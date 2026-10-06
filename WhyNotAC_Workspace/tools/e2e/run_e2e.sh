@@ -37,7 +37,8 @@ PROPS
 
 (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
 mkdir -p "$WORK_DIR/plugins"
-cp "$ROOT"/whynotac-paper/build/libs/whynotac-paper-*.jar "$WORK_DIR/plugins/WhyNotAC.jar"
+PLUGIN_JAR=$(find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' | head -1)
+cp "$PLUGIN_JAR" "$WORK_DIR/plugins/WhyNotAC.jar"
 
 FIFO="$WORK_DIR/console.fifo"
 rm -f "$FIFO" && mkfifo "$FIFO"
