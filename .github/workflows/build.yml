@@ -31,3 +31,41 @@ jobs:
         with:
           name: whynotac-paper
           path: WhyNotAC_Workspace/whynotac-paper/build/libs/*.jar
+
+  # A real Paper 1.21.11 server (official build, sha256-verified) with the freshly built plugin and a
+  # protocol-774 probe client over TCP. "interop" adds ViaVersion and PacketEvents (sha512-verified),
+  # the plugins that sit closest to the network edge on real servers.
+  e2e:
+    name: live E2E (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [vanilla, interop]
+    defaults:
+      run:
+        working-directory: WhyNotAC_Workspace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Fetch interop plugins (sha512-verified)
+        if: matrix.variant == 'interop'
+        run: |
+          echo "EXTRA_PLUGINS=$(tools/e2e/fetch_interop_plugins.sh "$RUNNER_TEMP/interop-plugins")" >> "$GITHUB_ENV"
+          echo "E2E_EXPECT_PLUGINS=ViaVersion packetevents" >> "$GITHUB_ENV"
+      - name: Run live E2E
+        run: tools/e2e/run_e2e.sh "$RUNNER_TEMP/e2e"
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.variant }}
+          path: |
+            ${{ runner.temp }}/e2e/e2e-*
+            ${{ runner.temp }}/e2e/logs/latest.log
+          if-no-files-found: warn

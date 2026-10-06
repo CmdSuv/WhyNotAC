@@ -5,6 +5,8 @@
  * - strictfp is implicit since Java 17 (JEP 306): all float/double arithmetic is IEEE-754 strict on
  *   every JVM, which is what makes bit-exact replication of the vanilla client possible at all.
  * - Warnings are errors: numerical code tolerates no silent lossy conversions.
+ * - Reproducible builds: snapshot dependencies are pinned to one timestamped build, and any other
+ *   snapshot fails resolution (archives are already reproducible by default since Gradle 9).
  */
 plugins {
     `java-library`
@@ -25,6 +27,22 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Javadoc>().configureEach {
     (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:none", "-quiet")
+}
+
+val pinnedSnapshots = mapOf(
+    "io.papermc.paper:paper-api" to libs.findVersion("pinned-paper-api").get().requiredVersion,
+    "com.velocitypowered:velocity-native" to libs.findVersion("pinned-velocity-native").get().requiredVersion,
+)
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        val pin = pinnedSnapshots["${requested.group}:${requested.name}"]
+        if (pin != null) {
+            useVersion(pin)
+            because("snapshot pinned to one timestamped build (gradle/libs.versions.toml)")
+        } else if (requested.version.orEmpty().endsWith("-SNAPSHOT") && requested.group != project.group.toString()) {
+            throw GradleException("Unpinned snapshot dependency $requested: pin it to a timestamped build in gradle/libs.versions.toml")
+        }
+    }
 }
 
 dependencies {

@@ -7,7 +7,8 @@
 #
 # usage: tools/e2e/run_e2e.sh <work-dir> [probe-seconds]
 #   <work-dir> is created if needed; the official Paper build is downloaded into it and checksum-verified.
-#   EXTRA_PLUGINS="a.jar b.jar" installs additional plugins (interop testing, e.g. ViaVersion, PacketEvents).
+#   EXTRA_PLUGINS="a.jar b.jar" installs additional plugins (interop testing, e.g. ViaVersion, PacketEvents;
+#   see fetch_interop_plugins.sh), and E2E_EXPECT_PLUGINS="ViaVersion packetevents" checks they were enabled.
 set -euo pipefail
 WORK_DIR=$(mkdir -p "$1" && cd "$1" && pwd)
 PROBE_SECONDS=${2:-14}

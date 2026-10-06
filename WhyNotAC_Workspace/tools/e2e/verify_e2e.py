@@ -4,6 +4,7 @@ Checks an E2E run: the server-side view printed by `whynotac inspect` must match
 client actually did, bit for bit where floats are involved.
 
 usage: verify_e2e.py <e2e-server.log> <e2e-probe.json> [<recording> <inspect.json> <dump.jsonl> <work-dir>]
+E2E_EXPECT_PLUGINS="ViaVersion packetevents" additionally requires those plugins to have been enabled.
 """
 import hashlib
 import json
@@ -41,6 +42,8 @@ def main():
         check(sent == acked + skipped + pending, f"transaction accounting closes ({sent} = {acked} + {skipped} + {pending})")
     m = re.search(r"queued \d+ dropped (\d+)", log)
     check(m is not None and int(m.group(1)) == 0, "no timeline events dropped")
+    for plugin in os.environ.get("E2E_EXPECT_PLUGINS", "").split():
+        check(re.search(rf"\[{re.escape(plugin)}\] Enabling {re.escape(plugin)} v", log) is not None, f"{plugin} loaded next to WhyNotAC")
     check(probe["still_connected"], "probe was never disconnected (interceptor is passive)")
     check(probe.get("server_list_ping_answered") is True, "server-list ping answered normally")
     m = re.search(r"WhyNotAC sessions: (\d+)", log)

@@ -17,7 +17,7 @@ configurations.named("jmhImplementation") { extendsFrom(configurations.compileCl
 configurations.named("jmhRuntimeOnly") { extendsFrom(configurations.runtimeClasspath.get()) }
 
 dependencies {
-    paperweight.paperDevBundle(libs.versions.paper.api.get())
+    paperweight.paperDevBundle(libs.versions.paper.dev.bundle.get())
     "jmhImplementation"(project(":whynotac-paper"))
     "jmhImplementation"(project(":whynotac-recording"))
     "jmhImplementation"(libs.jmh.core)

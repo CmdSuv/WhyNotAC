@@ -39,6 +39,9 @@ command in game) before you hand out a copy.
 - **Rotating the secret.** Deleting or replacing `recording-secret.key` permanently unlinks every
   existing recording from every player, including from `find`. Only do this when you also delete
   the recordings, or deliberately want to anonymise them.
+- **Back up the secret** separately from the recordings and encrypted (for example, in your
+  password manager). Without it, `find`/`forget` can no longer match anyone, and erasure requests
+  can then only be met by deleting every recording.
 - **Keep the secret private.** Anyone with the key and a UUID can confirm which recordings belong
   to that player. It never needs to leave the server.
 

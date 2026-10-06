@@ -11,7 +11,7 @@ description = "Paper 1.21.11 platform: NMS/Netty packet interceptor and plugin b
 paperweight.reobfArtifactConfiguration = ReobfArtifactConfiguration.MOJANG_PRODUCTION
 
 dependencies {
-    paperweight.paperDevBundle(libs.versions.paper.api.get())
+    paperweight.paperDevBundle(libs.versions.paper.dev.bundle.get())
     implementation(project(":whynotac-protocol"))
     implementation(project(":whynotac-recording"))
 }

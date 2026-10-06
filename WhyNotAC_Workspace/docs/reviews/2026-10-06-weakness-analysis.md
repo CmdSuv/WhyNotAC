@@ -225,3 +225,23 @@ kontrolü · #7 kanıt sınıflandırması (kanıtlanabilir ve istatistiksel).
 
 **Karar gerektirenler (sizde):** #14 sürüm stratejisi · #15 hukuk görüşü · #16 hile verisi
 toplama yöntemi.
+
+---
+
+## Durum (2026-10-06, "Hemen" grubu tamamlandı)
+
+| # | Çözüm | Doğrulama |
+|---|---|---|
+| 4 | Çevrilemeyen paket artık açık bir `Untranslatable` olayı (giden ise sandviçlenir). Enum'lar `EnumMapping` ile eşlenir; bilinmeyen değer `UNKNOWN` olur. `ProtocolSurfaceTest`, 66 serverbound + 139 clientbound play paketinin hepsini sınıflandırır ve enum'ların birebir aynı olduğunu doğrular. | Birim + Netty testleri |
+| 8 | Kimlikler `SecureRandom`, `[-32768, 32767]` aralığı diğer eklentilere bırakıldı. Atlanan, iki kez yanıtlanan ve **hiç yanıtlanmayan** (`TRANSACTIONS_WITHHELD`) transaction'lar ayrı ayrı tespit edilir. | E2E: 291 ping, ortak önek yok |
+| 9 | Oturum başına ve global olay bütçesi (taşma = açık `Gap`). Status (sunucu listesi) bağlantıları oturum açmadan ayrılır. Executor kapanırken kuyruk kaybolmaz. | Birim testleri + E2E "ping oturum bırakmaz" |
+| 12 | SNAPSHOT'lar zaman damgalı yapıya sabitlendi, sabitlenmemiş SNAPSHOT derlemeyi durdurur. Jar bayt bayt tekrarlanabilir. CI her push'ta yalın ve ViaVersion+PacketEvents'li iki canlı E2E çalıştırır. | Temiz iki derleme aynı sha256. E2E 30/30 (iki varyant) |
+| 13 | `find`/`forget` aracı, yönetici rehberi ve TR/EN oyuncu bilgilendirme şablonu: [docs/privacy](../privacy/README.md). | Birim testi + E2E: `usercache.json`'daki UUID ile bul ve sil |
+
+Bu sırada bulunan bir hata: `/whynotac inspect`, bir paketin yaw'ını bir sonrakinin farkıyla
+yazdırabiliyordu (iki ayrı volatile alan). Artık tek bir değişmez kayıt olarak yayımlanıyor ve
+eşzamanlı bir testle korunuyor.
+
+**Açık kalanlar (önerilen sırayla):** Faz 2b: #1 bayt düzeyinde tel dinleme · #2 client türü
+tespiti · #6 başsız gerçek client · #10 yük testi. Ardından fizik ile birlikte: #3, #5, #11, #7.
+#16 için izole VM'de açık kaynak hile kaydı onaylandı.
