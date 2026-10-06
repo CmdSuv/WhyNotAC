@@ -5,7 +5,8 @@ recording:
   # Recordings are pseudonymised: no IP address, no player name, and the UUID is replaced by an
   # HMAC pseudonym keyed with plugins/WhyNotAC/recording-secret.key (keep that file private;
   # deleting it unlinks all past recordings from future ones).
-  # Tell your players before enabling this on a public server.
+  # Tell your players before enabling this on a public server: a notice template and the
+  # find/forget tool for access and erasure requests are described in docs/privacy/.
   enabled: false
   # Recordings older than this are deleted.
   max-age-days: 14

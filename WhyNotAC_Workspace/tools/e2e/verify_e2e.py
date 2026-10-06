@@ -3,13 +3,15 @@
 Checks an E2E run: the server-side view printed by `whynotac inspect` must match what the probe
 client actually did, bit for bit where floats are involved.
 
-usage: verify_e2e.py <e2e-server.log> <e2e-probe.json>
+usage: verify_e2e.py <e2e-server.log> <e2e-probe.json> [<recording> <inspect.json> <dump.jsonl> <work-dir>]
 """
+import hashlib
 import json
 import os
 import re
 import struct
 import sys
+import uuid
 
 
 def f32(x):
@@ -46,17 +48,18 @@ def main():
     check("SKIPPED_TRANSACTION" in log or "Anomalies 2" in log, "anomalies reported")
 
     # Rotation: the yaw the server printed, and its exact delta, must be one of the probe's own steps.
-    m = re.search(r"Last move ROT .*? yaw=(\S+) pitch", log)
-    d = re.search(r"Exact dYaw=(\S+) dPitch", log)
-    check(m is not None and d is not None, "rotation observed")
-    if m and d:
+    m = re.search(r"Last rotation yaw=(\S+) pitch=\S+ exact dYaw=(\S+) dPitch", log)
+    check(m is not None, "rotation observed")
+    if m:
         server_yaw = f32(float(m.group(1)))  # Java's Float.toString is the shortest repr that round-trips
-        server_delta = float(d.group(1))     # Double.toString round-trips exactly
+        server_delta = float(m.group(2))     # Double.toString round-trips exactly
         steps = [(from_bits(a), from_bits(b)) for a, b in probe["yaw_steps_bits"]]
         matches = [(a, b) for a, b in steps if b == server_yaw and (b - a) == server_delta]
         check(bool(matches), f"server yaw {server_yaw!r} with exact delta {server_delta!r} matches a step the probe sent, bit for bit")
     if len(sys.argv) > 3:
         verify_recording(probe, sys.argv[3], sys.argv[4], sys.argv[5], check)
+        if sys.argv[3]:
+            verify_subject_requests(sys.argv[6], sys.argv[3], sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -100,6 +103,24 @@ def verify_recording(probe, recording, inspect_path, dump_path, check):
     raw = open(recording, "rb").read()
     check(b"WhyNotProbe" not in raw and "WhyNotProbe" not in open(dump_path).read(), "real player name appears nowhere in the file")
     check(events[-1]["type"] == "Disconnected", "recording ends with the disconnect")
+
+
+def verify_subject_requests(work_dir, recording, dump_path, check):
+    """find/forget, driven by the UUID from usercache.json as the operator guide describes."""
+    # Offline-mode UUID, derived independently: Java's UUID.nameUUIDFromBytes (MD5, version 3).
+    expected = str(uuid.UUID(bytes=hashlib.md5(b"OfflinePlayer:WhyNotProbe").digest(), version=3))
+    cache = json.load(open(os.path.join(work_dir, "usercache.json")))
+    check([e["uuid"] for e in cache if e["name"] == "WhyNotProbe"] == [expected], f"usercache.json holds the player's UUID {expected}")
+    found = json.load(open(os.path.join(work_dir, "e2e-find.json")))
+    files = [r["file"] for r in found["recordings"]]
+    check(files == [recording] and found["unreadable_for_manual_review"] == [], f"find locates exactly the player's recording: {files}")
+    bound = [json.loads(line) for line in open(dump_path) if '"type":"Bound"' in line]
+    check(len(bound) == 1 and found["pseudonym"] == bound[0]["playerId"], "find's pseudonym is the one inside the recording")
+    other = json.load(open(os.path.join(work_dir, "e2e-find-other.json")))
+    check(other["recordings"] == [], "find for another UUID matches nothing")
+    forgotten = json.load(open(os.path.join(work_dir, "e2e-forget.json")))
+    left = [f for _, _, fs in os.walk(os.path.join(work_dir, "forget-copy")) for f in fs if ".wnrec" in f]
+    check(forgotten["deleted"] == 1 and forgotten["dry_run"] is False and left == [], f"forget --yes deleted the recording (left: {left})")
 
 
 if __name__ == "__main__":

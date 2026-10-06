@@ -4,24 +4,37 @@ import dev.whynotac.math.stats.RunningMoments;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.TimelineEvent;
+import dev.whynotac.recording.format.RecordingFormat;
+import dev.whynotac.recording.format.RecordingHeader;
 import dev.whynotac.recording.read.RecordingReader;
+import dev.whynotac.recording.write.Pseudonymizer;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
+import java.util.stream.Stream;
 
 /**
- * Offline inspection of recordings:
+ * Offline inspection of recordings, and data-subject requests (KVKK / GDPR):
  * <pre>
  *   java -jar WhyNotAC.jar inspect &lt;file.wnrec&gt;   JSON summary (integrity report, counts, latency, anomalies)
  *   java -jar WhyNotAC.jar dump    &lt;file.wnrec&gt;   one JSON object per event, floats with raw bits
+ *   java -jar WhyNotAC.jar find    &lt;recordings-dir&gt; &lt;secret-key&gt; &lt;player-uuid&gt;          recordings of one player
+ *   java -jar WhyNotAC.jar forget  &lt;recordings-dir&gt; &lt;secret-key&gt; &lt;player-uuid&gt; [--yes] delete them
  * </pre>
- * Exit code 0 if the recording is complete, 2 if it was read but is incomplete or damaged, 1 on usage
- * or I/O errors.
+ * {@code find}/{@code forget} turn the real UUID into the pseudonym with the server's secret and
+ * compare it with each file's header only; no recording content is decoded. Without {@code --yes},
+ * {@code forget} only lists what it would delete. Run it while the player is offline.
+ *
+ * <p>Exit codes: {@code inspect}/{@code dump} 0 if the recording is complete, 2 if it was read but is
+ * incomplete or damaged; {@code find}/{@code forget} 0 on success, 2 if some files could not be read
+ * (they are listed for manual review); 1 on usage or I/O errors.
  */
 public final class RecordingTool {
 
@@ -32,8 +45,13 @@ public final class RecordingTool {
     }
 
     static int run(String[] args, PrintStream out, PrintStream err) {
+        if (args.length >= 4 && (args[0].equals("find") || args[0].equals("forget"))) {
+            return subjectRequest(args, out, err);
+        }
         if (args.length != 2 || !(args[0].equals("inspect") || args[0].equals("dump"))) {
             err.println("usage: inspect|dump <recording.wnrec>");
+            err.println("       find <recordings-dir> <secret-key> <player-uuid>");
+            err.println("       forget <recordings-dir> <secret-key> <player-uuid> [--yes]");
             return 1;
         }
         RecordingReader reader;
@@ -109,6 +127,75 @@ public final class RecordingTool {
         summary.put("transactions", transactions);
         summary.put("anomalies", anomalies);
         return summary;
+    }
+
+    private static int subjectRequest(String[] args, PrintStream out, PrintStream err) {
+        boolean delete = args[0].equals("forget") && args.length == 5 && args[4].equals("--yes");
+        if (args.length > 5 || args.length == 5 && !delete) {
+            err.println("usage: find|forget <recordings-dir> <secret-key> <player-uuid> [--yes]");
+            return 1;
+        }
+        Path directory = Path.of(args[1]);
+        UUID player;
+        Pseudonymizer pseudonymizer;
+        try {
+            player = UUID.fromString(args[3]);
+            pseudonymizer = new Pseudonymizer(Files.readAllBytes(Path.of(args[2])));
+        } catch (IOException | IllegalArgumentException e) {
+            err.println("cannot use secret or uuid: " + e.getMessage());
+            return 1;
+        }
+        UUID subject = pseudonymizer.pseudonym(player);
+        List<Object> matches = new ArrayList<>();
+        List<String> unreadable = new ArrayList<>();
+        long deleted = 0;
+        try (Stream<Path> walk = Files.walk(directory, 3)) {
+            for (Path file : (Iterable<Path>) walk.filter(Files::isRegularFile).sorted()::iterator) {
+                String fileName = file.getFileName().toString();
+                if (!fileName.endsWith(RecordingFormat.FILE_SUFFIX) && !fileName.endsWith(RecordingFormat.PARTIAL_SUFFIX)) {
+                    continue;
+                }
+                RecordingHeader header;
+                try {
+                    header = RecordingHeader.decode(readPrefix(file, 4096)).header();
+                } catch (IOException | RuntimeException e) {
+                    unreadable.add(file.toString());
+                    continue;
+                }
+                if (!header.subject().equals(subject)) {
+                    continue;
+                }
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("file", file.toString());
+                entry.put("bytes", Files.size(file));
+                entry.put("started_utc", java.time.Instant.ofEpochMilli(header.startEpochMillis()).toString());
+                entry.put("complete_file", fileName.endsWith(RecordingFormat.FILE_SUFFIX));
+                if (delete) {
+                    Files.delete(file);
+                    deleted++;
+                    entry.put("deleted", true);
+                }
+                matches.add(entry);
+            }
+        } catch (IOException e) {
+            err.println("cannot scan " + directory + ": " + e.getMessage());
+            return 1;
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("action", args[0]);
+        result.put("pseudonym", subject);
+        result.put("recordings", matches);
+        result.put("deleted", deleted);
+        result.put("dry_run", args[0].equals("forget") && !delete);
+        result.put("unreadable_for_manual_review", unreadable);
+        out.println(Json.value(result));
+        return unreadable.isEmpty() ? 0 : 2;
+    }
+
+    private static byte[] readPrefix(Path file, int max) throws IOException {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            return in.readNBytes(max);
+        }
     }
 
     private static String name(ServerboundPacket packet) {

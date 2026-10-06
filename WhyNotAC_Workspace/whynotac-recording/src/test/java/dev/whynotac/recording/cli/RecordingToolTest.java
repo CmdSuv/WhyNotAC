@@ -13,6 +13,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -56,6 +57,57 @@ class RecordingToolTest {
         run(2, "inspect", sample(false).toString());
         run(1, "inspect", dir.resolve("missing.wnrec").toString());
         run(1, "bogus");
+    }
+
+    @Test
+    void findAndForgetActOnExactlyOnePlayersRecordings() throws Exception {
+        byte[] secret = dev.whynotac.recording.write.Pseudonymizer.newSecret();
+        Path secretFile = Files.write(dir.resolve("recording-secret.key"), secret);
+        Path recordings = dir.resolve("recordings");
+        dev.whynotac.recording.write.RecordingStore store = new dev.whynotac.recording.write.RecordingStore(recordings,
+                dev.whynotac.recording.write.RecordingStore.Settings.defaults(), java.util.logging.Logger.getLogger("test"));
+        dev.whynotac.protocol.session.SessionRegistry registry = new dev.whynotac.protocol.session.SessionRegistry(Runnable::run, 1024,
+                (s, e, t) -> { throw new AssertionError(t); });
+        registry.addListener(new dev.whynotac.recording.write.RecordingListener(store, new dev.whynotac.recording.write.Pseudonymizer(secret),
+                774, "1.21.11", "test"));
+        java.util.UUID alice = java.util.UUID.randomUUID();
+        java.util.UUID bob = java.util.UUID.randomUUID();
+        for (java.util.UUID player : List.of(alice, bob, alice)) {
+            dev.whynotac.protocol.session.PlayerSession session = registry.open("x");
+            session.bind(player, "p", 1, 0);
+            session.onInbound(new ServerboundPacket.ClientTickEnd(), 1);
+            session.disconnect(2);
+        }
+        store.close();
+
+        String found = run(0, "find", recordings.toString(), secretFile.toString(), alice.toString());
+        assertEquals(2, count(found, "\"file\":"), found);
+        String dryRun = run(0, "forget", recordings.toString(), secretFile.toString(), alice.toString());
+        assertTrue(dryRun.contains("\"dry_run\":true") && dryRun.contains("\"deleted\":0"), dryRun);
+        assertEquals(3, countRecordings(recordings));
+        String forgotten = run(0, "forget", recordings.toString(), secretFile.toString(), alice.toString(), "--yes");
+        assertTrue(forgotten.contains("\"deleted\":2"), forgotten);
+        assertEquals(1, countRecordings(recordings), "only Bob's recording remains");
+        assertEquals(1, count(run(0, "find", recordings.toString(), secretFile.toString(), bob.toString()), "\"file\":"));
+
+        // Another server's secret links nothing.
+        Path otherSecret = Files.write(dir.resolve("other.key"), dev.whynotac.recording.write.Pseudonymizer.newSecret());
+        assertEquals(0, count(run(0, "find", recordings.toString(), otherSecret.toString(), bob.toString()), "\"file\":"));
+        run(1, "forget", recordings.toString(), secretFile.toString(), "not-a-uuid");
+    }
+
+    private static int count(String haystack, String needle) {
+        int n = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + 1)) {
+            n++;
+        }
+        return n;
+    }
+
+    private static long countRecordings(Path dir) throws java.io.IOException {
+        try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {
+            return walk.filter(p -> p.toString().endsWith(".wnrec")).count();
+        }
     }
 
     @Test

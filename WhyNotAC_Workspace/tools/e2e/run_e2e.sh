@@ -86,9 +86,16 @@ if [ -n "$RECORDING" ]; then
   java -jar "$WORK_DIR/plugins/WhyNotAC.jar" inspect "$RECORDING" > "$WORK_DIR/e2e-inspect.json" || true
   java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/e2e-dump.jsonl" || true
   ls -la "$RECORDING"
+  # Data-subject requests, the way docs/privacy/README.md tells operators to do them.
+  PROBE_UUID=$(python3 -I -c 'import json, sys; print(next(e["uuid"] for e in json.load(open(sys.argv[1])) if e["name"] == "WhyNotProbe"))' "$WORK_DIR/usercache.json" || echo missing)
+  SECRET="$WORK_DIR/plugins/WhyNotAC/recording-secret.key"
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" find "$WORK_DIR/plugins/WhyNotAC/recordings" "$SECRET" "$PROBE_UUID" > "$WORK_DIR/e2e-find.json" || true
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" find "$WORK_DIR/plugins/WhyNotAC/recordings" "$SECRET" "$(python3 -I -c 'import uuid; print(uuid.uuid4())')" > "$WORK_DIR/e2e-find-other.json" || true
+  rm -rf "$WORK_DIR/forget-copy" && cp -r "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/forget-copy"
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" forget "$WORK_DIR/forget-copy" "$SECRET" "$PROBE_UUID" --yes > "$WORK_DIR/e2e-forget.json" || true
 fi
 
 echo "--- server view (whynotac inspect)"
-grep -E '\[WhyNotAC\]|== WhyNotAC|RTT last|Transactions sent|Packets in|Last move|Exact dYaw|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
+grep -E '\[WhyNotAC\]|== WhyNotAC|RTT last|Transactions sent|Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
 echo "--- verification"
-python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json" "${RECORDING:-}" "$WORK_DIR/e2e-inspect.json" "$WORK_DIR/e2e-dump.jsonl"
+python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json" "${RECORDING:-}" "$WORK_DIR/e2e-inspect.json" "$WORK_DIR/e2e-dump.jsonl" "$WORK_DIR"
