@@ -1,0 +1,10 @@
+name: WhyNotAC
+version: '${version}'
+main: dev.whynotac.paper.WhyNotAcPlugin
+api-version: '${minecraft}'
+description: Server-side anomaly detection for Minecraft ${minecraft}
+load: STARTUP
+permissions:
+  whynotac.inspect:
+    description: Use /whynotac inspect and /whynotac sessions
+    default: op
