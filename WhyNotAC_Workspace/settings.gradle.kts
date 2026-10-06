@@ -5,6 +5,7 @@
  *
  *   whynotac-paper ──► whynotac-recording ──► whynotac-protocol ──► whynotac-math
  *   whynotac-conformance ──► whynotac-math (+ vanilla 1.21.11 server code, test-only)
+ *   whynotac-bench ──► everything (JMH micro-benchmarks, never shipped)
  *
  * Planned layers (folders exist with a README describing their contract; they are added to the
  * build when their phase starts): whynotac-physics, whynotac-analysis, whynotac-ai,
@@ -40,4 +41,5 @@ include(
     "whynotac-recording",
     "whynotac-paper",
     "whynotac-conformance",
+    "whynotac-bench",
 )

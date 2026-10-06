@@ -30,8 +30,12 @@
             ┌──────────────▼────────────── whynotac-protocol ──────────────────────┐
             │  PlayerSession · sıralı zaman çizelgesi · SerialMailbox (aktör)      │
             │  TransactionTracker · LatencyEstimator · TransactionPolicy           │
+            │  replay oturumları                                                   │
             └──────────────┬───────────────────────────────────────────────────────┘
                            │ TimelineEvent (oyuncu başına toplam sıra)
+                           ├──────────────► whynotac-recording: kayıpsız kayıt (.wnrec),
+                           │                takma ad, replay, inspect/dump aracı
+                           │                (kayıtlar replay ile aynı dinleyicilere geri akar)
    ┌───────────────────────┼─────────────────────────────┬────────────────────────┐
    ▼                       ▼                             ▼                        │
 whynotac-physics     whynotac-analysis              whynotac-ai                    │  (planlı)
@@ -71,6 +75,8 @@ fizik motoru         dedektörleri                   (çevrimiçi öğrenme)    
 - `SerialMailbox` sınırlıdır (varsayılan 16 384 olay). Taşma, sessizce veri kaybı değil, açık bir
   `Gap` olayıdır. Gap'i aşan kanıt geçersizdir.
 - Dinleyici hataları izole edilir: biri çökerse diğerleri olayı yine görür, bağlantı etkilenmez.
+- Analiz havuzu kapanmışsa teslimat çağıran thread'e düşer: kapanışta hiçbir olay (özellikle
+  `Disconnected`) kuyrukta kalmaz.
 
 ## Gecikme telafisi: transaction sandviçi
 
@@ -115,6 +121,8 @@ olasılığı ölçülebilir ve keyfî derecede küçük tutmaktır:
 | `whynotac-protocol` | **Faz 1 ✔** | 1.21.11 paket modeli, oyuncu zaman çizelgesi, aktör posta kutusu, transaction izleme |
 | `whynotac-paper` | **Faz 1 ✔** | NMS/Netty paket yakalayıcı, sandviç, `/whynotac inspect` |
 | `whynotac-conformance` | **Faz 1 ✔** | Gerçek oyun sınıflarına karşı diferansiyel testler |
+| `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
+| `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
 | `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
 | `whynotac-analysis` | Faz 3 (planlı) | Aim/tıklama/zamanlama dedektörleri |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |
@@ -129,4 +137,5 @@ olasılığı ölçülebilir ve keyfî derecede küçük tutmaktır:
   bayt düzeyinde çevirir), ancak **fizikleri farklıdır**. Faz 2'de bu client'lar ya ayrı
   modellenecek ya da analiz dışı tutulacak.
 - `ChannelInitializeListenerHolder` Paper'ın desteklenmeyen iç API'sidir.
-- Paket başına ek yük henüz JMH ile ölçülmedi (Faz 2'nin ilk işi).
+- Ölçülen ek yük: ağ thread'inde paket başına ≈ 115 ns / 112 B; 1 000 oyuncu ≈ bir çekirdeğin
+  %1.2'si (ayrıntı: `docs/phases/PHASE-2A-REPORT.md`).

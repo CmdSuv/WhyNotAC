@@ -4,9 +4,10 @@ Minecraft Java Edition **1.21.11** (Paper) için tamamen sunucu taraflı anomali
 Client'a hiçbir şey kurulmaz ve client'ın bilgisayarı okunmaz. Tüm analiz ağ paketleri, bit-tam
 fizik ve davranış modelleriyle sunucuda yapılır.
 
-> **Durum: Faz 1 tamamlandı** (paket yakalayıcı + yüksek hassasiyetli matematik çekirdeği).
-> Faz 1 tamamen pasif bir gözlemcidir: hiçbir oyuncuya işlem yapmaz.
-> Rapor: [`docs/phases/PHASE-1-REPORT.md`](docs/phases/PHASE-1-REPORT.md)
+> **Durum: Faz 2a tamamlandı.** Faz 1: paket yakalayıcı ve yüksek hassasiyetli matematik çekirdeği.
+> Faz 2a: kayıpsız oturum kaydı, birebir replay ve performans tabanı.
+> Sistem şu an tamamen pasif bir gözlemcidir: hiçbir oyuncuya işlem yapmaz.
+> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md)
 
 ## Belgeler
 - [Mimari ve ilkeler](docs/ARCHITECTURE.md): katmanlar, thread modeli, transaction sandviçi, sıfır yanlış-ban sözleşmesi
@@ -19,21 +20,35 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 |---|---|
 | `whynotac-math` | Vanilla bit-tam sayısal çekirdek ve hassas analiz primitifleri (bağımlılıksız) |
 | `whynotac-protocol` | Platformdan bağımsız paket modeli, oyuncu zaman çizelgesi, transaction/gecikme izleme |
-| `whynotac-paper` | Paper 1.21.11 eklentisi: NMS/Netty paket yakalayıcı |
+| `whynotac-recording` | Kayıpsız, çökmeye dayanıklı oturum kaydı, takma adlandırma, replay, inspect/dump aracı |
+| `whynotac-paper` | Paper 1.21.11 eklentisi: NMS/Netty paket yakalayıcı, kayıt entegrasyonu |
 | `whynotac-conformance` | Gerçek oyun sınıflarına karşı diferansiyel testler (dağıtılmaz) |
+| `whynotac-bench` | JMH performans ölçümleri (dağıtılmaz) |
 
 ## Derleme ve test
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 79 test
+./gradlew build                       # tüm modüller + 104 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (20 kontrol)
+./gradlew :whynotac-bench:jmh         # performans ölçümü (sonuç: whynotac-bench/build/jmh/results.json)
 ```
 
-## Kullanım (Faz 1)
+## Kullanım
 `plugins/` klasörüne kopyalayın. Konsol veya `whynotac.inspect` yetkili oyuncu:
 - `/whynotac inspect <oyuncu>`: RTT/jitter, transaction muhasebesi, paket sayaçları, son hareket
   paketinin tam değerleri, kesin yaw/pitch farkı ve o yaw'ın float çözünürlüğü, basılı tuşlar,
   anomaliler
 - `/whynotac sessions`: canlı oturumlar
+
+### Oturum kaydı
+`plugins/WhyNotAC/config.yml` içinde `recording.enabled: true` (varsayılan kapalı; açmadan önce
+oyuncuları bilgilendirin). Kayıtlar `plugins/WhyNotAC/recordings/<tarih>/*.wnrec` altına
+takma adlı olarak yazılır. IP ve isim içermez. Çevrimdışı inceleme için eklenti jar'ı aynı zamanda
+bir araçtır:
+
+```bash
+java -jar WhyNotAC.jar inspect kayit.wnrec   # bütünlük raporu, sayaçlar, gecikme, anomaliler (JSON)
+java -jar WhyNotAC.jar dump    kayit.wnrec   # her olay bir JSON satırı, float'lar ham bitleriyle
+```
