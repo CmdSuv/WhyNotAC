@@ -44,13 +44,18 @@ public sealed interface TimelineEvent {
 
     /** A protocol-level impossibility (not an accusation: a fact to be weighed by the verdict layer). */
     record Anomaly(long sequence, long nanoTime, Kind kind, String detail) implements TimelineEvent {
+        /** Constants are stored by ordinal in recordings: only ever append. */
         public enum Kind {
-            /** Pong carrying a WhyNotAC transaction id that was never sent or was already answered. */
+            /** Legacy (format v1 recordings only): a pong with a WhyNotAC-prefixed id that was never sent. Ids are random now. */
             UNKNOWN_TRANSACTION,
             /** Pong answered a newer transaction while older ones are still pending. */
             SKIPPED_TRANSACTION,
             /** Movement or rotation contained NaN or infinity. */
-            NON_FINITE_MOVEMENT
+            NON_FINITE_MOVEMENT,
+            /** A transaction answered a second time, or after a newer one. */
+            DUPLICATE_TRANSACTION,
+            /** The client keeps the connection alive but has stopped answering transactions. */
+            TRANSACTIONS_WITHHELD
         }
     }
 

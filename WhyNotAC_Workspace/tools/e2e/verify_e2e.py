@@ -29,12 +29,12 @@ def main():
         if not condition:
             failures.append(message)
 
-    m = re.search(r"Transactions sent (\d+) acked (\d+) pending (\d+) \(oldest [\d.]+ ms\) skipped (\d+) unknown (\d+)", log)
+    m = re.search(r"Transactions sent (\d+) acked (\d+) pending (\d+) \(oldest [\d.]+ ms\) skipped (\d+) duplicate (\d+)", log)
     check(m is not None, "inspect output present")
     if m:
-        sent, acked, pending, skipped, unknown = map(int, m.groups())
-        check(skipped == len(probe["skipped_transaction_ids"]) == 1, f"withheld transaction detected (skipped={skipped})")
-        check(unknown == len(probe["forged_transaction_ids"]) == 1, f"forged transaction detected (unknown={unknown})")
+        sent, acked, pending, skipped, duplicate = map(int, m.groups())
+        check(skipped == len(probe["skipped_transaction_ids"]) == 1, f"unanswered transaction detected (skipped={skipped})")
+        check(duplicate == len(probe["duplicated_transaction_ids"]) == 1, f"twice-answered transaction detected (duplicate={duplicate})")
         check(sent == acked + skipped + pending, f"transaction accounting closes ({sent} = {acked} + {skipped} + {pending})")
     m = re.search(r"queued \d+ dropped (\d+)", log)
     check(m is not None and int(m.group(1)) == 0, "no timeline events dropped")
@@ -81,7 +81,11 @@ def verify_recording(probe, recording, inspect_path, dump_path, check):
     anomalies = [e for e in events if e["type"] == "Anomaly"]
     kinds = [a["kind"] for a in anomalies]
     check("SKIPPED_TRANSACTION" in kinds, "withheld transaction preserved in the recording")
-    check(any(a["kind"] == "UNKNOWN_TRANSACTION" and "574ebeef" in a["detail"] for a in anomalies), "forged transaction id preserved")
+    dup = probe["duplicated_transaction_ids"][0][2:] if probe["duplicated_transaction_ids"] else "?"
+    check(any(a["kind"] == "DUPLICATE_TRANSACTION" and a["detail"].endswith(dup) for a in anomalies), "twice-answered transaction preserved")
+    pings = [e["packet"]["id"] for e in events if e["type"] == "Outbound" and e["packet"]["type"] == "Ping"]
+    check(all(not (-32768 <= p <= 32767) for p in pings) and len(set(p >> 16 for p in pings)) > len(pings) * 0.9,
+          f"transaction ids are random, no shared prefix ({len(pings)} pings)")
     bound = [e for e in events if e["type"] == "Bound"]
     check(len(bound) == 1 and bound[0]["playerName"].startswith("anon-"), "identity pseudonymised in the recording")
     raw = open(recording, "rb").read()

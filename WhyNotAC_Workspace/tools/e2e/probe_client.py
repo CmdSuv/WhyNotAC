@@ -9,10 +9,13 @@ with the *exact* float32 arithmetic of MouseHandler/Entity.turn, ClientTickEnd e
 keep-alives and pings. Two deliberate protocol violations are injected so the server-side detection
 can be verified live:
 
-  * one WhyNotAC transaction is never answered while the next one is  -> SKIPPED_TRANSACTION
-  * one pong carries a WhyNotAC-prefixed id the server never sent     -> UNKNOWN_TRANSACTION
+  * one transaction is never answered while the next one is  -> SKIPPED_TRANSACTION
+  * one transaction is answered twice                         -> DUPLICATE_TRANSACTION
 
 Usage: probe_client.py HOST PORT NAME SECONDS
+WhyNotAC transaction ids are random, so the probe treats every play ping alike (on the test server
+WhyNotAC is the only plugin that sends them).
+
 Stdlib only. Prints a JSON summary as the last line.
 """
 import hashlib
@@ -26,7 +29,6 @@ import uuid
 import zlib
 
 PROTOCOL = 774
-WN_PREFIX = 0x574E0000
 
 # packet ids (1.21.11, from reports/packets.json)
 LOGIN_C_DISCONNECT, LOGIN_C_FINISHED, LOGIN_C_COMPRESSION, LOGIN_C_CUSTOM_QUERY = 0x00, 0x02, 0x03, 0x04
@@ -104,10 +106,12 @@ class Client:
         self.alive = True
         self.disconnect_reason = None
         self.pings_answered = 0
-        self.wn_pings_seen = 0
-        self.skip_next_wn = False
+        self.pings_seen = 0
+        self.skip_next = False
+        self.duplicate_next = False
+        self.last_answered = None
         self.skipped_ids = []
-        self.forged_ids = []
+        self.duplicated_ids = []
         self.loaded = threading.Event()
 
     # --- framing -------------------------------------------------------------------------------
@@ -199,14 +203,18 @@ class Client:
                 self.send(PLAY_S_KEEP_ALIVE, struct.pack(">q", r.unpack("q")))
             elif packet_id == PLAY_C_PING:
                 ping_id = r.unpack("i")
-                if (ping_id & 0xFFFF0000) == WN_PREFIX:
-                    self.wn_pings_seen += 1
-                    if self.skip_next_wn:
-                        self.skip_next_wn = False
-                        self.skipped_ids.append(ping_id)
-                        return  # violation 1: never answer this one
+                self.pings_seen += 1
+                if self.skip_next:
+                    self.skip_next = False
+                    self.skipped_ids.append(ping_id)
+                    return  # violation 1: never answer this one
                 self.send(PLAY_S_PONG, struct.pack(">i", ping_id))
                 self.pings_answered += 1
+                self.last_answered = ping_id
+                if self.duplicate_next:
+                    self.duplicate_next = False
+                    self.duplicated_ids.append(ping_id)
+                    self.send(PLAY_S_PONG, struct.pack(">i", ping_id))  # violation 2: answer it twice
             elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
                 self.send(PLAY_S_CHUNK_BATCH_RECEIVED, struct.pack(">f", 9.0))
             elif packet_id == PLAY_C_DISCONNECT:
@@ -256,11 +264,9 @@ def main():
             yaw = new_yaw
         client.send(PLAY_S_TICK_END)
         if tick == 100:
-            client.skip_next_wn = True  # violation 1, at ~5 s
+            client.skip_next = True       # violation 1, at ~5 s
         if tick == 160:
-            forged = WN_PREFIX | 0xBEEF
-            client.forged_ids.append(forged)
-            client.send(PLAY_S_PONG, struct.pack(">i", forged))  # violation 2, at ~8 s
+            client.duplicate_next = True  # violation 2, at ~8 s
         tick += 1
         time.sleep(max(0.0, start + tick * 0.05 - time.monotonic()))
 
@@ -269,9 +275,9 @@ def main():
         "entity_id": client.entity_id,
         "ticks": tick,
         "pings_answered": client.pings_answered,
-        "whynotac_pings_seen": client.wn_pings_seen,
-        "skipped_transaction_ids": [hex(i) for i in client.skipped_ids],
-        "forged_transaction_ids": [hex(i) for i in client.forged_ids],
+        "pings_seen": client.pings_seen,
+        "skipped_transaction_ids": [hex(i & 0xFFFFFFFF) for i in client.skipped_ids],
+        "duplicated_transaction_ids": [hex(i & 0xFFFFFFFF) for i in client.duplicated_ids],
         "yaw_steps_bits": [[float_bits(a), float_bits(b)] for a, b, _ in yaw_history],
         "pitch_bits": float_bits(pitch),
         "inputs_sent": inputs_sent,

@@ -70,7 +70,7 @@ public final class PlayerSession {
         long tick = clientTick;
         emit(nanoTime, seq -> new TimelineEvent.Inbound(seq, nanoTime, tick, packet));
         switch (packet) {
-            case ServerboundPacket.Pong pong when TransactionTracker.isWhyNotAcId(pong.id()) -> onTransactionPong(pong.id(), nanoTime);
+            case ServerboundPacket.Pong pong -> onTransactionPong(pong.id(), nanoTime);
             case ServerboundPacket.MovePlayer move when move.hasNonFiniteValue() ->
                     emit(nanoTime, seq -> new TimelineEvent.Anomaly(seq, nanoTime, TimelineEvent.Anomaly.Kind.NON_FINITE_MOVEMENT, move.toString()));
             case ServerboundPacket.ClientTickEnd ignored -> clientTicksPublished = ++clientTick;
@@ -92,8 +92,8 @@ public final class PlayerSession {
             return;
         }
         outboundModeled++;
-        if (packet instanceof ClientboundPacket.Ping ping && TransactionTracker.isWhyNotAcId(ping.id())) {
-            transactions.onSent(ping.id(), nanoTime);
+        if (packet instanceof ClientboundPacket.Ping ping) {
+            transactions.onSent(ping.id(), nanoTime); // ignored unless the id was allocated here
         }
         emit(nanoTime, seq -> new TimelineEvent.Outbound(seq, nanoTime, packet));
     }
@@ -101,7 +101,18 @@ public final class PlayerSession {
     /** Reserves a transaction id for a ping the platform is about to send. */
     public synchronized OptionalInt allocateTransaction() {
         requireLive();
-        return closed ? OptionalInt.empty() : transactions.allocate();
+        if (closed) {
+            return OptionalInt.empty();
+        }
+        boolean wasWithheld = transactions.isWithheld();
+        OptionalInt id = transactions.allocate();
+        if (id.isEmpty() && !wasWithheld) {
+            long now = System.nanoTime();
+            long age = transactions.oldestPendingAgeNanos(now) / 1_000_000;
+            emit(now, seq -> new TimelineEvent.Anomaly(seq, now, TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD,
+                    TransactionTracker.MAX_PENDING + " unanswered, oldest " + age + " ms"));
+        }
+        return id;
     }
 
     /** Links this connection to the player who logged in on it. */
@@ -176,8 +187,9 @@ public final class PlayerSession {
                             matched.skipped() + " transaction(s) before " + Integer.toHexString(id) + " were never answered"));
                 }
             }
-            case TransactionTracker.PongResult.Unknown unknown -> emit(nanoTime, seq -> new TimelineEvent.Anomaly(seq, nanoTime,
-                    TimelineEvent.Anomaly.Kind.UNKNOWN_TRANSACTION, "pong " + Integer.toHexString(unknown.id())));
+            case TransactionTracker.PongResult.Duplicate duplicate -> emit(nanoTime, seq -> new TimelineEvent.Anomaly(seq, nanoTime,
+                    TimelineEvent.Anomaly.Kind.DUPLICATE_TRANSACTION, "pong " + Integer.toHexString(duplicate.id())));
+            case TransactionTracker.PongResult.Foreign ignored -> { }
         }
     }
 

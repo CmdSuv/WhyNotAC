@@ -168,7 +168,7 @@ class WhyNotChannelHandlerTest {
         int before = assertInstanceOf(ClientboundPingPacket.class, wire.get(0)).getId();
         assertSame(knockback, wire.get(1));
         int after = assertInstanceOf(ClientboundPingPacket.class, wire.get(2)).getId();
-        assertTrue(TransactionTracker.isWhyNotAcId(before) && TransactionTracker.isWhyNotAcId(after) && before != after);
+        assertTrue(before != after && !TransactionTracker.isReservedForOthers(before) && !TransactionTracker.isReservedForOthers(after));
 
         // Timeline order matches wire order, and the motion carries the exact client-side quantisation.
         assertEquals(new ClientboundPacket.Ping(before), ((TimelineEvent.Outbound) events.get(0)).packet());

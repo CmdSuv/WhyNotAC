@@ -90,7 +90,7 @@ public final class WhyNotCommand implements BasicCommand {
                 latency.lastRttMillis(), latency.smoothedRttMillis(), latency.jitterMillis(), latency.minRttMillis(), latency.maxRttMillis()));
         lines.add("Transactions sent " + latency.sent() + " acked " + latency.acknowledged() + " pending " + latency.pending()
                 + String.format(Locale.ROOT, " (oldest %.1f ms)", latency.oldestPendingMillis())
-                + " skipped " + latency.skipped() + " unknown " + latency.unknown());
+                + " skipped " + latency.skipped() + " duplicate " + latency.duplicates() + (latency.withheld() ? " WITHHELD" : ""));
         lines.add("Packets in " + counters.inbound() + " | out modelled " + counters.outboundModeled() + " unmodelled "
                 + counters.outboundUnmodeled() + " | queued " + counters.queued() + " dropped " + counters.dropped()
                 + " | client ticks " + session.clientTicks());
