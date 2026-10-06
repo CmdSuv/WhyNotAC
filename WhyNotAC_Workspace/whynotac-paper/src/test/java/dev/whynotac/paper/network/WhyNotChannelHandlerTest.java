@@ -227,9 +227,31 @@ class WhyNotChannelHandlerTest {
         };
         channel.writeInbound(hostile);
         assertSame(hostile, forwardedInbound.getFirst());
-        assertTrue(events.isEmpty(), "nothing half-translated may reach the timeline");
+        // Not a silent hole: the timeline records that something it could not read happened here.
+        ServerboundPacket.Untranslatable marker = assertInstanceOf(ServerboundPacket.Untranslatable.class,
+                ((TimelineEvent.Inbound) events.getFirst()).packet());
+        assertTrue(marker.type().contains("WhyNotChannelHandlerTest"), marker.type());
         channel.writeInbound(ServerboundClientTickEndPacket.INSTANCE);
-        assertEquals(1, events.size(), "the handler keeps working after a failure");
+        assertEquals(2, events.size(), "the handler keeps working after a failure");
+    }
+
+    @Test
+    void untranslatableOutboundIsRecordedAndSandwiched() {
+        Packet<net.minecraft.network.protocol.game.ClientGamePacketListener> hostile = new Packet<>() {
+            @Override
+            public net.minecraft.network.protocol.PacketType<? extends Packet<net.minecraft.network.protocol.game.ClientGamePacketListener>> type() {
+                throw new IllegalStateException("simulated translator failure");
+            }
+
+            @Override
+            public void handle(net.minecraft.network.protocol.game.ClientGamePacketListener listener) {
+            }
+        };
+        channel.writeOutbound(hostile);
+        List<Object> wire = drainOutbound();
+        assertEquals(3, wire.size(), "unknown effect on the client: bracketed by transactions");
+        assertSame(hostile, wire.get(1));
+        assertInstanceOf(ClientboundPacket.Untranslatable.class, ((TimelineEvent.Outbound) events.get(1)).packet());
     }
 
     @Test

@@ -79,6 +79,50 @@ public final class PacketTranslator {
         }
     }
 
+    /**
+     * Maps game enum constants onto WhyNotAC's by name. A constant a newer game version adds becomes
+     * {@code UNKNOWN} instead of failing the whole packet (the packet's other fields stay usable);
+     * {@code ProtocolSurfaceTest} turns such additions into a failing build so they get modelled.
+     */
+    static final class EnumMapping<G extends Enum<G>, W extends Enum<W>> {
+        private final Map<G, W> table;
+        private final W unknown;
+
+        EnumMapping(Class<G> game, Class<W> ours, W unknown) {
+            this.unknown = unknown;
+            Map<G, W> map = new java.util.EnumMap<>(game);
+            for (G constant : game.getEnumConstants()) {
+                for (W candidate : ours.getEnumConstants()) {
+                    if (candidate.name().equals(constant.name())) {
+                        map.put(constant, candidate);
+                    }
+                }
+            }
+            this.table = map;
+        }
+
+        W map(G constant) {
+            return table.getOrDefault(constant, unknown);
+        }
+    }
+
+    static final EnumMapping<ServerboundPlayerCommandPacket.Action, ServerboundPacket.PlayerCommand.Action> PLAYER_COMMAND =
+            new EnumMapping<>(ServerboundPlayerCommandPacket.Action.class, ServerboundPacket.PlayerCommand.Action.class, ServerboundPacket.PlayerCommand.Action.UNKNOWN);
+    static final EnumMapping<ServerboundPlayerActionPacket.Action, ServerboundPacket.PlayerAction.Action> PLAYER_ACTION =
+            new EnumMapping<>(ServerboundPlayerActionPacket.Action.class, ServerboundPacket.PlayerAction.Action.class, ServerboundPacket.PlayerAction.Action.UNKNOWN);
+    static final EnumMapping<AttributeModifier.Operation, ClientboundPacket.UpdateAttributes.Operation> OPERATION =
+            new EnumMapping<>(AttributeModifier.Operation.class, ClientboundPacket.UpdateAttributes.Operation.class, ClientboundPacket.UpdateAttributes.Operation.UNKNOWN);
+    static final EnumMapping<Relative, RelativeFlag> RELATIVE = new EnumMapping<>(Relative.class, RelativeFlag.class, RelativeFlag.UNKNOWN);
+
+    /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
+    static String typeName(Packet<?> packet) {
+        try {
+            return packet.type().id().toString();
+        } catch (RuntimeException | LinkageError e) {
+            return packet.getClass().getName();
+        }
+    }
+
     private final Map<Class<?>, ServerboundPacket.Unmodeled> unmodeledInbound = new ConcurrentHashMap<>();
     private final Map<Class<?>, ClientboundPacket.Unmodeled> unmodeledOutbound = new ConcurrentHashMap<>();
 
@@ -95,9 +139,9 @@ public final class PacketTranslator {
             case ServerboundClientTickEndPacket ignored -> new ServerboundPacket.ClientTickEnd();
             case ServerboundPongPacket pong -> new ServerboundPacket.Pong(pong.getId());
             case ServerboundPlayerCommandPacket command -> new ServerboundPacket.PlayerCommand(
-                    command.getId(), ServerboundPacket.PlayerCommand.Action.valueOf(command.getAction().name()), command.getData());
+                    command.getId(), PLAYER_COMMAND.map(command.getAction()), command.getData());
             case ServerboundPlayerActionPacket action -> new ServerboundPacket.PlayerAction(
-                    ServerboundPacket.PlayerAction.Action.valueOf(action.getAction().name()),
+                    PLAYER_ACTION.map(action.getAction()),
                     position(action.getPos()), face(action.getDirection()), action.getSequence());
             case ServerboundInteractPacket interact -> interact(interact);
             case ServerboundSwingPacket swing -> new ServerboundPacket.Swing(hand(swing.getHand()));
@@ -189,7 +233,7 @@ public final class PacketTranslator {
             List<ClientboundPacket.UpdateAttributes.Modifier> modifiers = new ArrayList<>(snapshot.modifiers().size());
             for (AttributeModifier modifier : snapshot.modifiers()) {
                 modifiers.add(new ClientboundPacket.UpdateAttributes.Modifier(modifier.id().toString(), modifier.amount(),
-                        ClientboundPacket.UpdateAttributes.Operation.valueOf(modifier.operation().name())));
+                        OPERATION.map(modifier.operation())));
             }
             out.add(new ClientboundPacket.UpdateAttributes.Attribute(key(snapshot.attribute()), snapshot.base(), modifiers));
         }
@@ -217,7 +261,7 @@ public final class PacketTranslator {
     static Set<RelativeFlag> relatives(Set<Relative> relatives) {
         EnumSet<RelativeFlag> out = EnumSet.noneOf(RelativeFlag.class);
         for (Relative relative : relatives) {
-            out.add(RelativeFlag.valueOf(relative.name()));
+            out.add(RELATIVE.map(relative));
         }
         return out;
     }

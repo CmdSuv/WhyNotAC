@@ -127,6 +127,7 @@ public final class Generators {
             case "PlayerLoaded" -> new ServerboundPacket.PlayerLoaded();
             case "ChunkBatchReceived" -> new ServerboundPacket.ChunkBatchReceived(anyFloat());
             case "Unmodeled" -> new ServerboundPacket.Unmodeled(anyString());
+            case "Untranslatable" -> new ServerboundPacket.Untranslatable(anyString());
             default -> throw new AssertionError("no generator for serverbound " + name + ": add one (and a codec case)");
         };
     }
@@ -168,6 +169,7 @@ public final class Generators {
                     random.nextBoolean(), anyFloat(), anyFloat());
             case "GameEvent" -> new ClientboundPacket.GameEvent(anyInt(), anyFloat());
             case "Unmodeled" -> new ClientboundPacket.Unmodeled(anyString());
+            case "Untranslatable" -> new ClientboundPacket.Untranslatable(anyString());
             default -> throw new AssertionError("no generator for clientbound " + name + ": add one (and a codec case)");
         };
     }

@@ -2,6 +2,7 @@ package dev.whynotac.paper.network;
 
 import dev.whynotac.protocol.latency.TransactionPolicy;
 import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -53,10 +54,17 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         long now = System.nanoTime();
         if (msg instanceof Packet<?> packet) {
+            ServerboundPacket translated;
             try {
-                session.onInbound(translator.inbound(packet), now);
+                translated = translator.inbound(packet);
             } catch (RuntimeException | LinkageError e) {
                 report("inbound " + packet.getClass().getName(), e);
+                translated = new ServerboundPacket.Untranslatable(PacketTranslator.typeName(packet)); // a marker, never a silent hole
+            }
+            try {
+                session.onInbound(translated, now);
+            } catch (RuntimeException | LinkageError e) {
+                report("inbound session " + packet.getClass().getName(), e);
             }
         }
         super.channelRead(ctx, msg);
@@ -78,8 +86,10 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             }
         } catch (RuntimeException | LinkageError e) {
             report("outbound " + packet.getClass().getName(), e);
+            // Unknown effect on the client: record a marker in its place and bracket it with transactions.
             observed.clear();
-            sandwich = false;
+            observed.add(new ClientboundPacket.Untranslatable(PacketTranslator.typeName(packet)));
+            sandwich = true;
         }
         // The timeline must list packets in wire order. With a sandwich that is: transaction, the
         // packet(s), transaction. The client acknowledges the first one before applying the packet and

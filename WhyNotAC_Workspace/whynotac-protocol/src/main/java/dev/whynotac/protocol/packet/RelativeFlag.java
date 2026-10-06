@@ -10,5 +10,7 @@ public enum RelativeFlag {
     DELTA_X,
     DELTA_Y,
     DELTA_Z,
-    ROTATE_DELTA
+    ROTATE_DELTA,
+    /** A flag this WhyNotAC build does not know. Always last. */
+    UNKNOWN
 }

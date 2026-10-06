@@ -153,6 +153,23 @@ class ReaderRobustnessTest {
         assertFalse(reader.report().complete());
     }
 
+    @Test
+    void unknownPacketKindInsideAKnownEventKeepsTheEvent() {
+        // A newer writer's packet tag (99) inside an Inbound record: the event, its time and tick survive.
+        dev.whynotac.recording.format.ByteSink body = new dev.whynotac.recording.format.ByteSink(32);
+        body.writeVarLong(1).writeZigZag(7).writeZigZag(2).writeVarInt(99).writeInt(0xCAFE);
+        dev.whynotac.recording.format.ByteSink raw = new dev.whynotac.recording.format.ByteSink(32);
+        raw.writeVarInt(dev.whynotac.recording.format.RecordingFormat.TAG_INBOUND).writeVarInt(body.size()).writeBytes(body.toByteArray());
+        MemorySink sink = new MemorySink();
+        sink.accept(new Block(10, 1000, 5, 1, 0, raw.toByteArray()));
+        sink.close(1, 0);
+        RecordingReader reader = RecordingReader.of(sink.bytes());
+        List<TimelineEvent> read = readAll(reader);
+        assertEquals(List.of(new TimelineEvent.Inbound(10, 1007, 7,
+                new dev.whynotac.protocol.packet.ServerboundPacket.Unmodeled(dev.whynotac.recording.format.RecordingFormat.UNKNOWN_PACKET_PREFIX + 99))), read);
+        assertEquals(0, reader.report().corruptBlocks());
+    }
+
     private static int indexOfSequence(List<TimelineEvent> events, long sequence) {
         for (int i = 0; i < events.size(); i++) {
             if (events.get(i).sequence() == sequence) {

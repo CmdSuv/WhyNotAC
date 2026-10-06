@@ -62,7 +62,8 @@ public sealed interface ClientboundPacket {
 
         public record Modifier(String id, double amount, Operation operation) {}
 
-        public enum Operation { ADD_VALUE, ADD_MULTIPLIED_BASE, ADD_MULTIPLIED_TOTAL }
+        /** {@code UNKNOWN}: a constant this WhyNotAC build does not know. Always last. */
+        public enum Operation { ADD_VALUE, ADD_MULTIPLIED_BASE, ADD_MULTIPLIED_TOTAL, UNKNOWN }
     }
 
     /** {@code ClientboundUpdateMobEffectPacket}. {@code amplifier} is zero-based. */
@@ -82,4 +83,11 @@ public sealed interface ClientboundPacket {
 
     /** Any other clientbound packet (counted, never queued). */
     record Unmodeled(String type) implements ClientboundPacket {}
+
+    /**
+     * A packet WhyNotAC failed to translate. Unlike {@link Unmodeled} it is always queued and always
+     * sandwiched: it may have changed the client's state in a way WhyNotAC cannot see, so everything
+     * built on client state must treat it as an unknown change.
+     */
+    record Untranslatable(String type) implements ClientboundPacket {}
 }

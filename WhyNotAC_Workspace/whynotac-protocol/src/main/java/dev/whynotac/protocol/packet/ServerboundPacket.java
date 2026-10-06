@@ -50,14 +50,16 @@ public sealed interface ServerboundPacket {
 
     /** {@code ServerboundPlayerCommandPacket}. */
     record PlayerCommand(int entityId, Action action, int data) implements ServerboundPacket {
-        public enum Action { STOP_SLEEPING, START_SPRINTING, STOP_SPRINTING, START_RIDING_JUMP, STOP_RIDING_JUMP, OPEN_INVENTORY, START_FALL_FLYING }
+        /** {@code UNKNOWN}: a constant this WhyNotAC build does not know (newer game version). Always last. */
+        public enum Action { STOP_SLEEPING, START_SPRINTING, STOP_SPRINTING, START_RIDING_JUMP, STOP_RIDING_JUMP, OPEN_INVENTORY, START_FALL_FLYING, UNKNOWN }
     }
 
     /** {@code ServerboundPlayerActionPacket}; {@code STAB} is the 1.21.11 spear jab. */
     record PlayerAction(Action action, BlockPosition position, BlockFace face, int sequence) implements ServerboundPacket {
+        /** {@code UNKNOWN}: a constant this WhyNotAC build does not know (newer game version). Always last. */
         public enum Action {
             START_DESTROY_BLOCK, ABORT_DESTROY_BLOCK, STOP_DESTROY_BLOCK, DROP_ALL_ITEMS, DROP_ITEM,
-            RELEASE_USE_ITEM, SWAP_ITEM_WITH_OFFHAND, STAB
+            RELEASE_USE_ITEM, SWAP_ITEM_WITH_OFFHAND, STAB, UNKNOWN
         }
     }
 
@@ -120,4 +122,11 @@ public sealed interface ServerboundPacket {
 
     /** Any other serverbound packet: kept for timing and ordering analysis. */
     record Unmodeled(String type) implements ServerboundPacket {}
+
+    /**
+     * A packet WhyNotAC failed to translate (a bug, or a game update it does not know yet). It still
+     * occupies its place in the timeline, so analysis knows something unknown happened here instead
+     * of seeing a silent hole.
+     */
+    record Untranslatable(String type) implements ServerboundPacket {}
 }

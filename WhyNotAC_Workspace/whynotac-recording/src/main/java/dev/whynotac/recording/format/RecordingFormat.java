@@ -57,6 +57,7 @@ public final class RecordingFormat {
     public static final int SB_PLAYER_LOADED = 19;
     public static final int SB_CHUNK_BATCH_RECEIVED = 20;
     public static final int SB_UNMODELED = 21;
+    public static final int SB_UNTRANSLATABLE = 22;
 
     // --- clientbound packet tags ---------------------------------------------------------------
     public static final int CB_PING = 1;
@@ -73,4 +74,12 @@ public final class RecordingFormat {
     public static final int CB_PLAYER_ABILITIES = 12;
     public static final int CB_GAME_EVENT = 13;
     public static final int CB_UNMODELED = 14;
+    public static final int CB_UNTRANSLATABLE = 15;
+
+    /**
+     * Type id given to a recorded packet whose tag this reader does not know (written by a newer
+     * WhyNotAC). The packet is the last field of its record, so the reader skips it and keeps the
+     * event, timestamp and order intact.
+     */
+    public static final String UNKNOWN_PACKET_PREFIX = "whynotac:unknown-recorded-packet/";
 }

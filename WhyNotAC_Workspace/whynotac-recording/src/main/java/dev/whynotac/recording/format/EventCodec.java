@@ -270,6 +270,10 @@ public final class EventCodec {
                     body.writeVarInt(SB_UNMODELED);
                     string(u.type());
                 }
+                case ServerboundPacket.Untranslatable u -> {
+                    body.writeVarInt(SB_UNTRANSLATABLE);
+                    string(u.type());
+                }
             }
         }
 
@@ -362,6 +366,10 @@ public final class EventCodec {
                 }
                 case ClientboundPacket.Unmodeled u -> {
                     body.writeVarInt(CB_UNMODELED);
+                    string(u.type());
+                }
+                case ClientboundPacket.Untranslatable u -> {
+                    body.writeVarInt(CB_UNTRANSLATABLE);
                     string(u.type());
                 }
             }
@@ -546,7 +554,11 @@ public final class EventCodec {
                 case SB_PLAYER_LOADED -> new ServerboundPacket.PlayerLoaded();
                 case SB_CHUNK_BATCH_RECEIVED -> new ServerboundPacket.ChunkBatchReceived(in.readFloat());
                 case SB_UNMODELED -> new ServerboundPacket.Unmodeled(string(in));
-                default -> throw new RecordingFormatException("unknown serverbound tag " + tag);
+                case SB_UNTRANSLATABLE -> new ServerboundPacket.Untranslatable(string(in));
+                default -> {
+                    in.skip(in.remaining()); // the packet is the record's last field
+                    yield new ServerboundPacket.Unmodeled(UNKNOWN_PACKET_PREFIX + tag);
+                }
             };
         }
 
@@ -614,7 +626,11 @@ public final class EventCodec {
                 }
                 case CB_GAME_EVENT -> new ClientboundPacket.GameEvent(zint(in), in.readFloat());
                 case CB_UNMODELED -> new ClientboundPacket.Unmodeled(string(in));
-                default -> throw new RecordingFormatException("unknown clientbound tag " + tag);
+                case CB_UNTRANSLATABLE -> new ClientboundPacket.Untranslatable(string(in));
+                default -> {
+                    in.skip(in.remaining());
+                    yield new ClientboundPacket.Unmodeled(UNKNOWN_PACKET_PREFIX + tag);
+                }
             };
         }
 

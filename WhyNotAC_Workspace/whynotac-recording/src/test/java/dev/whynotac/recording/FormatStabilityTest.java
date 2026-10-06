@@ -67,15 +67,15 @@ class FormatStabilityTest {
     @Test
     void enumOrdinalsUsedOnDiskAreFrozen() {
         assertEquals(List.of("UNKNOWN_TRANSACTION", "SKIPPED_TRANSACTION", "NON_FINITE_MOVEMENT"), names(TimelineEvent.Anomaly.Kind.values()));
-        assertEquals(List.of("STOP_SLEEPING", "START_SPRINTING", "STOP_SPRINTING", "START_RIDING_JUMP", "STOP_RIDING_JUMP", "OPEN_INVENTORY", "START_FALL_FLYING"),
+        assertEquals(List.of("STOP_SLEEPING", "START_SPRINTING", "STOP_SPRINTING", "START_RIDING_JUMP", "STOP_RIDING_JUMP", "OPEN_INVENTORY", "START_FALL_FLYING", "UNKNOWN"),
                 names(ServerboundPacket.PlayerCommand.Action.values()));
         assertEquals(List.of("START_DESTROY_BLOCK", "ABORT_DESTROY_BLOCK", "STOP_DESTROY_BLOCK", "DROP_ALL_ITEMS", "DROP_ITEM", "RELEASE_USE_ITEM",
-                "SWAP_ITEM_WITH_OFFHAND", "STAB"), names(ServerboundPacket.PlayerAction.Action.values()));
+                "SWAP_ITEM_WITH_OFFHAND", "STAB", "UNKNOWN"), names(ServerboundPacket.PlayerAction.Action.values()));
         assertEquals(List.of("INTERACT", "ATTACK", "INTERACT_AT"), names(ServerboundPacket.InteractEntity.Kind.values()));
         assertEquals(List.of("MAIN_HAND", "OFF_HAND"), names(Hand.values()));
         assertEquals(List.of("DOWN", "UP", "NORTH", "SOUTH", "WEST", "EAST"), names(BlockFace.values()));
-        assertEquals(List.of("X", "Y", "Z", "Y_ROT", "X_ROT", "DELTA_X", "DELTA_Y", "DELTA_Z", "ROTATE_DELTA"), names(RelativeFlag.values()));
-        assertEquals(List.of("ADD_VALUE", "ADD_MULTIPLIED_BASE", "ADD_MULTIPLIED_TOTAL"), names(ClientboundPacket.UpdateAttributes.Operation.values()));
+        assertEquals(List.of("X", "Y", "Z", "Y_ROT", "X_ROT", "DELTA_X", "DELTA_Y", "DELTA_Z", "ROTATE_DELTA", "UNKNOWN"), names(RelativeFlag.values()));
+        assertEquals(List.of("ADD_VALUE", "ADD_MULTIPLIED_BASE", "ADD_MULTIPLIED_TOTAL", "UNKNOWN"), names(ClientboundPacket.UpdateAttributes.Operation.values()));
     }
 
     private static List<String> names(Enum<?>[] values) {
