@@ -102,6 +102,15 @@ public final class PacketInterceptor {
         return handler.map(WhyNotChannelHandler::session);
     }
 
+    /** Handler names of the player's Netty pipeline, head (network) to tail (game), for interop diagnostics. */
+    public Optional<List<String>> pipeline(Player player) {
+        if (!(player instanceof CraftPlayer craft) || craft.getHandle().connection == null) {
+            return Optional.empty();
+        }
+        Channel channel = craft.getHandle().connection.connection.channel;
+        return channel == null ? Optional.empty() : Optional.of(List.copyOf(channel.pipeline().names()));
+    }
+
     public Optional<PlayerSession> session(Player player) {
         return handler(player).map(WhyNotChannelHandler::session);
     }

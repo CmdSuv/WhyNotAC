@@ -7,6 +7,7 @@
 #
 # usage: tools/e2e/run_e2e.sh <work-dir> [probe-seconds]
 #   <work-dir> is created if needed; the official Paper build is downloaded into it and checksum-verified.
+#   EXTRA_PLUGINS="a.jar b.jar" installs additional plugins (interop testing, e.g. ViaVersion, PacketEvents).
 set -euo pipefail
 WORK_DIR=$(mkdir -p "$1" && cd "$1" && pwd)
 PROBE_SECONDS=${2:-14}
@@ -47,6 +48,8 @@ recording:
 CONFIG
 PLUGIN_JAR=$(find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' | head -1)
 cp "$PLUGIN_JAR" "$WORK_DIR/plugins/WhyNotAC.jar"
+find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delete
+for extra in ${EXTRA_PLUGINS:-}; do cp "$extra" "$WORK_DIR/plugins/"; done
 
 FIFO="$WORK_DIR/console.fifo"
 rm -f "$FIFO" && mkfifo "$FIFO"
@@ -67,6 +70,7 @@ python3 -I "$HERE/probe_client.py" 127.0.0.1 "$PORT" WhyNotProbe "$PROBE_SECONDS
 PROBE=$!
 sleep $(( PROBE_SECONDS - 2 ))
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
+echo "whynotac pipeline WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
 wait "$PROBE"
 sleep 2   # let the server see the disconnect and finalise the recording
@@ -85,6 +89,6 @@ if [ -n "$RECORDING" ]; then
 fi
 
 echo "--- server view (whynotac inspect)"
-grep -E '\[WhyNotAC\]|== WhyNotAC|RTT last|Transactions sent|Packets in|Last move|Exact dYaw|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
+grep -E '\[WhyNotAC\]|== WhyNotAC|RTT last|Transactions sent|Packets in|Last move|Exact dYaw|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
 echo "--- verification"
 python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json" "${RECORDING:-}" "$WORK_DIR/e2e-inspect.json" "$WORK_DIR/e2e-dump.jsonl"

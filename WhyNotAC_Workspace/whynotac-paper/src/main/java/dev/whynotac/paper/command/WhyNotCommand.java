@@ -52,13 +52,26 @@ public final class WhyNotCommand implements BasicCommand {
                 return;
             }
             inspect(sender, target);
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("pipeline")) {
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                sender.sendMessage(Component.text("No online player named " + args[1], NamedTextColor.RED));
+                return;
+            }
+            List<String> names = interceptor.pipeline(target).orElse(List.of());
+            sender.sendMessage(Component.text("Pipeline of " + target.getName() + " (network -> game):", NamedTextColor.GOLD));
+            for (int i = 0; i < names.size(); i++) {
+                boolean ours = names.get(i).equals(PacketInterceptor.HANDLER_NAME);
+                sender.sendMessage(Component.text(String.format(Locale.ROOT, " %2d %s%s", i, names.get(i), ours ? "   <== WhyNotAC" : ""),
+                        ours ? NamedTextColor.GREEN : NamedTextColor.GRAY));
+            }
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
             sender.sendMessage(Component.text("WhyNotAC sessions: " + registry.sessions().size(), NamedTextColor.GOLD));
             for (PlayerSession session : registry.sessions()) {
                 sender.sendMessage(Component.text(" " + session + " ticks=" + session.clientTicks(), NamedTextColor.GRAY));
             }
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac sessions", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac sessions", NamedTextColor.YELLOW));
         }
     }
 
@@ -108,9 +121,9 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "sessions");
+            return List.of("inspect", "pipeline", "sessions");
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("inspect")) {
+        if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("pipeline"))) {
             return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
         }
         return List.of();
