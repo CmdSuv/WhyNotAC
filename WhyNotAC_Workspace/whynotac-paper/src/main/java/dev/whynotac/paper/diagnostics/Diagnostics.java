@@ -13,18 +13,24 @@ import java.util.concurrent.ConcurrentHashMap;
  * verify the interceptor in game ({@code /whynotac inspect}). It analyses nothing and judges nobody.
  *
  * <p>Writes happen on the analysis thread; reads on the main thread. Every field is volatile and
- * individually consistent; a reader may see fields from adjacent events, which is fine for display.
+ * individually consistent; a reader may see fields from adjacent events, which is fine for counters.
+ * Values that must agree with each other (a yaw and its exact delta) are published together as one
+ * immutable {@link Rotation}, never as separate fields.
  */
 public final class Diagnostics implements TimelineListener {
+
+    /**
+     * A rotation packet and the exact (zero rounding error) change from the rotation packet before
+     * it; the deltas are NaN for the first one. {@code yawInformationLimit} is half the float spacing
+     * of the client's yaw: finer structure than this does not exist in the data.
+     */
+    public record Rotation(ServerboundPacket.MovePlayer move, double yawDelta, double pitchDelta, double yawInformationLimit) {}
 
     /** Latest facts for one connection. */
     public static final class View {
         volatile ServerboundPacket.MovePlayer lastMove;
-        volatile ServerboundPacket.MovePlayer lastRotation;
+        volatile Rotation lastRotation;
         volatile ServerboundPacket.PlayerInput lastInput = ServerboundPacket.PlayerInput.NONE;
-        volatile double lastYawDelta = Double.NaN;
-        volatile double lastPitchDelta = Double.NaN;
-        volatile double yawInformationLimit = Double.NaN;
         volatile long inbound;
         volatile long movements;
         volatile long anomalies;
@@ -39,18 +45,9 @@ public final class Diagnostics implements TimelineListener {
             return lastInput;
         }
 
-        /** Exact (zero rounding error) yaw change between the last two rotation packets. */
-        public double lastYawDelta() {
-            return lastYawDelta;
-        }
-
-        public double lastPitchDelta() {
-            return lastPitchDelta;
-        }
-
-        /** Half the float spacing of the client's yaw: finer structure than this does not exist in the data. */
-        public double yawInformationLimit() {
-            return yawInformationLimit;
+        /** The last rotation packet with its exact deltas, or null before the first one. */
+        public Rotation lastRotation() {
+            return lastRotation;
         }
 
         public long inbound() {
@@ -108,12 +105,12 @@ public final class Diagnostics implements TimelineListener {
         if (!move.hasRotation()) {
             return;
         }
-        ServerboundPacket.MovePlayer previous = view.lastRotation;
-        if (previous != null) {
-            view.lastYawDelta = ExactAngles.delta(previous.yaw(), move.yaw());
-            view.lastPitchDelta = ExactAngles.delta(previous.pitch(), move.pitch());
-            view.yawInformationLimit = ExactAngles.informationLimit(previous.yaw(), move.yaw());
-        }
-        view.lastRotation = move;
+        Rotation previous = view.lastRotation;
+        view.lastRotation = previous == null
+                ? new Rotation(move, Double.NaN, Double.NaN, Double.NaN)
+                : new Rotation(move,
+                        ExactAngles.delta(previous.move().yaw(), move.yaw()),
+                        ExactAngles.delta(previous.move().pitch(), move.pitch()),
+                        ExactAngles.informationLimit(previous.move().yaw(), move.yaw()));
     }
 }

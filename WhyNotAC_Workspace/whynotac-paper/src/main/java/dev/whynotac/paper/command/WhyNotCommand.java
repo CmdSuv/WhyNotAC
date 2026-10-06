@@ -101,8 +101,12 @@ public final class WhyNotCommand implements BasicCommand {
                 lines.add("Last move " + move.shape() + " x=" + move.x() + " y=" + move.y() + " z=" + move.z()
                         + " yaw=" + move.yaw() + " pitch=" + move.pitch() + " ground=" + move.onGround() + " hcol=" + move.horizontalCollision());
             }
-            lines.add("Exact dYaw=" + view.lastYawDelta() + " dPitch=" + view.lastPitchDelta()
-                    + " (float resolution of this yaw: +/-" + view.yawInformationLimit() + ")");
+            Diagnostics.Rotation rotation = view.lastRotation();
+            if (rotation != null) {
+                lines.add("Last rotation yaw=" + rotation.move().yaw() + " pitch=" + rotation.move().pitch()
+                        + " exact dYaw=" + rotation.yawDelta() + " dPitch=" + rotation.pitchDelta()
+                        + " (float resolution of this yaw: +/-" + rotation.yawInformationLimit() + ")");
+            }
             ServerboundPacket.PlayerInput input = view.lastInput();
             lines.add("Keys W" + flag(input.forward()) + " S" + flag(input.backward()) + " A" + flag(input.left()) + " D" + flag(input.right())
                     + " jump" + flag(input.jump()) + " sneak" + flag(input.shift()) + " sprint" + flag(input.sprint()));
