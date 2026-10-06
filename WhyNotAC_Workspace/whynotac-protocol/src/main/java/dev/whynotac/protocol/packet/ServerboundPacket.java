@@ -120,6 +120,16 @@ public sealed interface ServerboundPacket {
     /** {@code ServerboundChunkBatchReceivedPacket}. */
     record ChunkBatchReceived(float desiredChunksPerTick) implements ServerboundPacket {}
 
+    /**
+     * {@code ClientIntentionPacket}, the first packet of every connection. The host name the client
+     * typed is deliberately not kept. {@code protocolVersion} is what reached the server: a protocol
+     * translator such as ViaVersion may already have rewritten it.
+     */
+    record Handshake(int protocolVersion, Intent intent) implements ServerboundPacket {
+        /** {@code UNKNOWN}: a constant this WhyNotAC build does not know. Always last. */
+        public enum Intent { STATUS, LOGIN, TRANSFER, UNKNOWN }
+    }
+
     /** Any other serverbound packet: kept for timing and ordering analysis. */
     record Unmodeled(String type) implements ServerboundPacket {}
 

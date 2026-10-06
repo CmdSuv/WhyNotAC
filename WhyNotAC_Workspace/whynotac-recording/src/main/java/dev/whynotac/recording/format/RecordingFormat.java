@@ -58,6 +58,7 @@ public final class RecordingFormat {
     public static final int SB_CHUNK_BATCH_RECEIVED = 20;
     public static final int SB_UNMODELED = 21;
     public static final int SB_UNTRANSLATABLE = 22;
+    public static final int SB_HANDSHAKE = 23;
 
     // --- clientbound packet tags ---------------------------------------------------------------
     public static final int CB_PING = 1;

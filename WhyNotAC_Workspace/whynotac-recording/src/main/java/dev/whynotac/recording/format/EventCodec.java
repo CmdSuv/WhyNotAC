@@ -274,6 +274,11 @@ public final class EventCodec {
                     body.writeVarInt(SB_UNTRANSLATABLE);
                     string(u.type());
                 }
+                case ServerboundPacket.Handshake h -> {
+                    body.writeVarInt(SB_HANDSHAKE);
+                    body.writeZigZag(h.protocolVersion());
+                    body.writeVarInt(h.intent().ordinal());
+                }
             }
         }
 
@@ -555,6 +560,7 @@ public final class EventCodec {
                 case SB_CHUNK_BATCH_RECEIVED -> new ServerboundPacket.ChunkBatchReceived(in.readFloat());
                 case SB_UNMODELED -> new ServerboundPacket.Unmodeled(string(in));
                 case SB_UNTRANSLATABLE -> new ServerboundPacket.Untranslatable(string(in));
+                case SB_HANDSHAKE -> new ServerboundPacket.Handshake(zint(in), enumAt(ServerboundPacket.Handshake.Intent.values(), in.readVarInt()));
                 default -> {
                     in.skip(in.remaining()); // the packet is the record's last field
                     yield new ServerboundPacket.Unmodeled(UNKNOWN_PACKET_PREFIX + tag);

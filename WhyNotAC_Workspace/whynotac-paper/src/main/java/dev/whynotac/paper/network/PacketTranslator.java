@@ -52,6 +52,8 @@ import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.network.protocol.handshake.ClientIntent;
+import net.minecraft.network.protocol.handshake.ClientIntentionPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Relative;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -113,6 +115,8 @@ public final class PacketTranslator {
     static final EnumMapping<AttributeModifier.Operation, ClientboundPacket.UpdateAttributes.Operation> OPERATION =
             new EnumMapping<>(AttributeModifier.Operation.class, ClientboundPacket.UpdateAttributes.Operation.class, ClientboundPacket.UpdateAttributes.Operation.UNKNOWN);
     static final EnumMapping<Relative, RelativeFlag> RELATIVE = new EnumMapping<>(Relative.class, RelativeFlag.class, RelativeFlag.UNKNOWN);
+    static final EnumMapping<ClientIntent, ServerboundPacket.Handshake.Intent> INTENT =
+            new EnumMapping<>(ClientIntent.class, ServerboundPacket.Handshake.Intent.class, ServerboundPacket.Handshake.Intent.UNKNOWN);
 
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
     static String typeName(Packet<?> packet) {
@@ -159,6 +163,7 @@ public final class PacketTranslator {
             case ServerboundContainerClosePacket close -> new ServerboundPacket.ContainerClose(close.getContainerId());
             case ServerboundPlayerLoadedPacket ignored -> new ServerboundPacket.PlayerLoaded();
             case ServerboundChunkBatchReceivedPacket(float desired) -> new ServerboundPacket.ChunkBatchReceived(desired);
+            case ClientIntentionPacket intention -> new ServerboundPacket.Handshake(intention.protocolVersion(), INTENT.map(intention.intention()));
             default -> unmodeledInbound.computeIfAbsent(packet.getClass(), c -> new ServerboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }

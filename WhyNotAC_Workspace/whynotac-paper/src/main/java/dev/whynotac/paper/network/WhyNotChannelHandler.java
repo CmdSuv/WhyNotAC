@@ -66,6 +66,12 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             } catch (RuntimeException | LinkageError e) {
                 report("inbound session " + packet.getClass().getName(), e);
             }
+            if (translated instanceof ServerboundPacket.Handshake handshake && handshake.intent() == ServerboundPacket.Handshake.Intent.STATUS) {
+                // A server-list ping never becomes a player: stop observing it (handlerRemoved closes the session).
+                super.channelRead(ctx, msg);
+                ctx.pipeline().remove(this);
+                return;
+            }
         }
         super.channelRead(ctx, msg);
     }

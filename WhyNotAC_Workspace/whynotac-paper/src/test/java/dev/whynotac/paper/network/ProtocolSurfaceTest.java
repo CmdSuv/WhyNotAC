@@ -157,6 +157,7 @@ class ProtocolSurfaceTest {
         assertEquals(names(AttributeModifier.Operation.values()), withoutUnknown(ClientboundPacket.UpdateAttributes.Operation.values()));
         assertEquals(names(Relative.values()), withoutUnknown(RelativeFlag.values()));
         assertEquals(names(InteractionHand.values()), names(Hand.values()));
+        assertEquals(names(net.minecraft.network.protocol.handshake.ClientIntent.values()), withoutUnknown(ServerboundPacket.Handshake.Intent.values()));
         assertEquals(names(Direction.values()), names(BlockFace.values()));
         for (Direction direction : Direction.values()) {
             assertEquals(direction.name(), BlockFace.values()[direction.get3DDataValue()].name(), "3D data value of " + direction);

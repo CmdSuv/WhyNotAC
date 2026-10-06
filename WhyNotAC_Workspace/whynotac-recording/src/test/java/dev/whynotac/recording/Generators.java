@@ -128,6 +128,7 @@ public final class Generators {
             case "ChunkBatchReceived" -> new ServerboundPacket.ChunkBatchReceived(anyFloat());
             case "Unmodeled" -> new ServerboundPacket.Unmodeled(anyString());
             case "Untranslatable" -> new ServerboundPacket.Untranslatable(anyString());
+            case "Handshake" -> new ServerboundPacket.Handshake(anyInt(), pick(ServerboundPacket.Handshake.Intent.values()));
             default -> throw new AssertionError("no generator for serverbound " + name + ": add one (and a codec case)");
         };
     }

@@ -55,7 +55,8 @@ public final class PlayerSession {
         this.connectionId = connectionId;
         this.remoteAddress = remoteAddress;
         this.replay = replay;
-        this.mailbox = new SerialMailbox(registry.executor(), mailboxCapacity, event -> registry.dispatch(this, event));
+        this.mailbox = new SerialMailbox(registry.executor(), mailboxCapacity, registry.globalQueued(),
+                replay ? Long.MAX_VALUE : registry.globalQueueCapacity(), event -> registry.dispatch(this, event));
     }
 
     // --- platform side ---------------------------------------------------------------------------

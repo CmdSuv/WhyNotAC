@@ -6,6 +6,7 @@ client actually did, bit for bit where floats are involved.
 usage: verify_e2e.py <e2e-server.log> <e2e-probe.json>
 """
 import json
+import os
 import re
 import struct
 import sys
@@ -39,6 +40,9 @@ def main():
     m = re.search(r"queued \d+ dropped (\d+)", log)
     check(m is not None and int(m.group(1)) == 0, "no timeline events dropped")
     check(probe["still_connected"], "probe was never disconnected (interceptor is passive)")
+    check(probe.get("server_list_ping_answered") is True, "server-list ping answered normally")
+    m = re.search(r"WhyNotAC sessions: (\d+)", log)
+    check(m is not None and int(m.group(1)) == 1, "the server-list ping left no session behind")
     check("SKIPPED_TRANSACTION" in log or "Anomalies 2" in log, "anomalies reported")
 
     # Rotation: the yaw the server printed, and its exact delta, must be one of the probe's own steps.
@@ -88,6 +92,11 @@ def verify_recording(probe, recording, inspect_path, dump_path, check):
           f"transaction ids are random, no shared prefix ({len(pings)} pings)")
     bound = [e for e in events if e["type"] == "Bound"]
     check(len(bound) == 1 and bound[0]["playerName"].startswith("anon-"), "identity pseudonymised in the recording")
+    handshakes = inbound("Handshake")
+    check(len(handshakes) == 1 and handshakes[0]["intent"] == "LOGIN" and handshakes[0]["protocolVersion"] == 774,
+          "login handshake recorded with protocol 774")
+    recordings = [p for p in os.listdir(os.path.dirname(recording)) if p.endswith(".wnrec")]
+    check(len(recordings) == 1, f"exactly one recording (the ping made none): {recordings}")
     raw = open(recording, "rb").read()
     check(b"WhyNotProbe" not in raw and "WhyNotProbe" not in open(dump_path).read(), "real player name appears nowhere in the file")
     check(events[-1]["type"] == "Disconnected", "recording ends with the disconnect")

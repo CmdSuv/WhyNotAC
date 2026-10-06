@@ -232,8 +232,20 @@ class Client:
             self.alive = False
 
 
+def server_list_ping(host, port):
+    """What every launcher does before joining: handshake with intent STATUS, then a status request."""
+    sock = socket.create_connection((host, port), timeout=10)
+    handshake = varint(0x00) + varint(PROTOCOL) + mc_string(host) + struct.pack(">H", port) + varint(1)
+    request = varint(0x00)
+    sock.sendall(varint(len(handshake)) + handshake + varint(len(request)) + request)
+    data = sock.recv(65536)
+    sock.close()
+    return b"version" in data
+
+
 def main():
     host, port, name, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3], float(sys.argv[4])
+    status_ok = server_list_ping(host, port)
     client = Client(host, port, name)
     client.login()
     threading.Thread(target=client.reader_loop, daemon=True).start()
@@ -286,6 +298,7 @@ def main():
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,
         "multiplier": repr(multiplier),
+        "server_list_ping_answered": status_ok,
         "still_connected": client.alive,
         "disconnect_reason": client.disconnect_reason,
     }

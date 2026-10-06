@@ -19,8 +19,8 @@ import java.util.UUID;
  */
 public final class RecordingListener implements TimelineListener {
 
-    /** Pre-login events kept per connection; login and configuration normally need far fewer. */
-    public static final int MAX_BUFFERED_BEFORE_BIND = 4096;
+    /** Pre-login events kept per connection. A measured vanilla login uses 16; this leaves room for modded clients. */
+    public static final int MAX_BUFFERED_BEFORE_BIND = 512;
 
     private static final Object STATE = new Object();
 

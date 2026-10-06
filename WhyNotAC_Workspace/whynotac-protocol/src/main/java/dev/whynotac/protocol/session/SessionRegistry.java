@@ -27,6 +27,8 @@ public final class SessionRegistry {
     }
 
     public static final int DEFAULT_MAILBOX_CAPACITY = 16_384;
+    /** Events queued across all sessions (about 60 MB at the measured ~112 B per event). */
+    public static final long DEFAULT_GLOBAL_QUEUE_CAPACITY = 524_288;
 
     private final Executor executor;
     private final int mailboxCapacity;
@@ -35,11 +37,31 @@ public final class SessionRegistry {
     private final Map<Long, PlayerSession> sessions = new ConcurrentHashMap<>();
     private final Map<UUID, PlayerSession> byPlayer = new ConcurrentHashMap<>();
     private final AtomicLong connectionIds = new AtomicLong();
+    private final AtomicLong globalQueued = new AtomicLong();
+    private final long globalQueueCapacity;
 
     public SessionRegistry(Executor executor, int mailboxCapacity, ErrorHandler errorHandler) {
+        this(executor, mailboxCapacity, DEFAULT_GLOBAL_QUEUE_CAPACITY, errorHandler);
+    }
+
+    public SessionRegistry(Executor executor, int mailboxCapacity, long globalQueueCapacity, ErrorHandler errorHandler) {
         this.executor = executor;
         this.mailboxCapacity = mailboxCapacity;
+        this.globalQueueCapacity = globalQueueCapacity;
         this.errorHandler = errorHandler;
+    }
+
+    /** Events currently queued for analysis across all sessions. */
+    public long queuedEvents() {
+        return globalQueued.get();
+    }
+
+    AtomicLong globalQueued() {
+        return globalQueued;
+    }
+
+    long globalQueueCapacity() {
+        return globalQueueCapacity;
     }
 
     public void addListener(TimelineListener listener) {

@@ -203,6 +203,27 @@ class PlayerSessionTest {
     }
 
     @Test
+    void serverWideBudgetBoundsMemoryAcrossManyConnections() {
+        ManualExecutor executor = new ManualExecutor(); // analysis stalled
+        SessionRegistry registry = new SessionRegistry(executor, 1_000, 50, (s, e, t) -> { throw new AssertionError(t); });
+        List<TimelineEvent> events = record(registry);
+        List<PlayerSession> sessions = new ArrayList<>();
+        for (int c = 0; c < 20; c++) {
+            PlayerSession session = registry.open("bot-" + c);
+            sessions.add(session);
+            for (int i = 0; i < 10; i++) {
+                session.onInbound(MOVE, i);
+            }
+        }
+        assertTrue(registry.queuedEvents() <= 50, "queued " + registry.queuedEvents());
+        long dropped = sessions.stream().mapToLong(s -> s.counters().dropped()).sum();
+        assertEquals(200 - 50, dropped);
+        executor.runAll();
+        assertEquals(0, registry.queuedEvents());
+        assertEquals(50, events.size());
+    }
+
+    @Test
     void concurrentProducersYieldSerialGaplessDelivery() throws InterruptedException {
         ExecutorService analysis = Executors.newFixedThreadPool(8);
         SessionRegistry registry = new SessionRegistry(analysis, 1 << 20, (s, e, t) -> { throw new AssertionError(t); });

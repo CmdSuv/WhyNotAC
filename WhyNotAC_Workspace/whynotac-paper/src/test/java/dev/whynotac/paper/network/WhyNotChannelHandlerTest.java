@@ -254,6 +254,33 @@ class WhyNotChannelHandlerTest {
         assertInstanceOf(ClientboundPacket.Untranslatable.class, ((TimelineEvent.Outbound) events.get(1)).packet());
     }
 
+    /** A handshake decoded from wire bytes by the game's own codec (intent ids: 1 status, 2 login). */
+    private static Packet<?> handshake(String host, int intentId) {
+        return decode(net.minecraft.network.protocol.handshake.ClientIntentionPacket.STREAM_CODEC, buf -> {
+            buf.writeVarInt(774);
+            buf.writeUtf(host);
+            buf.writeShort(25565);
+            buf.writeVarInt(intentId);
+        });
+    }
+
+    @Test
+    void serverListPingsAreNotObserved() {
+        channel.writeInbound(handshake("play.example.org", 1));
+        assertNull(channel.pipeline().get(PacketInterceptor.HANDLER_NAME), "detached after a STATUS handshake");
+        assertEquals(new ServerboundPacket.Handshake(774, ServerboundPacket.Handshake.Intent.STATUS), ((TimelineEvent.Inbound) events.getFirst()).packet());
+        assertInstanceOf(TimelineEvent.Disconnected.class, events.getLast());
+        assertEquals(1, forwardedInbound.size(), "the handshake still reaches the game");
+        assertTrue(!events.toString().contains("play.example.org"), "the typed host name is not kept");
+    }
+
+    @Test
+    void loginHandshakeKeepsObserving() {
+        channel.writeInbound(handshake("localhost", 2));
+        assertTrue(channel.pipeline().get(PacketInterceptor.HANDLER_NAME) != null);
+        assertEquals(1, events.size());
+    }
+
     @Test
     void closingTheChannelEndsTheSession() {
         channel.writeInbound(ServerboundClientTickEndPacket.INSTANCE);

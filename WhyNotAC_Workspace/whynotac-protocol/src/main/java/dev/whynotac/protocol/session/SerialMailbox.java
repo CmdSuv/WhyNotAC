@@ -6,6 +6,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -20,7 +21,9 @@ import java.util.function.Consumer;
  * <p>If the executor rejects work (it was shut down), delivery degrades to caller-runs instead of
  * silently stranding queued events: shutdown must still deliver every {@code Disconnected}.
  *
- * <p>The bound protects the server from a client that floods packets faster than analysis runs.
+ * <p>Two bounds protect the server: one per session (a client flooding packets faster than analysis
+ * runs) and one shared by all sessions (many connections at once, e.g. a bot attack), so the total
+ * memory held by queued events stays bounded whatever the number of connections.
  * Overflow is handled by the caller ({@link PlayerSession}), which turns dropped events into an
  * explicit {@link TimelineEvent.Gap}.
  */
@@ -35,24 +38,29 @@ final class SerialMailbox {
     private final Executor executor;
     private final Consumer<TimelineEvent> consumer;
     private final int capacity;
+    private final AtomicLong globalSize;
+    private final long globalCapacity;
 
-    SerialMailbox(Executor executor, int capacity, Consumer<TimelineEvent> consumer) {
+    SerialMailbox(Executor executor, int capacity, AtomicLong globalSize, long globalCapacity, Consumer<TimelineEvent> consumer) {
         if (capacity < 2) {
             throw new IllegalArgumentException("capacity must be at least 2 (a gap marker travels with the next event)");
         }
         this.executor = executor;
         this.capacity = capacity;
+        this.globalSize = globalSize;
+        this.globalCapacity = globalCapacity;
         this.consumer = consumer;
     }
 
-    /** True if {@code events} more events fit under the bound. */
+    /** True if {@code events} more events fit under both this session's and the server-wide bound. */
     boolean hasRoomFor(int events) {
-        return (long) size.get() + events <= capacity;
+        return (long) size.get() + events <= capacity && globalSize.get() + events <= globalCapacity;
     }
 
     void enqueue(TimelineEvent event) {
         queue.add(event);
         size.incrementAndGet();
+        globalSize.incrementAndGet();
         if (scheduled.compareAndSet(false, true)) {
             try {
                 executor.execute(this::drain);
@@ -82,6 +90,7 @@ final class SerialMailbox {
                         break;
                     }
                     size.decrementAndGet();
+                    globalSize.decrementAndGet();
                     consumer.accept(event);
                 }
             } finally {
