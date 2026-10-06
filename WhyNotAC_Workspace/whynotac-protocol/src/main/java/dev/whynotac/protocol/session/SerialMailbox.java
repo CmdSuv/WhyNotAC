@@ -3,6 +3,7 @@ package dev.whynotac.protocol.session;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -15,6 +16,9 @@ import java.util.function.Consumer;
  * gives each session strict FIFO processing without locks in the consumers. The {@code scheduled}
  * flag's CAS plus the concurrent queue provide the happens-before edge between drains that may run
  * on different pool threads.
+ *
+ * <p>If the executor rejects work (it was shut down), delivery degrades to caller-runs instead of
+ * silently stranding queued events: shutdown must still deliver every {@code Disconnected}.
  *
  * <p>The bound protects the server from a client that floods packets faster than analysis runs.
  * Overflow is handled by the caller ({@link PlayerSession}), which turns dropped events into an
@@ -43,14 +47,18 @@ final class SerialMailbox {
 
     /** True if {@code events} more events fit under the bound. */
     boolean hasRoomFor(int events) {
-        return size.get() + events <= capacity;
+        return (long) size.get() + events <= capacity;
     }
 
     void enqueue(TimelineEvent event) {
         queue.add(event);
         size.incrementAndGet();
         if (scheduled.compareAndSet(false, true)) {
-            executor.execute(this::drain);
+            try {
+                executor.execute(this::drain);
+            } catch (RejectedExecutionException shutDown) {
+                drain(); // executor is gone (shutdown): deliver on the caller rather than lose events
+            }
         }
     }
 
@@ -58,21 +66,34 @@ final class SerialMailbox {
         return size.get();
     }
 
+    /** Is any event still waiting for delivery? */
+    boolean isIdle() {
+        return size.get() == 0 && !scheduled.get();
+    }
+
     private void drain() {
-        try {
-            for (int i = 0; i < BATCH; i++) {
-                TimelineEvent event = queue.poll();
-                if (event == null) {
-                    break;
+        boolean continueInline;
+        do {
+            continueInline = false;
+            try {
+                for (int i = 0; i < BATCH; i++) {
+                    TimelineEvent event = queue.poll();
+                    if (event == null) {
+                        break;
+                    }
+                    size.decrementAndGet();
+                    consumer.accept(event);
                 }
-                size.decrementAndGet();
-                consumer.accept(event);
+            } finally {
+                scheduled.set(false);
             }
-        } finally {
-            scheduled.set(false);
             if (!queue.isEmpty() && scheduled.compareAndSet(false, true)) {
-                executor.execute(this::drain);
+                try {
+                    executor.execute(this::drain);
+                } catch (RejectedExecutionException shutDown) {
+                    continueInline = true; // keep draining here; iterative, so no recursion depth
+                }
             }
-        }
+        } while (continueInline);
     }
 }

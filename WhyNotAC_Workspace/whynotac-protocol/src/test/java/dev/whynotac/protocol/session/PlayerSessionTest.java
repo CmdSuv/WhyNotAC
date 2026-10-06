@@ -151,6 +151,58 @@ class PlayerSessionTest {
     }
 
     @Test
+    void replaySessionsReproduceRecordedEventsVerbatim() {
+        SessionRegistry live = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
+        List<TimelineEvent> recorded = record(live);
+        PlayerSession session = live.open("x");
+        UUID id = UUID.randomUUID();
+        session.bind(id, "Alex", 3, 10);
+        session.onInbound(MOVE, 20);
+        session.onInbound(new ServerboundPacket.ClientTickEnd(), 21);
+        session.onInbound(MOVE, 70);
+        session.disconnect(80);
+
+        SessionRegistry replayRegistry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
+        List<TimelineEvent> replayed = record(replayRegistry);
+        PlayerSession replay = replayRegistry.openReplay("recording.wnrec");
+        recorded.forEach(replay::deliver);
+        assertEquals(recorded, replayed);
+        assertEquals(id, replay.identity().playerId());
+        assertEquals(1, replay.clientTicks());
+        assertTrue(replay.isReplay() && replay.isClosed());
+    }
+
+    @Test
+    void replaySessionsRejectLiveCallsAndOutOfOrderEvents() {
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
+        PlayerSession replay = registry.openReplay("r");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> replay.onInbound(MOVE, 1));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, replay::allocateTransaction);
+        replay.deliver(new TimelineEvent.Inbound(5, 1, 0, MOVE));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> replay.deliver(new TimelineEvent.Inbound(5, 2, 0, MOVE)));
+        PlayerSession live = registry.open("l");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> live.deliver(new TimelineEvent.Inbound(0, 1, 0, MOVE)));
+    }
+
+    @Test
+    void executorShutdownNeverStrandsQueuedEvents() throws InterruptedException {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        SessionRegistry registry = new SessionRegistry(pool, 1 << 20, (s, e, t) -> { throw new AssertionError(t); });
+        List<TimelineEvent> events = record(registry);
+        PlayerSession session = registry.open("x");
+        for (int i = 0; i < 10_000; i++) { // many batches: the drain has to reschedule itself repeatedly
+            session.onInbound(MOVE, i);
+        }
+        session.disconnect(10_001);
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(30, TimeUnit.SECONDS));
+        session.onInbound(MOVE, 10_002); // ignored: closed
+        assertEquals(10_001, events.size());
+        assertInstanceOf(TimelineEvent.Disconnected.class, events.getLast());
+        assertTrue(session.isFullyDelivered());
+    }
+
+    @Test
     void concurrentProducersYieldSerialGaplessDelivery() throws InterruptedException {
         ExecutorService analysis = Executors.newFixedThreadPool(8);
         SessionRegistry registry = new SessionRegistry(analysis, 1 << 20, (s, e, t) -> { throw new AssertionError(t); });

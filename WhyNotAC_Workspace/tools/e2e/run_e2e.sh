@@ -36,7 +36,15 @@ motd=WhyNotAC E2E
 PROPS
 
 (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
-mkdir -p "$WORK_DIR/plugins"
+mkdir -p "$WORK_DIR/plugins/WhyNotAC"
+rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings"
+cat > "$WORK_DIR/plugins/WhyNotAC/config.yml" <<CONFIG
+recording:
+  enabled: true
+  max-age-days: 14
+  max-total-megabytes: 2048
+  max-queued-megabytes: 64
+CONFIG
 PLUGIN_JAR=$(find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' | head -1)
 cp "$PLUGIN_JAR" "$WORK_DIR/plugins/WhyNotAC.jar"
 
@@ -61,9 +69,22 @@ sleep $(( PROBE_SECONDS - 2 ))
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
 wait "$PROBE"
-sleep 1
+sleep 2   # let the server see the disconnect and finalise the recording
+echo "stop" > "$FIFO"
+wait "$SERVER" || true
+trap - EXIT
+kill "$HOLDER" 2>/dev/null || true
+rm -f "$FIFO"
+
+RECORDING=$(find "$WORK_DIR/plugins/WhyNotAC/recordings" -name '*.wnrec' | head -1)
+echo "--- recording: ${RECORDING:-<none>}"
+if [ -n "$RECORDING" ]; then
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" inspect "$RECORDING" > "$WORK_DIR/e2e-inspect.json" || true
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/e2e-dump.jsonl" || true
+  ls -la "$RECORDING"
+fi
 
 echo "--- server view (whynotac inspect)"
 grep -E '\[WhyNotAC\]|== WhyNotAC|RTT last|Transactions sent|Packets in|Last move|Exact dYaw|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
 echo "--- verification"
-python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json"
+python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json" "${RECORDING:-}" "$WORK_DIR/e2e-inspect.json" "$WORK_DIR/e2e-dump.jsonl"

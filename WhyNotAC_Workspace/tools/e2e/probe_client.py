@@ -238,6 +238,7 @@ def main():
     multiplier = d * d * d * 8.0
     yaw_history = []
     tick, sent_input = 0, None
+    inputs_sent = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         forward = (tick // 40) % 2 == 0  # toggle W every 2 seconds
@@ -245,6 +246,7 @@ def main():
         if flags != sent_input:
             client.send(PLAY_S_INPUT, bytes([flags]))
             sent_input = flags
+            inputs_sent.append(flags)
         counts = (tick % 7) - 3  # -3..3 cursor counts per frame, one frame per tick
         increment = f32(f32(counts * multiplier) * f32(0.15))
         new_yaw = f32(yaw + increment)
@@ -271,6 +273,9 @@ def main():
         "skipped_transaction_ids": [hex(i) for i in client.skipped_ids],
         "forged_transaction_ids": [hex(i) for i in client.forged_ids],
         "yaw_steps_bits": [[float_bits(a), float_bits(b)] for a, b, _ in yaw_history],
+        "pitch_bits": float_bits(pitch),
+        "inputs_sent": inputs_sent,
+        "tick_ends_sent": tick,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,

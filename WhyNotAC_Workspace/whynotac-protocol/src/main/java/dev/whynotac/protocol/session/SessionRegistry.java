@@ -52,7 +52,18 @@ public final class SessionRegistry {
 
     /** Creates a session for a newly accepted connection. */
     public PlayerSession open(String remoteAddress) {
-        PlayerSession session = new PlayerSession(connectionIds.incrementAndGet(), remoteAddress, this, mailboxCapacity);
+        PlayerSession session = new PlayerSession(connectionIds.incrementAndGet(), remoteAddress, this, mailboxCapacity, false);
+        sessions.put(session.connectionId(), session);
+        return session;
+    }
+
+    /**
+     * Creates a session that is fed recorded events through {@link PlayerSession#deliver} instead of
+     * live packets. Its mailbox is unbounded, because a replay must never lose an event. Use a
+     * caller-runs executor ({@code Runnable::run}) for fully deterministic, single-threaded replays.
+     */
+    public PlayerSession openReplay(String label) {
+        PlayerSession session = new PlayerSession(connectionIds.incrementAndGet(), label, this, Integer.MAX_VALUE, true);
         sessions.put(session.connectionId(), session);
         return session;
     }

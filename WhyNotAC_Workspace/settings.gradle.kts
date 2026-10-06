@@ -3,7 +3,7 @@
  *
  * Module graph (arrows point at dependencies):
  *
- *   whynotac-paper ──► whynotac-protocol ──► whynotac-math
+ *   whynotac-paper ──► whynotac-recording ──► whynotac-protocol ──► whynotac-math
  *   whynotac-conformance ──► whynotac-math (+ vanilla 1.21.11 server code, test-only)
  *
  * Planned layers (folders exist with a README describing their contract; they are added to the
@@ -37,6 +37,7 @@ rootProject.name = "whynotac"
 include(
     "whynotac-math",
     "whynotac-protocol",
+    "whynotac-recording",
     "whynotac-paper",
     "whynotac-conformance",
 )

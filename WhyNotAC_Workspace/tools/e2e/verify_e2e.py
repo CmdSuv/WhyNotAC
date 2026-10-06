@@ -51,8 +51,42 @@ def main():
         steps = [(from_bits(a), from_bits(b)) for a, b in probe["yaw_steps_bits"]]
         matches = [(a, b) for a, b in steps if b == server_yaw and (b - a) == server_delta]
         check(bool(matches), f"server yaw {server_yaw!r} with exact delta {server_delta!r} matches a step the probe sent, bit for bit")
+    if len(sys.argv) > 3:
+        verify_recording(probe, sys.argv[3], sys.argv[4], sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
+
+
+def verify_recording(probe, recording, inspect_path, dump_path, check):
+    """The recording, read back offline, must contain exactly what the probe sent."""
+    check(bool(recording), "a finished .wnrec recording exists")
+    if not recording:
+        return
+    summary = json.loads(open(inspect_path).read())
+    check(summary["complete"] is True, f"recording is complete (report: {summary['report']})")
+    events = [json.loads(line) for line in open(dump_path) if line.strip()]
+
+    def inbound(packet_type):
+        return [e["packet"] for e in events if e["type"] == "Inbound" and e["packet"]["type"] == packet_type]
+
+    rotations = [p for p in inbound("MovePlayer") if p["hasRotation"] and not p["hasPosition"]]
+    recorded_yaw = [int(p["yaw"]["bits"], 16) for p in rotations]
+    sent_yaw = [b for _, b in probe["yaw_steps_bits"]]
+    check(recorded_yaw == sent_yaw, f"all {len(sent_yaw)} rotation packets recorded in order with identical float bits")
+    check(all(int(p["pitch"]["bits"], 16) == probe["pitch_bits"] for p in rotations), "pitch bits identical in every rotation packet")
+    ticks = len(inbound("ClientTickEnd"))
+    check(ticks == probe["tick_ends_sent"], f"every ClientTickEnd recorded ({ticks} = {probe['tick_ends_sent']})")
+    inputs = [(1 if p["forward"] else 0) for p in inbound("PlayerInput")]
+    check(inputs == probe["inputs_sent"], f"key-state sequence recorded exactly ({len(inputs)} PlayerInput packets)")
+    anomalies = [e for e in events if e["type"] == "Anomaly"]
+    kinds = [a["kind"] for a in anomalies]
+    check("SKIPPED_TRANSACTION" in kinds, "withheld transaction preserved in the recording")
+    check(any(a["kind"] == "UNKNOWN_TRANSACTION" and "574ebeef" in a["detail"] for a in anomalies), "forged transaction id preserved")
+    bound = [e for e in events if e["type"] == "Bound"]
+    check(len(bound) == 1 and bound[0]["playerName"].startswith("anon-"), "identity pseudonymised in the recording")
+    raw = open(recording, "rb").read()
+    check(b"WhyNotProbe" not in raw and "WhyNotProbe" not in open(dump_path).read(), "real player name appears nowhere in the file")
+    check(events[-1]["type"] == "Disconnected", "recording ends with the disconnect")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,9 @@ import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.session.SessionRegistry;
+import dev.whynotac.recording.write.RecordingStore;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,12 +23,13 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-/** Phase 1 entry point: packet interception, per-player timelines and transaction latency tracking. */
+/** Entry point: packet interception, per-player timelines, transaction latency tracking and (optional) session recording. */
 public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
     private ExecutorService analysisExecutor;
     private SessionRegistry registry;
     private PacketInterceptor interceptor;
+    private RecordingStore recordings;
     private final AtomicLong listenerErrors = new AtomicLong();
 
     @Override
@@ -41,6 +44,16 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         });
         Diagnostics diagnostics = new Diagnostics();
         registry.addListener(diagnostics);
+        saveDefaultConfig();
+        try {
+            recordings = RecordingSetup.install(getConfig().getConfigurationSection("recording"), getDataPath(), registry,
+                    getPluginMeta().getVersion(), getLogger()).orElse(null);
+        } catch (IOException e) {
+            getLogger().log(Level.SEVERE, "Session recording could not start; continuing without it", e);
+        }
+        if (recordings != null) {
+            Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
+        }
 
         interceptor = new PacketInterceptor(registry, getLogger());
         interceptor.install();
@@ -64,6 +77,20 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     public void onDisable() {
         if (interceptor != null) {
             interceptor.uninstall();
+            // Detaching closes every session on its network thread; wait (bounded) until each one's
+            // Disconnected has been delivered, so recordings are finalised instead of left as .part.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!registry.sessions().isEmpty() && System.nanoTime() < deadline) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (!registry.sessions().isEmpty()) {
+                getLogger().warning(registry.sessions().size() + " session(s) were still open at shutdown");
+            }
         }
         if (analysisExecutor != null) {
             analysisExecutor.shutdown();
@@ -75,6 +102,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 analysisExecutor.shutdownNow();
                 Thread.currentThread().interrupt();
             }
+        }
+        if (recordings != null) {
+            recordings.close(); // drains queued blocks (bounded) and finalises files
         }
     }
 

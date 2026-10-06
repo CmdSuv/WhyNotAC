@@ -13,6 +13,7 @@ paperweight.reobfArtifactConfiguration = ReobfArtifactConfiguration.MOJANG_PRODU
 dependencies {
     paperweight.paperDevBundle(libs.versions.paper.api.get())
     implementation(project(":whynotac-protocol"))
+    implementation(project(":whynotac-recording"))
 }
 
 tasks.processResources {
@@ -23,7 +24,9 @@ tasks.processResources {
 
 // The plugin jar must carry the platform-agnostic modules (they are not provided by the server).
 tasks.jar {
-    dependsOn(":whynotac-protocol:jar", ":whynotac-math:jar")
+    dependsOn(":whynotac-recording:jar", ":whynotac-protocol:jar", ":whynotac-math:jar")
+    // The plugin jar doubles as the offline recording tool: java -jar WhyNotAC.jar inspect <file>
+    manifest.attributes("Main-Class" to "dev.whynotac.recording.cli.RecordingTool")
     from(configurations.runtimeClasspath.map { cp ->
         cp.filter { it.name.startsWith("whynotac-") }.map { zipTree(it) }
     })

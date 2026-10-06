@@ -30,6 +30,7 @@ public final class PlayerSession {
 
     private final long connectionId;
     private final String remoteAddress;
+    private final boolean replay;
     private final SerialMailbox mailbox;
     private final TransactionTracker transactions = new TransactionTracker();
 
@@ -41,6 +42,7 @@ public final class PlayerSession {
     private long inboundCount;
     private long outboundModeled;
     private long outboundUnmodeled;
+    private long lastDeliveredSequence = -1;
     private boolean closed;
 
     private volatile Identity identity;
@@ -49,9 +51,10 @@ public final class PlayerSession {
     // analysis-thread confined
     private final Map<Object, Object> attachments = new HashMap<>();
 
-    PlayerSession(long connectionId, String remoteAddress, SessionRegistry registry, int mailboxCapacity) {
+    PlayerSession(long connectionId, String remoteAddress, SessionRegistry registry, int mailboxCapacity, boolean replay) {
         this.connectionId = connectionId;
         this.remoteAddress = remoteAddress;
+        this.replay = replay;
         this.mailbox = new SerialMailbox(registry.executor(), mailboxCapacity, event -> registry.dispatch(this, event));
     }
 
@@ -59,6 +62,7 @@ public final class PlayerSession {
 
     /** A decoded packet from the client, observed on the network thread at {@code nanoTime}. */
     public synchronized void onInbound(ServerboundPacket packet, long nanoTime) {
+        requireLive();
         if (closed) {
             return;
         }
@@ -79,6 +83,7 @@ public final class PlayerSession {
      * counted but not queued.
      */
     public synchronized void onOutbound(ClientboundPacket packet, long nanoTime) {
+        requireLive();
         if (closed) {
             return;
         }
@@ -95,11 +100,13 @@ public final class PlayerSession {
 
     /** Reserves a transaction id for a ping the platform is about to send. */
     public synchronized OptionalInt allocateTransaction() {
+        requireLive();
         return closed ? OptionalInt.empty() : transactions.allocate();
     }
 
     /** Links this connection to the player who logged in on it. */
     public synchronized void bind(UUID playerId, String name, int entityId, long nanoTime) {
+        requireLive();
         if (closed) {
             return;
         }
@@ -110,12 +117,54 @@ public final class PlayerSession {
 
     /** The connection closed. Idempotent; the {@code Disconnected} event is delivered even if the mailbox is full. */
     public synchronized void disconnect(long nanoTime) {
+        requireLive();
         if (closed) {
             return;
         }
         closed = true;
         flushGap(nanoTime, true);
         mailbox.enqueue(new TimelineEvent.Disconnected(sequence++, nanoTime));
+    }
+
+    // --- replay side ------------------------------------------------------------------------------
+
+    /**
+     * Replay sessions only: hands a previously recorded event to the listeners exactly as it was
+     * recorded (same sequence number, timestamp and client tick). Sequence numbers must strictly
+     * increase. Nothing is dropped: replay sessions have an unbounded mailbox, so a replay is either
+     * complete or fails loudly.
+     */
+    public synchronized void deliver(TimelineEvent event) {
+        if (!replay) {
+            throw new IllegalStateException("deliver() is only valid on replay sessions");
+        }
+        if (closed) {
+            throw new IllegalStateException("event after Disconnected: " + event);
+        }
+        if (event.sequence() <= lastDeliveredSequence) {
+            throw new IllegalArgumentException("sequence " + event.sequence() + " does not follow " + lastDeliveredSequence);
+        }
+        lastDeliveredSequence = event.sequence();
+        sequence = event.sequence() + 1;
+        switch (event) {
+            case TimelineEvent.Bound bound -> identity = new Identity(bound.playerId(), bound.playerName(), bound.entityId());
+            case TimelineEvent.Inbound inbound when inbound.packet() instanceof ServerboundPacket.ClientTickEnd ->
+                    clientTicksPublished = clientTick = inbound.clientTick() + 1;
+            case TimelineEvent.Disconnected ignored -> closed = true;
+            default -> { }
+        }
+        mailbox.enqueue(event);
+    }
+
+    /** True for sessions created by {@link SessionRegistry#openReplay}. */
+    public boolean isReplay() {
+        return replay;
+    }
+
+    private void requireLive() {
+        if (replay) {
+            throw new IllegalStateException("live packet calls are not allowed on a replay session");
+        }
     }
 
     private void onTransactionPong(int id, long nanoTime) {
@@ -187,6 +236,11 @@ public final class PlayerSession {
 
     public synchronized boolean isClosed() {
         return closed;
+    }
+
+    /** Closed and every queued event delivered to the listeners. */
+    public boolean isFullyDelivered() {
+        return isClosed() && mailbox.isIdle();
     }
 
     // --- analysis side ---------------------------------------------------------------------------

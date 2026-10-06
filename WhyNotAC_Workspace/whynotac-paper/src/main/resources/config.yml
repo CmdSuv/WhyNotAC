@@ -1,0 +1,16 @@
+# WhyNotAC configuration
+
+recording:
+  # Records the timeline of every logged-in player to plugins/WhyNotAC/recordings/.
+  # Recordings are pseudonymised: no IP address, no player name, and the UUID is replaced by an
+  # HMAC pseudonym keyed with plugins/WhyNotAC/recording-secret.key (keep that file private;
+  # deleting it unlinks all past recordings from future ones).
+  # Tell your players before enabling this on a public server.
+  enabled: false
+  # Recordings older than this are deleted.
+  max-age-days: 14
+  # Oldest recordings are deleted while the directory is larger than this.
+  max-total-megabytes: 2048
+  # Memory budget for blocks waiting to be written; beyond it blocks are dropped (and marked as gaps)
+  # rather than ever slowing the server down.
+  max-queued-megabytes: 64
