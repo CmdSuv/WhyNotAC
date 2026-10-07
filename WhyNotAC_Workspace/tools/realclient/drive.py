@@ -30,18 +30,21 @@ def main():
         i.key(key, False)
 
     time.sleep(1.0)
-    # Mouse: one relative motion per tick (so each tick's rotation is one frame's increment), at several speeds.
-    motions = []
-    for speed in (1, 2, 3, 5, -4, -1, 7, -2):
-        for _ in range(10):
+    # Mouse: one relative motion every two ticks, at several speeds. Two ticks apart, every motion lands
+    # in its own frame and its own rotation packet, so the counts the server can infer must equal the
+    # commanded counts one for one (which proves the exact float math AND the absolute scale).
+    motions, vertical = [], []
+    for speed in (1, 2, 3, 5, -4, -1, 7, -2, 11, -13):
+        for _ in range(8):
             i.move(speed, 0)
             motions.append(speed)
-            time.sleep(TICK)
+            time.sleep(2 * TICK)
     for speed in (2, -3):
         for _ in range(8):
             i.move(0, speed)
-            time.sleep(TICK)
-    log("mouse", horizontal=motions)
+            vertical.append(speed)
+            time.sleep(2 * TICK)
+    log("mouse", horizontal=motions, vertical=vertical)
 
     hold("w", 2.0)
     # Sprint: hold W and press the sprint key while moving.

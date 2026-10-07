@@ -11,6 +11,33 @@ import re
 import sys
 
 
+def aligned(observed, commanded):
+    """True if the observed per-step counts are the commanded motions one for one, in order (a motion the
+    client merged with its neighbour into one frame is accepted as their sum, at most twice). The vanilla
+    client ignores the first cursor move after the window grabs the mouse and after the cursor enters
+    the window (MouseHandler.onMove, ignoreFirstMove): up to two leading motions may be consumed so."""
+    results = [_aligned(observed, commanded[skip:], skip) for skip in range(3)]
+    return next((r for r in results if r[0]), results[0])
+
+
+def _aligned(observed, commanded, skipped):
+    i, merged = 0, 0
+    for count in observed:
+        if count is None or i >= len(commanded):
+            return False, f"step {i}: {count} (commanded {commanded[i:i + 3]})"
+        total, j = commanded[i], i + 1
+        while total != count and j < len(commanded) and j - i < 3:
+            total += commanded[j]
+            j += 1
+        if total != count:
+            return False, f"step {i}: observed {count}, commanded {commanded[i:i + 3]}"
+        merged += (j - i) - 1
+        i = j
+    if i != len(commanded) or merged > 2:
+        return False, f"{i} of {len(commanded)} motions matched, {merged} merged"
+    return True, f"{len(observed)} steps == {len(commanded)} commanded motions ({merged} merged, {skipped} leading consumed by ignoreFirstMove)"
+
+
 def main():
     work = sys.argv[1]
     failures = []
@@ -48,15 +75,22 @@ def main():
     check(len(positions) > 50 and max(xs) - min(xs) > 1.0 and max(ys) - min(ys) > 0.5,
           f"the player walked and jumped ({len(positions)} position packets)")
 
-    tps = result["ticks_per_second"]
-    check(19.0 <= tps <= 21.0, f"client tick clock: {tps:.2f} ClientTickEnd per second")
+    tps = result["steady_ticks_per_second"]
+    check(19.5 <= tps <= 20.5, f"client tick clock after the join: {tps:.2f} ClientTickEnd per second "
+                               f"(whole session incl. world loading: {result['ticks_per_second']:.2f})")
     check(result["pongs_inside_a_tick"] == 0 and result["pongs"] > 100,
           f"wire order: no pong inside a tick, as the vanilla client answers pings at frame start ({result['pongs']} pongs)")
-    check(result["yaw_steps"] >= 60 and result["yaw_unexplained"] == 0,
-          f"every yaw change is explained by integer mouse counts through the exact vanilla float math "
-          f"({result['yaw_one_frame']} one-frame + {result['yaw_two_or_three_frames']} multi-frame of {result['yaw_steps']})")
-    check(result["pitch_steps"] > 0 and result["pitch_explained"] == result["pitch_steps"],
-          f"every pitch change is explained too ({result['pitch_explained']}/{result['pitch_steps']})")
+    # The driver spaced its mouse motions two ticks apart: each one is a rotation step of its own, so the
+    # counts inferred through the exact float model must equal the commanded counts one for one. That
+    # proves the float arithmetic and the absolute scale (a multiplier off by 2x would double them).
+    drive = json.load(open(os.path.join(work, "drive.json")))
+    mouse = next(a for a in drive["actions"] if a["what"] == "mouse")
+    yaw_ok, yaw_detail = aligned(result["yaw_counts"], mouse["horizontal"])
+    check(yaw_ok, f"every yaw step is exactly one commanded mouse motion through the vanilla float math: {yaw_detail}")
+    pitch_ok, pitch_detail = aligned(result["pitch_counts"], mouse["vertical"])
+    check(pitch_ok, f"every pitch step too: {pitch_detail}")
+    rejected = {name: not aligned(c["yaw_counts"], mouse["horizontal"])[0] for name, c in result["negative_controls"].items()}
+    check(all(rejected.values()), f"the same data rejects every wrong model (negative controls): {rejected}")
     screenshots = os.listdir(os.path.join(work, "game", "screenshots")) if os.path.isdir(os.path.join(work, "game", "screenshots")) else []
     check(len(screenshots) == 1, f"the client rendered and saved a screenshot: {screenshots}")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")

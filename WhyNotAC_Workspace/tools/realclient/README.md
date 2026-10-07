@@ -15,9 +15,9 @@ What a session proves (all checked automatically):
 
 | Check | Meaning |
 |---|---|
-| Every yaw and pitch change is explained by integer mouse counts through `MouseTurnModel` | The aim model is exact on the real game, not only on our own probe |
+| Every yaw and pitch step equals the commanded mouse motion, one for one, through `MouseTurnModel` (sensitivity 0.83, motions two ticks apart) | The aim model is bit-exact on the real game AND has the right absolute scale. Negative controls on the same data (multiplier /2, /3, x2, = 1, yaw off by one ulp per step) must all be rejected, so the check cannot pass by accident. Vanilla ignores the first cursor move after the mouse is grabbed (`ignoreFirstMove`): up to two leading motions may be consumed |
 | No pong between a tick's first packet and its `ClientTickEnd` (play phase) | A vanilla client answers transactions at frame start. This wire-order invariant can become deterministic evidence against off-thread ping spoofers |
 | 0 divergences, edge view, brand `vanilla` | The network edge and the game agree on a real client's traffic |
-| All movement keys, clicks and hotbar keys reach the server; about 20 ticks per second | Input and tick clock as the game produces them |
+| All movement keys, clicks and hotbar keys reach the server; 19.5-20.5 ticks per second measured after the join | Input and tick clock as the game produces them (world loading drops ticks, so the first 3 s are excluded) |
 
 The recordings are a ground-truth corpus for the physics engine.

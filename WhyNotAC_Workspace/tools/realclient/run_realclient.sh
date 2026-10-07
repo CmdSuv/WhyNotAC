@@ -53,7 +53,7 @@ simulationDistance:5
 maxFps:60
 narrator:0
 soundCategory_master:0.0
-mouseSensitivity:0.5
+mouseSensitivity:0.83
 OPTS
 
 Xvfb "$DISPLAY_NUM" -screen 0 1024x768x24 -nolisten tcp > "$WORK_DIR/xvfb.log" 2>&1 &
@@ -96,7 +96,7 @@ RECORDING=$(find "$WORK_DIR/plugins/WhyNotAC/recordings" -name '*.wnrec' | head 
 echo "--- recording: ${RECORDING:-<none>}"
 JARS=$(find "$ROOT/whynotac-math/build/libs" "$ROOT/whynotac-protocol/build/libs" "$ROOT/whynotac-recording/build/libs" -name '*.jar' ! -name '*-sources.jar' | paste -sd:)
 java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/dump.jsonl"
-java -cp "$JARS" "$HERE/RealClientCheck.java" "$RECORDING" 0.5 > "$WORK_DIR/check.json"
+java -cp "$JARS" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
 cat "$WORK_DIR/check.json"
 echo "--- verification"
 python3 -I "$HERE/verify_realclient.py" "$WORK_DIR"
