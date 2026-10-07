@@ -5,8 +5,10 @@ import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
+import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Phase 1 observability: a listener that keeps the latest raw facts per session so operators can
@@ -71,7 +73,36 @@ public final class Diagnostics implements TimelineListener {
         }
     }
 
+    /**
+     * Totals over every session since the plugin started, including sessions that have ended: what a
+     * load test or an operator checks first (an honest population must show no anomalies, no
+     * divergences and no lost events).
+     */
+    public record Totals(long sessions, long ended, long inbound, long outbound, long lostEvents,
+                         long inboundDivergences, long outboundDivergences, Map<TimelineEvent.Anomaly.Kind, Long> anomalies) {}
+
     private final Map<Long, View> views = new ConcurrentHashMap<>();
+    private final LongAdder sessions = new LongAdder();
+    private final LongAdder ended = new LongAdder();
+    private final LongAdder inbound = new LongAdder();
+    private final LongAdder outbound = new LongAdder();
+    private final LongAdder lostEvents = new LongAdder();
+    private final LongAdder inboundDivergences = new LongAdder();
+    private final LongAdder outboundDivergences = new LongAdder();
+    private final Map<TimelineEvent.Anomaly.Kind, LongAdder> anomalies = new EnumMap<>(TimelineEvent.Anomaly.Kind.class);
+
+    public Diagnostics() {
+        for (TimelineEvent.Anomaly.Kind kind : TimelineEvent.Anomaly.Kind.values()) {
+            anomalies.put(kind, new LongAdder()); // filled once, never modified: safe to read concurrently
+        }
+    }
+
+    public Totals totals() {
+        Map<TimelineEvent.Anomaly.Kind, Long> byKind = new EnumMap<>(TimelineEvent.Anomaly.Kind.class);
+        anomalies.forEach((kind, count) -> byKind.put(kind, count.sum()));
+        return new Totals(sessions.sum(), ended.sum(), inbound.sum(), outbound.sum(), lostEvents.sum(),
+                inboundDivergences.sum(), outboundDivergences.sum(), byKind);
+    }
 
     public View view(PlayerSession session) {
         return views.get(session.connectionId());
@@ -79,9 +110,15 @@ public final class Diagnostics implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        View view = views.computeIfAbsent(session.connectionId(), id -> new View());
+        View view = views.get(session.connectionId());
+        if (view == null) {
+            view = new View();
+            views.put(session.connectionId(), view);
+            sessions.increment();
+        }
         switch (event) {
             case TimelineEvent.Inbound inbound -> {
+                this.inbound.increment();
                 view.inbound++;
                 switch (inbound.packet()) {
                     case ServerboundPacket.MovePlayer move -> onMove(view, move);
@@ -89,12 +126,22 @@ public final class Diagnostics implements TimelineListener {
                     default -> { }
                 }
             }
+            case TimelineEvent.Outbound ignored -> outbound.increment();
             case TimelineEvent.Anomaly anomaly -> {
+                anomalies.get(anomaly.kind()).increment();
                 view.anomalies++;
                 view.lastAnomaly = anomaly;
             }
-            case TimelineEvent.Gap ignored -> view.gaps++;
-            case TimelineEvent.Disconnected ignored -> views.remove(session.connectionId());
+            case TimelineEvent.Gap gap -> {
+                lostEvents.add(gap.droppedEvents());
+                view.gaps++;
+            }
+            case TimelineEvent.InboundDivergence ignored -> inboundDivergences.increment();
+            case TimelineEvent.OutboundDivergence ignored -> outboundDivergences.increment();
+            case TimelineEvent.Disconnected ignored -> {
+                views.remove(session.connectionId());
+                ended.increment();
+            }
             default -> { }
         }
     }

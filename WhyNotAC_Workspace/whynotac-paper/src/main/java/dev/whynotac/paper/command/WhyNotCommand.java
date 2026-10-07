@@ -13,6 +13,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -30,11 +31,13 @@ public final class WhyNotCommand implements BasicCommand {
     private final PacketInterceptor interceptor;
     private final SessionRegistry registry;
     private final Diagnostics diagnostics;
+    private final Supplier<String> stats;
 
-    public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics) {
+    public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
+        this.stats = stats;
     }
 
     @Override
@@ -67,13 +70,16 @@ public final class WhyNotCommand implements BasicCommand {
                 sender.sendMessage(Component.text(String.format(Locale.ROOT, " %2d %s%s", i, name, ours ? "   <== WhyNotAC" : ""),
                         ours ? NamedTextColor.GREEN : NamedTextColor.GRAY));
             }
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("stats")) {
+            sender.sendMessage(Component.text("WhyNotAC stats " + stats.get(), NamedTextColor.GRAY));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
             sender.sendMessage(Component.text("WhyNotAC sessions: " + registry.sessions().size(), NamedTextColor.GOLD));
             for (PlayerSession session : registry.sessions()) {
                 sender.sendMessage(Component.text(" " + session + " ticks=" + session.clientTicks(), NamedTextColor.GRAY));
             }
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac sessions", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac sessions | /whynotac stats",
+                    NamedTextColor.YELLOW));
         }
     }
 
@@ -132,7 +138,7 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "pipeline", "sessions");
+            return List.of("inspect", "pipeline", "sessions", "stats");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("pipeline"))) {
             return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();

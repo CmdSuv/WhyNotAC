@@ -60,4 +60,25 @@ class DiagnosticsTest {
         assertEquals(null, torn.get());
         assertEquals(0.25, view.lastRotation().yawDelta());
     }
+
+    @Test
+    void totalsSurviveTheEndOfASession() {
+        Diagnostics diagnostics = new Diagnostics();
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, t) -> { throw new AssertionError(t); });
+        PlayerSession a = registry.open("a");
+        PlayerSession b = registry.open("b");
+        diagnostics.onEvent(a, rotation(0));
+        diagnostics.onEvent(a, new TimelineEvent.Anomaly(1, 1, TimelineEvent.Anomaly.Kind.SKIPPED_TRANSACTION, "x"));
+        diagnostics.onEvent(a, new TimelineEvent.Gap(2, 2, 5));
+        diagnostics.onEvent(a, new TimelineEvent.Disconnected(3, 3));
+        diagnostics.onEvent(b, rotation(1));
+        Diagnostics.Totals totals = diagnostics.totals();
+        assertEquals(2, totals.sessions());
+        assertEquals(1, totals.ended());
+        assertEquals(2, totals.inbound());
+        assertEquals(5, totals.lostEvents());
+        assertEquals(1L, totals.anomalies().get(TimelineEvent.Anomaly.Kind.SKIPPED_TRANSACTION));
+        assertEquals(0L, totals.anomalies().get(TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD));
+        assertEquals(null, diagnostics.view(a), "an ended session's view is released");
+    }
 }

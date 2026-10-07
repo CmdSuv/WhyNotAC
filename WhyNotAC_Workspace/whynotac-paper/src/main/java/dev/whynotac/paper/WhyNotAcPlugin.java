@@ -2,12 +2,17 @@ package dev.whynotac.paper;
 
 import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
+import dev.whynotac.paper.diagnostics.TickCost;
+import dev.whynotac.protocol.latency.LatencySnapshot;
+import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -31,6 +36,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private PacketInterceptor interceptor;
     private RecordingStore recordings;
     private final AtomicLong listenerErrors = new AtomicLong();
+    private final TickCost transactionLoop = new TickCost();
+    private Diagnostics diagnostics;
 
     @Override
     public void onEnable() {
@@ -42,7 +49,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 getLogger().log(Level.WARNING, "Analysis listener failed on " + session + " at " + event + " (error #" + count + ")", error);
             }
         });
-        Diagnostics diagnostics = new Diagnostics();
+        diagnostics = new Diagnostics();
         registry.addListener(diagnostics);
         saveDefaultConfig();
         try {
@@ -61,9 +68,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         Bukkit.getScheduler().runTask(this, () -> Bukkit.getOnlinePlayers().forEach(interceptor::bind));
         // One stand-alone transaction per server tick keeps a continuous, per-tick latency trace.
         Bukkit.getScheduler().runTaskTimer(this, () -> {
+            long[] cost = transactionLoop.begin();
             for (Player player : Bukkit.getOnlinePlayers()) {
                 interceptor.sendTransaction(player);
             }
+            transactionLoop.end(cost);
         }, 1L, 1L);
         // Another plugin may insert a handler outside the edge taps after login; move them back (every 5 s).
         Bukkit.getScheduler().runTaskTimer(this, () -> {
@@ -73,7 +82,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }, 100L, 100L);
 
         getServer().getPluginManager().registerEvents(this, this);
-        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics);
+        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -112,6 +121,32 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (recordings != null) {
             recordings.close(); // drains queued blocks (bounded) and finalises files
         }
+    }
+
+    /** One line of JSON for {@code /whynotac stats}: totals since start-up, for operators and the load test. */
+    private String stats() {
+        Diagnostics.Totals totals = diagnostics.totals();
+        long now = System.nanoTime();
+        int pendingMax = 0;
+        long withheld = 0;
+        for (PlayerSession session : registry.sessions()) {
+            LatencySnapshot latency = session.latency(now);
+            pendingMax = Math.max(pendingMax, latency.pending());
+            withheld += latency.withheld() ? 1 : 0;
+        }
+        StringBuilder anomalies = new StringBuilder();
+        for (Map.Entry<?, Long> entry : totals.anomalies().entrySet()) {
+            anomalies.append(anomalies.isEmpty() ? "" : ",").append('"').append(entry.getKey()).append("\":").append(entry.getValue());
+        }
+        return String.format(Locale.ROOT, "{\"sessionsLive\":%d,\"queuedEvents\":%d,\"sessions\":%d,\"ended\":%d,\"inbound\":%d,"
+                        + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
+                        + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
+                        + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f}}",
+                registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
+                totals.outbound(), totals.lostEvents(), totals.inboundDivergences(), totals.outboundDivergences(), anomalies,
+                pendingMax, withheld, listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
+                recordings == null ? 0 : recordings.failedRecordings(), transactionLoop.runs(), transactionLoop.meanWallMicros(),
+                transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
