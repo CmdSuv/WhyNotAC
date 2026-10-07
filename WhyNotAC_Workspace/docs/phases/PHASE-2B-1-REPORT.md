@@ -147,6 +147,9 @@ iyileştirilebilir (bekleyen kayıt nesneleri, `List.of`), ama şu an darboğaz 
   Bir client'ın kendi beyanı (brand vb.) hiçbir zaman muafiyet sebebi olmayacak.
 - Bundle sınırları zaman çizelgesine yazılmıyor (iki görünüm de düzleştiriyor). Client bir
   bundle'ı tek tick'te uygular; fizik motoru bunu kullanacaksa `BundleBoundary` modeli eklenecek.
-- Kayıt formatında ileri uyumluluk açığı: bilinmeyen bir kaydı atlayan eski okuyucu, o kayıtta
-  tanımlanan metin tablosu girdilerini kaçırır. Henüz dağıtılmış kayıt yok. Bir sonraki adımda
-  format sürüm 2 ile (açık indisli metin tanımları) kapatılacak.
+- **Kapatıldı (format sürüm 2):** Eskiden bilinmeyen bir kaydı atlayan okuyucu, o kayıtta tanımlanan
+  metin tablosu girdilerini kaçırıyor ve sonraki tüm metin referansları kayıyordu. Sürüm 2'de her
+  tanım kendi indisini taşır (`0, indis, utf8`). Atlanan bir kayıt yalnızca kendi içinde tanımlanan
+  metinlere mal olur. Bunlara yapılan referanslar açıkça `whynotac:unknown-recorded-string/<indis>`
+  olarak okunur, asla tahmin edilmez. Sürüm 1 kayıtları okunmaya devam eder (golden test iki sürümü
+  de kilitliyor).

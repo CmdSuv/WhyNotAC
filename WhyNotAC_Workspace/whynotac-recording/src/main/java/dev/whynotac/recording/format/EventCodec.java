@@ -141,9 +141,11 @@ public final class EventCodec {
             if (index != null) {
                 body.writeVarInt(index + 1);
             } else {
+                int defined = strings.size();
                 body.writeVarInt(0);
+                body.writeVarInt(defined);
                 body.writeUtf8(value);
-                strings.put(value, strings.size());
+                strings.put(value, defined);
             }
         }
 
@@ -422,10 +424,24 @@ public final class EventCodec {
 
     public static final class Decoder {
 
+        private final int version;
         private long previousSequence;
         private long previousNanoTime;
         private long previousClientTick;
         private final List<String> strings = new ArrayList<>();
+
+        /** A decoder for the current format version. */
+        public Decoder() {
+            this(RecordingFormat.VERSION);
+        }
+
+        /** A decoder for recordings of format {@code version}. */
+        public Decoder(int version) {
+            if (version < RecordingFormat.MIN_READABLE_VERSION || version > RecordingFormat.VERSION) {
+                throw new IllegalArgumentException("unsupported recording format version " + version);
+            }
+            this.version = version;
+        }
 
         public void reset(long baseSequence, long baseNanoTime, long baseClientTick) {
             previousSequence = baseSequence - 1;
@@ -489,14 +505,26 @@ public final class EventCodec {
         private String string(ByteSource in) {
             int reference = in.readVarInt();
             if (reference == 0) {
+                int index = version >= 2 ? in.readVarInt() : strings.size();
                 String value = in.readUtf8();
-                strings.add(value);
+                if (index < 0 || index > strings.size() + 4096) {
+                    throw new RecordingFormatException("string definition index " + index + " after " + strings.size());
+                }
+                while (strings.size() <= index) {
+                    strings.add(null); // defined in a record this reader skipped
+                }
+                strings.set(index, value);
                 return value;
             }
-            if (reference > strings.size()) {
-                throw new RecordingFormatException("string reference " + reference + " of " + strings.size());
+            String value = reference <= strings.size() ? strings.get(reference - 1) : null;
+            if (value == null) {
+                if (version < 2) {
+                    throw new RecordingFormatException("string reference " + reference + " of " + strings.size());
+                }
+                // Defined inside a record written by a newer WhyNotAC that this reader skipped: say so, never guess.
+                return RecordingFormat.UNKNOWN_STRING_PREFIX + (reference - 1);
             }
-            return strings.get(reference - 1);
+            return value;
         }
 
         private static UUID readUuid(ByteSource in) {

@@ -81,7 +81,7 @@ public final class RecordingReader implements Iterable<TimelineEvent> {
 
         private int position = bodyStart;
         private final ArrayDeque<TimelineEvent> ready = new ArrayDeque<>();
-        private final EventCodec.Decoder decoder = new EventCodec.Decoder();
+        private final EventCodec.Decoder decoder = new EventCodec.Decoder(header.formatVersion());
         private long lastSequence = -1;
         private long writerLost;
         private boolean skippedCorruption;

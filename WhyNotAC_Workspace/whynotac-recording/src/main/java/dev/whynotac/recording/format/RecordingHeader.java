@@ -39,7 +39,7 @@ public record RecordingHeader(int formatVersion, int protocolVersion, String gam
             throw new RecordingFormatException("not a WhyNotAC recording (bad magic)");
         }
         int version = in.readUnsignedShort();
-        if (version != RecordingFormat.VERSION) {
+        if (version < RecordingFormat.MIN_READABLE_VERSION || version > RecordingFormat.VERSION) {
             throw new RecordingFormatException("unsupported recording format version " + version);
         }
         int protocol = in.readVarInt();

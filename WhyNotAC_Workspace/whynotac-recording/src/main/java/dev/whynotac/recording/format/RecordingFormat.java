@@ -1,8 +1,8 @@
 package dev.whynotac.recording.format;
 
 /**
- * Constants of recording format version 1. Tags are part of the on-disk format: never renumber,
- * only append. {@code FormatStabilityTest} pins the exact bytes.
+ * Constants of the recording format. Tags are part of the on-disk format: never renumber, only
+ * append. {@code FormatStabilityTest} pins the exact bytes of every version.
  */
 public final class RecordingFormat {
 
@@ -10,7 +10,16 @@ public final class RecordingFormat {
 
     /** PNG-style magic: a high byte catches 7-bit transfers, CR LF catches newline translation. */
     public static final byte[] MAGIC = {(byte) 0x89, 'W', 'N', 'R', 'E', 'C', 0x0D, 0x0A};
-    public static final int VERSION = 1;
+    /**
+     * Version written. 2: a string-table definition carries its index ({@code 0, index, utf8}), so a
+     * reader that skips a record it does not know (written by a newer WhyNotAC) loses only the strings
+     * defined inside that record, never the alignment of every later reference. 1: implicit indices.
+     */
+    public static final int VERSION = 2;
+    /** Oldest version this reader still reads (old recordings are evidence and must stay readable). */
+    public static final int MIN_READABLE_VERSION = 1;
+    /** Text yielded for a reference to a string defined in a skipped record (version 2 and later). */
+    public static final String UNKNOWN_STRING_PREFIX = "whynotac:unknown-recorded-string/";
     public static final String FILE_SUFFIX = ".wnrec";
     public static final String PARTIAL_SUFFIX = ".wnrec.part";
 

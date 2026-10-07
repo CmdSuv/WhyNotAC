@@ -6,7 +6,7 @@
  * the same {@link dev.whynotac.protocol.session.TimelineListener}s with the same sequence numbers,
  * timestamps and values, bit for bit, so a false positive found once becomes a permanent test.
  *
- * <h2>File format (version 1)</h2>
+ * <h2>File format (version 2; version 1 is still read)</h2>
  * <pre>
  * header  : magic 89 'W' 'N' 'R' 'E' 'C' 0D 0A | u16 version | varint protocol | str game version
  *           | str WhyNotAC version | 16B recording id | 16B pseudonymous subject | i64 start epoch ms
@@ -17,7 +17,9 @@
  * </pre>
  * Blocks are self-contained (delta and string-table state restart in every block), so a damaged
  * block costs exactly its own events: the reader resynchronises on the next {@code WNBK} marker and
- * reports the loss as an explicit {@link dev.whynotac.protocol.session.TimelineEvent.Gap}. A file is
+ * reports the loss as an explicit {@link dev.whynotac.protocol.session.TimelineEvent.Gap}. Records of
+ * a kind this reader does not know are skipped; since version 2 a string-table definition carries its
+ * own index, so skipping one shifts nothing else. A file is
  * written as {@code .wnrec.part} and renamed to {@code .wnrec} only after its end record is durable;
  * after a crash every block that reached the disk is still readable.
  *
