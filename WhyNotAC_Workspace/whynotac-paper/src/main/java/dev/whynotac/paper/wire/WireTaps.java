@@ -61,10 +61,10 @@ public final class WireTaps {
     public static boolean ensurePlacement(ChannelPipeline pipeline) {
         ChannelHandler inbound = pipeline.get(INBOUND);
         ChannelHandler outbound = pipeline.get(OUTBOUND);
-        if (inbound == null || outbound == null) {
-            return false;
+        if (!(inbound instanceof Inbound tap) || outbound == null) {
+            return false; // absent, or left over from another plugin instance (it removes itself)
         }
-        WireObserver observer = ((Inbound) inbound).observer;
+        WireObserver observer = tap.observer;
         observer.moving(true);
         try {
             return repair(pipeline, observer);
@@ -74,31 +74,46 @@ public final class WireTaps {
     }
 
     private static boolean repair(ChannelPipeline pipeline, WireObserver observer) {
-        boolean repaired = false;
-        List<String> names = pipeline.names();
         String inAnchor = inboundAnchor(pipeline);
-        if (names.indexOf(INBOUND) != names.indexOf(inAnchor) + 1) {
-            pipeline.addAfter(inAnchor, INBOUND, pipeline.remove(INBOUND));
-            repaired = true;
-            names = pipeline.names();
-        }
         String outAnchor = outboundAnchor(pipeline);
-        if (names.indexOf(OUTBOUND) != names.indexOf(outAnchor) + 1) {
-            pipeline.addAfter(outAnchor, OUTBOUND, pipeline.remove(OUTBOUND));
-            repaired = true;
+        if (inAnchor == null || outAnchor == null) {
+            // Another plugin replaced the game's framing handlers: the edge can no longer be located.
+            observer.edgeLost("the game's framing handlers were replaced by another plugin", System.nanoTime());
+            remove(pipeline);
+            return true;
         }
+        boolean repaired = false;
+        repaired |= move(pipeline, INBOUND, inAnchor, observer);
+        repaired |= move(pipeline, OUTBOUND, outAnchor, observer);
         if (repaired) {
             observer.placementRepaired();
         }
         return repaired;
     }
 
+    /** Moves {@code name} directly after {@code anchor} if it is not already there; never leaves it removed. */
+    private static boolean move(ChannelPipeline pipeline, String name, String anchor, WireObserver observer) {
+        List<String> names = pipeline.names();
+        if (names.indexOf(name) == names.indexOf(anchor) + 1) {
+            return false;
+        }
+        ChannelHandler handler = pipeline.remove(name);
+        try {
+            pipeline.addAfter(anchor, name, handler);
+        } catch (RuntimeException e) {
+            observer.edgeLost("edge tap " + name + " could not be re-placed: " + e, System.nanoTime());
+            remove(pipeline);
+        }
+        return true;
+    }
+
+    /** The handler the inbound tap must follow, or null if neither framing handler exists any more. */
     private static String inboundAnchor(ChannelPipeline pipeline) {
-        return pipeline.get("decompress") != null ? "decompress" : "splitter";
+        return pipeline.get("decompress") != null ? "decompress" : pipeline.get("splitter") != null ? "splitter" : null;
     }
 
     private static String outboundAnchor(ChannelPipeline pipeline) {
-        return pipeline.get("compress") != null ? "compress" : "prepender";
+        return pipeline.get("compress") != null ? "compress" : pipeline.get("prepender") != null ? "prepender" : null;
     }
 
     @ChannelHandler.Sharable
@@ -114,6 +129,12 @@ public final class WireTaps {
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            if (!observer.active()) {
+                observer.detaching(); // WhyNotAC was disabled (or reloaded) while this connection was being accepted
+                ctx.fireChannelRead(msg);
+                remove(ctx.pipeline());
+                return;
+            }
             WireObserver.InboundAction action = WireObserver.InboundAction.CONTINUE;
             if (msg instanceof ByteBuf frame) {
                 try {
@@ -121,7 +142,7 @@ public final class WireTaps {
                 } catch (RuntimeException | LinkageError e) {
                     failures = report(logger, failures, "inbound frame", e);
                     try {
-                        observer.inboundFailure(System.nanoTime());
+                        observer.inboundFailure(frame, System.nanoTime());
                     } catch (RuntimeException | LinkageError ignored) {
                         // already reported; the frame is forwarded regardless
                     }
@@ -196,7 +217,7 @@ public final class WireTaps {
             } catch (RuntimeException | LinkageError e) {
                 failures = report(logger, failures, "outbound frame", e);
                 try {
-                    outgoing = observer.outboundFailure(System.nanoTime());
+                    outgoing = observer.outboundFailure(frame, System.nanoTime());
                 } catch (RuntimeException | LinkageError ignored) {
                     outgoing = WireObserver.Outgoing.STRUCTURAL;
                 }

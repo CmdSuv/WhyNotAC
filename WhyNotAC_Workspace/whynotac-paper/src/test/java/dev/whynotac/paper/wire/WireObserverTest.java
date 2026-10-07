@@ -547,6 +547,89 @@ class WireObserverTest {
     }
 
     @Test
+    void emptyFramesAreNothingOnBothSides() {
+        channel.writeInbound(Unpooled.EMPTY_BUFFER.retainedDuplicate()); // a client sending [len=1][dataLength=0]
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        assertEquals(List.of(new ServerboundPacket.ClientTickEnd()),
+                eventsOf(TimelineEvent.Inbound.class).stream().map(e -> ((TimelineEvent.Inbound) e).packet()).toList(),
+                "no marker for a frame nobody processes");
+        assertTrue(eventsOf(TimelineEvent.InboundDivergence.class).isEmpty(), events.toString());
+
+        // A plugin encoder that "cancels" by writing nothing: the client gets no packet, so neither does the timeline.
+        int motion = clientboundId(knockback(0, 0, 0));
+        channel.pipeline().addAfter(WireTaps.OUTBOUND, "pe-encoder", new ChannelOutboundHandlerAdapter() {
+            @Override
+            public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+                if (msg instanceof ByteBuf frame && packetId(frame) == motion) {
+                    frame.release();
+                    ctx.write(Unpooled.EMPTY_BUFFER, promise);
+                    return;
+                }
+                ctx.write(msg, promise);
+            }
+        });
+        channel.writeOutbound(knockback(0.0, 0.42, 0.0));
+        assertTrue(eventsOf(TimelineEvent.Outbound.class).stream()
+                .noneMatch(e -> ((TimelineEvent.Outbound) e).packet() instanceof ClientboundPacket.SetEntityMotion));
+        assertEquals(DivergenceKind.GAME_ONLY, ((TimelineEvent.OutboundDivergence) eventsOf(TimelineEvent.OutboundDivergence.class).getFirst()).kind());
+    }
+
+    @Test
+    void aFloodOfPacketsTheGameMaySkipNeverBreaksReconciliation() {
+        // set_creative_mode_slot is dropped by vanilla for survival players: recorded, never reconciled.
+        ByteBuf slotFrame = Unpooled.buffer();
+        serverbound.codec().encode(slotFrame, new net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket(36,
+                net.minecraft.world.item.ItemStack.EMPTY));
+        for (int i = 0; i < 300; i++) {
+            channel.writeInbound(slotFrame.retainedDuplicate());
+        }
+        for (int i = 0; i < 50; i++) {
+            channel.writeInbound(serverboundFrame(new ServerboundMovePlayerPacket.Pos(i, 64.0, 0.5, true, false)));
+        }
+        assertEquals(350, eventsOf(TimelineEvent.Inbound.class).size(), "everything the client sent is on the timeline");
+        assertTrue(eventsOf(TimelineEvent.InboundDivergence.class).isEmpty(), "and nothing is blamed on a plugin: " + events);
+    }
+
+    @Test
+    void behindAProxyTheClientsProtocolIsNeverClaimed() {
+        List<TimelineEvent> sink = new ArrayList<>();
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 1024, (s, e, t) -> { throw new AssertionError(t); });
+        registry.addListener((s, e) -> sink.add(e));
+        PlayerSession session = registry.open("proxied");
+        WireObserver proxied = new WireObserver(session, new PacketTranslator(), new WireProtocols(() -> registries), Logger.getAnonymousLogger(),
+                SharedConstants.getProtocolVersion(), 0, "the VELOCITY_MODERN proxy");
+        assertEquals(WireObserver.InboundAction.CONTINUE, proxied.onWireInbound(handshake(SharedConstants.getProtocolVersion(), 2), 1));
+        TimelineEvent.Observation observation = assertInstanceOf(TimelineEvent.Observation.class, sink.getFirst());
+        assertEquals(Source.WIRE, observation.inbound(), "the proxy's 774 stream is still decoded exactly");
+        assertEquals(-1, observation.clientProtocol(), "but the client behind the proxy may speak anything");
+        assertTrue(observation.detail().contains("unknown"), observation.detail());
+    }
+
+    @Test
+    void aReplacedFramingHandlerEndsTheEdgeExplicitly() {
+        channel.pipeline().replace("splitter", "custom_splitter", new Placeholder());
+        WireTaps.ensurePlacement(channel.pipeline());
+        assertNull(channel.pipeline().get(WireTaps.INBOUND));
+        TimelineEvent.Observation observation = (TimelineEvent.Observation) eventsOf(TimelineEvent.Observation.class).getLast();
+        assertEquals(Source.GAME, observation.inbound());
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        assertEquals(1, eventsOf(TimelineEvent.Inbound.class).size(), "the game's view records instead of a silent hole");
+    }
+
+    @Test
+    void handlersOfADisabledInstanceLeaveOnTheirNextPacket() {
+        boolean[] active = {true};
+        observer.activeWhile(() -> active[0]);
+        active[0] = false; // WhyNotAC disabled while this connection was still being accepted
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        assertEquals(1, processedByGame.size(), "the packet still reaches the game");
+        assertNull(channel.pipeline().get(WireTaps.INBOUND));
+        assertNull(channel.pipeline().get(WireTaps.OUTBOUND));
+        assertNull(channel.pipeline().get(dev.whynotac.paper.network.PacketInterceptor.HANDLER_NAME));
+        assertEquals(1, eventsOf(TimelineEvent.Disconnected.class).size(), "the session ends cleanly");
+    }
+
+    @Test
     void theAuditRepairsAPluginThatSqueezedInOutsideTheTaps() {
         channel.pipeline().addAfter("splitter", "late-plugin", new Placeholder());
         assertTrue(WireTaps.ensurePlacement(channel.pipeline()));

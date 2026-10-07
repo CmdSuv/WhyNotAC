@@ -1,6 +1,7 @@
 package dev.whynotac.paper.network;
 
 import dev.whynotac.paper.wire.WireObserver;
+import dev.whynotac.paper.wire.WireTaps;
 import dev.whynotac.protocol.latency.TransactionPolicy;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
@@ -73,8 +74,23 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
         observer.selfEntityId(entityId);
     }
 
+    /** WhyNotAC was disabled or reloaded after this connection got its handlers: leave cleanly. */
+    private boolean leaveIfInactive(ChannelHandlerContext ctx) {
+        if (observer.active()) {
+            return false;
+        }
+        detach();
+        WireTaps.remove(ctx.pipeline());
+        ctx.pipeline().remove(this);
+        return true;
+    }
+
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        if (leaveIfInactive(ctx)) {
+            ctx.fireChannelRead(msg);
+            return;
+        }
         long now = System.nanoTime();
         if (msg instanceof Packet<?> packet) {
             ServerboundPacket translated;
@@ -106,7 +122,7 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-        if (!(msg instanceof Packet<?> packet)) {
+        if (leaveIfInactive(ctx) || !(msg instanceof Packet<?> packet)) {
             super.write(ctx, msg, promise);
             return;
         }

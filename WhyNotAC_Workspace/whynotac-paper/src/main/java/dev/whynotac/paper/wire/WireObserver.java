@@ -14,7 +14,6 @@ import java.util.OptionalInt;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.minecraft.SharedConstants;
-import net.minecraft.network.VarInt;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;
@@ -51,8 +50,14 @@ import net.minecraft.network.protocol.login.LoginPacketTypes;
  */
 public final class WireObserver {
 
-    /** Type of the marker recorded when the edge itself failed on a frame; it reconciles with any packet. */
+    /** Type of the marker recorded when the edge itself failed on a frame whose type it cannot even read. */
     static final String EDGE_FAILURE = "whynotac:edge-failure";
+    /**
+     * Inbound types recorded but never reconciled: the game itself may drop them (vanilla skips
+     * {@code set_creative_mode_slot} with {@code SkipPacketDecoderException} for players without infinite
+     * materials), so a missing game-side packet would wrongly be blamed on a plugin.
+     */
+    static final java.util.Set<String> NOT_RECONCILED_INBOUND = java.util.Set.of("minecraft:set_creative_mode_slot");
     /**
      * How long a packet may be held back by another plugin before it counts as cancelled, once later
      * packets have passed it (see {@link Reconciler}).
@@ -87,6 +92,10 @@ public final class WireObserver {
     private boolean gameViewLost;
 
     private volatile Source source;   // null until the handshake decides
+    /** Non-null if the connection comes through a translating hop (a proxy, Geyser): its handshake is not the client's. */
+    private final String upstreamTranslation;
+    /** False once the WhyNotAC instance that created this observer is disabled: its handlers then remove themselves. */
+    private volatile java.util.function.BooleanSupplier active = () -> true;
     private volatile int clientProtocol = -1;
     private volatile int selfEntityId = -1;
     private volatile long inboundWireOnly;
@@ -97,11 +106,27 @@ public final class WireObserver {
     private volatile long placementRepairs;
 
     public WireObserver(PlayerSession session, PacketTranslator translator, WireProtocols protocols, Logger logger) {
-        this(session, translator, protocols, logger, SharedConstants.getProtocolVersion(), DEFAULT_GRACE_NANOS);
+        this(session, translator, protocols, logger, null);
+    }
+
+    /**
+     * {@code upstreamTranslation}: why the bytes this server receives are not the client's own (the
+     * connection comes through Velocity/BungeeCord, which may run ViaVersion, or through Geyser), or
+     * null for a direct connection. The edge still records the stream exactly; it just never claims to
+     * know the client's protocol.
+     */
+    public WireObserver(PlayerSession session, PacketTranslator translator, WireProtocols protocols, Logger logger, String upstreamTranslation) {
+        this(session, translator, protocols, logger, SharedConstants.getProtocolVersion(), DEFAULT_GRACE_NANOS, upstreamTranslation);
     }
 
     WireObserver(PlayerSession session, PacketTranslator translator, WireProtocols protocols, Logger logger, int serverProtocol,
             long graceNanos) {
+        this(session, translator, protocols, logger, serverProtocol, graceNanos, null);
+    }
+
+    WireObserver(PlayerSession session, PacketTranslator translator, WireProtocols protocols, Logger logger, int serverProtocol,
+            long graceNanos, String upstreamTranslation) {
+        this.upstreamTranslation = upstreamTranslation;
         this.session = session;
         this.translator = translator;
         this.protocols = protocols;
@@ -140,11 +165,13 @@ public final class WireObserver {
         if (source == Source.GAME) {
             return InboundAction.DETACH;
         }
+        if (!frame.isReadable()) {
+            return InboundAction.CONTINUE; // an empty frame: the game's decoder ignores it, so does the edge
+        }
         WireProtocols.Table table = inboundTable;
-        ByteBuf view = frame.duplicate();
-        int id = VarInt.read(view);
+        int id = packetId(frame);
         PacketType<?> type = table.type(id);
-        String typeName = type == null ? "whynotac:unknown-id/" + table + "/" + id : type.id().toString();
+        String typeName = typeName(table, type, id);
         ServerboundPacket translated;
         if (type == null) {
             translated = new ServerboundPacket.Untranslatable(typeName);
@@ -170,7 +197,7 @@ public final class WireObserver {
             inboundTable = protocols.playServerbound();
         }
         session.onInbound(translated, nanoTime);
-        if (!gameViewLost) {
+        if (!gameViewLost && !NOT_RECONCILED_INBOUND.contains(typeName)) {
             inbound.expect(typeName, translated, nanoTime);
         }
         return InboundAction.CONTINUE;
@@ -198,7 +225,13 @@ public final class WireObserver {
         source = Source.WIRE;
         inboundTable = protocols.loginServerbound;
         outboundTable = protocols.loginClientbound;
-        session.onObservation(Source.WIRE, Source.WIRE, handshake.protocolVersion(), "edge decoding", nanoTime);
+        if (upstreamTranslation != null) {
+            clientProtocol = -1; // the handshake is the proxy's or Geyser's, not the client's
+            session.onObservation(Source.WIRE, Source.WIRE, -1, "edge decoding of the " + handshake.protocolVersion()
+                    + " stream from " + upstreamTranslation + "; the client's own protocol is unknown", nanoTime);
+        } else {
+            session.onObservation(Source.WIRE, Source.WIRE, handshake.protocolVersion(), "edge decoding", nanoTime);
+        }
         session.onInbound(translated, nanoTime);
         inbound.expect(HandshakePacketTypes.CLIENT_INTENTION.id().toString(), translated, nanoTime);
         return InboundAction.CONTINUE;
@@ -214,13 +247,15 @@ public final class WireObserver {
         if (source != Source.WIRE || table == null) {
             return Outgoing.STRUCTURAL;
         }
-        ByteBuf view = frame.duplicate();
-        int id = VarInt.read(view);
+        if (!frame.isReadable()) {
+            return Outgoing.STRUCTURAL; // an empty frame (a plugin encoder that wrote nothing): the client ignores it
+        }
+        int id = packetId(frame);
         PacketType<?> type = table.type(id);
         if (GamePacketTypes.CLIENTBOUND_BUNDLE_DELIMITER.equals(type)) {
             return Outgoing.STRUCTURAL; // bundles are flattened, as in the game's view
         }
-        String typeName = type == null ? "whynotac:unknown-id/" + table + "/" + id : type.id().toString();
+        String typeName = typeName(table, type, id);
         ClientboundPacket translated;
         if (type == null) {
             translated = new ClientboundPacket.Untranslatable(typeName);
@@ -244,22 +279,24 @@ public final class WireObserver {
      * The edge failed on an outbound frame (a bug, or a malformed frame from another plugin): a marker
      * takes its place, so the timeline never has a silent hole.
      */
-    Outgoing outboundFailure(long nanoTime) {
+    Outgoing outboundFailure(ByteBuf frame, long nanoTime) {
         WireProtocols.Table table = outboundTable;
-        if (source != Source.WIRE || table == null) {
+        if (source != Source.WIRE || table == null || !frame.isReadable()) {
             return Outgoing.STRUCTURAL;
         }
-        return correlateOutbound(table, EDGE_FAILURE, new ClientboundPacket.Untranslatable(EDGE_FAILURE), nanoTime);
+        String typeName = failedTypeName(table, frame);
+        return correlateOutbound(table, typeName, new ClientboundPacket.Untranslatable(typeName), nanoTime);
     }
 
     /** The edge failed on an inbound frame: a marker takes its place (see {@link #outboundFailure}). */
-    void inboundFailure(long nanoTime) {
-        if (source != Source.WIRE) {
+    void inboundFailure(ByteBuf frame, long nanoTime) {
+        if (source != Source.WIRE || !frame.isReadable()) {
             return;
         }
-        ServerboundPacket marker = new ServerboundPacket.Untranslatable(EDGE_FAILURE);
+        String typeName = failedTypeName(inboundTable, frame);
+        ServerboundPacket marker = new ServerboundPacket.Untranslatable(typeName);
         session.onInbound(marker, nanoTime);
-        inbound.expect(EDGE_FAILURE, marker, nanoTime);
+        inbound.expect(typeName, marker, nanoTime);
     }
 
     private Outgoing correlateOutbound(WireProtocols.Table table, String typeName, ClientboundPacket translated, long nanoTime) {
@@ -304,6 +341,16 @@ public final class WireObserver {
         ctx.write(buf, ctx.newPromise());
     }
 
+    /** Ties this connection's handlers to the lifetime of the WhyNotAC instance that installed them. */
+    public void activeWhile(java.util.function.BooleanSupplier active) {
+        this.active = active;
+    }
+
+    /** False after the installing WhyNotAC instance was disabled (reload): the handlers must leave. */
+    public boolean active() {
+        return active.getAsBoolean();
+    }
+
     /** WhyNotAC moves (placement repair) or removes (uninstall) the taps itself. */
     void moving(boolean moving) {
         this.moving = moving;
@@ -325,6 +372,15 @@ public final class WireObserver {
         source = Source.GAME;
         session.onObservation(Source.GAME, Source.GAME, clientProtocol,
                 "edge tap " + name + " removed by another plugin; the game's view records from here", nanoTime);
+    }
+
+    /** The edge cannot be kept (e.g. its anchors are gone): switch to the game's view, declared. */
+    void edgeLost(String reason, long nanoTime) {
+        if (source != Source.WIRE) {
+            return;
+        }
+        source = Source.GAME;
+        session.onObservation(Source.GAME, Source.GAME, clientProtocol, reason + "; the game's view records from here", nanoTime);
     }
 
     /** The connection closed (seen by a tap; the game-side handler may be gone). Idempotent. */
@@ -364,6 +420,9 @@ public final class WireObserver {
 
     /** A packet the game decoded and is about to process. */
     public void onGameInbound(String type, ServerboundPacket packet, long nanoTime) {
+        if (NOT_RECONCILED_INBOUND.contains(type)) {
+            return;
+        }
         if (!inbound.match(type, packet, nanoTime)) {
             inboundGameOnly++;
             session.onInboundDivergence(DivergenceKind.GAME_ONLY, packet, nanoTime);
@@ -396,6 +455,39 @@ public final class WireObserver {
             long outboundWireOnly, long outboundGameOnly, long edgeTransactions, long placementRepairs) {}
 
     // --- internals ---------------------------------------------------------------------------------
+
+    /** The frame's packet id, or -1 if it is not a well-formed VarInt (never throws, never moves the reader index). */
+    static int packetId(ByteBuf frame) {
+        int value = 0;
+        int index = frame.readerIndex();
+        for (int i = 0; i < 5; i++) {
+            if (index + i >= frame.writerIndex()) {
+                return -1;
+            }
+            byte b = frame.getByte(index + i);
+            value |= (b & 0x7F) << (7 * i);
+            if ((b & 0x80) == 0) {
+                return value;
+            }
+        }
+        return -1;
+    }
+
+    private static String typeName(WireProtocols.Table table, PacketType<?> type, int id) {
+        if (type != null) {
+            return type.id().toString();
+        }
+        return id < 0 ? "whynotac:malformed-frame/" + table : "whynotac:unknown-id/" + table + "/" + id;
+    }
+
+    private static String failedTypeName(WireProtocols.Table table, ByteBuf frame) {
+        if (table == null) {
+            return EDGE_FAILURE;
+        }
+        int id = packetId(frame);
+        PacketType<?> type = table.type(id);
+        return type != null ? type.id().toString() : EDGE_FAILURE;
+    }
 
     private ServerboundPacket decodeServerbound(WireProtocols.Table table, ByteBuf frame, String typeName) {
         try {
@@ -430,18 +522,15 @@ public final class WireObserver {
         return packet instanceof ClientboundPacket.SetEntityMotion motion ? motion.asReceived() : packet;
     }
 
-    /** Same packet in both views: same type and content, or one side could not be translated. */
+    /**
+     * Same packet in both views: same type and content, or one side could not be translated (then the
+     * type alone decides; a marker of unknown type matches nothing, so it can never shift other pairs).
+     */
     private static boolean sameInbound(String typeA, ServerboundPacket a, String typeB, ServerboundPacket b) {
-        if (typeA.equals(EDGE_FAILURE) || typeB.equals(EDGE_FAILURE)) {
-            return true;
-        }
         return typeA.equals(typeB) && (a.equals(b) || a instanceof ServerboundPacket.Untranslatable || b instanceof ServerboundPacket.Untranslatable);
     }
 
     private static boolean sameOutbound(String typeA, ClientboundPacket a, String typeB, ClientboundPacket b) {
-        if (typeA.equals(EDGE_FAILURE) || typeB.equals(EDGE_FAILURE)) {
-            return true;
-        }
         return typeA.equals(typeB) && (canonical(a).equals(canonical(b))
                 || a instanceof ClientboundPacket.Untranslatable || b instanceof ClientboundPacket.Untranslatable);
     }

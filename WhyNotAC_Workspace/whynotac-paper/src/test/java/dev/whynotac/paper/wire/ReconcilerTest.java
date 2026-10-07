@@ -57,6 +57,25 @@ class ReconcilerTest {
     }
 
     @Test
+    void staleEntriesOfOneTypeNeverBlockMatchesOfAnother() {
+        // Regression: 300 entries the other side never sees (a flood the game drops) used to fill the scan
+        // window, after which nothing matched again and every later packet became a false divergence.
+        List<String> stale = new ArrayList<>();
+        Reconciler<String> r = new Reconciler<>((ta, a, tb, b) -> ta.equals(tb) && a.equals(b), (p, t) -> stale.add(p), GRACE);
+        for (int i = 0; i < 300; i++) {
+            r.expect("skipped", "s" + i, 0);
+        }
+        for (int i = 0; i < 1_000; i++) {
+            r.expect("move", "m" + i, i);
+            assertTrue(r.match("move", "m" + i, i), "move " + i);
+        }
+        r.expire(GRACE + 1_000);
+        assertEquals(300, stale.size(), "the dropped flood is reported once the stream has moved past it");
+        assertTrue(stale.stream().allMatch(p -> p.startsWith("s")), "no real packet was ever reported");
+        assertEquals(0, r.pending());
+    }
+
+    @Test
     void capacityAndScanAreBounded() {
         for (int i = 0; i < Reconciler.CAPACITY + 10; i++) {
             reconciler.expect("t", "p" + i, 0);

@@ -115,12 +115,19 @@ public final class PacketInterceptor {
     private void inject(Channel channel, boolean fresh) {
         try {
             ChannelPipeline pipeline = channel.pipeline();
-            if (pipeline.get(HANDLER_NAME) != null || pipeline.get(ANCHOR) == null) {
+            if (pipeline.get(HANDLER_NAME) instanceof WhyNotChannelHandler || pipeline.get(ANCHOR) == null) {
                 return;
+            }
+            // Handlers left by an earlier WhyNotAC instance (a reload) are not ours to keep.
+            for (String name : List.of(WireTaps.INBOUND, WireTaps.OUTBOUND, HANDLER_NAME)) {
+                if (pipeline.get(name) != null) {
+                    pipeline.remove(name);
+                }
             }
             SocketAddress address = channel.remoteAddress();
             PlayerSession session = registry.open(address == null ? "unknown" : address.toString());
-            WireObserver observer = new WireObserver(session, translator, protocols, logger);
+            WireObserver observer = new WireObserver(session, translator, protocols, logger, upstreamTranslation(channel));
+            observer.activeWhile(() -> enabled);
             pipeline.addBefore(ANCHOR, HANDLER_NAME, new WhyNotChannelHandler(session, translator, observer, logger));
             boolean edge = false;
             if (fresh && pipeline.get("splitter") != null && pipeline.get("prepender") != null) {
@@ -139,6 +146,18 @@ public final class PacketInterceptor {
             // Fail open: an injection failure leaves the connection exactly as vanilla built it.
             logger.log(Level.WARNING, "WhyNotAC could not attach to " + channel, e);
         }
+    }
+
+    /** Why this connection's bytes are not the client's own, or null for a direct connection. */
+    private String upstreamTranslation(Channel channel) {
+        if (channel instanceof io.netty.channel.local.LocalChannel) {
+            return "Geyser (in-process Bedrock translation)";
+        }
+        ClientFacts.Policy policy = identityPolicy;
+        if (policy != null && (policy.topology().equals("VELOCITY_MODERN") || policy.topology().equals("BUNGEE_LEGACY"))) {
+            return "the " + policy.topology() + " proxy (it may translate other client versions)";
+        }
+        return null;
     }
 
     /** Links a joined player to the session on their connection and returns it. */
@@ -218,7 +237,8 @@ public final class PacketInterceptor {
         if (channel == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable((WhyNotChannelHandler) channel.pipeline().get(HANDLER_NAME));
+        // instanceof, not a cast: after a reload the pipeline may still hold the old instance's handler.
+        return channel.pipeline().get(HANDLER_NAME) instanceof WhyNotChannelHandler handler ? Optional.of(handler) : Optional.empty();
     }
 
     private static List<Connection> existingConnections() {

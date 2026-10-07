@@ -86,6 +86,14 @@ public final class ClientFacts {
 
             int protocol = edge.clientProtocol();
             String protocolSource = "handshake bytes at the network edge";
+            boolean upstream = inProcess || policy.topology().equals("VELOCITY_MODERN") || policy.topology().equals("BUNGEE_LEGACY");
+            if (upstream) {
+                // The handshake this server saw is the proxy's or Geyser's, not the client's: say so, never guess.
+                String hop = inProcess ? "geyser" : policy.topology().toLowerCase(java.util.Locale.ROOT) + " proxy";
+                session.onFact(Fact.TRANSLATOR, "unknown (" + hop + ")", Trust.CLAIMED, "the client's protocol is not visible behind " + hop, now);
+                session.onFact(Fact.TRANSACTION_ORIGIN, "UNKNOWN", Trust.CLAIMED, "a translator behind " + hop + " may answer transactions", now);
+                return;
+            }
             if (protocol < 0) {
                 Optional<Integer> via = viaVersion(id);
                 protocol = via.orElse(-1);
