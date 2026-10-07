@@ -76,6 +76,8 @@ public final class RecordingTool {
         Map<String, Long> inbound = new TreeMap<>();
         Map<String, Long> outbound = new TreeMap<>();
         List<Object> anomalies = new ArrayList<>();
+        List<Object> observations = new ArrayList<>();
+        Map<String, Long> divergences = new TreeMap<>();
         RunningMoments rtt = new RunningMoments();
         long skipped = 0;
         long clientTicks = 0;
@@ -106,6 +108,17 @@ public final class RecordingTool {
                     entry.put("detail", anomaly.detail());
                     anomalies.add(entry);
                 }
+                case TimelineEvent.Observation observation -> {
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("sequence", observation.sequence());
+                    entry.put("inbound", observation.inbound());
+                    entry.put("outbound", observation.outbound());
+                    entry.put("client_protocol", observation.clientProtocol());
+                    entry.put("detail", observation.detail());
+                    observations.add(entry);
+                }
+                case TimelineEvent.InboundDivergence d -> divergences.merge("inbound " + d.kind() + " " + name(d.packet()), 1L, Long::sum);
+                case TimelineEvent.OutboundDivergence d -> divergences.merge("outbound " + d.kind() + " " + name(d.packet()), 1L, Long::sum);
                 default -> { }
             }
         }
@@ -126,6 +139,8 @@ public final class RecordingTool {
         transactions.put("rtt_ms_max", rtt.max());
         summary.put("transactions", transactions);
         summary.put("anomalies", anomalies);
+        summary.put("observation", observations);
+        summary.put("divergences", divergences);
         return summary;
     }
 

@@ -1,5 +1,8 @@
 package dev.whynotac.paper.network;
 
+import dev.whynotac.paper.wire.WireObserver;
+import dev.whynotac.paper.wire.WireProtocols;
+import dev.whynotac.paper.wire.WireTaps;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import io.netty.channel.Channel;
@@ -21,7 +24,8 @@ import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 
 /**
- * Installs {@link WhyNotChannelHandler} into every player connection.
+ * Installs {@link WhyNotChannelHandler} into every player connection, and the edge taps
+ * ({@link WireTaps}) into every connection created after WhyNotAC enabled.
  *
  * <p>New connections are caught through Paper's {@link ChannelInitializeListenerHolder}, which runs
  * at the end of the server's own {@code ChannelInitializer}, after {@code packet_handler} exists and
@@ -36,6 +40,7 @@ public final class PacketInterceptor {
 
     private final SessionRegistry registry;
     private final PacketTranslator translator = new PacketTranslator();
+    private final WireProtocols protocols = new WireProtocols(() -> MinecraftServer.getServer().registryAccess());
     private final Logger logger;
 
     public PacketInterceptor(SessionRegistry registry, Logger logger) {
@@ -44,7 +49,7 @@ public final class PacketInterceptor {
     }
 
     public void install() {
-        ChannelInitializeListenerHolder.addListener(LISTENER_KEY, this::inject);
+        ChannelInitializeListenerHolder.addListener(LISTENER_KEY, channel -> inject(channel, true));
         injectExisting();
     }
 
@@ -56,7 +61,7 @@ public final class PacketInterceptor {
         for (Connection connection : existingConnections()) {
             Channel channel = connection.channel;
             if (channel != null && channel.isOpen()) {
-                channel.eventLoop().execute(() -> inject(channel));
+                channel.eventLoop().execute(() -> inject(channel, false));
             }
         }
     }
@@ -68,6 +73,7 @@ public final class PacketInterceptor {
             if (channel != null) {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline pipeline = channel.pipeline();
+                    WireTaps.remove(pipeline);
                     if (pipeline.get(HANDLER_NAME) != null) {
                         pipeline.remove(HANDLER_NAME); // handlerRemoved() closes the session cleanly
                     }
@@ -76,7 +82,11 @@ public final class PacketInterceptor {
         }
     }
 
-    private void inject(Channel channel) {
+    /**
+     * {@code fresh}: the connection was just created and nothing was read yet, so the edge can follow
+     * it from the first byte. A connection that existed before WhyNotAC enabled gets the game's view.
+     */
+    private void inject(Channel channel, boolean fresh) {
         try {
             ChannelPipeline pipeline = channel.pipeline();
             if (pipeline.get(HANDLER_NAME) != null || pipeline.get(ANCHOR) == null) {
@@ -84,7 +94,21 @@ public final class PacketInterceptor {
             }
             SocketAddress address = channel.remoteAddress();
             PlayerSession session = registry.open(address == null ? "unknown" : address.toString());
-            pipeline.addBefore(ANCHOR, HANDLER_NAME, new WhyNotChannelHandler(session, translator, logger));
+            WireObserver observer = new WireObserver(session, translator, protocols, logger);
+            pipeline.addBefore(ANCHOR, HANDLER_NAME, new WhyNotChannelHandler(session, translator, observer, logger));
+            boolean edge = false;
+            if (fresh && pipeline.get("splitter") != null && pipeline.get("prepender") != null) {
+                try {
+                    WireTaps.install(pipeline, observer, logger);
+                    edge = true;
+                } catch (RuntimeException e) {
+                    logger.log(Level.WARNING, "WhyNotAC could not attach its edge taps to " + channel + "; using the game's view", e);
+                    WireTaps.remove(pipeline);
+                }
+            }
+            if (!edge) {
+                observer.useGameView(fresh ? "edge taps unavailable" : "attached mid-session", System.nanoTime());
+            }
         } catch (RuntimeException e) {
             // Fail open: an injection failure leaves the connection exactly as vanilla built it.
             logger.log(Level.WARNING, "WhyNotAC could not attach to " + channel, e);
@@ -113,6 +137,35 @@ public final class PacketInterceptor {
 
     public Optional<PlayerSession> session(Player player) {
         return handler(player).map(WhyNotChannelHandler::session);
+    }
+
+    /** The edge view's state for diagnostics. */
+    public Optional<WireObserver.Status> edge(Player player) {
+        return handler(player).map(h -> h.observer().status());
+    }
+
+    /**
+     * Re-checks that the player's edge taps still sit at the outer edge of the pipeline (another plugin
+     * may have inserted itself outside them) and repairs it on the connection's event loop.
+     */
+    public void auditPlacement(Player player) {
+        if (!(player instanceof CraftPlayer craft) || craft.getHandle().connection == null) {
+            return;
+        }
+        Channel channel = craft.getHandle().connection.connection.channel;
+        if (channel == null || !channel.isOpen()) {
+            return;
+        }
+        channel.eventLoop().execute(() -> {
+            try {
+                if (WireTaps.ensurePlacement(channel.pipeline())) {
+                    logger.info("WhyNotAC moved its edge taps back to the network edge of " + player.getName()
+                            + " (another plugin had inserted a handler outside them)");
+                }
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "WhyNotAC could not audit the pipeline of " + player.getName(), e);
+            }
+        });
     }
 
     /** Sends one stand-alone transaction (used every server tick for continuous latency tracking). */

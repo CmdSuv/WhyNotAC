@@ -12,6 +12,10 @@ can be verified live:
   * one transaction is never answered while the next one is  -> SKIPPED_TRANSACTION
   * one transaction is answered twice                         -> DUPLICATE_TRANSACTION
 
+It also keeps a trace of every transaction ping and every velocity packet addressed to itself, in
+arrival order, with velocities decoded exactly as the client's LpVec3 codec does: the ground truth the
+server-side timeline must match.
+
 Usage: probe_client.py HOST PORT NAME SECONDS
 WhyNotAC transaction ids are random, so the probe treats every play ping alike (on the test server
 WhyNotAC is the only plugin that sends them).
@@ -39,6 +43,7 @@ PLAY_C_CHUNK_BATCH_FINISHED, PLAY_C_DISCONNECT, PLAY_C_KEEP_ALIVE, PLAY_C_LOGIN,
     0x0B, 0x20, 0x2B, 0x30, 0x3B, 0x46, 0x74)
 PLAY_S_ACCEPT_TELEPORT, PLAY_S_CHUNK_BATCH_RECEIVED, PLAY_S_TICK_END, PLAY_S_KEEP_ALIVE = 0x00, 0x0A, 0x0C, 0x1B
 PLAY_S_MOVE_POS_ROT, PLAY_S_MOVE_ROT, PLAY_S_INPUT, PLAY_S_LOADED, PLAY_S_PONG = 0x1E, 0x1F, 0x2A, 0x2B, 0x2C
+PLAY_C_SET_ENTITY_MOTION = 0x63
 
 
 def f32(x):
@@ -92,6 +97,24 @@ class Reader:
         return self.data[self.pos:]
 
 
+def read_lpvec3(r):
+    """net.minecraft.network.LpVec3.read, operation for operation (IEEE doubles, same order)."""
+    b0 = r.unpack("B")
+    if b0 == 0:
+        return 0.0, 0.0, 0.0
+    b1 = r.unpack("B")
+    high = r.unpack("I")
+    packed = (high << 16) | (b1 << 8) | b0
+    scale = b0 & 3
+    if b0 & 4:
+        scale |= (r.varint() & 0xFFFFFFFF) << 2
+
+    def unpack(value):
+        return min(value & 32767, 32766.0) * 2.0 / 32766.0 - 1.0
+
+    return unpack(packed >> 3) * scale, unpack(packed >> 18) * scale, unpack(packed >> 33) * scale
+
+
 class Client:
     def __init__(self, host, port, name):
         self.sock = socket.create_connection((host, port), timeout=30)
@@ -112,6 +135,7 @@ class Client:
         self.last_answered = None
         self.skipped_ids = []
         self.duplicated_ids = []
+        self.trace = []  # ["ping", id] and ["motion", x, y, z] in arrival order
         self.loaded = threading.Event()
 
     # --- framing -------------------------------------------------------------------------------
@@ -201,8 +225,12 @@ class Client:
                     self.loaded.set()
             elif packet_id == PLAY_C_KEEP_ALIVE:
                 self.send(PLAY_S_KEEP_ALIVE, struct.pack(">q", r.unpack("q")))
+            elif packet_id == PLAY_C_SET_ENTITY_MOTION:
+                if r.varint() == self.entity_id:
+                    self.trace.append(["motion"] + [repr(c) for c in read_lpvec3(r)])
             elif packet_id == PLAY_C_PING:
                 ping_id = r.unpack("i")
+                self.trace.append(["ping", ping_id])
                 self.pings_seen += 1
                 if self.skip_next:
                     self.skip_next = False
@@ -300,6 +328,7 @@ def main():
         "multiplier": repr(multiplier),
         "server_list_ping_answered": status_ok,
         "still_connected": client.alive,
+        "trace": client.trace,
         "disconnect_reason": client.disconnect_reason,
     }
     print(json.dumps(summary))

@@ -81,7 +81,9 @@ final class Json {
             case Record record -> {
                 out.append("{\"type\":").append(string(record.getClass().getSimpleName()));
                 for (RecordComponent component : record.getClass().getRecordComponents()) {
-                    out.append(',').append(string(component.getName())).append(':');
+                    // "type" is the record's own name; a component of that name (Unmodeled.type, GameEvent.type) becomes "typeId".
+                    String name = component.getName().equals("type") ? "typeId" : component.getName();
+                    out.append(',').append(string(name)).append(':');
                     try {
                         append(out, component.getAccessor().invoke(record));
                     } catch (ReflectiveOperationException e) {

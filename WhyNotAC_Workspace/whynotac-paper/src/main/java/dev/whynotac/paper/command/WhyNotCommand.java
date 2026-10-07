@@ -61,8 +61,10 @@ public final class WhyNotCommand implements BasicCommand {
             List<String> names = interceptor.pipeline(target).orElse(List.of());
             sender.sendMessage(Component.text("Pipeline of " + target.getName() + " (network -> game):", NamedTextColor.GOLD));
             for (int i = 0; i < names.size(); i++) {
-                boolean ours = names.get(i).equals(PacketInterceptor.HANDLER_NAME);
-                sender.sendMessage(Component.text(String.format(Locale.ROOT, " %2d %s%s", i, names.get(i), ours ? "   <== WhyNotAC" : ""),
+                String name = names.get(i);
+                boolean ours = name.equals(PacketInterceptor.HANDLER_NAME) || name.equals(dev.whynotac.paper.wire.WireTaps.INBOUND)
+                        || name.equals(dev.whynotac.paper.wire.WireTaps.OUTBOUND);
+                sender.sendMessage(Component.text(String.format(Locale.ROOT, " %2d %s%s", i, name, ours ? "   <== WhyNotAC" : ""),
                         ours ? NamedTextColor.GREEN : NamedTextColor.GRAY));
             }
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
@@ -91,6 +93,10 @@ public final class WhyNotCommand implements BasicCommand {
         lines.add("Transactions sent " + latency.sent() + " acked " + latency.acknowledged() + " pending " + latency.pending()
                 + String.format(Locale.ROOT, " (oldest %.1f ms)", latency.oldestPendingMillis())
                 + " skipped " + latency.skipped() + " duplicate " + latency.duplicates() + (latency.withheld() ? " WITHHELD" : ""));
+        interceptor.edge(target).ifPresent(edge -> lines.add("View " + (edge.source() == null ? "pending" : edge.source())
+                + " | client protocol " + edge.clientProtocol() + " | divergences in wire-only " + edge.inboundWireOnly()
+                + " game-only " + edge.inboundGameOnly() + " | out wire-only " + edge.outboundWireOnly() + " game-only "
+                + edge.outboundGameOnly() + " | edge transactions " + edge.edgeTransactions() + " | placement repairs " + edge.placementRepairs()));
         lines.add("Packets in " + counters.inbound() + " | out modelled " + counters.outboundModeled() + " unmodelled "
                 + counters.outboundUnmodeled() + " | queued " + counters.queued() + " dropped " + counters.dropped()
                 + " | client ticks " + session.clientTicks());

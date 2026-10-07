@@ -103,6 +103,23 @@ public final class EventCodec {
                     yield TAG_ANOMALY;
                 }
                 case TimelineEvent.Disconnected ignored -> TAG_DISCONNECTED;
+                case TimelineEvent.Observation observation -> {
+                    body.writeVarInt(observation.inbound().ordinal());
+                    body.writeVarInt(observation.outbound().ordinal());
+                    body.writeZigZag(observation.clientProtocol());
+                    string(observation.detail());
+                    yield TAG_OBSERVATION;
+                }
+                case TimelineEvent.InboundDivergence divergence -> {
+                    body.writeVarInt(divergence.kind().ordinal());
+                    writeServerbound(divergence.packet());
+                    yield TAG_INBOUND_DIVERGENCE;
+                }
+                case TimelineEvent.OutboundDivergence divergence -> {
+                    body.writeVarInt(divergence.kind().ordinal());
+                    writeClientbound(divergence.packet());
+                    yield TAG_OUTBOUND_DIVERGENCE;
+                }
             };
             out.writeVarInt(tag);
             out.writeVarInt(body.size());
@@ -451,6 +468,13 @@ public final class EventCodec {
                 case TAG_GAP -> new TimelineEvent.Gap(sequence, nanoTime, body.readZigZag());
                 case TAG_ANOMALY -> new TimelineEvent.Anomaly(sequence, nanoTime, enumAt(TimelineEvent.Anomaly.Kind.values(), body.readVarInt()), string(body));
                 case TAG_DISCONNECTED -> new TimelineEvent.Disconnected(sequence, nanoTime);
+                case TAG_OBSERVATION -> new TimelineEvent.Observation(sequence, nanoTime,
+                        enumAt(TimelineEvent.Observation.Source.values(), body.readVarInt()),
+                        enumAt(TimelineEvent.Observation.Source.values(), body.readVarInt()), (int) body.readZigZag(), string(body));
+                case TAG_INBOUND_DIVERGENCE -> new TimelineEvent.InboundDivergence(sequence, nanoTime,
+                        enumAt(TimelineEvent.DivergenceKind.values(), body.readVarInt()), readServerbound(body));
+                case TAG_OUTBOUND_DIVERGENCE -> new TimelineEvent.OutboundDivergence(sequence, nanoTime,
+                        enumAt(TimelineEvent.DivergenceKind.values(), body.readVarInt()), readClientbound(body));
                 default -> null;
             };
             if (event == null) {

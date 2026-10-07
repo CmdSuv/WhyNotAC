@@ -59,6 +59,49 @@ public sealed interface TimelineEvent {
         }
     }
 
+    /**
+     * Where this session's {@link Inbound} and {@link Outbound} events come from, from this event on.
+     * {@code clientProtocol} is the protocol version the client really speaks (read from its handshake
+     * bytes before any translation layer), or -1 if unknown.
+     */
+    record Observation(long sequence, long nanoTime, Source inbound, Source outbound, int clientProtocol, String detail) implements TimelineEvent {
+        /** Constants are stored by ordinal in recordings: only ever append. */
+        public enum Source {
+            /**
+             * Decoded from the bytes at the network edge, below every other plugin: exactly what the
+             * client sent, or exactly what it received.
+             */
+            WIRE,
+            /**
+             * The packet objects next to the game's own handler: what the game processed or sent. Used
+             * when the edge cannot be decoded (the client speaks another protocol version through a
+             * translation layer such as ViaVersion, or WhyNotAC attached to a connection mid-session).
+             */
+            GAME
+        }
+    }
+
+    /**
+     * The client's packet stream and the game's differ: a plugin between the network edge and the
+     * game added, removed or rewrote a packet. A fact about observation, not about the player.
+     *
+     * <ul>
+     *   <li>{@code WIRE_ONLY}, inbound: the client sent it, the game never processed it.
+     *   <li>{@code GAME_ONLY}, inbound: the game processed it, the client never sent it.
+     *   <li>{@code WIRE_ONLY}, outbound: the client received it, the game never sent it (written below
+     *       the game's send path, e.g. by PacketEvents).
+     *   <li>{@code GAME_ONLY}, outbound: the game sent it, the client never received it.
+     * </ul>
+     * A rewritten packet shows up as a {@code GAME_ONLY} original plus a {@code WIRE_ONLY} replacement.
+     */
+    enum DivergenceKind { WIRE_ONLY, GAME_ONLY }
+
+    /** See {@link DivergenceKind}. */
+    record InboundDivergence(long sequence, long nanoTime, DivergenceKind kind, ServerboundPacket packet) implements TimelineEvent {}
+
+    /** See {@link DivergenceKind}. */
+    record OutboundDivergence(long sequence, long nanoTime, DivergenceKind kind, ClientboundPacket packet) implements TimelineEvent {}
+
     /** The connection closed. This is always the last event of a session. */
     record Disconnected(long sequence, long nanoTime) implements TimelineEvent {}
 }

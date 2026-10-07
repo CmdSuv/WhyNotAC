@@ -1,5 +1,6 @@
 package dev.whynotac.paper.network;
 
+import dev.whynotac.paper.wire.WireObserver;
 import dev.whynotac.protocol.latency.TransactionPolicy;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
@@ -24,6 +25,13 @@ import net.minecraft.network.protocol.game.ClientboundBundlePacket;
  * {@code unbundler} and {@code encoder}. Inbound and outbound traffic of a connection run on its
  * single event-loop thread, so the timestamps taken here are a consistent per-player clock.
  *
+ * <h2>Two views</h2>
+ * When the connection's edge view is active ({@link WireObserver#edgeView()}), the timeline is
+ * recorded at the network edge and this handler only reconciles the game's packets with it, so that
+ * packets other plugins inject or cancel in between become explicit divergences. Otherwise (a client on
+ * another protocol version, or a connection attached mid-session) this handler records the timeline.
+ * Either way it brackets the game's physics-changing packets with transactions.
+ *
  * <h2>Fail-open</h2>
  * Phase 1 is a passive observer. Whatever happens inside WhyNotAC, every packet is forwarded
  * unchanged and no exception ever reaches Netty: a bug in an anti-cheat must never kick a player.
@@ -32,14 +40,20 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
 
     private final PlayerSession session;
     private final PacketTranslator translator;
+    private final WireObserver observer;
     private final Logger logger;
     private volatile int selfEntityId = -1;
     private int failures;
 
-    WhyNotChannelHandler(PlayerSession session, PacketTranslator translator, Logger logger) {
+    WhyNotChannelHandler(PlayerSession session, PacketTranslator translator, WireObserver observer, Logger logger) {
         this.session = session;
         this.translator = translator;
+        this.observer = observer;
         this.logger = logger;
+    }
+
+    WireObserver observer() {
+        return observer;
     }
 
     PlayerSession session() {
@@ -48,6 +62,7 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
 
     void selfEntityId(int entityId) {
         this.selfEntityId = entityId;
+        observer.selfEntityId(entityId);
     }
 
     @Override
@@ -62,7 +77,11 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
                 translated = new ServerboundPacket.Untranslatable(PacketTranslator.typeName(packet)); // a marker, never a silent hole
             }
             try {
-                session.onInbound(translated, now);
+                if (observer.edgeView()) {
+                    observer.onGameInbound(PacketTranslator.typeName(packet), translated, now);
+                } else {
+                    session.onInbound(translated, now);
+                }
             } catch (RuntimeException | LinkageError e) {
                 report("inbound session " + packet.getClass().getName(), e);
             }
@@ -84,9 +103,10 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
         }
         long now = System.nanoTime();
         List<ClientboundPacket> observed = new ArrayList<>(1);
+        List<String> types = new ArrayList<>(1);
         boolean sandwich = false;
         try {
-            translateOutbound(packet, observed);
+            translateOutbound(packet, observed, types);
             for (ClientboundPacket translated : observed) {
                 sandwich |= TransactionPolicy.requiresSandwich(translated, selfEntityId);
             }
@@ -94,7 +114,9 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             report("outbound " + packet.getClass().getName(), e);
             // Unknown effect on the client: record a marker in its place and bracket it with transactions.
             observed.clear();
+            types.clear();
             observed.add(new ClientboundPacket.Untranslatable(PacketTranslator.typeName(packet)));
+            types.add(PacketTranslator.typeName(packet));
             sandwich = true;
         }
         // The timeline must list packets in wire order. With a sandwich that is: transaction, the
@@ -103,20 +125,34 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
         if (sandwich) {
             writeTransaction(ctx, now);
         }
-        for (ClientboundPacket translated : observed) {
-            session.onOutbound(translated, now);
+        if (!observer.edgeView()) {
+            for (ClientboundPacket translated : observed) {
+                session.onOutbound(translated, now);
+            }
+            super.write(ctx, msg, promise);
+        } else {
+            // The edge records it as the frame passes and reconciles it with what the game announced here.
+            beginGameWrite(types, observed, now);
+            super.write(ctx, msg, promise);
         }
-        super.write(ctx, msg, promise);
         if (sandwich) {
             writeTransaction(ctx, System.nanoTime());
         }
     }
 
+    private void beginGameWrite(List<String> types, List<ClientboundPacket> packets, long now) {
+        try {
+            observer.beginGameWrite(types, packets, now);
+        } catch (RuntimeException | LinkageError e) {
+            report("outbound reconciliation", e);
+        }
+    }
+
     /** Translates an outbound packet, flattening bundles, without recording anything yet. */
-    private void translateOutbound(Packet<?> packet, List<ClientboundPacket> out) {
+    private void translateOutbound(Packet<?> packet, List<ClientboundPacket> out, List<String> types) {
         if (packet instanceof ClientboundBundlePacket bundle) {
             for (Packet<?> sub : bundle.subPackets()) {
-                translateOutbound(sub, out);
+                translateOutbound(sub, out, types);
             }
             return;
         }
@@ -125,6 +161,7 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             selfEntityId = login.entityId();
         }
         out.add(translated);
+        types.add(PacketTranslator.typeName(packet));
     }
 
     /**
@@ -136,9 +173,16 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
         if (id.isEmpty()) {
             return;
         }
-        session.onOutbound(new ClientboundPacket.Ping(id.getAsInt()), now);
-        // A real promise, not voidPromise(): other plugins' handlers may attach listeners to it.
-        ctx.write(new ClientboundPingPacket(id.getAsInt()), ctx.newPromise());
+        ClientboundPingPacket ping = new ClientboundPingPacket(id.getAsInt());
+        ClientboundPacket.Ping translated = new ClientboundPacket.Ping(id.getAsInt());
+        if (!observer.edgeView()) {
+            session.onOutbound(translated, now);
+            // A real promise, not voidPromise(): other plugins' handlers may attach listeners to it.
+            ctx.write(ping, ctx.newPromise());
+            return;
+        }
+        beginGameWrite(List.of(PacketTranslator.typeName(ping)), List.of(translated), now);
+        ctx.write(ping, ctx.newPromise());
     }
 
     @Override

@@ -193,6 +193,12 @@ public final class Generators {
             case "Gap" -> new TimelineEvent.Gap(sequence, nanoTime, random.nextLong(0, Long.MAX_VALUE));
             case "Anomaly" -> new TimelineEvent.Anomaly(sequence, nanoTime, pick(TimelineEvent.Anomaly.Kind.values()), anyString());
             case "Disconnected" -> new TimelineEvent.Disconnected(sequence, nanoTime);
+            case "Observation" -> new TimelineEvent.Observation(sequence, nanoTime, pick(TimelineEvent.Observation.Source.values()),
+                    pick(TimelineEvent.Observation.Source.values()), anyInt(), anyString());
+            case "InboundDivergence" -> new TimelineEvent.InboundDivergence(sequence, nanoTime, pick(TimelineEvent.DivergenceKind.values()),
+                    serverbound(SERVERBOUND.get(random.nextInt(SERVERBOUND.size()))));
+            case "OutboundDivergence" -> new TimelineEvent.OutboundDivergence(sequence, nanoTime, pick(TimelineEvent.DivergenceKind.values()),
+                    clientbound(CLIENTBOUND.get(random.nextInt(CLIENTBOUND.size()))));
             default -> throw new AssertionError("no generator for event " + name);
         };
     }

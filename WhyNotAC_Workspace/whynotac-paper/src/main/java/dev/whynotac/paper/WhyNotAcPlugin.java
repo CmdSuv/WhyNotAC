@@ -65,6 +65,12 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 interceptor.sendTransaction(player);
             }
         }, 1L, 1L);
+        // Another plugin may insert a handler outside the edge taps after login; move them back (every 5 s).
+        Bukkit.getScheduler().runTaskTimer(this, () -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                interceptor.auditPlacement(player);
+            }
+        }, 100L, 100L);
 
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics);

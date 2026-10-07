@@ -23,6 +23,8 @@ if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
 fi
 echo "$PAPER_SHA256  $WORK_DIR/$PAPER_JAR" | sha256sum -c --quiet -
 echo 'eula=true' > "$WORK_DIR/eula.txt"
+# Hermetic: a fresh world and player data every run (state from an earlier run must not leak in).
+rm -rf "$WORK_DIR/world" "$WORK_DIR/world_nether" "$WORK_DIR/world_the_end" "$WORK_DIR/usercache.json"
 cat > "$WORK_DIR/server.properties" <<PROPS
 online-mode=false
 server-port=$PORT
@@ -33,11 +35,12 @@ spawn-protection=0
 view-distance=3
 simulation-distance=3
 spawn-monsters=false
+difficulty=peaceful
 max-players=5
 motd=WhyNotAC E2E
 PROPS
 
-(cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
+(cd "$ROOT" && ./gradlew -q :whynotac-paper:jar :whynotac-interop-probe:jar)
 mkdir -p "$WORK_DIR/plugins/WhyNotAC"
 rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings"
 cat > "$WORK_DIR/plugins/WhyNotAC/config.yml" <<CONFIG
@@ -50,6 +53,8 @@ CONFIG
 PLUGIN_JAR=$(find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' | head -1)
 cp "$PLUGIN_JAR" "$WORK_DIR/plugins/WhyNotAC.jar"
 find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delete
+# Test-only helper that sends and cancels knockback below WhyNotAC (PacketEvents if installed, raw Netty otherwise).
+find "$ROOT/whynotac-interop-probe/build/libs" -name 'whynotac-interop-probe-*.jar' ! -name '*-sources.jar' -exec cp {} "$WORK_DIR/plugins/WhyNotACInteropProbe.jar" \;
 for extra in ${EXTRA_PLUGINS:-}; do cp "$extra" "$WORK_DIR/plugins/"; done
 
 FIFO="$WORK_DIR/console.fifo"
@@ -69,7 +74,11 @@ echo "server up: $(grep -o 'Done ([^)]*)' "$WORK_DIR/e2e-server.log")"
 
 python3 -I "$HERE/probe_client.py" 127.0.0.1 "$PORT" WhyNotProbe "$PROBE_SECONDS" > "$WORK_DIR/e2e-probe.json" &
 PROBE=$!
-sleep $(( PROBE_SECONDS - 2 ))
+# Knockback three ways: the game's own path, injected below the game, and sent by the game but cancelled below it.
+sleep 4; echo "wnprobe game WhyNotProbe 0 0.3 0" > "$FIFO"
+sleep 1; echo "wnprobe inject WhyNotProbe 0 0.5 0" > "$FIFO"
+sleep 1; echo "wnprobe cancel WhyNotProbe 0 0.7 0" > "$FIFO"
+sleep $(( PROBE_SECONDS - 8 ))
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
@@ -97,6 +106,6 @@ if [ -n "$RECORDING" ]; then
 fi
 
 echo "--- server view (whynotac inspect)"
-grep -E '\[WhyNotAC\]|== WhyNotAC|RTT last|Transactions sent|Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
+grep -E '\[WhyNotAC\]|\[wnprobe\]|== WhyNotAC|RTT last|Transactions sent|View |Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
 echo "--- verification"
 python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json" "${RECORDING:-}" "$WORK_DIR/e2e-inspect.json" "$WORK_DIR/e2e-dump.jsonl" "$WORK_DIR"

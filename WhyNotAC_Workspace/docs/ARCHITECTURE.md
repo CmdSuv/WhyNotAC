@@ -54,23 +54,46 @@ fizik motoru         dedektörleri                   (çevrimiçi öğrenme)    
 
 ## Veri akışı ve thread modeli
 
+Zaman çizelgesi **ağın kenarında**, baytlardan kaydedilir (Faz 2b-1). Oyunun nesne görünümü ise
+yalnızca onunla karşılaştırılır:
+
 ```
- TCP ─► [Netty event-loop thread'i]                         [Analiz havuzu]            [Ana thread]
-        decode ─► WhyNotChannelHandler.channelRead
-                   ├─ System.nanoTime()  (en erken sunucu gözlemi)
-                   ├─ PacketTranslator   (NMS → kayıt)
-                   ├─ PlayerSession.onInbound (senkron: sıra no, tick no, kuyruğa ekle)
-                   └─ paket DEĞİŞMEDEN packet_handler'a ──────────────────────────────► oyun mantığı
-                                         │
-                                         └─► SerialMailbox ─► TimelineListener'lar (oturum başına seri)
- oyun ─► Connection.send ─► WhyNotChannelHandler.write
-                   ├─ bundle'ı aç, çevir, fizik etkili mi? (TransactionPolicy)
-                   ├─ evet: Ping(a) ─ paket ─ Ping(b)   (zaman çizelgesi = tel üzerindeki sıra)
-                   └─ encoder ─► TCP
+ TCP ─► splitter ─► [decompress] ─► whynotac_wire_in ─► (diğer eklentilerin decoder'ları) ─► decoder ─► … ─► whynotac_interceptor ─► packet_handler
+                                     │  vanilla 1.21.11 codec'iyle çöz,                                       │  oyunun gördüğü paketi
+                                     │  PlayerSession.onInbound (client'ın GÖNDERDİĞİ)                         │  kenarla uzlaştır
+                                     ▼                                                                         ▼
+                              SerialMailbox ─► TimelineListener'lar               Reconciler: yalnız bir tarafta olan ─► Divergence olayı
+
+ oyun ─► packet_handler ─► whynotac_interceptor ─► encoder ─► (diğer eklentilerin encoder'ları) ─► whynotac_wire_out ─► [compress] ─► prepender ─► TCP
+          sandviç: Ping ─ paket ─ Ping;                                                            çöz, PlayerSession.onOutbound
+          oyunun gönderdiğini kenara bildir                                                        (client'ın ALDIĞI), uzlaştır;
+                                                                                                   oyunu atlayan fizik paketini
+                                                                                                   kenarda sandviçle
 ```
 
-- Bir bağlantının gelen ve giden trafiği **tek bir event-loop thread'inde** işlenir. Bu yüzden
-  `sequence` oyuncu başına toplam bir sıradır ve `nanoTime` tutarlı bir saattir.
+- **Neden kenar:** ViaVersion, PacketEvents, ProtocolLib ve bunların üzerine kurulu eklentiler
+  oyun ile ağ arasında paket ekler, iptal eder veya yeniden yazar. PacketEvents
+  `sendPacketSilently` oyunun gönderim yolunu hiç kullanmaz. Client'ın aldığı ama WhyNotAC'nin
+  görmediği bir knockback, dürüst bir oyuncunun hareketini imkânsız gösterirdi. Kenarda
+  client'ın gönderdiği ve aldığı **tam olarak** görülür.
+- **Yerleşim:** Gelen tap `decompress`'in (yoksa `splitter`'ın), giden tap `compress`'in (yoksa
+  `prepender`'ın) hemen yanındadır. Paper sıkıştırmayı bir `ConnectionEvent` ile duyurur.
+  ViaVersion buna kendini sıkıştırmanın yanına taşıyarak tepki verir. Tap'ler bir event-loop
+  görevi sonra yine en dışa döner. Her 5 saniyede bir denetim, araya giren başka eklentileri de
+  düzeltir. Hepsi E2E'de gerçek ViaVersion ile doğrulandı.
+- **Uzlaştırma (`Reconciler`):** Yalnızca bir tarafta olan her paket açık bir
+  `InboundDivergence`/`OutboundDivergence` olayıdır (`WIRE_ONLY`/`GAME_ONLY`). Yeniden
+  yazılmış bir paket iki olay üretir. Başka eklentilerin bir süre tutup sonra bıraktığı paketler
+  (ViaVersion ve PacketEvents play başında bunu yapar) gecikmedir, sapma sayılmaz. Bir paket,
+  ancak akış onu geçtiğinde **ve** 2 saniyelik süre dolduğunda eksik sayılır.
+- **Kenar çözülemezse:** Kenar, sunucunun 774 codec'iyle çözülür. Handshake baytlarından okunan
+  gerçek protokol başkaysa (ViaVersion'lı eski client) veya bağlantı WhyNotAC'den önce kurulmuşsa,
+  oyunun görünümü kullanılır. Bu, bir `Observation` olayıyla açıkça kaydedilir; analiz hangi
+  görünüme sahip olduğunu bilir.
+- Bir bağlantının tüm handler'ları **tek bir event-loop thread'inde** çalışır. Bu yüzden kenar,
+  oyun tarafı ve sandviç aynı çağrı yığınında, kilitsiz ve kesin sırayla işler.
+
+- `sequence` oyuncu başına toplam bir sıradır ve `nanoTime` tutarlı bir saattir.
 - Ağ thread'i analiz beklemez: yalnızca damgalar, sayar, kuyruğa ekler.
 - `SerialMailbox` sınırlıdır (varsayılan 16 384 olay). Taşma, sessizce veri kaybı değil, açık bir
   `Gap` olayıdır. Gap'i aşan kanıt geçersizdir.
@@ -93,9 +116,12 @@ client:   Pong(a) gelene kadar: knockback KESİN uygulanmadı
 ```
 
 Böylece yüksek ping'li ya da jitter'lı bir oyuncunun "geç" uygulanan knockback'i tahmin edilmez,
-**kanıtlanır**. Ping arkasına saklanan bir hile (transaction'ı geciktirme/atlatma) ise protokol
-düzeyinde görünür: atlanan transaction `SKIPPED_TRANSACTION`, sahte kimlik
-`UNKNOWN_TRANSACTION` anomalisidir (canlı E2E testte ikisi de yakalandı). Ayrıca her sunucu
+**kanıtlanır**. Ping arkasına saklanan bir hile protokol düzeyinde görünür: atlanan transaction
+`SKIPPED_TRANSACTION`, iki kez yanıtlanan `DUPLICATE_TRANSACTION`, yanıtlanmayı tamamen bırakan
+client `TRANSACTIONS_WITHHELD` anomalisidir (canlı E2E testte ilk ikisi yakalanıyor). Kimlikler
+`SecureRandom`'dan gelir. Bu yüzden bir transaction görülmeden yanıtlanamaz ve WhyNotAC'nin ping'leri
+sabit bir önekle tanınamaz. Başka bir eklentinin oyunu atlayarak gönderdiği fizik paketi, kenarda
+baytlarla kodlanan bir sandviçe alınır. Ayrıca her sunucu
 tick'inde bağımsız bir transaction gönderilerek sürekli RTT/jitter izi tutulur
 (RFC 6298 SRTT, RFC 3550 jitter).
 
@@ -119,7 +145,7 @@ olasılığı ölçülebilir ve keyfî derecede küçük tutmaktır:
 |---|---|---|
 | `whynotac-math` | **Faz 1 ✔** | Vanilla bit-tam sayısal çekirdek (`Mth`, `Vec3`, LpVec3, fare modeli, gönderim kuralları), ULP/tolerans, hatasız dönüşümler, Neumaier toplamı, kaydırmalı Welford momentleri |
 | `whynotac-protocol` | **Faz 1 ✔** | 1.21.11 paket modeli, oyuncu zaman çizelgesi, aktör posta kutusu, transaction izleme |
-| `whynotac-paper` | **Faz 1 ✔** | NMS/Netty paket yakalayıcı, sandviç, `/whynotac inspect` |
+| `whynotac-paper` | **Faz 1 ✔ · 2b-1 ✔** | NMS/Netty paket yakalayıcı, ağ kenarı tap'leri ve uzlaştırma, sandviç (kenarda da), `/whynotac inspect` |
 | `whynotac-conformance` | **Faz 1 ✔** | Gerçek oyun sınıflarına karşı diferansiyel testler |
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
@@ -129,13 +155,14 @@ olasılığı ölçülebilir ve keyfî derecede küçük tutmaktır:
 | `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve karar |
 | `whynotac-storage` | Faz 4 (planlı) | Profil ve kanıt kalıcılığı |
 
-## Bilinen sınırlar (Faz 1)
+## Bilinen sınırlar
 
 - Yalnızca **Paper 1.21.11** (CraftBukkit/NMS sınıfları kullanılır). Spigot ve Folia
   desteklenmez/test edilmedi.
-- ViaVersion ile başka sürümden bağlanan client'lar paket düzeyinde doğru görünür (ViaVersion
-  bayt düzeyinde çevirir), ancak **fizikleri farklıdır**. Faz 2'de bu client'lar ya ayrı
-  modellenecek ya da analiz dışı tutulacak.
+- ViaVersion ile başka sürümden bağlanan client'lar için kenar çözülemez. Oyunun görünümü
+  kullanılır ve bu açıkça kaydedilir. Bu client'ların **fizikleri de farklıdır**. Client türü
+  tespiti (Faz 2b-2) ayrı modelleme ya da analiz dışı tutma kararını verecek.
 - `ChannelInitializeListenerHolder` Paper'ın desteklenmeyen iç API'sidir.
-- Ölçülen ek yük: ağ thread'inde paket başına ≈ 115 ns / 112 B; 1 000 oyuncu ≈ bir çekirdeğin
-  %1.2'si (ayrıntı: `docs/phases/PHASE-2A-REPORT.md`).
+- Ölçülen ek yük: ağ thread'inde paket başına ≈ 115 ns / 112 B (nesne görünümü). Kenar,
+  modellenen paket başına ≈ 180–220 ns, modellenmeyen (chunk vb.) başına ≈ 80 ns ekler
+  (ayrıntı: `docs/phases/PHASE-2A-REPORT.md`, `docs/phases/PHASE-2B-1-REPORT.md`).

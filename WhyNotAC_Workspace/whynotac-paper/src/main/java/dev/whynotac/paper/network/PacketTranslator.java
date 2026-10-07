@@ -118,8 +118,24 @@ public final class PacketTranslator {
     static final EnumMapping<ClientIntent, ServerboundPacket.Handshake.Intent> INTENT =
             new EnumMapping<>(ClientIntent.class, ServerboundPacket.Handshake.Intent.class, ServerboundPacket.Handshake.Intent.UNKNOWN);
 
+    /**
+     * Packet type paths (any protocol state) that {@link #inbound} turns into a dedicated model record.
+     * The edge view decodes exactly these; everything else is recorded by type only.
+     * {@code ProtocolSurfaceTest} keeps this list in step with the protocol.
+     */
+    public static final Set<String> SERVERBOUND_MODELLED = Set.of(
+            "intention", "accept_teleportation", "chunk_batch_received", "client_tick_end", "container_click", "container_close", "interact",
+            "keep_alive", "move_player_pos", "move_player_pos_rot", "move_player_rot", "move_player_status_only", "move_vehicle",
+            "paddle_boat", "player_abilities", "player_action", "player_command", "player_input", "player_loaded", "pong",
+            "set_carried_item", "swing", "use_item", "use_item_on");
+
+    /** Packet type paths that {@link #outbound} turns into a dedicated model record (see {@link #SERVERBOUND_MODELLED}). */
+    public static final Set<String> CLIENTBOUND_MODELLED = Set.of(
+            "explode", "game_event", "keep_alive", "login", "ping", "player_abilities", "player_position", "player_rotation",
+            "remove_mob_effect", "respawn", "set_entity_motion", "update_attributes", "update_mob_effect");
+
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
-    static String typeName(Packet<?> packet) {
+    public static String typeName(Packet<?> packet) {
         try {
             return packet.type().id().toString();
         } catch (RuntimeException | LinkageError e) {

@@ -45,12 +45,9 @@ class ProtocolSurfaceTest {
 
     // --- serverbound ---------------------------------------------------------------------------
 
-    /** Translated into a dedicated model record. */
-    private static final Set<String> SERVERBOUND_MODELLED = Set.of(
-            "accept_teleportation", "chunk_batch_received", "client_tick_end", "container_click", "container_close", "interact",
-            "keep_alive", "move_player_pos", "move_player_pos_rot", "move_player_rot", "move_player_status_only", "move_vehicle",
-            "paddle_boat", "player_abilities", "player_action", "player_command", "player_input", "player_loaded", "pong",
-            "set_carried_item", "swing", "use_item", "use_item_on");
+    /** Translated into a dedicated model record (the handshake's "intention" is not a play packet). */
+    private static final Set<String> SERVERBOUND_MODELLED = PacketTranslator.SERVERBOUND_MODELLED.stream()
+            .filter(id -> !id.equals("intention")).collect(Collectors.toUnmodifiableSet());
 
     /** Relevant for analysis, to be modelled next (Phase 2b): client settings and brand, item picking. */
     private static final Set<String> SERVERBOUND_PLANNED = Set.of(
@@ -68,10 +65,8 @@ class ProtocolSurfaceTest {
 
     // --- clientbound -----------------------------------------------------------------------------
 
-    private static final Set<String> CLIENTBOUND_MODELLED = Set.of(
-            "explode", "game_event", "keep_alive", "login", "ping", "player_abilities", "player_position", "player_rotation",
-            "remove_mob_effect", "respawn", "set_entity_motion", "update_attributes", "update_mob_effect",
-            "bundle_delimiter"); // bundles are flattened by the handler
+    private static final Set<String> CLIENTBOUND_MODELLED = Stream.concat(PacketTranslator.CLIENTBOUND_MODELLED.stream(),
+            Stream.of("bundle_delimiter")).collect(Collectors.toUnmodifiableSet()); // bundles are flattened
 
     /**
      * Changes what the client simulates or collides with, or its combat state, but is not modelled yet.

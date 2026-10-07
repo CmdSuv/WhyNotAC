@@ -81,9 +81,14 @@ class WhyNotChannelHandlerTest {
                 forwardedInbound.add(msg);
             }
         });
-        WhyNotChannelHandler handler = new WhyNotChannelHandler(session, new PacketTranslator(), Logger.getAnonymousLogger());
+        // The game's view (no edge taps): what a connection attached mid-session, or a translated client, gets.
+        dev.whynotac.paper.wire.WireObserver observer = new dev.whynotac.paper.wire.WireObserver(session, new PacketTranslator(),
+                new dev.whynotac.paper.wire.WireProtocols(() -> { throw new AssertionError("no edge decoding here"); }), Logger.getAnonymousLogger());
+        observer.useGameView("test", 0);
+        WhyNotChannelHandler handler = new WhyNotChannelHandler(session, new PacketTranslator(), observer, Logger.getAnonymousLogger());
         handler.selfEntityId(SELF);
         channel.pipeline().addBefore("packet_handler", PacketInterceptor.HANDLER_NAME, handler);
+        events.clear();
     }
 
     private List<Object> drainOutbound() {

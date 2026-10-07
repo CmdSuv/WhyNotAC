@@ -63,6 +63,7 @@ def main():
         verify_recording(probe, sys.argv[3], sys.argv[4], sys.argv[5], check)
         if sys.argv[3]:
             verify_subject_requests(sys.argv[6], sys.argv[3], sys.argv[5], check)
+            verify_edge(probe, log, sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -124,6 +125,53 @@ def verify_subject_requests(work_dir, recording, dump_path, check):
     forgotten = json.load(open(os.path.join(work_dir, "e2e-forget.json")))
     left = [f for _, _, fs in os.walk(os.path.join(work_dir, "forget-copy")) for f in fs if ".wnrec" in f]
     check(forgotten["deleted"] == 1 and forgotten["dry_run"] is False and left == [], f"forget --yes deleted the recording (left: {left})")
+
+
+def f64(value):
+    """A dumped double: {"f64": text, "bits": hex} -> exact float."""
+    return struct.unpack(">d", bytes.fromhex(value["bits"][2:].zfill(16)))[0]
+
+
+def verify_edge(probe, log, dump_path, check):
+    """The timeline's knockback must be exactly what the client received, whoever sent or cancelled it."""
+    events = [json.loads(line) for line in open(dump_path) if line.strip()]
+    self_id = probe["entity_id"]
+    observation = [e for e in events if e["type"] == "Observation"]
+    check(len(observation) == 1 and observation[0]["inbound"] == "WIRE" and observation[0]["outbound"] == "WIRE"
+          and observation[0]["clientProtocol"] == 774, f"timeline recorded at the network edge: {observation}")
+
+    def motion_of(packet):
+        return tuple(f64(packet["motion"][axis]) for axis in ("x", "y", "z"))
+
+    recorded = [motion_of(e["packet"]) for e in events
+                if e["type"] == "Outbound" and e["packet"]["type"] == "SetEntityMotion" and e["packet"]["entityId"] == self_id]
+    received = [tuple(float(c) for c in t[1:]) for t in probe["trace"] if t[0] == "motion"]
+    check(recorded == received and len(received) >= 2,
+          f"knockback on the timeline == knockback the client received, bit for bit ({len(received)}: {received})")
+
+    def near(motion, y):
+        return motion[0] == 0.0 and motion[2] == 0.0 and abs(motion[1] - y) < 4e-5
+
+    check(any(near(m, 0.3) for m in received), "game-path knockback (0.3) reached the client and the timeline")
+    check(any(near(m, 0.5) for m in received), "knockback injected below the game (0.5) reached the client and the timeline")
+    check(not any(near(m, 0.7) for m in received + recorded), "knockback cancelled below the game (0.7) is in neither")
+
+    divergences = [e for e in events if e["type"] == "OutboundDivergence"]
+    inbound_divergences = [e for e in events if e["type"] == "InboundDivergence"]
+    kinds = sorted((e["kind"], round(motion_of(e["packet"])[1], 3)) for e in divergences if e["packet"]["type"] == "SetEntityMotion")
+    check(kinds == [("GAME_ONLY", 0.7), ("WIRE_ONLY", 0.5)], f"exactly the injected and the cancelled knockback are flagged: {kinds}")
+    check(len(divergences) == 2 and not inbound_divergences,
+          f"no other divergence anywhere ({len(divergences)} outbound, {len(inbound_divergences)} inbound)")
+
+    # Bracketing: every knockback the client received sits between two transactions, in the client's own order.
+    trace = probe["trace"]
+    bracketed = all(0 < i < len(trace) - 1 and trace[i - 1][0] == "ping" and trace[i + 1][0] == "ping"
+                    for i, t in enumerate(trace) if t[0] == "motion")
+    check(bracketed, "every knockback the client received is bracketed by transactions, the injected one too (at the edge)")
+    m = re.search(r"\[wnprobe\] inject via (\S+)", log)
+    c = re.search(r"\[wnprobe\] (\S+) cancelled a velocity packet", log)
+    check(m is not None and c is not None and m.group(1) == c.group(1),
+          f"knockback injected and cancelled through {m.group(1) if m else '?'}")
 
 
 if __name__ == "__main__":

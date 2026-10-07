@@ -32,6 +32,9 @@ public final class RecordingFormat {
     public static final int TAG_GAP = 5;
     public static final int TAG_ANOMALY = 6;
     public static final int TAG_DISCONNECTED = 7;
+    public static final int TAG_OBSERVATION = 8;
+    public static final int TAG_INBOUND_DIVERGENCE = 9;
+    public static final int TAG_OUTBOUND_DIVERGENCE = 10;
     public static final int MAX_EVENT_TAG = 63;
     public static final int TAG_END = 127;
 

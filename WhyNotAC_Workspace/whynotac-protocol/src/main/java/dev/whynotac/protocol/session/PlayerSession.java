@@ -42,6 +42,7 @@ public final class PlayerSession {
     private long inboundCount;
     private long outboundModeled;
     private long outboundUnmodeled;
+    private long divergences;
     private long lastDeliveredSequence = -1;
     private boolean closed;
 
@@ -97,6 +98,36 @@ public final class PlayerSession {
             transactions.onSent(ping.id(), nanoTime); // ignored unless the id was allocated here
         }
         emit(nanoTime, seq -> new TimelineEvent.Outbound(seq, nanoTime, packet));
+    }
+
+    /** Records where {@link #onInbound}/{@link #onOutbound} observations come from from now on. */
+    public synchronized void onObservation(TimelineEvent.Observation.Source inbound, TimelineEvent.Observation.Source outbound,
+            int clientProtocol, String detail, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        emit(nanoTime, seq -> new TimelineEvent.Observation(seq, nanoTime, inbound, outbound, clientProtocol, detail));
+    }
+
+    /** The client's inbound stream and the game's differ by this packet. */
+    public synchronized void onInboundDivergence(TimelineEvent.DivergenceKind kind, ServerboundPacket packet, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        divergences++;
+        emit(nanoTime, seq -> new TimelineEvent.InboundDivergence(seq, nanoTime, kind, packet));
+    }
+
+    /** The client's outbound stream and the game's differ by this packet. */
+    public synchronized void onOutboundDivergence(TimelineEvent.DivergenceKind kind, ClientboundPacket packet, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        divergences++;
+        emit(nanoTime, seq -> new TimelineEvent.OutboundDivergence(seq, nanoTime, kind, packet));
     }
 
     /** Reserves a transaction id for a ping the platform is about to send. */
@@ -241,11 +272,14 @@ public final class PlayerSession {
     }
 
     public synchronized Counters counters() {
-        return new Counters(inboundCount, outboundModeled, outboundUnmodeled, droppedTotal, mailbox.size());
+        return new Counters(inboundCount, outboundModeled, outboundUnmodeled, divergences, droppedTotal, mailbox.size());
     }
 
-    /** Traffic counters; {@code dropped} counts events lost to back-pressure (each one became part of a gap). */
-    public record Counters(long inbound, long outboundModeled, long outboundUnmodeled, long dropped, int queued) {}
+    /**
+     * Traffic counters; {@code divergences} counts packets that differ between the client's stream and
+     * the game's, {@code dropped} counts events lost to back-pressure (each one became part of a gap).
+     */
+    public record Counters(long inbound, long outboundModeled, long outboundUnmodeled, long divergences, long dropped, int queued) {}
 
     public synchronized boolean isClosed() {
         return closed;
