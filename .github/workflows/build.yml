@@ -69,3 +69,42 @@ jobs:
             ${{ runner.temp }}/e2e/e2e-*
             ${{ runner.temp }}/e2e/logs/latest.log
           if-no-files-found: warn
+
+  # The official, unmodified Minecraft 1.21.11 client, headless (Xvfb + Mesa software OpenGL), played
+  # with real OS-level keyboard and mouse input (XTest) on a real Paper server with WhyNotAC. Checks the
+  # recording against WhyNotAC's vanilla models: mouse-to-rotation math, wire order, tick clock.
+  real-client:
+    name: real client ground truth
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: WhyNotAC_Workspace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install a virtual display and software OpenGL
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libxtst6 libxi6 libxrandr2 libxcursor1 libxxf86vm1
+      - name: Cache the official client (SHA-1 verified on every run)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/realclient/client-cache
+          key: minecraft-client-1.21.11-v1
+      - name: Play a session with the real client
+        run: tools/realclient/run_realclient.sh "$RUNNER_TEMP/realclient"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-client
+          path: |
+            ${{ runner.temp }}/realclient/*.log
+            ${{ runner.temp }}/realclient/*.json
+            ${{ runner.temp }}/realclient/dump.jsonl
+            ${{ runner.temp }}/realclient/game/screenshots/
+            ${{ runner.temp }}/realclient/game/crash-reports/
+          if-no-files-found: warn
