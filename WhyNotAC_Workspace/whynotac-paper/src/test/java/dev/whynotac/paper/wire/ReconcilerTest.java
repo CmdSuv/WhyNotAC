@@ -84,4 +84,23 @@ class ReconcilerTest {
         assertEquals(10, missing.size(), "oldest entries are reported, not kept forever");
         assertFalse(reconciler.match("t", "p" + (Reconciler.CAPACITY + 9), 1), "beyond the scan window");
     }
+
+    @Test
+    void typeQueuesAreKeptButBounded() {
+        for (int round = 0; round < 3; round++) {
+            for (String type : List.of("a", "b")) {
+                reconciler.expect(type, type + round, 0);
+                assertTrue(reconciler.match(type, type + round, 0));
+            }
+        }
+        assertEquals(2, reconciler.types(), "an emptied queue is reused, not rebuilt for every packet");
+        // Distinct types beyond what any protocol state has (malformed or unknown frames) are not kept.
+        for (int i = 0; i < Reconciler.KEPT_TYPES * 2; i++) {
+            reconciler.expect("unknown/" + i, "x", 0);
+            assertTrue(reconciler.match("unknown/" + i, "x", 0));
+        }
+        assertEquals(Reconciler.KEPT_TYPES, reconciler.types());
+        assertEquals(0, reconciler.pending());
+        assertTrue(missing.isEmpty());
+    }
 }

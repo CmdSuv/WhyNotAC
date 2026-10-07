@@ -23,12 +23,17 @@ import java.util.Map;
  * A match that consumes nothing means the packet exists only on the matching side.
  *
  * <p>Bounded: at most {@link #CAPACITY} pending entries (the oldest is declared missing beyond that),
- * and a match compares at most {@link #SCAN} entries of its own type. Event-loop confined.
+ * and a match compares at most {@link #SCAN} entries of its own type. A type's queue is kept when it
+ * runs empty (packet types are a small fixed set, and rebuilding the queue on every packet would
+ * allocate on the hot path); beyond {@link #KEPT_TYPES} types, empty queues are dropped. Event-loop
+ * confined.
  */
 final class Reconciler<P> {
 
     static final int CAPACITY = 4_096;
     static final int SCAN = 256;
+    /** More than every packet type of one protocol state; only malformed or unknown frames go beyond. */
+    static final int KEPT_TYPES = 256;
 
     @FunctionalInterface
     interface Same<P> {
@@ -82,7 +87,7 @@ final class Reconciler<P> {
             }
         }
         Entry<P> entry = new Entry<>(nextSeq++, nanoTime, type, packet);
-        byType.computeIfAbsent(type, t -> new ArrayDeque<>()).addLast(entry);
+        byType.computeIfAbsent(type, t -> new ArrayDeque<>(4)).addLast(entry);
         order.addLast(entry);
         pending++;
         expire(nanoTime);
@@ -105,9 +110,7 @@ final class Reconciler<P> {
                     break;
                 }
             }
-            if (candidates.isEmpty()) {
-                byType.remove(type);
-            }
+            releaseIfEmpty(type, candidates);
         }
         expire(nanoTime);
         return found;
@@ -144,10 +147,19 @@ final class Reconciler<P> {
         ArrayDeque<Entry<P>> queue = byType.get(entry.type);
         if (queue != null) {
             queue.remove(entry);
-            if (queue.isEmpty()) {
-                byType.remove(entry.type);
-            }
+            releaseIfEmpty(entry.type, queue);
         }
+    }
+
+    private void releaseIfEmpty(String type, ArrayDeque<Entry<P>> queue) {
+        if (queue.isEmpty() && byType.size() > KEPT_TYPES) {
+            byType.remove(type);
+        }
+    }
+
+    /** Number of per-type queues currently held (for tests). */
+    int types() {
+        return byType.size();
     }
 
     int pending() {
