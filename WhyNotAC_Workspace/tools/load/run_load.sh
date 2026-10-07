@@ -4,11 +4,13 @@
 # usage: tools/load/run_load.sh <work-dir> <variant> [bots] [measure-seconds] [crowd]
 #   variant  baseline  - no plugin (the reference)
 #            whynotac  - WhyNotAC with session recording enabled
-#   crowd    spread (default): bots spread far apart (per-player cost, little entity traffic)
-#            crowd: all bots in one place (every bot sees every other one: N^2 entity traffic)
+#   layout   cluster (default): bots at least 8 blocks apart within 160 blocks (each sees a few dozen
+#            others, like a busy spawn or arena); spread: far apart (per-player cost only);
+#            crowd: all in one place (every bot sees every other one: N^2 entity traffic)
 #
 # The server runs on CPUs 0-1 and the bots on the remaining CPUs (taskset), so their load does not mix.
-# After every bot has joined and a warm-up, one measurement window: Paper's tick times, the server
+# After every bot has joined, the warm-up lasts until the tick time has settled (chunk generation done),
+# then one measurement window: Paper's tick times, the server
 # process's CPU time, a JFR profile (attributed to WhyNotAC by JfrAttribution.java), the heap by class
 # and, with WhyNotAC, its own totals (/whynotac stats). Results: <work-dir>/load-<variant>.json
 set -euo pipefail
@@ -16,8 +18,10 @@ WORK_DIR=$(mkdir -p "$1" && cd "$1" && pwd)
 VARIANT=$2
 BOTS=${3:-100}
 MEASURE=${4:-60}
-LAYOUT=${5:-spread}
-WARMUP=${LOAD_WARMUP:-60}
+LAYOUT=${5:-cluster}
+WARMUP=${LOAD_WARMUP:-30}            # minimum warm-up; it continues until MSPT has settled
+SETTLE_MSPT=${LOAD_SETTLE_MSPT:-25}  # settled: Paper's 5 s average tick time below this, twice in a row
+MAX_WARMUP=${LOAD_MAX_WARMUP:-300}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PAPER_JAR=paper-1.21.11-132.jar
@@ -87,12 +91,14 @@ JAVA_PID=$(pgrep -f -n "java .*$PAPER_JAR")
 echo "server up (pid $JAVA_PID, CPUs $SERVER_CPUS), $BOTS bots on CPUs $BOT_CPUS"
 
 # Bots in several processes; every bot runs until the end of the measurement window.
-BOT_SECONDS=$((WARMUP + MEASURE + 30))
+BOT_SECONDS=$((MAX_WARMUP + MEASURE + 120))   # an upper bound: the bots stop when the stop file appears
+STOP_FILE="$OUT.stop"
+rm -f "$STOP_FILE"
 PER=$(( (BOTS + PROCESSES - 1) / PROCESSES ))
 for ((p = 0; p < PROCESSES; p++)); do
   FIRST=$((p * PER)); COUNT=$(( BOTS - FIRST < PER ? BOTS - FIRST : PER ))
   [ "$COUNT" -gt 0 ] || continue
-  taskset -c "$BOT_CPUS" python3 -I "$HERE/load_bots.py" 127.0.0.1 "$PORT" Bot "$FIRST" "$COUNT" "$BOT_SECONDS" 0.15 > "$OUT-bots-$p.json" 2> "$OUT-bots-$p.err" &
+  taskset -c "$BOT_CPUS" python3 -I "$HERE/load_bots.py" 127.0.0.1 "$PORT" Bot "$FIRST" "$COUNT" "$BOT_SECONDS" 0.15 "$STOP_FILE" > "$OUT-bots-$p.json" 2> "$OUT-bots-$p.err" &
   BOT_PIDS+=($!)
 done
 for _ in $(seq 1 240); do
@@ -101,10 +107,21 @@ for _ in $(seq 1 240); do
   sleep 1
 done
 echo "joined: $(grep -c 'joined the game' "$OUT-server.log" || true)/$BOTS"
-if [ "$LAYOUT" = spread ]; then
-  echo "spreadplayers 0 0 80 2000 false @a" > "$FIFO"   # far enough apart that bots do not see each other
-fi
+case "$LAYOUT" in
+  spread) echo "spreadplayers 0 0 80 1200 false @a" > "$FIFO" ;;   # far enough apart that bots do not see each other
+  cluster) echo "spreadplayers 0 0 8 160 false @a" > "$FIFO" ;;
+  crowd) ;;
+  *) echo "unknown layout $LAYOUT"; exit 2 ;;
+esac
 sleep "$WARMUP"
+WARMED=$WARMUP; SETTLED=0
+while [ "$WARMED" -lt "$MAX_WARMUP" ] && [ "$SETTLED" -lt 2 ]; do
+  echo "mspt" > "$FIFO"; sleep 5; WARMED=$((WARMED + 5))
+  AVG5=$(sed -E 's/\x1b\[[0-9;]*m//g' "$OUT-server.log" | grep -A1 'Server tick times' | tail -1 | grep -oE '[0-9.]+/[0-9.]+/[0-9.]+' | head -1 | cut -d/ -f1)
+  if [ -n "$AVG5" ] && awk -v a="$AVG5" -v t="$SETTLE_MSPT" 'BEGIN { exit !(a < t) }'; then SETTLED=$((SETTLED + 1)); else SETTLED=0; fi
+done
+echo "warm-up: ${WARMED}s, settled=$SETTLED (last 5 s MSPT ${AVG5:-?})"
+echo "$WARMED $SETTLED" > "$OUT-warmup.txt"
 
 cpu_ticks() { awk '{print $14 + $15}' "/proc/$JAVA_PID/stat"; }
 CPU_START=$(cpu_ticks); T_START=$(date +%s.%N)
@@ -117,6 +134,7 @@ echo "tps" > "$FIFO"
 [ "$VARIANT" = whynotac ] && echo "whynotac stats" > "$FIFO"
 sleep 2
 jcmd "$JAVA_PID" GC.class_histogram > "$OUT-histogram.txt" 2>/dev/null || true
+touch "$STOP_FILE"   # every bot finishes its current second and reports whether it was still connected
 for pid in "${BOT_PIDS[@]}"; do wait "$pid" || true; done
 BOT_PIDS=()
 sleep 3

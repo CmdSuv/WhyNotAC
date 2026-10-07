@@ -53,11 +53,16 @@ def main():
         "errors": [e for b in bot_results for e in b["errors"]][:10],
         "disconnects": [d for b in bot_results for d in b["disconnects"]][:10],
     }
+    try:
+        warmed, settled = open(out_prefix + "-warmup.txt").read().split()
+        warmup = {"seconds": int(warmed), "settled": int(settled) >= 2}
+    except (OSError, ValueError):
+        warmup = None
     moved_wrongly = sum(1 for line in log if "moved wrongly" in line or "moved too quickly" in line)
 
     print(json.dumps({
         "variant": variant, "layout": layout, "bots": int(bots), "measureSeconds": round(seconds, 2),
-        "mspt": mspt, "tps": tps, "serverCpuCores": round(cpu_cores, 4),
+        "warmup": warmup, "mspt": mspt, "tps": tps, "serverCpuCores": round(cpu_cores, 4),
         "jfr": json.load(open(jfr_json)),
         "heapAfterFullGcBytes": heap_total, "whynotacHeapBytes": ours, "whynotacTopClasses": top[:12],
         "whynotacStatsDuringLoad": stats[0] if stats else None,
