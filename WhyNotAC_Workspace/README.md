@@ -9,6 +9,10 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > Sistem şu an tamamen pasif bir gözlemcidir: hiçbir oyuncuya işlem yapmaz.
 > Faz 2b-1: zaman çizelgesi ağın kenarında, client'ın gerçekten gönderdiği ve aldığı baytlardan
 > kaydedilir. Diğer eklentilerin eklediği, iptal ettiği veya yeniden yazdığı paketler görünür.
+> Faz 2b-2: client hakkındaki her bilgi (kimlik, topoloji, protokol, çevirici, Bedrock, marka) güven
+> seviyesiyle kaydedilir. Client'ın kendi iddiası hiçbir deterministik kontrolü kapatamaz.
+> Gerçek client doğrulaması: resmi, değiştirilmemiş 1.21.11 client'ı CI'da başsız ve gerçek
+> klavye/fare girdisiyle oynanır. Kayıt WhyNotAC'ın vanilla modelleriyle karşılaştırılır.
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md)
 
 ## Belgeler
@@ -31,15 +35,17 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 139 test
+./gradlew build                       # tüm modüller + 154 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (39 kontrol)
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (46 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e  # aynı test, ViaVersion 5.12.0 + PacketEvents 2.14.0 yanında
+tools/realclient/run_realclient.sh /tmp/wnac-rc  # resmi client, Xvfb + XTest (bkz. tools/realclient/README.md)
 ./gradlew :whynotac-bench:jmh         # performans ölçümü (sonuç: whynotac-bench/build/jmh/results.json)
 ```
 
-CI her push'ta derlemeyi, tüm testleri ve iki canlı E2E varyantını (yalın, interop) çalıştırır.
+CI her push'ta derlemeyi, tüm testleri, iki canlı E2E varyantını (yalın, interop) ve gerçek client
+oturumunu çalıştırır.
 **Tekrarlanabilir derleme:** SNAPSHOT bağımlılıkları (`dev-bundle`, `paper-api`, `velocity-native`)
 `gradle/libs.versions.toml` içinde tek bir zaman damgalı yapıya sabitlenmiştir. Sabitlenmemiş bir
 SNAPSHOT derlemeyi durdurur. Aynı commit'ten iki temiz derleme bayt bayt aynı eklenti jar'ını

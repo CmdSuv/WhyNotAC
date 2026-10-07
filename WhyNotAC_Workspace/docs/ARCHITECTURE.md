@@ -152,6 +152,12 @@ baytlarla kodlanan bir sandviçe alınır. Ayrıca her sunucu
 tick'inde bağımsız bir transaction gönderilerek sürekli RTT/jitter izi tutulur
 (RFC 6298 SRTT, RFC 3550 jitter).
 
+Gerçek client'ta ölçülen sıra kuralı (resmi 1.21.11 client'ı, `tools/realclient`): oyun fazında
+client pong'ları kare başında, tick'in paketlerinden önce gönderir. Bir tick'in ilk paketi ile
+`ClientTickEnd` arasında hiç pong yoktur (558 pong'da 0 ihlal). Bu kural, ping'leri ayrı bir thread'den
+yanıtlayan client'lara karşı deterministik kanıt adayıdır. Kanıt olarak kullanılmadan önce modlu
+client'larda ve çeviricilerin arkasında doğrulanacak (yol haritası).
+
 ## Sıfır yanlış-ban yaklaşımı (verdict katmanı için sözleşme)
 
 Matematiksel olarak hiçbir sistem %0 olasılık **garanti edemez**. WhyNotAC'nin taahhüdü,
