@@ -140,7 +140,7 @@ public final class Generators {
             case "KeepAlive" -> new ClientboundPacket.KeepAlive(anyLong());
             case "Login" -> new ClientboundPacket.Login(anyInt());
             case "Respawn" -> new ClientboundPacket.Respawn();
-            case "SetEntityMotion" -> new ClientboundPacket.SetEntityMotion(anyInt(), vec());
+            case "SetEntityMotion" -> new ClientboundPacket.SetEntityMotion(anyInt(), vec(), random.nextBoolean() ? vec() : null);
             case "Explosion" -> new ClientboundPacket.Explosion(vec(), anyFloat(), random.nextBoolean() ? vec() : null);
             case "PlayerPosition" -> {
                 EnumSet<RelativeFlag> flags = EnumSet.noneOf(RelativeFlag.class);

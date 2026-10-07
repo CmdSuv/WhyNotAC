@@ -34,7 +34,7 @@ class FormatStabilityTest {
                 new TimelineEvent.Inbound(3, 1_070, 0, new ServerboundPacket.PlayerInput(true, false, false, true, false, false, true)),
                 new TimelineEvent.Inbound(4, 1_080, 0, new ServerboundPacket.ClientTickEnd()),
                 new TimelineEvent.Outbound(5, 1_090, new ClientboundPacket.Ping(0x574E0001)),
-                new TimelineEvent.Outbound(6, 1_091, new ClientboundPacket.SetEntityMotion(42, new Vec3d(0.25, 0.4, -0.125))),
+                new TimelineEvent.Outbound(6, 1_091, ClientboundPacket.SetEntityMotion.sent(42, new Vec3d(0.25, 0.4, -0.125))),
                 new TimelineEvent.Outbound(7, 1_092, new ClientboundPacket.PlayerPosition(3, Vec3d.ZERO, Vec3d.Y_AXIS, 0F, 0F, Set.of(RelativeFlag.X, RelativeFlag.ROTATE_DELTA))),
                 new TimelineEvent.Inbound(8, 2_000, 1, new ServerboundPacket.Pong(0x574E0001)),
                 new TimelineEvent.Acknowledged(9, 2_000, 0x574E0001, 1_090, 0),
@@ -113,17 +113,18 @@ class FormatStabilityTest {
 
     /**
      * Format version 2 bytes of {@link #FIXED}, generated from the reference implementation, checked by
-     * hand against version 1 (the only differences: the three string definitions carry their index
-     * 00/01/02, and their records are one byte longer) and committed.
+     * hand against version 1 (differences: the three string definitions carry their index 00/01/02 and
+     * their records are one byte longer; the knockback uses tag 16 with the client's exact value, here
+     * LpVec3.quantize(0.25, 0.4, -0.125), followed by flag 1 and the server's value) and committed.
      */
     private static final String GOLDEN_V2 = ""
             + "042301000000000000001234000000000000567800000d616e6f6e2d303030303132333454012501640001073ff80000"
             + "000000004050000000000000c00200000000000042b40000c1280000010d011400010642b60000c12800000105011400"
-            + "024901040114000a0207011401574e0001021c010205543fd00000000000003fd999999999999abfc000000000000002"
-            + "3e0102070600000000000000000000000000000000000000000000000000000000000000003ff0000000000000000000"
-            + "000000000000000000000000008102010901980e020b574e000103090100574e00019c0e00010801c80100050e010001"
-            + "0a0114000407000000000a0105011400060001150114001500010e6d696e6563726166743a6368617401050102001502"
-            + "0608018a010100020131050402c80102070301f80a";
+            + "024901040114000a0207011401574e00010235010210543fd00040010004003fd9996665999668bfc000400100040001"
+            + "3fd00000000000003fd999999999999abfc0000000000000023e01020706000000000000000000000000000000000000"
+            + "00000000000000000000000000003ff0000000000000000000000000000000000000000000008102010901980e020b57"
+            + "4e000103090100574e00019c0e00010801c80100050e0100010a0114000407000000000a010501140006000115011400"
+            + "1500010e6d696e6563726166743a63686174010501020015020608018a010100020131050402c80102070301f80a";
 
     /** Format version 1 bytes of {@link #FIXED} (frozen; version 1 recordings must stay readable). */
     private static final String GOLDEN_V1 = ""

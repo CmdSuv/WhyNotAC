@@ -262,7 +262,24 @@ class WireObserverTest {
         List<TimelineEvent> outbound = eventsOf(TimelineEvent.Outbound.class);
         assertEquals(3, outbound.size(), events.toString());
         ClientboundPacket.SetEntityMotion motion = (ClientboundPacket.SetEntityMotion) ((TimelineEvent.Outbound) outbound.get(1)).packet();
-        assertEquals(LpVec3.quantize(new Vec3d(0.1, 0.42, -0.3)), motion.motion(), "the velocity the client really applies");
+        assertEquals(LpVec3.quantize(new Vec3d(0.1, 0.42, -0.3)), motion.clientMotion(), "the velocity the client really applies");
+        assertNull(motion.serverMotion(), "the edge only knows what the client received");
+        assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty(), events.toString());
+    }
+
+    @Test
+    void edgeVelocityIsQuantizedExactlyOnce() {
+        // LpVec3 is not idempotent: re-quantizing this vector changes it (the z scale drops from 8 to 7).
+        Vec3d v = new Vec3d(1.884547125526538, 4.484370533432598, 7.00008200728259);
+        Vec3d once = LpVec3.quantize(v);
+        assertTrue(!once.equals(LpVec3.quantize(once)), "precondition: the vector is a non-idempotent case");
+
+        channel.writeOutbound(knockback(v.x(), v.y(), v.z()));
+
+        ClientboundPacket.SetEntityMotion recorded = eventsOf(TimelineEvent.Outbound.class).stream()
+                .map(e -> ((TimelineEvent.Outbound) e).packet()).filter(p -> p instanceof ClientboundPacket.SetEntityMotion)
+                .map(p -> (ClientboundPacket.SetEntityMotion) p).findFirst().orElseThrow();
+        assertEquals(once, recorded.clientMotion(), "what the client decodes from the bytes, bit for bit");
         assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty(), events.toString());
     }
 
@@ -283,7 +300,7 @@ class WireObserverTest {
         assertEquals(((ClientboundPingPacket) received.get(0)).getId(), ((ClientboundPacket.Ping) ((TimelineEvent.Outbound) outbound.get(0)).packet()).id());
         TimelineEvent.OutboundDivergence divergence = (TimelineEvent.OutboundDivergence) eventsOf(TimelineEvent.OutboundDivergence.class).getFirst();
         assertEquals(DivergenceKind.WIRE_ONLY, divergence.kind());
-        assertEquals(new ClientboundPacket.SetEntityMotion(SELF, LpVec3.quantize(new Vec3d(0.0, 0.5, 0.0))), divergence.packet());
+        assertEquals(ClientboundPacket.SetEntityMotion.received(SELF, LpVec3.quantize(new Vec3d(0.0, 0.5, 0.0))), divergence.packet());
         assertEquals(2, observer.status().edgeTransactions());
     }
 
@@ -311,7 +328,7 @@ class WireObserverTest {
                 "the client never got the knockback, so the timeline must not claim it did");
         TimelineEvent.OutboundDivergence divergence = (TimelineEvent.OutboundDivergence) eventsOf(TimelineEvent.OutboundDivergence.class).getFirst();
         assertEquals(DivergenceKind.GAME_ONLY, divergence.kind());
-        assertEquals(new ClientboundPacket.SetEntityMotion(SELF, LpVec3.quantize(new Vec3d(0.1, 0.42, -0.3))), divergence.packet());
+        assertEquals(ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.1, 0.42, -0.3)), divergence.packet(), "reported as the game sent it");
     }
 
     @Test
@@ -333,7 +350,7 @@ class WireObserverTest {
 
         List<ClientboundPacket> motions = eventsOf(TimelineEvent.Outbound.class).stream().map(e -> ((TimelineEvent.Outbound) e).packet())
                 .filter(p -> p instanceof ClientboundPacket.SetEntityMotion).toList();
-        assertEquals(List.of(new ClientboundPacket.SetEntityMotion(SELF, LpVec3.quantize(new Vec3d(0.0, 0.9, 0.0)))), motions);
+        assertEquals(List.of(ClientboundPacket.SetEntityMotion.received(SELF, LpVec3.quantize(new Vec3d(0.0, 0.9, 0.0)))), motions);
         List<DivergenceKind> kinds = eventsOf(TimelineEvent.OutboundDivergence.class).stream()
                 .map(e -> ((TimelineEvent.OutboundDivergence) e).kind()).toList();
         assertEquals(List.of(DivergenceKind.WIRE_ONLY, DivergenceKind.GAME_ONLY), kinds);
@@ -493,9 +510,47 @@ class WireObserverTest {
     }
 
     @Test
+    void aTapRemovedByAnotherPluginNeverLeavesASilentHole() {
+        channel.pipeline().remove(WireTaps.INBOUND); // e.g. a plugin "cleaning up" unknown handlers
+        TimelineEvent.Observation observation = (TimelineEvent.Observation) eventsOf(TimelineEvent.Observation.class).getLast();
+        assertEquals(Source.GAME, observation.inbound());
+        assertTrue(observation.detail().contains("removed by another plugin"), observation.detail());
+
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        channel.writeOutbound(knockback(0.0, 0.42, 0.0));
+        assertEquals(List.of(new ServerboundPacket.ClientTickEnd()),
+                eventsOf(TimelineEvent.Inbound.class).stream().map(e -> ((TimelineEvent.Inbound) e).packet()).toList(),
+                "the game's view records what the edge no longer can");
+        assertTrue(eventsOf(TimelineEvent.Outbound.class).stream()
+                .anyMatch(e -> ((TimelineEvent.Outbound) e).packet() instanceof ClientboundPacket.SetEntityMotion));
+        assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty() && eventsOf(TimelineEvent.InboundDivergence.class).isEmpty());
+    }
+
+    @Test
+    void theGameSideHandlerRemovedByAnotherPluginLeavesTheEdgeRecording() {
+        channel.pipeline().remove(dev.whynotac.paper.network.PacketInterceptor.HANDLER_NAME);
+        assertTrue(eventsOf(TimelineEvent.Disconnected.class).isEmpty(), "the player is still connected");
+        TimelineEvent.Observation observation = (TimelineEvent.Observation) eventsOf(TimelineEvent.Observation.class).getLast();
+        assertTrue(observation.detail().contains("game-side handler removed"), observation.detail());
+
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        channel.writeOutbound(knockback(0.0, 0.42, 0.0)); // no game-side sandwich any more...
+        List<Packet<?>> received = clientReceived();
+        assertEquals(3, received.size(), "...so the edge brackets it: " + received);
+        assertInstanceOf(ClientboundPingPacket.class, received.get(0));
+        assertInstanceOf(ClientboundPingPacket.class, received.get(2));
+        assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty(), "nothing to reconcile, nothing reported");
+        assertTrue(eventsOf(TimelineEvent.Inbound.class).stream().anyMatch(e -> ((TimelineEvent.Inbound) e).packet() instanceof ServerboundPacket.ClientTickEnd));
+
+        channel.close();
+        assertEquals(1, eventsOf(TimelineEvent.Disconnected.class).size(), "the edge ends the session at disconnect");
+    }
+
+    @Test
     void theAuditRepairsAPluginThatSqueezedInOutsideTheTaps() {
         channel.pipeline().addAfter("splitter", "late-plugin", new Placeholder());
         assertTrue(WireTaps.ensurePlacement(channel.pipeline()));
+        assertTrue(eventsOf(TimelineEvent.Observation.class).isEmpty(), "WhyNotAC's own move is not a lost tap: " + events);
         List<String> names = channel.pipeline().names();
         assertEquals(names.indexOf("splitter") + 1, names.indexOf(WireTaps.INBOUND), names.toString());
         assertFalse(WireTaps.ensurePlacement(channel.pipeline()), "already in place");

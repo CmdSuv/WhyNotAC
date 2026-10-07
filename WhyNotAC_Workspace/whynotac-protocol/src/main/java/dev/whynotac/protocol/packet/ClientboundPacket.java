@@ -25,12 +25,28 @@ public sealed interface ClientboundPacket {
     record Respawn() implements ClientboundPacket {}
 
     /**
-     * {@code ClientboundSetEntityMotionPacket}. {@code motion} is the server-side value; the client
-     * <em>replaces</em> its velocity with {@link #clientMotion()}, the lossy {@code LpVec3} decoding.
+     * {@code ClientboundSetEntityMotionPacket}. The client <em>replaces</em> its velocity with
+     * {@code clientMotion}: exactly what it decodes from the lossy {@code LpVec3} encoding. Physics must
+     * use this value and never quantize it again ({@code LpVec3} is not idempotent: re-quantizing
+     * changes about 1 vector in 36 000).
+     *
+     * <p>{@code serverMotion} is the value the server encoded. Only the game's view knows it; it is
+     * null when the packet was decoded at the network edge, where only the client's value exists.
      */
-    record SetEntityMotion(int entityId, Vec3d motion) implements ClientboundPacket {
-        public Vec3d clientMotion() {
-            return LpVec3.quantize(motion);
+    record SetEntityMotion(int entityId, Vec3d clientMotion, Vec3d serverMotion) implements ClientboundPacket {
+        /** As decoded at the network edge: what the client received. */
+        public static SetEntityMotion received(int entityId, Vec3d clientMotion) {
+            return new SetEntityMotion(entityId, clientMotion, null);
+        }
+
+        /** As the game sent it: the client will apply the single quantization of it. */
+        public static SetEntityMotion sent(int entityId, Vec3d serverMotion) {
+            return new SetEntityMotion(entityId, LpVec3.quantize(serverMotion), serverMotion);
+        }
+
+        /** This packet as the client sees it (without the server-side value), for comparing views. */
+        public SetEntityMotion asReceived() {
+            return serverMotion == null ? this : received(entityId, clientMotion);
         }
     }
 

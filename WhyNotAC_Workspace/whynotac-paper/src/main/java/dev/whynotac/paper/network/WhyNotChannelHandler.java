@@ -44,6 +44,8 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
     private final Logger logger;
     private volatile int selfEntityId = -1;
     private int failures;
+    /** WhyNotAC removes this handler itself (uninstall, or a server-list ping): the session ends. */
+    private volatile boolean detached;
 
     WhyNotChannelHandler(PlayerSession session, PacketTranslator translator, WireObserver observer, Logger logger) {
         this.session = session;
@@ -54,6 +56,12 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
 
     WireObserver observer() {
         return observer;
+    }
+
+    /** Marks the coming removal as WhyNotAC's own (the session then ends with it). */
+    void detach() {
+        detached = true;
+        observer.detaching();
     }
 
     PlayerSession session() {
@@ -79,7 +87,7 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             try {
                 if (observer.edgeView()) {
                     observer.onGameInbound(PacketTranslator.typeName(packet), translated, now);
-                } else {
+                } else if (!observer.recordedByEdge(PacketTranslator.typeName(packet), translated, now)) {
                     session.onInbound(translated, now);
                 }
             } catch (RuntimeException | LinkageError e) {
@@ -88,6 +96,7 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             if (translated instanceof ServerboundPacket.Handshake handshake && handshake.intent() == ServerboundPacket.Handshake.Intent.STATUS) {
                 // A server-list ping never becomes a player: stop observing it (handlerRemoved closes the session).
                 super.channelRead(ctx, msg);
+                detached = true;
                 ctx.pipeline().remove(this);
                 return;
             }
@@ -193,7 +202,13 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) {
-        session.disconnect(System.nanoTime());
+        long now = System.nanoTime();
+        if (detached || !ctx.channel().isActive() || !observer.edgeView()) {
+            session.disconnect(now);
+        } else {
+            // Another plugin removed this handler; the edge keeps recording and ends the session at disconnect.
+            observer.gameViewLost(now);
+        }
     }
 
     private void report(String what, Throwable error) {

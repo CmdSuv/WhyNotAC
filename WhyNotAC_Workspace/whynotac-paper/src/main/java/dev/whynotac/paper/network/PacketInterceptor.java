@@ -42,14 +42,30 @@ public final class PacketInterceptor {
     private final PacketTranslator translator = new PacketTranslator();
     private final WireProtocols protocols = new WireProtocols(() -> MinecraftServer.getServer().registryAccess());
     private final Logger logger;
+    /** Off after uninstall: the registered listener then does nothing (it is never removed, see install). */
+    private volatile boolean enabled;
 
     public PacketInterceptor(SessionRegistry registry, Logger logger) {
         this.registry = registry;
         this.logger = logger;
     }
 
+    /**
+     * Paper keeps channel listeners in a plain {@code LinkedHashMap} that event loops iterate inside
+     * {@code initChannel} while plugins add and remove entries from the main thread. Removing an entry
+     * is a structural change: racing with a connection being accepted, it throws
+     * {@code ConcurrentModificationException} inside {@code initChannel} and that player's connection
+     * is closed. So the listener is registered under a fixed key and never removed. Registering it
+     * again (re-enable) only replaces the value, which is not structural, and uninstall switches it
+     * off with a flag.
+     */
     public void install() {
-        ChannelInitializeListenerHolder.addListener(LISTENER_KEY, channel -> inject(channel, true));
+        enabled = true;
+        ChannelInitializeListenerHolder.addListener(LISTENER_KEY, channel -> {
+            if (enabled) {
+                inject(channel, true);
+            }
+        });
         injectExisting();
     }
 
@@ -67,12 +83,15 @@ public final class PacketInterceptor {
     }
 
     public void uninstall() {
-        ChannelInitializeListenerHolder.removeListener(LISTENER_KEY);
+        enabled = false; // never removeListener: see install()
         for (Connection connection : existingConnections()) {
             Channel channel = connection.channel;
             if (channel != null) {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline pipeline = channel.pipeline();
+                    if (pipeline.get(HANDLER_NAME) instanceof WhyNotChannelHandler handler) {
+                        handler.detach();
+                    }
                     WireTaps.remove(pipeline);
                     if (pipeline.get(HANDLER_NAME) != null) {
                         pipeline.remove(HANDLER_NAME); // handlerRemoved() closes the session cleanly

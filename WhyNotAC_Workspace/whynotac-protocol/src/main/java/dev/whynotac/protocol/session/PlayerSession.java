@@ -137,9 +137,9 @@ public final class PlayerSession {
             return OptionalInt.empty();
         }
         boolean wasWithheld = transactions.isWithheld();
-        OptionalInt id = transactions.allocate();
-        if (id.isEmpty() && !wasWithheld) {
-            long now = System.nanoTime();
+        long now = System.nanoTime();
+        OptionalInt id = transactions.allocate(now);
+        if (transactions.isWithheld() && !wasWithheld) {
             long age = transactions.oldestPendingAgeNanos(now) / 1_000_000;
             emit(now, seq -> new TimelineEvent.Anomaly(seq, now, TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD,
                     TransactionTracker.MAX_PENDING + " unanswered, oldest " + age + " ms"));

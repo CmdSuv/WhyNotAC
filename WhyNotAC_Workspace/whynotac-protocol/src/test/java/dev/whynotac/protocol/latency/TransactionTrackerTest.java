@@ -21,7 +21,7 @@ class TransactionTrackerTest {
     private static final long MS = 1_000_000L;
 
     private static int sendOne(TransactionTracker tracker, long nanoTime) {
-        int id = tracker.allocate().orElseThrow();
+        int id = tracker.allocate(nanoTime).orElseThrow();
         assertTrue(tracker.onSent(id, nanoTime));
         return id;
     }
@@ -97,12 +97,28 @@ class TransactionTrackerTest {
                 first = id;
             }
         }
-        assertTrue(tracker.allocate().isEmpty());
+        assertTrue(tracker.allocate(TransactionTracker.MAX_PENDING).isEmpty());
         assertTrue(tracker.isWithheld());
         assertTrue(tracker.snapshot(0).withheld());
         tracker.onPong(first, 5_000);
         assertFalse(tracker.isWithheld(), "answering again lifts the condition");
-        assertTrue(tracker.allocate().isPresent());
+        assertTrue(tracker.allocate(5_001).isPresent());
+    }
+
+    @Test
+    void pingsThatNeverLeftTheServerAreNeverHeldAgainstTheClient() {
+        TransactionTracker tracker = new TransactionTracker();
+        // A plugin cancels every WhyNotAC ping: ids are allocated but never seen leaving the server.
+        for (int i = 0; i < TransactionTracker.MAX_PENDING + 100; i++) {
+            tracker.allocate(i * MS);
+        }
+        assertFalse(tracker.isWithheld(), "a server-side backlog is not the client withholding");
+        assertFalse(tracker.snapshot(0).withheld());
+        // Five seconds later the stale allocations expire and are counted as lost before the wire.
+        long later = TransactionTracker.UNSENT_EXPIRY_NANOS + TransactionTracker.MAX_PENDING * MS;
+        assertTrue(tracker.allocate(later).isPresent());
+        assertEquals(TransactionTracker.MAX_PENDING, tracker.snapshot(later).lostBeforeWire());
+        assertEquals(0, tracker.snapshot(later).sent());
     }
 
     @Test
@@ -127,7 +143,7 @@ class TransactionTrackerTest {
         int a = session.allocateTransaction().orElseThrow();
         int b = session.allocateTransaction().orElseThrow();
         session.onOutbound(new ClientboundPacket.Ping(a), 0);
-        session.onOutbound(new ClientboundPacket.SetEntityMotion(7, dev.whynotac.math.vector.Vec3d.Y_AXIS), 1);
+        session.onOutbound(ClientboundPacket.SetEntityMotion.received(7, dev.whynotac.math.vector.Vec3d.Y_AXIS), 1);
         session.onOutbound(new ClientboundPacket.Ping(b), 2);
         session.onInbound(new ServerboundPacket.Pong(-42), 10); // another plugin's ping: ignored by the tracker
         session.onInbound(new ServerboundPacket.Pong(b), 60 * MS);

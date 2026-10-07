@@ -15,7 +15,7 @@ class TransactionPolicyTest {
 
     @Test
     void ownPhysicsChangesAreSandwiched() {
-        assertTrue(TransactionPolicy.requiresSandwich(new ClientboundPacket.SetEntityMotion(SELF, Vec3d.Y_AXIS), SELF));
+        assertTrue(TransactionPolicy.requiresSandwich(ClientboundPacket.SetEntityMotion.received(SELF, Vec3d.Y_AXIS), SELF));
         assertTrue(TransactionPolicy.requiresSandwich(new ClientboundPacket.UpdateAttributes(SELF, List.of()), SELF));
         assertTrue(TransactionPolicy.requiresSandwich(new ClientboundPacket.MobEffect(SELF, "minecraft:speed", 1, 100, 0), SELF));
         assertTrue(TransactionPolicy.requiresSandwich(new ClientboundPacket.Explosion(Vec3d.ZERO, 1.2F, new Vec3d(0.5, 0.6, 0)), SELF));
@@ -25,7 +25,7 @@ class TransactionPolicyTest {
 
     @Test
     void otherEntitiesAndNeutralPacketsAreNot() {
-        assertFalse(TransactionPolicy.requiresSandwich(new ClientboundPacket.SetEntityMotion(SELF + 1, Vec3d.Y_AXIS), SELF));
+        assertFalse(TransactionPolicy.requiresSandwich(ClientboundPacket.SetEntityMotion.received(SELF + 1, Vec3d.Y_AXIS), SELF));
         assertFalse(TransactionPolicy.requiresSandwich(new ClientboundPacket.Explosion(Vec3d.ZERO, 1.2F, null), SELF));
         assertFalse(TransactionPolicy.requiresSandwich(new ClientboundPacket.GameEvent(1, 0), SELF)); // rain
         assertFalse(TransactionPolicy.requiresSandwich(new ClientboundPacket.Ping(5), SELF));
@@ -34,6 +34,6 @@ class TransactionPolicyTest {
 
     @Test
     void unknownSelfIdIsConservative() {
-        assertTrue(TransactionPolicy.requiresSandwich(new ClientboundPacket.SetEntityMotion(12345, Vec3d.Y_AXIS), -1));
+        assertTrue(TransactionPolicy.requiresSandwich(ClientboundPacket.SetEntityMotion.received(12345, Vec3d.Y_AXIS), -1));
     }
 }

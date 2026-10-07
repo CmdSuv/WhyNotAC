@@ -222,10 +222,20 @@ public final class PacketTranslator {
     // --- clientbound -------------------------------------------------------------------------------
 
     public ClientboundPacket outbound(Packet<?> packet) {
+        return outbound(packet, false);
+    }
+
+    /**
+     * {@code fromWire}: the packet object was decoded from the bytes the client received (network edge),
+     * so lossy fields already hold the client's values; otherwise it is the game's object before encoding.
+     */
+    public ClientboundPacket outbound(Packet<?> packet, boolean fromWire) {
         return switch (packet) {
             case ClientboundPingPacket ping -> new ClientboundPacket.Ping(ping.getId());
             case ClientboundKeepAlivePacket keepAlive -> new ClientboundPacket.KeepAlive(keepAlive.getId());
-            case ClientboundSetEntityMotionPacket motion -> new ClientboundPacket.SetEntityMotion(motion.getId(), vec(motion.getMovement()));
+            case ClientboundSetEntityMotionPacket motion -> fromWire
+                    ? ClientboundPacket.SetEntityMotion.received(motion.getId(), vec(motion.getMovement()))
+                    : ClientboundPacket.SetEntityMotion.sent(motion.getId(), vec(motion.getMovement()));
             case ClientboundExplodePacket explode -> new ClientboundPacket.Explosion(
                     vec(explode.center()), explode.radius(), explode.playerKnockback().map(PacketTranslator::vec).orElse(null));
             case ClientboundPlayerPositionPacket position -> new ClientboundPacket.PlayerPosition(

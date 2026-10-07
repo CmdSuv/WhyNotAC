@@ -88,6 +88,8 @@ public final class RecordingFormat {
     public static final int CB_GAME_EVENT = 13;
     public static final int CB_UNMODELED = 14;
     public static final int CB_UNTRANSLATABLE = 15;
+    /** SetEntityMotion with the client's exact value and, from the game's view, the server's (format 2). */
+    public static final int CB_SET_ENTITY_MOTION_EXACT = 16;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

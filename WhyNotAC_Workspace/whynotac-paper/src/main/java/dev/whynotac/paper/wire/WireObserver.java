@@ -1,6 +1,5 @@
 package dev.whynotac.paper.wire;
 
-import dev.whynotac.math.vanilla.LpVec3;
 import dev.whynotac.paper.network.PacketTranslator;
 import dev.whynotac.protocol.latency.TransactionPolicy;
 import dev.whynotac.protocol.packet.ClientboundPacket;
@@ -82,6 +81,10 @@ public final class WireObserver {
     /** Reference: the game (what it sent); matched by the edge. Missing = cancelled below the game. */
     private final Reconciler<ClientboundPacket> outbound;
     private int failures;
+    /** WhyNotAC itself is moving or removing the taps: their handlerRemoved is not a loss. */
+    private boolean moving;
+    /** Another plugin removed WhyNotAC's game-side handler: nothing to reconcile with any more. */
+    private boolean gameViewLost;
 
     private volatile Source source;   // null until the handshake decides
     private volatile int clientProtocol = -1;
@@ -167,7 +170,9 @@ public final class WireObserver {
             inboundTable = protocols.playServerbound();
         }
         session.onInbound(translated, nanoTime);
-        inbound.expect(typeName, translated, nanoTime);
+        if (!gameViewLost) {
+            inbound.expect(typeName, translated, nanoTime);
+        }
         return InboundAction.CONTINUE;
     }
 
@@ -258,10 +263,12 @@ public final class WireObserver {
     }
 
     private Outgoing correlateOutbound(WireProtocols.Table table, String typeName, ClientboundPacket translated, long nanoTime) {
+        boolean physics = table.state == net.minecraft.network.ConnectionProtocol.PLAY && TransactionPolicy.requiresSandwich(translated, selfEntityId);
+        if (gameViewLost) {
+            return new Outgoing(typeName, translated, false, physics); // nothing to reconcile; the edge brackets it
+        }
         boolean expected = outbound.match(typeName, translated, nanoTime);
-        boolean sandwich = !expected && table.state == net.minecraft.network.ConnectionProtocol.PLAY
-                && TransactionPolicy.requiresSandwich(translated, selfEntityId);
-        return new Outgoing(typeName, translated, !expected, sandwich);
+        return new Outgoing(typeName, translated, !expected, !expected && physics);
     }
 
     /** Records an outbound frame after it was forwarded towards the client. */
@@ -297,6 +304,57 @@ public final class WireObserver {
         ctx.write(buf, ctx.newPromise());
     }
 
+    /** WhyNotAC moves (placement repair) or removes (uninstall) the taps itself. */
+    void moving(boolean moving) {
+        this.moving = moving;
+    }
+
+    /** Uninstall: the taps and the handler are about to be removed on purpose. */
+    public void detaching() {
+        moving = true;
+    }
+
+    /**
+     * A tap was removed, and not by WhyNotAC: from now on the game's view records the timeline, so it
+     * never silently stops. Declared with an {@code Observation}; evidence spanning it is invalid.
+     */
+    void tapRemoved(String name, long nanoTime) {
+        if (moving || source != Source.WIRE) {
+            return;
+        }
+        source = Source.GAME;
+        session.onObservation(Source.GAME, Source.GAME, clientProtocol,
+                "edge tap " + name + " removed by another plugin; the game's view records from here", nanoTime);
+    }
+
+    /** The connection closed (seen by a tap; the game-side handler may be gone). Idempotent. */
+    void channelInactive(long nanoTime) {
+        session.disconnect(nanoTime);
+    }
+
+    /**
+     * Another plugin removed WhyNotAC's game-side handler while the connection is open. The edge keeps
+     * recording; there is no game view to reconcile with any more, and the edge brackets every
+     * physics-changing packet itself (the game-side sandwich is gone).
+     */
+    public void gameViewLost(long nanoTime) {
+        if (gameViewLost) {
+            return;
+        }
+        gameViewLost = true;
+        Source current = source == null ? Source.GAME : source;
+        session.onObservation(current, current, clientProtocol,
+                "game-side handler removed by another plugin: no reconciliation; the edge brackets physics packets", nanoTime);
+    }
+
+    /**
+     * After the edge was lost: true if this packet the game decoded was already recorded at the edge
+     * (it was between the two when the tap went away), so the game view must not record it again.
+     */
+    public boolean recordedByEdge(String type, ServerboundPacket packet, long nanoTime) {
+        return inbound.pending() > 0 && inbound.match(type, packet, nanoTime);
+    }
+
     // --- game side (WhyNotChannelHandler) ---------------------------------------------------------
 
     /** True once the handshake chose the edge view: the game-side handler then only reconciles. */
@@ -315,7 +373,7 @@ public final class WireObserver {
     /** The game is about to write these packets (a bundle is several); the edge will match them as they pass. */
     public void beginGameWrite(List<String> types, List<ClientboundPacket> packets, long nanoTime) {
         for (int i = 0; i < packets.size(); i++) {
-            outbound.expect(types.get(i), canonical(packets.get(i)), nanoTime);
+            outbound.expect(types.get(i), packets.get(i), nanoTime); // reported as the game sent it
         }
     }
 
@@ -360,19 +418,16 @@ public final class WireObserver {
             if (view.isReadable()) {
                 return new ClientboundPacket.Untranslatable(typeName);
             }
-            return translator.outbound(packet);
+            return translator.outbound(packet, true);
         } catch (RuntimeException | LinkageError e) {
             report("outbound " + typeName, e);
             return new ClientboundPacket.Untranslatable(typeName);
         }
     }
 
-    /** The game's packet in the form the client receives it (velocity is quantized on the wire). */
+    /** A packet in the form the client receives it (the game's view also knows the server-side velocity). */
     static ClientboundPacket canonical(ClientboundPacket packet) {
-        if (packet instanceof ClientboundPacket.SetEntityMotion motion) {
-            return new ClientboundPacket.SetEntityMotion(motion.entityId(), LpVec3.quantize(motion.motion()));
-        }
-        return packet;
+        return packet instanceof ClientboundPacket.SetEntityMotion motion ? motion.asReceived() : packet;
     }
 
     /** Same packet in both views: same type and content, or one side could not be translated. */
@@ -387,7 +442,8 @@ public final class WireObserver {
         if (typeA.equals(EDGE_FAILURE) || typeB.equals(EDGE_FAILURE)) {
             return true;
         }
-        return typeA.equals(typeB) && (a.equals(b) || a instanceof ClientboundPacket.Untranslatable || b instanceof ClientboundPacket.Untranslatable);
+        return typeA.equals(typeB) && (canonical(a).equals(canonical(b))
+                || a instanceof ClientboundPacket.Untranslatable || b instanceof ClientboundPacket.Untranslatable);
     }
 
     private void report(String what, Throwable error) {

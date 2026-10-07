@@ -40,6 +40,8 @@ def main():
         check(skipped == len(probe["skipped_transaction_ids"]) == 1, f"unanswered transaction detected (skipped={skipped})")
         check(duplicate == len(probe["duplicated_transaction_ids"]) == 1, f"twice-answered transaction detected (duplicate={duplicate})")
         check(sent == acked + skipped + pending, f"transaction accounting closes ({sent} = {acked} + {skipped} + {pending})")
+    m = re.search(r"lost-before-wire (\d+)", log)
+    check(m is not None and int(m.group(1)) == 0, "no transaction was lost on the server side")
     m = re.search(r"queued \d+ dropped (\d+)", log)
     check(m is not None and int(m.group(1)) == 0, "no timeline events dropped")
     for plugin in os.environ.get("E2E_EXPECT_PLUGINS", "").split():
@@ -141,7 +143,7 @@ def verify_edge(probe, log, dump_path, check):
           and observation[0]["clientProtocol"] == 774, f"timeline recorded at the network edge: {observation}")
 
     def motion_of(packet):
-        return tuple(f64(packet["motion"][axis]) for axis in ("x", "y", "z"))
+        return tuple(f64(packet["clientMotion"][axis]) for axis in ("x", "y", "z"))
 
     recorded = [motion_of(e["packet"]) for e in events
                 if e["type"] == "Outbound" and e["packet"]["type"] == "SetEntityMotion" and e["packet"]["entityId"] == self_id]

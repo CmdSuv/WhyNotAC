@@ -92,7 +92,8 @@ public final class WhyNotCommand implements BasicCommand {
                 latency.lastRttMillis(), latency.smoothedRttMillis(), latency.jitterMillis(), latency.minRttMillis(), latency.maxRttMillis()));
         lines.add("Transactions sent " + latency.sent() + " acked " + latency.acknowledged() + " pending " + latency.pending()
                 + String.format(Locale.ROOT, " (oldest %.1f ms)", latency.oldestPendingMillis())
-                + " skipped " + latency.skipped() + " duplicate " + latency.duplicates() + (latency.withheld() ? " WITHHELD" : ""));
+                + " skipped " + latency.skipped() + " duplicate " + latency.duplicates() + " lost-before-wire " + latency.lostBeforeWire()
+                + (latency.withheld() ? " WITHHELD" : ""));
         interceptor.edge(target).ifPresent(edge -> lines.add("View " + (edge.source() == null ? "pending" : edge.source())
                 + " | client protocol " + edge.clientProtocol() + " | divergences in wire-only " + edge.inboundWireOnly()
                 + " game-only " + edge.inboundGameOnly() + " | out wire-only " + edge.outboundWireOnly() + " game-only "

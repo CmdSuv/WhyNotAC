@@ -64,6 +64,16 @@ public final class WireTaps {
         if (inbound == null || outbound == null) {
             return false;
         }
+        WireObserver observer = ((Inbound) inbound).observer;
+        observer.moving(true);
+        try {
+            return repair(pipeline, observer);
+        } finally {
+            observer.moving(false);
+        }
+    }
+
+    private static boolean repair(ChannelPipeline pipeline, WireObserver observer) {
         boolean repaired = false;
         List<String> names = pipeline.names();
         String inAnchor = inboundAnchor(pipeline);
@@ -77,8 +87,8 @@ public final class WireTaps {
             pipeline.addAfter(outAnchor, OUTBOUND, pipeline.remove(OUTBOUND));
             repaired = true;
         }
-        if (repaired && inbound instanceof Inbound tap) {
-            tap.observer.placementRepaired();
+        if (repaired) {
+            observer.placementRepaired();
         }
         return repaired;
     }
@@ -124,6 +134,21 @@ public final class WireTaps {
         }
 
         @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            try {
+                observer.channelInactive(System.nanoTime());
+            } catch (RuntimeException | LinkageError e) {
+                failures = report(logger, failures, "disconnect", e);
+            }
+            ctx.fireChannelInactive();
+        }
+
+        @Override
+        public void handlerRemoved(ChannelHandlerContext ctx) {
+            observer.tapRemoved(INBOUND, System.nanoTime());
+        }
+
+        @Override
         public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
             if (evt instanceof ConnectionEvent) {
                 // Let every handler react first (ViaVersion moves itself synchronously), then restore the edge.
@@ -149,6 +174,11 @@ public final class WireTaps {
         Outbound(WireObserver observer, Logger logger) {
             this.observer = observer;
             this.logger = logger;
+        }
+
+        @Override
+        public void handlerRemoved(ChannelHandlerContext ctx) {
+            observer.tapRemoved(OUTBOUND, System.nanoTime());
         }
 
         @Override

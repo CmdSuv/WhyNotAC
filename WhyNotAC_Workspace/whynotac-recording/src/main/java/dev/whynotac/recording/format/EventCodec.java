@@ -317,9 +317,13 @@ public final class EventCodec {
                 }
                 case ClientboundPacket.Respawn ignored -> body.writeVarInt(CB_RESPAWN);
                 case ClientboundPacket.SetEntityMotion m -> {
-                    body.writeVarInt(CB_SET_ENTITY_MOTION);
+                    body.writeVarInt(CB_SET_ENTITY_MOTION_EXACT);
                     body.writeZigZag(m.entityId());
-                    vec(m.motion());
+                    vec(m.clientMotion());
+                    body.writeByte(m.serverMotion() == null ? 0 : 1);
+                    if (m.serverMotion() != null) {
+                        vec(m.serverMotion());
+                    }
                 }
                 case ClientboundPacket.Explosion e -> {
                     body.writeVarInt(CB_EXPLOSION);
@@ -627,7 +631,13 @@ public final class EventCodec {
                 case CB_KEEP_ALIVE -> new ClientboundPacket.KeepAlive(in.readLong());
                 case CB_LOGIN -> new ClientboundPacket.Login(zint(in));
                 case CB_RESPAWN -> new ClientboundPacket.Respawn();
-                case CB_SET_ENTITY_MOTION -> new ClientboundPacket.SetEntityMotion(zint(in), vec(in));
+                // Format 1 recorded the game's view only: the server value, which the client quantizes once.
+                case CB_SET_ENTITY_MOTION -> ClientboundPacket.SetEntityMotion.sent(zint(in), vec(in));
+                case CB_SET_ENTITY_MOTION_EXACT -> {
+                    int entityId = zint(in);
+                    Vec3d client = vec(in);
+                    yield new ClientboundPacket.SetEntityMotion(entityId, client, in.readUnsignedByte() != 0 ? vec(in) : null);
+                }
                 case CB_EXPLOSION -> {
                     Vec3d center = vec(in);
                     float radius = in.readFloat();

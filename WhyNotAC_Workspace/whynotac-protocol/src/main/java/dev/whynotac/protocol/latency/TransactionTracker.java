@@ -27,8 +27,18 @@ import java.util.Set;
  */
 public final class TransactionTracker {
 
-    /** One transaction per server tick for 60 s. A client that answers keep-alives but not pings for that long is withholding them. */
+    /**
+     * One transaction per server tick for 60 s. A client that keeps the connection alive but has not
+     * answered this many transactions that really left the server is withholding them (an anomaly to
+     * weigh, not proof: a client whose main thread froze answers keep-alives but not pings).
+     */
     public static final int MAX_PENDING = 1_200;
+    /**
+     * An allocated id whose ping never reached the network within this time was lost on the server
+     * side (cancelled by a plugin, dropped after a disconnect, written after a protocol switch). It is
+     * counted as {@code lostBeforeWire} and never held against the client.
+     */
+    public static final long UNSENT_EXPIRY_NANOS = 5_000_000_000L;
     /** Answered (and skipped) ids remembered, to recognise a second or late answer. */
     private static final int REMEMBERED = 512;
 
@@ -50,7 +60,8 @@ public final class TransactionTracker {
 
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final Map<Integer, Pending> pendingById = new HashMap<>();
-    private final Set<Integer> allocatedUnsent = new HashSet<>();
+    /** Allocated id -> allocation time, for pings not yet seen leaving the server. */
+    private final Map<Integer, Long> allocatedUnsent = new HashMap<>();
     private final ArrayDeque<Integer> rememberedOrder = new ArrayDeque<>();
     private final Set<Integer> remembered = new HashSet<>();
     private final LatencyEstimator estimator = new LatencyEstimator();
@@ -58,6 +69,7 @@ public final class TransactionTracker {
     private long acknowledged;
     private long skipped;
     private long duplicates;
+    private long lostBeforeWire;
     private boolean withheld;
 
     /** True for ids in the range left to other plugins. */
@@ -66,20 +78,37 @@ public final class TransactionTracker {
     }
 
     /**
-     * Reserves an id for a ping about to be sent, or empty if {@link #MAX_PENDING} transactions are
-     * outstanding (see {@link #isWithheld()}).
+     * Reserves an id for a ping about to be sent, or empty if {@link #MAX_PENDING} sent transactions
+     * are unanswered (see {@link #isWithheld()}) or {@link #MAX_PENDING} allocations are still waiting
+     * to leave the server (a server-side backlog, not the client's doing).
      */
-    public OptionalInt allocate() {
-        if (pending.size() + allocatedUnsent.size() >= MAX_PENDING) {
+    public OptionalInt allocate(long nanoTime) {
+        expireUnsent(nanoTime);
+        if (pending.size() >= MAX_PENDING) {
             withheld = true;
+            return OptionalInt.empty();
+        }
+        if (allocatedUnsent.size() >= MAX_PENDING) {
             return OptionalInt.empty();
         }
         int id;
         do {
             id = RANDOM.nextInt();
-        } while (isReservedForOthers(id) || pendingById.containsKey(id) || allocatedUnsent.contains(id) || remembered.contains(id));
-        allocatedUnsent.add(id);
+        } while (isReservedForOthers(id) || pendingById.containsKey(id) || allocatedUnsent.containsKey(id) || remembered.contains(id));
+        allocatedUnsent.put(id, nanoTime);
         return OptionalInt.of(id);
+    }
+
+    private void expireUnsent(long nanoTime) {
+        if (allocatedUnsent.isEmpty()) {
+            return;
+        }
+        for (var it = allocatedUnsent.values().iterator(); it.hasNext(); ) {
+            if (nanoTime - it.next() >= UNSENT_EXPIRY_NANOS) {
+                it.remove();
+                lostBeforeWire++;
+            }
+        }
     }
 
     /**
@@ -87,7 +116,7 @@ public final class TransactionTracker {
      * id was not allocated here (another plugin's ping), which is then not tracked.
      */
     public boolean onSent(int id, long nanoTime) {
-        if (!allocatedUnsent.remove(id)) {
+        if (allocatedUnsent.remove(id) == null) {
             return false;
         }
         Pending entry = new Pending(id, nanoTime);
@@ -119,7 +148,7 @@ public final class TransactionTracker {
         acknowledged++;
         skipped += skippedNow;
         estimator.addSample(nanoTime - match.sentNanoTime);
-        if (pending.size() + allocatedUnsent.size() < MAX_PENDING) {
+        if (pending.size() < MAX_PENDING) {
             withheld = false;
         }
         return new PongResult.Matched(id, match.sentNanoTime, skippedNow);
@@ -150,6 +179,6 @@ public final class TransactionTracker {
                 estimator.lastMillis(), estimator.smoothedMillis(), estimator.jitterMillis(),
                 estimator.minMillis(), estimator.maxMillis(),
                 pending.size(), oldestPendingAgeNanos(nowNanoTime) / 1.0e6,
-                sent, acknowledged, skipped, duplicates, withheld);
+                sent, acknowledged, skipped, duplicates, lostBeforeWire, withheld);
     }
 }
