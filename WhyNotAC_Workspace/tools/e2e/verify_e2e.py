@@ -166,11 +166,28 @@ def verify_edge(probe, log, dump_path, check):
     check(len(divergences) == 2 and not inbound_divergences,
           f"no other divergence anywhere ({len(divergences)} outbound, {len(inbound_divergences)} inbound)")
 
-    # Bracketing: every knockback the client received sits between two transactions, in the client's own order.
+    # Bracketing. WhyNotAC also sends one transaction per tick, so "a ping on each side" alone proves nothing
+    # (review finding): what only a sandwich produces is two pings written together with the knockback,
+    # within a few milliseconds (the game's sandwich goes through the event loop as three tasks; the edge
+    # writes its own in one call), while per-tick pings are 50 ms apart.
     trace = probe["trace"]
-    bracketed = all(0 < i < len(trace) - 1 and trace[i - 1][0] == "ping" and trace[i + 1][0] == "ping"
-                    for i, t in enumerate(trace) if t[0] == "motion")
-    check(bracketed, "every knockback the client received is bracketed by transactions, the injected one too (at the edge)")
+    outbound = [e for e in events if e["type"] == "Outbound"]
+    sandwiches = []
+    for i, e in enumerate(outbound):
+        if e["packet"]["type"] == "SetEntityMotion" and e["packet"]["entityId"] == self_id:
+            before, after = (outbound[i - 1] if i > 0 else None), (outbound[i + 1] if i + 1 < len(outbound) else None)
+            sandwiches.append((before, e, after))
+    client_neighbours = [(trace[i - 1], trace[i + 1]) for i, t in enumerate(trace) if t[0] == "motion" and 0 < i < len(trace) - 1]
+    tight = all(b is not None and a is not None and b["packet"]["type"] == "Ping" and a["packet"]["type"] == "Ping"
+                and a["nanoTime"] - b["nanoTime"] < 20_000_000 for b, _, a in sandwiches)
+    check(len(sandwiches) == len(received) and tight,
+          "every knockback is sandwiched: two pings written with it, < 20 ms apart (per-tick pings are 50 ms apart): "
+          + str([(round((a["nanoTime"] - b["nanoTime"]) / 1e6, 3) if a and b else None) for b, _, a in sandwiches]) + " ms")
+    same_ids = [(["ping", b["packet"]["id"]], ["ping", a["packet"]["id"]]) for b, _, a in sandwiches] == [(list(x), list(y)) for x, y in client_neighbours]
+    check(same_ids, "the client received each knockback between exactly those two transactions")
+    edge = re.search(r"edge transactions (\d+)", log)
+    check(edge is not None and int(edge.group(1)) == 2,
+          f"exactly one sandwich was written at the edge, for the injected knockback (edge transactions {edge.group(1) if edge else '?'})")
     m = re.search(r"\[wnprobe\] inject via (\S+)", log)
     c = re.search(r"\[wnprobe\] (\S+) cancelled a velocity packet", log)
     check(m is not None and c is not None and m.group(1) == c.group(1),

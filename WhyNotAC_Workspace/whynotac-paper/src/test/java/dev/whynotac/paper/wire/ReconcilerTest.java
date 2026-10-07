@@ -11,9 +11,14 @@ import org.junit.jupiter.api.Test;
 class ReconcilerTest {
 
     private static final long GRACE = 1_000;
+    /** The production grace period: tests that depend on stale entries must use it, not 0. */
+    private static final long PRODUCTION_GRACE = WireObserver.DEFAULT_GRACE_NANOS;
+
+    /** Strings starting with '?' stand for packets one side could not translate: no content key. */
+    private static final Reconciler.Key<String> KEY = (type, p) -> p.startsWith("?") ? null : p;
 
     private final List<String> missing = new ArrayList<>();
-    private final Reconciler<String> reconciler = new Reconciler<>((ta, a, tb, b) -> a.equals(b), (p, t) -> missing.add(p), GRACE);
+    private final Reconciler<String> reconciler = new Reconciler<>(KEY, (p, t) -> missing.add(p), GRACE);
 
     @Test
     void inOrderStreamsMatchCompletely() {
@@ -57,11 +62,47 @@ class ReconcilerTest {
     }
 
     @Test
+    void equalPacketsMatchOldestFirst() {
+        reconciler.expect("t", "same", 0);
+        reconciler.expect("t", "other", 1);
+        reconciler.expect("t", "same", 2);
+        assertTrue(reconciler.match("t", "same", 3));
+        assertTrue(reconciler.match("t", "other", 3));
+        assertTrue(reconciler.match("t", "same", 3));
+        assertEquals(0, reconciler.pending());
+        assertTrue(missing.isEmpty());
+    }
+
+    @Test
+    void theTypeIsPartOfTheKey() {
+        reconciler.expect("a", "x", 0);
+        assertFalse(reconciler.match("b", "x", 0), "same content, different packet type");
+        assertTrue(reconciler.match("a", "x", 0));
+    }
+
+    @Test
+    void staleEntriesNeverHideALaterMatchEvenOfTheSameType() {
+        // Regression (review of the per-type reconciler): a plugin below WhyNotAC cancels hundreds of
+        // motion packets for other entities within the 2 s grace period. They are all pending, and with a
+        // scan window the player's own, unchanged knockback was not found among them: a false
+        // "injected below the game" divergence. With the content index it matches at once.
+        List<String> reported = new ArrayList<>();
+        Reconciler<String> r = new Reconciler<>(KEY, (p, t) -> reported.add(p), PRODUCTION_GRACE);
+        for (int i = 0; i < 1_000; i++) {
+            r.expect("set_entity_motion", "other-entity-" + i, i);
+        }
+        r.expect("set_entity_motion", "self-knockback", 1_000);
+        assertTrue(r.match("set_entity_motion", "self-knockback", 1_001));
+        assertTrue(reported.isEmpty(), "within the grace period nothing is reported yet");
+        r.expire(PRODUCTION_GRACE + 1_001);
+        assertEquals(1_000, reported.size(), "the cancelled packets are reported once the grace period is over");
+        assertTrue(reported.stream().allMatch(p -> p.startsWith("other-entity-")), "the real packet never is");
+    }
+
+    @Test
     void staleEntriesOfOneTypeNeverBlockMatchesOfAnother() {
-        // Regression: 300 entries the other side never sees (a flood the game drops) used to fill the scan
-        // window, after which nothing matched again and every later packet became a false divergence.
         List<String> stale = new ArrayList<>();
-        Reconciler<String> r = new Reconciler<>((ta, a, tb, b) -> ta.equals(tb) && a.equals(b), (p, t) -> stale.add(p), GRACE);
+        Reconciler<String> r = new Reconciler<>(KEY, (p, t) -> stale.add(p), GRACE);
         for (int i = 0; i < 300; i++) {
             r.expect("skipped", "s" + i, 0);
         }
@@ -76,31 +117,59 @@ class ReconcilerTest {
     }
 
     @Test
-    void capacityAndScanAreBounded() {
+    void untranslatablePacketsMatchByTypeAlone() {
+        reconciler.expect("t", "?reference-failed", 0);
+        assertTrue(reconciler.match("t", "anything", 1), "the reference side could not translate it: the type decides");
+        reconciler.expect("t", "a", 2);
+        reconciler.expect("t", "b", 3);
+        assertTrue(reconciler.match("t", "?matching-side-failed", 4), "the matching side could not translate it");
+        assertTrue(reconciler.match("t", "b", 5), "it took the oldest of its type (a), b is still there");
+        assertFalse(reconciler.match("t", "a", 5));
+        assertTrue(missing.isEmpty());
+    }
+
+    @Test
+    void anUntranslatableEntryIsOnlyTakenWhenItIsOlderThanTheExactMatch() {
+        reconciler.expect("t", "x", 0);
+        reconciler.expect("t", "?failed", 1);
+        assertTrue(reconciler.match("t", "x", 2), "the exact match is older");
+        assertTrue(reconciler.match("t", "y", 2), "now the untranslatable entry takes y");
+        assertEquals(0, reconciler.pending());
+    }
+
+    @Test
+    void capacityIsBoundedAndTheNewestEntryIsStillFound() {
         for (int i = 0; i < Reconciler.CAPACITY + 10; i++) {
             reconciler.expect("t", "p" + i, 0);
         }
         assertEquals(Reconciler.CAPACITY, reconciler.pending());
         assertEquals(10, missing.size(), "oldest entries are reported, not kept forever");
-        assertFalse(reconciler.match("t", "p" + (Reconciler.CAPACITY + 9), 1), "beyond the scan window");
+        assertTrue(reconciler.match("t", "p" + (Reconciler.CAPACITY + 9), 1), "no scan window: found among 4096 pending");
     }
 
     @Test
-    void typeQueuesAreKeptButBounded() {
-        for (int round = 0; round < 3; round++) {
-            for (String type : List.of("a", "b")) {
-                reconciler.expect(type, type + round, 0);
-                assertTrue(reconciler.match(type, type + round, 0));
-            }
+    void matchedEntriesBehindAStaleOneDoNotAccumulate() {
+        Reconciler<String> r = new Reconciler<>(KEY, (p, t) -> { }, PRODUCTION_GRACE);
+        r.expect("t", "stale", 0); // never matched: keeps the head of the order for the whole grace period
+        for (int i = 0; i < 100_000; i++) {
+            r.expect("t", "m" + i, 1);
+            assertTrue(r.match("t", "m" + i, 1));
         }
-        assertEquals(2, reconciler.types(), "an emptied queue is reused, not rebuilt for every packet");
-        // Distinct types beyond what any protocol state has (malformed or unknown frames) are not kept.
-        for (int i = 0; i < Reconciler.KEPT_TYPES * 2; i++) {
-            reconciler.expect("unknown/" + i, "x", 0);
-            assertTrue(reconciler.match("unknown/" + i, "x", 0));
-        }
-        assertEquals(Reconciler.KEPT_TYPES, reconciler.types());
-        assertEquals(0, reconciler.pending());
-        assertTrue(missing.isEmpty());
+        assertEquals(1, r.pending());
+        assertTrue(r.retained() <= 2 + 1_024 + 1, "matched entries are compacted away: " + r.retained());
+    }
+
+    @Test
+    void inFlightEntriesSurviveTheLossOfAViewAndPassedOnesAreReported() {
+        Reconciler<String> r = new Reconciler<>(KEY, (p, t) -> missing.add(p), PRODUCTION_GRACE);
+        r.expect("swing", "swing", 0);      // cancelled before the game
+        r.expect("move", "m1", 1);
+        assertTrue(r.match("move", "m1", 2)); // the stream moved past the swing
+        r.expect("swing", "swing", 3);      // in flight when the view is lost
+        r.expect("tick_end", "tick", 4);    // in flight
+        List<Reconciler.InFlight<String>> inFlight = r.drainInFlight(5);
+        assertEquals(List.of("swing"), missing, "the cancelled swing is reported now, before it could absorb a new one");
+        assertEquals(List.of("swing", "tick"), inFlight.stream().map(Reconciler.InFlight::packet).toList());
+        assertEquals(0, r.pending());
     }
 }

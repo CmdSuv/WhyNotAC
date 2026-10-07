@@ -9,6 +9,7 @@ import dev.whynotac.protocol.session.TimelineEvent.DivergenceKind;
 import dev.whynotac.protocol.session.TimelineEvent.Observation.Source;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.logging.Level;
@@ -83,6 +84,8 @@ public final class WireObserver {
     private WireProtocols.Table outboundTable;
     /** Reference: the edge (what the client sent); matched by the game. Missing = cancelled before the game. */
     private final Reconciler<ServerboundPacket> inbound;
+    /** After the edge view ended: inbound packets the edge recorded that had not reached the game yet. */
+    private ArrayDeque<Reconciler.InFlight<ServerboundPacket>> inFlight = new ArrayDeque<>();
     /** Reference: the game (what it sent); matched by the edge. Missing = cancelled below the game. */
     private final Reconciler<ClientboundPacket> outbound;
     private int failures;
@@ -133,11 +136,11 @@ public final class WireObserver {
         this.logger = logger;
         this.serverProtocol = serverProtocol;
         this.inboundTable = protocols.handshake;
-        this.inbound = new Reconciler<>(WireObserver::sameInbound, (packet, nanoTime) -> {
+        this.inbound = new Reconciler<>(WireObserver::inboundKey, (packet, nanoTime) -> {
             inboundWireOnly++;
             session.onInboundDivergence(DivergenceKind.WIRE_ONLY, packet, nanoTime);
         }, graceNanos);
-        this.outbound = new Reconciler<>(WireObserver::sameOutbound, (packet, nanoTime) -> {
+        this.outbound = new Reconciler<>(WireObserver::outboundKey, (packet, nanoTime) -> {
             outboundGameOnly++;
             session.onOutboundDivergence(DivergenceKind.GAME_ONLY, packet, nanoTime);
         }, graceNanos);
@@ -372,6 +375,7 @@ public final class WireObserver {
         source = Source.GAME;
         session.onObservation(Source.GAME, Source.GAME, clientProtocol,
                 "edge tap " + name + " removed by another plugin; the game's view records from here", nanoTime);
+        keepInFlight(nanoTime);
     }
 
     /** The edge cannot be kept (e.g. its anchors are gone): switch to the game's view, declared. */
@@ -381,6 +385,17 @@ public final class WireObserver {
         }
         source = Source.GAME;
         session.onObservation(Source.GAME, Source.GAME, clientProtocol, reason + "; the game's view records from here", nanoTime);
+        keepInFlight(nanoTime);
+    }
+
+    /**
+     * The edge view ends: inbound packets the edge recorded that the game has not seen yet are in flight
+     * between the two and will reach the game in order (unless a plugin cancels them). They are kept so
+     * the game view does not record them twice; anything the stream had already moved past was cancelled
+     * between the two views and is reported now, so it can never absorb a later, identical packet.
+     */
+    private void keepInFlight(long nanoTime) {
+        inFlight = new ArrayDeque<>(inbound.drainInFlight(nanoTime));
     }
 
     /** The connection closed (seen by a tap; the game-side handler may be gone). Idempotent. */
@@ -408,7 +423,33 @@ public final class WireObserver {
      * (it was between the two when the tap went away), so the game view must not record it again.
      */
     public boolean recordedByEdge(String type, ServerboundPacket packet, long nanoTime) {
-        return inbound.pending() > 0 && inbound.match(type, packet, nanoTime);
+        if (inFlight.isEmpty()) {
+            return false;
+        }
+        // In flight packets reach the game in order: the first one that is this packet was recorded by
+        // the edge; the ones before it were cancelled in between. If none is, this packet is new and
+        // every packet still in flight was cancelled (a later packet has passed them all).
+        Object key = inboundKey(type, packet);
+        int position = 0;
+        for (Reconciler.InFlight<ServerboundPacket> candidate : inFlight) {
+            if (candidate.type().equals(type) && (key == null || candidate.key() == null || key.equals(candidate.key()))) {
+                for (int i = 0; i < position; i++) {
+                    reportCancelledInFlight(inFlight.removeFirst().packet(), nanoTime);
+                }
+                inFlight.removeFirst();
+                return true;
+            }
+            position++;
+        }
+        while (!inFlight.isEmpty()) {
+            reportCancelledInFlight(inFlight.removeFirst().packet(), nanoTime);
+        }
+        return false;
+    }
+
+    private void reportCancelledInFlight(ServerboundPacket packet, long nanoTime) {
+        inboundWireOnly++;
+        session.onInboundDivergence(DivergenceKind.WIRE_ONLY, packet, nanoTime);
     }
 
     // --- game side (WhyNotChannelHandler) ---------------------------------------------------------
@@ -523,16 +564,16 @@ public final class WireObserver {
     }
 
     /**
-     * Same packet in both views: same type and content, or one side could not be translated (then the
-     * type alone decides; a marker of unknown type matches nothing, so it can never shift other pairs).
+     * Content keys for reconciliation: the same packet in both views has the same type and an equal key.
+     * A packet one side could not translate has no key and matches by type alone (a marker of unknown
+     * type matches nothing, so it can never shift other pairs).
      */
-    private static boolean sameInbound(String typeA, ServerboundPacket a, String typeB, ServerboundPacket b) {
-        return typeA.equals(typeB) && (a.equals(b) || a instanceof ServerboundPacket.Untranslatable || b instanceof ServerboundPacket.Untranslatable);
+    static Object inboundKey(String type, ServerboundPacket packet) {
+        return packet instanceof ServerboundPacket.Untranslatable ? null : packet;
     }
 
-    private static boolean sameOutbound(String typeA, ClientboundPacket a, String typeB, ClientboundPacket b) {
-        return typeA.equals(typeB) && (canonical(a).equals(canonical(b))
-                || a instanceof ClientboundPacket.Untranslatable || b instanceof ClientboundPacket.Untranslatable);
+    static Object outboundKey(String type, ClientboundPacket packet) {
+        return packet instanceof ClientboundPacket.Untranslatable ? null : canonical(packet);
     }
 
     private void report(String what, Throwable error) {

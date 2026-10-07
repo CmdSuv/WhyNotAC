@@ -88,6 +88,8 @@ until grep -q 'Done (' "$OUT-server.log" 2>/dev/null; do
   sleep 1
 done
 JAVA_PID=$(pgrep -f -n "java .*$PAPER_JAR")
+# Vanilla's locator bar (1.21.6+) does O(players^2) work on every move; large servers switch it off.
+echo "gamerule locator_bar false" > "$FIFO"
 echo "server up (pid $JAVA_PID, CPUs $SERVER_CPUS), $BOTS bots on CPUs $BOT_CPUS"
 
 # Bots in several processes; every bot runs until the end of the measurement window.

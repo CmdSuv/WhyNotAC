@@ -95,12 +95,19 @@ class WireObserverTest {
 
     @BeforeEach
     void setUp() {
+        // No grace period: a packet counts as cancelled as soon as a later one passed it (production waits 2 s).
+        build(0);
+    }
+
+    /** (Re)builds the pipeline; tests about entries that are still pending use the production grace period. */
+    private void build(long graceNanos) {
+        events.clear();
+        processedByGame.clear();
         SessionRegistry registry = new SessionRegistry(Runnable::run, 1 << 16, (s, e, t) -> { throw new AssertionError(t); });
         registry.addListener((s, e) -> events.add(e));
         PlayerSession session = registry.open("embedded");
-        // No grace period: a packet counts as cancelled as soon as a later one passed it (production waits 2 s).
         observer = new WireObserver(session, new PacketTranslator(), new WireProtocols(() -> registries), Logger.getAnonymousLogger(),
-                SharedConstants.getProtocolVersion(), 0);
+                SharedConstants.getProtocolVersion(), graceNanos);
         channel = new EmbeddedChannel();
         channel.pipeline()
                 .addLast("splitter", new Placeholder())
@@ -524,6 +531,84 @@ class WireObserverTest {
         assertTrue(eventsOf(TimelineEvent.Outbound.class).stream()
                 .anyMatch(e -> ((TimelineEvent.Outbound) e).packet() instanceof ClientboundPacket.SetEntityMotion));
         assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty() && eventsOf(TimelineEvent.InboundDivergence.class).isEmpty());
+    }
+
+    @Test
+    void aPacketCancelledBeforeTheEdgeWasLostNeverSwallowsALaterIdenticalOne() {
+        // Regression (review): production grace keeps the cancelled swing pending; after the tap was removed
+        // the game-side view matched the NEW swing against it and never recorded it.
+        build(WireObserver.DEFAULT_GRACE_NANOS);
+        int swing = serverboundId(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
+        boolean[] cancelOnce = {true};
+        channel.pipeline().addAfter(WireTaps.INBOUND, "swing-filter", dropInbound(frame -> {
+            if (cancelOnce[0] && packetId(frame) == swing) {
+                cancelOnce[0] = false;
+                return true;
+            }
+            return false;
+        }));
+        channel.writeInbound(serverboundFrame(new ServerboundSwingPacket(InteractionHand.MAIN_HAND))); // cancelled before the game
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        channel.pipeline().remove(WireTaps.INBOUND); // another plugin removes the tap
+        events.clear();
+        channel.writeInbound(serverboundFrame(new ServerboundSwingPacket(InteractionHand.MAIN_HAND))); // the client swings again
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        assertEquals(List.of(new ServerboundPacket.Swing(dev.whynotac.protocol.packet.Hand.MAIN_HAND), new ServerboundPacket.ClientTickEnd()),
+                eventsOf(TimelineEvent.Inbound.class).stream().map(e -> ((TimelineEvent.Inbound) e).packet()).toList());
+    }
+
+    @Test
+    void aPacketInFlightWhenTheEdgeIsLostIsRecordedOnce() {
+        build(WireObserver.DEFAULT_GRACE_NANOS);
+        // A plugin between the taps holds inbound packets; the tap is removed while one is held.
+        List<Object> held = new ArrayList<>();
+        boolean[] holding = {true};
+        channel.pipeline().addAfter(WireTaps.INBOUND, "holder", new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                if (holding[0]) {
+                    held.add(msg);
+                } else {
+                    ctx.fireChannelRead(msg);
+                }
+            }
+        });
+        channel.writeInbound(serverboundFrame(new ServerboundSwingPacket(InteractionHand.MAIN_HAND)));
+        channel.pipeline().remove(WireTaps.INBOUND);
+        holding[0] = false;
+        ChannelHandlerContext holder = channel.pipeline().context("holder");
+        held.forEach(holder::fireChannelRead); // released after the edge was lost: the edge recorded it already
+        channel.writeInbound(serverboundFrame(ServerboundClientTickEndPacket.INSTANCE));
+        assertEquals(List.of(new ServerboundPacket.Swing(dev.whynotac.protocol.packet.Hand.MAIN_HAND), new ServerboundPacket.ClientTickEnd()),
+                eventsOf(TimelineEvent.Inbound.class).stream().map(e -> ((TimelineEvent.Inbound) e).packet()).toList(),
+                "recorded exactly once each");
+        assertTrue(eventsOf(TimelineEvent.InboundDivergence.class).isEmpty());
+    }
+
+    @Test
+    void aFloodOfCancelledMotionPacketsNeverHidesThePlayersOwnKnockback() {
+        // Regression (review): an entity-hiding plugin below WhyNotAC cancels other entities' motion packets.
+        // With the 2 s grace period they stay pending; the own knockback was not found among them and was
+        // flagged as injected, with a second edge sandwich (5 frames instead of 3).
+        build(WireObserver.DEFAULT_GRACE_NANOS);
+        int motion = clientboundId(knockback(0, 0, 0));
+        channel.pipeline().addAfter(WireTaps.OUTBOUND, "entity-hider", dropOutbound(frame -> {
+            if (packetId(frame) != motion) {
+                return false;
+            }
+            ByteBuf view = frame.duplicate();
+            VarInt.read(view);
+            return VarInt.read(view) != SELF;
+        }));
+        for (int i = 0; i < 1_000; i++) {
+            channel.writeOutbound(new ClientboundSetEntityMotionPacket(1_000 + i, new Vec3(0.01 * (i % 100), 0, 0)));
+        }
+        clientReceived();
+        events.clear();
+        channel.writeOutbound(knockback(0.0, 0.42, 0.0));
+        List<Packet<?>> received = clientReceived();
+        assertEquals(3, received.size(), "ping, knockback, ping: " + received);
+        assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty(), eventsOf(TimelineEvent.OutboundDivergence.class).toString());
     }
 
     @Test
