@@ -126,6 +126,11 @@ public final class Generators {
             case "ContainerClose" -> new ServerboundPacket.ContainerClose(anyInt());
             case "PlayerLoaded" -> new ServerboundPacket.PlayerLoaded();
             case "ChunkBatchReceived" -> new ServerboundPacket.ChunkBatchReceived(anyFloat());
+            case "ClientInformation" -> new ServerboundPacket.ClientInformation(anyInt(), random.nextBoolean() ? "LEFT" : anyString());
+            case "ClientBrand" -> new ServerboundPacket.ClientBrand(anyString());
+            case "ChannelRegistration" -> new ServerboundPacket.ChannelRegistration(random.nextBoolean(),
+                    java.util.stream.IntStream.range(0, random.nextInt(4)).mapToObj(n -> anyString()).toList());
+            case "CustomPayload" -> new ServerboundPacket.CustomPayload(anyString(), anyInt());
             case "Unmodeled" -> new ServerboundPacket.Unmodeled(anyString());
             case "Untranslatable" -> new ServerboundPacket.Untranslatable(anyString());
             case "Handshake" -> new ServerboundPacket.Handshake(anyInt(), pick(ServerboundPacket.Handshake.Intent.values()));
@@ -197,6 +202,8 @@ public final class Generators {
                     pick(TimelineEvent.Observation.Source.values()), anyInt(), anyString());
             case "InboundDivergence" -> new TimelineEvent.InboundDivergence(sequence, nanoTime, pick(TimelineEvent.DivergenceKind.values()),
                     serverbound(SERVERBOUND.get(random.nextInt(SERVERBOUND.size()))));
+            case "ClientFact" -> new TimelineEvent.ClientFact(sequence, nanoTime, pick(TimelineEvent.ClientFact.Fact.values()), anyString(),
+                    pick(TimelineEvent.ClientFact.Trust.values()), anyString());
             case "OutboundDivergence" -> new TimelineEvent.OutboundDivergence(sequence, nanoTime, pick(TimelineEvent.DivergenceKind.values()),
                     clientbound(CLIENTBOUND.get(random.nextInt(CLIENTBOUND.size()))));
             default -> throw new AssertionError("no generator for event " + name);

@@ -101,6 +101,33 @@ yalnızca onunla karşılaştırılır:
 - Analiz havuzu kapanmışsa teslimat çağıran thread'e düşer: kapanışta hiçbir olay (özellikle
   `Disconnected`) kuyrukta kalmaz.
 
+## Client hakkında bilinenler ve güven düzeyleri
+
+Sunucunun bir client hakkında öğrendiği her şey, ne kadar güvenilebileceğiyle birlikte bir
+`ClientFact` olayı olarak kaydedilir:
+
+| Güven | Anlamı | Örnekler |
+|---|---|---|
+| `AUTHENTIC` | Kriptografik ya da yapısal olarak kanıtlı | online mode, Velocity HMAC, Floodgate anahtarı, süreç içi `LocalChannel` (Geyser) |
+| `FORMAT_BOUND` | Client'ın hizmet alabilmek için konuşmak zorunda olduğu baytlarla belirli | gerçek protokol sürümü (handshake baytları), çevirici var mı, transaction'ı kim yanıtlıyor |
+| `CLAIMED` | Client'ın kendi beyanı | brand, kanal kayıtları, ayarlar, doğrulanmamış iletilen kimlik |
+
+**Kural (her analiz katmanı için bağlayıcı):** `CLAIMED` bir bilgi yalnızca herkese tanınan
+hipotezler ekleyebilir. Hiçbir zaman deterministik bir kontrolü kapatamaz ya da kanıtı
+affettiremez, çünkü bir hile her şeyi beyan edebilir. Fizik modelini yalnızca `AUTHENTIC` ve
+`FORMAT_BOUND` bilgiler seçebilir.
+
+**Kimlik:** `IDENTITY` olgusu sunucu yapılandırmasından belirlenir: `AUTHENTICATED_MOJANG`,
+`AUTHENTICATED_BY_PROXY` (Velocity modern + çevrimiçi proxy, ya da Floodgate), `CLAIMED_BY_PROXY`
+(legacy BungeeCord: düz metin, port korunmuyorsa herkes her UUID'yi iddia edebilir) ve
+`UNAUTHENTICATED` (offline mode). Uzun ömürlü durum (profil, ceza) **yalnızca** `AUTHENTICATED_*`
+kimliklere bağlanabilir. Diğerlerinde kanıt oturumla sınırlıdır ve hiçbir hesaba otomatik işlem
+yapılmaz. Böyle bir sunucuda eklenti başlangıçta açıkça uyarır.
+
+**Transaction kökeni:** 1.17 öncesi client'larda ping paketi yoktur. ViaBackwards onların yerine
+yanıt verir. Bu bağlantılarda `TRANSACTION_ORIGIN = TRANSLATOR` kaydedilir ve gecikme/sandviç
+kanıtı bu client hakkında hiçbir şey söylemez.
+
 ## Gecikme telafisi: transaction sandviçi
 
 Client, `ClientboundPingPacket`'i oyun thread'inde, diğer tüm paketlerle aynı sırada işler ve

@@ -44,6 +44,7 @@ public final class RecordingFormat {
     public static final int TAG_OBSERVATION = 8;
     public static final int TAG_INBOUND_DIVERGENCE = 9;
     public static final int TAG_OUTBOUND_DIVERGENCE = 10;
+    public static final int TAG_CLIENT_FACT = 11;
     public static final int MAX_EVENT_TAG = 63;
     public static final int TAG_END = 127;
 
@@ -71,6 +72,10 @@ public final class RecordingFormat {
     public static final int SB_UNMODELED = 21;
     public static final int SB_UNTRANSLATABLE = 22;
     public static final int SB_HANDSHAKE = 23;
+    public static final int SB_CLIENT_INFORMATION = 24;
+    public static final int SB_CLIENT_BRAND = 25;
+    public static final int SB_CHANNEL_REGISTRATION = 26;
+    public static final int SB_CUSTOM_PAYLOAD = 27;
 
     // --- clientbound packet tags ---------------------------------------------------------------
     public static final int CB_PING = 1;

@@ -102,6 +102,47 @@ public sealed interface TimelineEvent {
     /** See {@link DivergenceKind}. */
     record OutboundDivergence(long sequence, long nanoTime, DivergenceKind kind, ClientboundPacket packet) implements TimelineEvent {}
 
+    /**
+     * Something the server learned about the client, with how far it can be trusted. The rule every
+     * analysis layer must follow: a {@link Trust#CLAIMED} fact may add hypotheses that are granted to
+     * every player, but it can never disable a deterministic check or excuse evidence (a cheat can
+     * claim anything). Only {@link Trust#AUTHENTIC} and {@link Trust#FORMAT_BOUND} facts may select a
+     * physics model.
+     */
+    record ClientFact(long sequence, long nanoTime, Fact fact, String value, Trust trust, String source) implements TimelineEvent {
+        /** Constants are stored by ordinal in recordings: only ever append. */
+        public enum Fact {
+            /** How the player's identity was established: see {@link Identity}. */
+            IDENTITY,
+            /** How the connection reaches the server: DIRECT, VELOCITY_MODERN, BUNGEE_LEGACY, GEYSER_LOCAL. */
+            TOPOLOGY,
+            /** The protocol version the client really speaks. */
+            NATIVE_PROTOCOL,
+            /** A plugin translates between the client's protocol and the server's: none, or which. */
+            TRANSLATOR,
+            /** The player is on Bedrock Edition (through Geyser): true or false. */
+            BEDROCK,
+            /** Who answers transactions: CLIENT, or TRANSLATOR (then they say nothing about the client). */
+            TRANSACTION_ORIGIN
+        }
+
+        /** Constants are stored by ordinal in recordings: only ever append. */
+        public enum Trust {
+            /** Cryptographically or structurally established (online mode, Floodgate key, in-process channel). */
+            AUTHENTIC,
+            /** Forced by the bytes the client must speak to be served at all (its real protocol version). */
+            FORMAT_BOUND,
+            /** The client's own word: brand, channels, settings, a forwarded identity nobody verified. */
+            CLAIMED
+        }
+
+        /**
+         * Values of {@link Fact#IDENTITY}. Long-lived state (profiles, bans) may only ever be keyed by an
+         * {@code AUTHENTICATED_*} identity; anything else is session-scoped and never acted on automatically.
+         */
+        public enum Identity { AUTHENTICATED_MOJANG, AUTHENTICATED_BY_PROXY, CLAIMED_BY_PROXY, UNAUTHENTICATED }
+    }
+
     /** The connection closed. This is always the last event of a session. */
     record Disconnected(long sequence, long nanoTime) implements TimelineEvent {}
 }

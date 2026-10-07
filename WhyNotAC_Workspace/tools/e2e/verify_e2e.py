@@ -66,6 +66,7 @@ def main():
         if sys.argv[3]:
             verify_subject_requests(sys.argv[6], sys.argv[3], sys.argv[5], check)
             verify_edge(probe, log, sys.argv[5], check)
+            verify_facts(probe, sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -174,6 +175,24 @@ def verify_edge(probe, log, dump_path, check):
     c = re.search(r"\[wnprobe\] (\S+) cancelled a velocity packet", log)
     check(m is not None and c is not None and m.group(1) == c.group(1),
           f"knockback injected and cancelled through {m.group(1) if m else '?'}")
+
+
+def verify_facts(probe, dump_path, check):
+    """What the server established about the client, each with its trust level; claims recorded, bounded, minimal."""
+    events = [json.loads(line) for line in open(dump_path) if line.strip()]
+    facts = {e["fact"]: (e["value"], e["trust"]) for e in events if e["type"] == "ClientFact"}
+    check(facts.get("IDENTITY") == ("UNAUTHENTICATED", "CLAIMED"), f"offline-mode identity is never treated as authenticated: {facts.get('IDENTITY')}")
+    check(facts.get("TOPOLOGY") == ("DIRECT", "AUTHENTIC"), f"topology: {facts.get('TOPOLOGY')}")
+    check(facts.get("NATIVE_PROTOCOL") == ("774", "FORMAT_BOUND") and facts.get("TRANSLATOR") == ("none", "FORMAT_BOUND")
+          and facts.get("TRANSACTION_ORIGIN") == ("CLIENT", "FORMAT_BOUND"), f"protocol facts: {facts}")
+    check("BEDROCK" not in facts, "no Bedrock claim without Floodgate/Geyser")
+    inbound = [e["packet"] for e in events if e["type"] == "Inbound"]
+    brands = [p["brand"] for p in inbound if p["type"] == "ClientBrand"]
+    registrations = [p["channels"] for p in inbound if p["type"] == "ChannelRegistration"]
+    infos = [p for p in inbound if p["type"] == "ClientInformation"]
+    check(brands == [probe["brand"]] and registrations == [probe["channels"]], f"claimed brand and channels recorded: {brands} {registrations}")
+    check(len(infos) == 1 and infos[0]["viewDistance"] == 3 and infos[0]["mainHand"] == "RIGHT" and "en_us" not in open(dump_path).read(),
+          f"client settings minimal (no language): {infos}")
 
 
 if __name__ == "__main__":

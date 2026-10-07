@@ -1,5 +1,6 @@
 package dev.whynotac.paper.network;
 
+import dev.whynotac.paper.identity.ClientFacts;
 import dev.whynotac.paper.wire.WireObserver;
 import dev.whynotac.paper.wire.WireProtocols;
 import dev.whynotac.paper.wire.WireTaps;
@@ -44,6 +45,7 @@ public final class PacketInterceptor {
     private final Logger logger;
     /** Off after uninstall: the registered listener then does nothing (it is never removed, see install). */
     private volatile boolean enabled;
+    private volatile ClientFacts.Policy identityPolicy;
 
     public PacketInterceptor(SessionRegistry registry, Logger logger) {
         this.registry = registry;
@@ -60,6 +62,11 @@ public final class PacketInterceptor {
      * off with a flag.
      */
     public void install() {
+        identityPolicy = ClientFacts.policy();
+        if (!identityPolicy.authenticated()) {
+            logger.warning("WhyNotAC: player identities on this server are not authenticated (" + identityPolicy.detail()
+                    + "). Evidence stays session-scoped and nothing is ever acted on per account automatically.");
+        }
         enabled = true;
         ChannelInitializeListenerHolder.addListener(LISTENER_KEY, channel -> {
             if (enabled) {
@@ -140,7 +147,9 @@ public final class PacketInterceptor {
         handler.ifPresent(h -> {
             ServerPlayer handle = ((CraftPlayer) player).getHandle();
             h.selfEntityId(handle.getId());
-            h.session().bind(player.getUniqueId(), player.getName(), handle.getId(), System.nanoTime());
+            long now = System.nanoTime();
+            h.session().bind(player.getUniqueId(), player.getName(), handle.getId(), now);
+            ClientFacts.emit(h.session(), player, handle.connection.connection.channel, h.observer().status(), identityPolicy, now);
         });
         return handler.map(WhyNotChannelHandler::session);
     }

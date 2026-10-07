@@ -1,6 +1,7 @@
 package dev.whynotac.protocol.packet;
 
 import dev.whynotac.math.vector.Vec3d;
+import java.util.List;
 
 /**
  * Client-to-server packets (1.21.11 play state). Names follow Mojang's mappings without the
@@ -132,6 +133,26 @@ public sealed interface ServerboundPacket {
 
     /** Any other serverbound packet: kept for timing and ordering analysis. */
     record Unmodeled(String type) implements ServerboundPacket {}
+
+    /**
+     * {@code ServerboundClientInformationPacket}, reduced to what analysis needs (data minimisation:
+     * language, chat and skin settings are not kept). {@code viewDistance} bounds which entities the
+     * client tracks; {@code mainHand} is "LEFT" or "RIGHT". Self-reported (claimed).
+     */
+    record ClientInformation(int viewDistance, String mainHand) implements ServerboundPacket {}
+
+    /** The client's self-reported brand ({@code minecraft:brand}): claimed, any string is possible. */
+    record ClientBrand(String brand) implements ServerboundPacket {}
+
+    /** {@code minecraft:register}/{@code unregister}: plugin-message channels the client announces (claimed). */
+    record ChannelRegistration(boolean register, List<String> channels) implements ServerboundPacket {
+        public ChannelRegistration {
+            channels = List.copyOf(channels);
+        }
+    }
+
+    /** Any other plugin message: its channel and size only, never its content. */
+    record CustomPayload(String channel, int size) implements ServerboundPacket {}
 
     /**
      * A packet WhyNotAC failed to translate (a bug, or a game update it does not know yet). It still

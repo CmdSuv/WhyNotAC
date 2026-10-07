@@ -142,6 +142,9 @@ class FormatStabilityTest {
                 names(TimelineEvent.Anomaly.Kind.values()));
         assertEquals(List.of("WIRE", "GAME"), names(TimelineEvent.Observation.Source.values()));
         assertEquals(List.of("WIRE_ONLY", "GAME_ONLY"), names(TimelineEvent.DivergenceKind.values()));
+        assertEquals(List.of("IDENTITY", "TOPOLOGY", "NATIVE_PROTOCOL", "TRANSLATOR", "BEDROCK", "TRANSACTION_ORIGIN"),
+                names(TimelineEvent.ClientFact.Fact.values()));
+        assertEquals(List.of("AUTHENTIC", "FORMAT_BOUND", "CLAIMED"), names(TimelineEvent.ClientFact.Trust.values()));
         assertEquals(List.of("STOP_SLEEPING", "START_SPRINTING", "STOP_SPRINTING", "START_RIDING_JUMP", "STOP_RIDING_JUMP", "OPEN_INVENTORY", "START_FALL_FLYING", "UNKNOWN"),
                 names(ServerboundPacket.PlayerCommand.Action.values()));
         assertEquals(List.of("START_DESTROY_BLOCK", "ABORT_DESTROY_BLOCK", "STOP_DESTROY_BLOCK", "DROP_ALL_ITEMS", "DROP_ITEM", "RELEASE_USE_ITEM",

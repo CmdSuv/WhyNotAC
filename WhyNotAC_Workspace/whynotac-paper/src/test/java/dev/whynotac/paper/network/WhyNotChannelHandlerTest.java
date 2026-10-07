@@ -294,4 +294,35 @@ class WhyNotChannelHandlerTest {
         assertEquals(1, events.stream().filter(e -> e instanceof TimelineEvent.Disconnected).count(), "exactly one disconnect");
         assertNull(channel.pipeline().get(PacketInterceptor.HANDLER_NAME));
     }
+
+    @Test
+    void clientClaimsAreRecordedBoundedAndMinimal() {
+        channel.writeInbound(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+                new net.minecraft.network.protocol.common.custom.BrandPayload("fabric")));
+        channel.writeInbound(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+                new net.minecraft.network.protocol.common.custom.DiscardedPayload(net.minecraft.resources.Identifier.parse("minecraft:register"),
+                        "examplemod:sync\u0000other:hello".getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+        channel.writeInbound(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+                new net.minecraft.network.protocol.common.custom.DiscardedPayload(net.minecraft.resources.Identifier.parse("examplemod:sync"), new byte[42])));
+        channel.writeInbound(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+                new net.minecraft.network.protocol.common.custom.BrandPayload("x".repeat(5000))));
+        // How Paper actually delivers it: the brand as raw payload data (a VarInt-prefixed UTF-8 string).
+        io.netty.buffer.ByteBuf raw = io.netty.buffer.Unpooled.buffer();
+        new FriendlyByteBuf(raw).writeUtf("vanilla");
+        byte[] brandBytes = new byte[raw.readableBytes()];
+        raw.readBytes(brandBytes);
+        channel.writeInbound(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+                new net.minecraft.network.protocol.common.custom.DiscardedPayload(net.minecraft.resources.Identifier.parse("minecraft:brand"), brandBytes)));
+        channel.writeInbound(new net.minecraft.network.protocol.common.ServerboundClientInformationPacket(
+                new net.minecraft.server.level.ClientInformation("tr_tr", 12, net.minecraft.world.entity.player.ChatVisiblity.FULL, true, 127,
+                        net.minecraft.world.entity.HumanoidArm.LEFT, false, true, net.minecraft.server.level.ParticleStatus.ALL)));
+
+        List<ServerboundPacket> packets = events.stream().map(e -> ((TimelineEvent.Inbound) e).packet()).toList();
+        assertEquals(new ServerboundPacket.ClientBrand("fabric"), packets.get(0));
+        assertEquals(new ServerboundPacket.ChannelRegistration(true, List.of("examplemod:sync", "other:hello")), packets.get(1));
+        assertEquals(new ServerboundPacket.CustomPayload("examplemod:sync", 42), packets.get(2), "channel and size only, never content");
+        assertEquals(PacketTranslator.MAX_CLAIMED_TEXT, ((ServerboundPacket.ClientBrand) packets.get(3)).brand().length(), "bounded");
+        assertEquals(new ServerboundPacket.ClientBrand("vanilla"), packets.get(4), "Paper's raw form of the brand");
+        assertEquals(new ServerboundPacket.ClientInformation(12, "LEFT"), packets.get(5), "no language, chat or skin settings");
+    }
 }

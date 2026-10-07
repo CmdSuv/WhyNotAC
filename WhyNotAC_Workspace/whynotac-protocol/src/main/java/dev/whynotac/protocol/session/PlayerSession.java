@@ -110,6 +110,16 @@ public final class PlayerSession {
         emit(nanoTime, seq -> new TimelineEvent.Observation(seq, nanoTime, inbound, outbound, clientProtocol, detail));
     }
 
+    /** Records a fact about the client (see {@link TimelineEvent.ClientFact} for the trust rule). */
+    public synchronized void onFact(TimelineEvent.ClientFact.Fact fact, String value, TimelineEvent.ClientFact.Trust trust, String source,
+            long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        emit(nanoTime, seq -> new TimelineEvent.ClientFact(seq, nanoTime, fact, value, trust, source));
+    }
+
     /** The client's inbound stream and the game's differ by this packet. */
     public synchronized void onInboundDivergence(TimelineEvent.DivergenceKind kind, ServerboundPacket packet, long nanoTime) {
         requireLive();

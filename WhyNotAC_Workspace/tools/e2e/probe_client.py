@@ -38,7 +38,9 @@ PROTOCOL = 774
 LOGIN_C_DISCONNECT, LOGIN_C_FINISHED, LOGIN_C_COMPRESSION, LOGIN_C_CUSTOM_QUERY = 0x00, 0x02, 0x03, 0x04
 LOGIN_S_HELLO, LOGIN_S_CUSTOM_QUERY_ANSWER, LOGIN_S_ACK = 0x00, 0x02, 0x03
 CFG_C_DISCONNECT, CFG_C_FINISH, CFG_C_KEEP_ALIVE, CFG_C_PING, CFG_C_KNOWN_PACKS = 0x02, 0x03, 0x04, 0x05, 0x0E
-CFG_S_CLIENT_INFO, CFG_S_FINISH, CFG_S_KEEP_ALIVE, CFG_S_PONG, CFG_S_KNOWN_PACKS = 0x00, 0x03, 0x04, 0x05, 0x07
+CFG_S_CLIENT_INFO, CFG_S_CUSTOM_PAYLOAD, CFG_S_FINISH, CFG_S_KEEP_ALIVE, CFG_S_PONG, CFG_S_KNOWN_PACKS = 0x00, 0x02, 0x03, 0x04, 0x05, 0x07
+BRAND = "whynotac-probe"
+CHANNELS = ["whynotac:probe", "example:sync"]
 PLAY_C_CHUNK_BATCH_FINISHED, PLAY_C_DISCONNECT, PLAY_C_KEEP_ALIVE, PLAY_C_LOGIN, PLAY_C_PING, PLAY_C_POSITION, PLAY_C_START_CONFIG = (
     0x0B, 0x20, 0x2B, 0x30, 0x3B, 0x46, 0x74)
 PLAY_S_ACCEPT_TELEPORT, PLAY_S_CHUNK_BATCH_RECEIVED, PLAY_S_TICK_END, PLAY_S_KEEP_ALIVE = 0x00, 0x0A, 0x0C, 0x1B
@@ -194,6 +196,9 @@ class Client:
                 self.send(LOGIN_S_ACK)
                 self.state = "configuration"
                 self.send(CFG_S_CLIENT_INFO, mc_string("en_us") + bytes([3]) + varint(0) + b"\x01" + b"\x7f" + varint(1) + b"\x00" + b"\x01" + varint(0))
+                # What a vanilla client announces (the brand) and what a modded one adds (channel registrations).
+                self.send(CFG_S_CUSTOM_PAYLOAD, mc_string("minecraft:brand") + mc_string(BRAND))
+                self.send(CFG_S_CUSTOM_PAYLOAD, mc_string("minecraft:register") + "\x00".join(CHANNELS).encode("utf-8"))
             elif packet_id == LOGIN_C_CUSTOM_QUERY:
                 self.send(LOGIN_S_CUSTOM_QUERY_ANSWER, varint(r.varint()) + b"\x00")
             elif packet_id == LOGIN_C_DISCONNECT:
@@ -329,6 +334,8 @@ def main():
         "server_list_ping_answered": status_ok,
         "still_connected": client.alive,
         "trace": client.trace,
+        "brand": BRAND,
+        "channels": CHANNELS,
         "disconnect_reason": client.disconnect_reason,
     }
     print(json.dumps(summary))

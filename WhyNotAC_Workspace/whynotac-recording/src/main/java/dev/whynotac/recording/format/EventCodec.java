@@ -120,6 +120,13 @@ public final class EventCodec {
                     writeClientbound(divergence.packet());
                     yield TAG_OUTBOUND_DIVERGENCE;
                 }
+                case TimelineEvent.ClientFact fact -> {
+                    body.writeVarInt(fact.fact().ordinal());
+                    string(fact.value());
+                    body.writeVarInt(fact.trust().ordinal());
+                    string(fact.source());
+                    yield TAG_CLIENT_FACT;
+                }
             };
             out.writeVarInt(tag);
             out.writeVarInt(body.size());
@@ -297,6 +304,26 @@ public final class EventCodec {
                     body.writeVarInt(SB_HANDSHAKE);
                     body.writeZigZag(h.protocolVersion());
                     body.writeVarInt(h.intent().ordinal());
+                }
+                case ServerboundPacket.ClientInformation c -> {
+                    body.writeVarInt(SB_CLIENT_INFORMATION);
+                    body.writeZigZag(c.viewDistance());
+                    string(c.mainHand());
+                }
+                case ServerboundPacket.ClientBrand b -> {
+                    body.writeVarInt(SB_CLIENT_BRAND);
+                    string(b.brand());
+                }
+                case ServerboundPacket.ChannelRegistration r -> {
+                    body.writeVarInt(SB_CHANNEL_REGISTRATION);
+                    body.writeByte(r.register() ? 1 : 0);
+                    body.writeVarInt(r.channels().size());
+                    r.channels().forEach(this::string);
+                }
+                case ServerboundPacket.CustomPayload p -> {
+                    body.writeVarInt(SB_CUSTOM_PAYLOAD);
+                    string(p.channel());
+                    body.writeZigZag(p.size());
                 }
             }
         }
@@ -495,6 +522,12 @@ public final class EventCodec {
                         enumAt(TimelineEvent.DivergenceKind.values(), body.readVarInt()), readServerbound(body));
                 case TAG_OUTBOUND_DIVERGENCE -> new TimelineEvent.OutboundDivergence(sequence, nanoTime,
                         enumAt(TimelineEvent.DivergenceKind.values(), body.readVarInt()), readClientbound(body));
+                case TAG_CLIENT_FACT -> {
+                    TimelineEvent.ClientFact.Fact fact = enumAt(TimelineEvent.ClientFact.Fact.values(), body.readVarInt());
+                    String value = string(body);
+                    TimelineEvent.ClientFact.Trust trust = enumAt(TimelineEvent.ClientFact.Trust.values(), body.readVarInt());
+                    yield new TimelineEvent.ClientFact(sequence, nanoTime, fact, value, trust, string(body));
+                }
                 default -> null;
             };
             if (event == null) {
@@ -617,6 +650,21 @@ public final class EventCodec {
                 case SB_UNMODELED -> new ServerboundPacket.Unmodeled(string(in));
                 case SB_UNTRANSLATABLE -> new ServerboundPacket.Untranslatable(string(in));
                 case SB_HANDSHAKE -> new ServerboundPacket.Handshake(zint(in), enumAt(ServerboundPacket.Handshake.Intent.values(), in.readVarInt()));
+                case SB_CLIENT_INFORMATION -> new ServerboundPacket.ClientInformation(zint(in), string(in));
+                case SB_CLIENT_BRAND -> new ServerboundPacket.ClientBrand(string(in));
+                case SB_CHANNEL_REGISTRATION -> {
+                    boolean register = in.readUnsignedByte() != 0;
+                    int count = in.readVarInt();
+                    if (count < 0 || count > in.remaining()) {
+                        throw new RecordingFormatException("channel count " + count);
+                    }
+                    List<String> channels = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        channels.add(string(in));
+                    }
+                    yield new ServerboundPacket.ChannelRegistration(register, channels);
+                }
+                case SB_CUSTOM_PAYLOAD -> new ServerboundPacket.CustomPayload(string(in), zint(in));
                 default -> {
                     in.skip(in.remaining()); // the packet is the record's last field
                     yield new ServerboundPacket.Unmodeled(UNKNOWN_PACKET_PREFIX + tag);

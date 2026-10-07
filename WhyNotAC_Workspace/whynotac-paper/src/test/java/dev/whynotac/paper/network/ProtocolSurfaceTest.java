@@ -47,11 +47,10 @@ class ProtocolSurfaceTest {
 
     /** Translated into a dedicated model record (the handshake's "intention" is not a play packet). */
     private static final Set<String> SERVERBOUND_MODELLED = PacketTranslator.SERVERBOUND_MODELLED.stream()
-            .filter(id -> !id.equals("intention")).collect(Collectors.toUnmodifiableSet());
+            .filter(id -> !id.equals("intention")).collect(Collectors.toUnmodifiableSet()); // client_information/custom_payload are common
 
-    /** Relevant for analysis, to be modelled next (Phase 2b): client settings and brand, item picking. */
-    private static final Set<String> SERVERBOUND_PLANNED = Set.of(
-            "client_information", "custom_payload", "pick_item_from_block", "pick_item_from_entity");
+    /** Relevant for analysis, to be modelled next: item picking. */
+    private static final Set<String> SERVERBOUND_PLANNED = Set.of("pick_item_from_block", "pick_item_from_entity");
 
     /** No bearing on movement, combat or timing beyond what Unmodeled already records (type and time). */
     private static final Set<String> SERVERBOUND_IGNORED = Set.of(

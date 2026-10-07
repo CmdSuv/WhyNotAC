@@ -25,9 +25,11 @@ gönderdiği ve sunucunun size gönderdiği oyun paketlerinin bir kısmı kayded
   patlama itmesi, iksir etkileri, nitelikler, yetenekler
 - Zamanlama: paketlerin sunucuya ulaştığı an ve gecikme ölçümleri (ping, jitter)
 - Bağlandığınız Minecraft protokol sürümü
+- İstemcinizin sunucuya kendisinin bildirdiği bilgiler: istemci adı ("brand"), duyurduğu eklenti
+  mesaj kanallarının adları (içerikleri değil), görüş mesafesi ve ana el (sağ/sol)
 
 **Kaydedilmeyenler**
-- IP adresiniz, kullanıcı adınız, sohbet mesajlarınız ve komutlarınız
+- IP adresiniz, kullanıcı adınız, sohbet mesajlarınız, komutlarınız ve dil ayarınız
 - Bilgisayarınızdaki dosyalar, işlemler veya modlar: WhyNotAC yalnızca sunucu tarafında çalışır,
   cihazınızı taramaz
 
@@ -72,9 +74,11 @@ between your client and the server is recorded.
   potion effects, attributes, abilities
 - Timing: when packets reached the server, and latency measurements (ping, jitter)
 - The Minecraft protocol version you connected with
+- What your client itself announces to the server: its client name ("brand"), the names of the
+  plugin-message channels it registers (not their content), view distance and main hand
 
 **What is not recorded**
-- Your IP address, username, chat messages or commands
+- Your IP address, username, chat messages, commands or language setting
 - Files, processes or mods on your computer: WhyNotAC runs only on the server and never scans
   your device
 

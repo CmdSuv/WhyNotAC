@@ -22,7 +22,12 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;
 import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
+import net.minecraft.network.protocol.common.ServerboundClientInformationPacket;
+import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.ServerboundPongPacket;
+import net.minecraft.network.protocol.common.custom.BrandPayload;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.network.protocol.common.custom.DiscardedPayload;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
 import net.minecraft.network.protocol.game.ClientboundLoginPacket;
@@ -124,7 +129,8 @@ public final class PacketTranslator {
      * {@code ProtocolSurfaceTest} keeps this list in step with the protocol.
      */
     public static final Set<String> SERVERBOUND_MODELLED = Set.of(
-            "intention", "accept_teleportation", "chunk_batch_received", "client_tick_end", "container_click", "container_close", "interact",
+            "intention", "client_information", "custom_payload",
+            "accept_teleportation", "chunk_batch_received", "client_tick_end", "container_click", "container_close", "interact",
             "keep_alive", "move_player_pos", "move_player_pos_rot", "move_player_rot", "move_player_status_only", "move_vehicle",
             "paddle_boat", "player_abilities", "player_action", "player_command", "player_input", "player_loaded", "pong",
             "set_carried_item", "swing", "use_item", "use_item_on");
@@ -180,6 +186,9 @@ public final class PacketTranslator {
             case ServerboundPlayerLoadedPacket ignored -> new ServerboundPacket.PlayerLoaded();
             case ServerboundChunkBatchReceivedPacket(float desired) -> new ServerboundPacket.ChunkBatchReceived(desired);
             case ClientIntentionPacket intention -> new ServerboundPacket.Handshake(intention.protocolVersion(), INTENT.map(intention.intention()));
+            case ServerboundClientInformationPacket info -> new ServerboundPacket.ClientInformation(
+                    info.information().viewDistance(), info.information().mainHand().name());
+            case ServerboundCustomPayloadPacket payload -> customPayload(payload.payload());
             default -> unmodeledInbound.computeIfAbsent(packet.getClass(), c -> new ServerboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }
@@ -217,6 +226,45 @@ public final class PacketTranslator {
         BlockHitResult hit = packet.getHitResult();
         return new ServerboundPacket.UseItemOn(hand(packet.getHand()), position(hit.getBlockPos()), face(hit.getDirection()),
                 vec(hit.getLocation()), hit.isInside(), hit.isWorldBorderHit(), packet.getSequence());
+    }
+
+    /** Longest brand or channel name kept: a client may send up to 32 KiB of anything. */
+    static final int MAX_CLAIMED_TEXT = 128;
+    /** Most channels kept from one registration. */
+    static final int MAX_CHANNELS = 64;
+
+    private static ServerboundPacket customPayload(CustomPacketPayload payload) {
+        if (payload instanceof BrandPayload brand) {
+            return new ServerboundPacket.ClientBrand(clip(brand.brand()));
+        }
+        String channel = payload.type().id().toString();
+        if (payload instanceof DiscardedPayload discarded) {
+            if (channel.equals("minecraft:brand")) {
+                // Paper keeps every serverbound payload as raw data (for plugin messaging), the brand too.
+                try {
+                    return new ServerboundPacket.ClientBrand(clip(new net.minecraft.network.FriendlyByteBuf(
+                            io.netty.buffer.Unpooled.wrappedBuffer(discarded.data())).readUtf(32767)));
+                } catch (RuntimeException malformed) {
+                    return new ServerboundPacket.CustomPayload(channel, discarded.data().length);
+                }
+            }
+            boolean register = channel.equals("minecraft:register");
+            if (register || channel.equals("minecraft:unregister")) {
+                List<String> channels = new ArrayList<>();
+                for (String name : new String(discarded.data(), java.nio.charset.StandardCharsets.UTF_8).split("\u0000")) {
+                    if (!name.isEmpty() && channels.size() < MAX_CHANNELS) {
+                        channels.add(clip(name));
+                    }
+                }
+                return new ServerboundPacket.ChannelRegistration(register, channels);
+            }
+            return new ServerboundPacket.CustomPayload(clip(channel), discarded.data().length);
+        }
+        return new ServerboundPacket.CustomPayload(clip(channel), -1);
+    }
+
+    private static String clip(String text) {
+        return text.length() <= MAX_CLAIMED_TEXT ? text : text.substring(0, MAX_CLAIMED_TEXT);
     }
 
     // --- clientbound -------------------------------------------------------------------------------
