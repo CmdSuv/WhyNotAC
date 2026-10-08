@@ -82,9 +82,11 @@ sleep $(( PROBE_SECONDS - 8 ))
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
-echo "whynotac cases" > "$FIFO"
 wait "$PROBE"
 sleep 2   # let the server see the disconnect and finalise the recording
+# After the probe: its violation (tick 200) may come later than the commands above on a slow machine.
+echo "whynotac cases" > "$FIFO"
+sleep 1
 echo "stop" > "$FIFO"
 wait "$SERVER" || true
 trap - EXIT
