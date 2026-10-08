@@ -28,6 +28,8 @@ public final class TransactionPolicy {
             case ClientboundPacket.GameEvent event -> event.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE;
             case ClientboundPacket.PlayerPosition ignored -> true;
             case ClientboundPacket.PlayerRotation ignored -> true;
+            // Moves the player only as its former vehicle; positions are not modelled yet (physics backlog).
+            case ClientboundPacket.TeleportEntity ignored -> false;
             case ClientboundPacket.PlayerAbilities ignored -> true;
             case ClientboundPacket.Respawn ignored -> true;
             case ClientboundPacket.KeepAlive ignored -> false;

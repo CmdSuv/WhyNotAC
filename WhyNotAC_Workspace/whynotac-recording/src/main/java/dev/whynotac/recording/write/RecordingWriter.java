@@ -4,6 +4,8 @@ import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.recording.format.Block;
 import dev.whynotac.recording.format.ByteSink;
 import dev.whynotac.recording.format.EventCodec;
+import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Turns one session's events into sealed blocks. A block is sealed when its raw size reaches
@@ -31,12 +33,24 @@ public final class RecordingWriter {
     private long totalEvents;
     private long lostTotal;
     private boolean closed;
+    private final Path file;
 
     public RecordingWriter(BlockSink sink, int targetBlockBytes, long maxBlockAgeNanos) {
+        this(sink, targetBlockBytes, maxBlockAgeNanos, null);
+    }
+
+    /** @param file where the finished recording will be (null if the sink is not a file) */
+    public RecordingWriter(BlockSink sink, int targetBlockBytes, long maxBlockAgeNanos, Path file) {
         this.sink = sink;
         this.targetBlockBytes = targetBlockBytes;
         this.maxBlockAgeNanos = maxBlockAgeNanos;
         this.current = new ByteSink(targetBlockBytes + 1024);
+        this.file = file;
+    }
+
+    /** The finished recording's path (it is a .part file until the session ends), if written to a file. */
+    public Optional<Path> file() {
+        return Optional.ofNullable(file);
     }
 
     public void append(TimelineEvent event) {

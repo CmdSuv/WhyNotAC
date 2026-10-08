@@ -1,5 +1,9 @@
 package dev.whynotac.paper;
 
+import dev.whynotac.analysis.checks.TickFramingCheck;
+import dev.whynotac.analysis.verdict.ShadowVerdict;
+import dev.whynotac.paper.cases.Alerts;
+import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.TickCost;
@@ -26,6 +30,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** Entry point: packet interception, per-player timelines, transaction latency tracking and (optional) session recording. */
@@ -35,6 +40,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private SessionRegistry registry;
     private PacketInterceptor interceptor;
     private RecordingStore recordings;
+    private final ShadowVerdict verdict = new ShadowVerdict();
+    private CaseStore cases;
+    private Alerts alerts;
     private final AtomicLong listenerErrors = new AtomicLong();
     private final TickCost transactionLoop = new TickCost();
     private Diagnostics diagnostics;
@@ -52,28 +60,48 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         diagnostics = new Diagnostics();
         registry.addListener(diagnostics);
         saveDefaultConfig();
+        RecordingSetup.Recording recording = null;
         try {
-            recordings = RecordingSetup.install(getConfig().getConfigurationSection("recording"), getDataPath(), registry,
+            recording = RecordingSetup.install(getConfig().getConfigurationSection("recording"), getDataPath(), registry,
                     getPluginMeta().getVersion(), getLogger()).orElse(null);
         } catch (IOException e) {
             getLogger().log(Level.SEVERE, "Session recording could not start; continuing without it", e);
         }
+        recordings = recording == null ? null : recording.store();
+        // Checks run after the recorder, so a case can name the recording that holds its window.
+        RecordingSetup.Recording recorder = recording;
+        cases = new CaseStore(getDataPath().resolve("cases.db"), getDataPath().resolve("cases"),
+                session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session),
+                getPluginMeta().getVersion(), getLogger());
+        cases.retain(Math.max(1, getConfig().getInt("cases.retention-days", 90)));
+        alerts = new Alerts(this);
+        verdict.addListener(cases);
+        verdict.addListener(alerts);
+        registry.addListener(new TickFramingCheck(verdict));
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
         }
 
-        interceptor = new PacketInterceptor(registry, getLogger());
+        boolean edge = getConfig().getBoolean("observation.edge", true);
+        boolean perTickTransactions = getConfig().getBoolean("observation.per-tick-transactions", true);
+        if (!edge || !perTickTransactions) {
+            getLogger().warning("WhyNotAC observation reduced by config.yml: edge=" + edge + ", per-tick-transactions=" + perTickTransactions
+                    + " (detection quality is lower; meant for measurements and troubleshooting)");
+        }
+        interceptor = new PacketInterceptor(registry, getLogger(), edge);
         interceptor.install();
         Bukkit.getScheduler().runTask(this, interceptor::injectExisting); // connections still pending at install time
         Bukkit.getScheduler().runTask(this, () -> Bukkit.getOnlinePlayers().forEach(interceptor::bind));
         // One stand-alone transaction per server tick keeps a continuous, per-tick latency trace.
-        Bukkit.getScheduler().runTaskTimer(this, () -> {
-            long[] cost = transactionLoop.begin();
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                interceptor.sendTransaction(player);
-            }
-            transactionLoop.end(cost);
-        }, 1L, 1L);
+        if (perTickTransactions) {
+            Bukkit.getScheduler().runTaskTimer(this, () -> {
+                long[] cost = transactionLoop.begin();
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    interceptor.sendTransaction(player);
+                }
+                transactionLoop.end(cost);
+            }, 1L, 1L);
+        }
         // Another plugin may insert a handler outside the edge taps after login; move them back (every 5 s).
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             for (Player player : Bukkit.getOnlinePlayers()) {
@@ -82,7 +110,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }, 100L, 100L);
 
         getServer().getPluginManager().registerEvents(this, this);
-        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats);
+        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -121,6 +149,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (recordings != null) {
             recordings.close(); // drains queued blocks (bounded) and finalises files
         }
+        if (cases != null) {
+            cases.close();
+        }
     }
 
     /** One line of JSON for {@code /whynotac stats}: totals since start-up, for operators and the load test. */
@@ -141,12 +172,22 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         return String.format(Locale.ROOT, "{\"sessionsLive\":%d,\"queuedEvents\":%d,\"sessions\":%d,\"ended\":%d,\"inbound\":%d,"
                         + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
                         + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
-                        + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f}}",
+                        + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
+                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d}}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
                 totals.outbound(), totals.lostEvents(), totals.inboundDivergences(), totals.outboundDivergences(), anomalies,
                 pendingMax, withheld, listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
                 recordings == null ? 0 : recordings.failedRecordings(), transactionLoop.runs(), transactionLoop.meanWallMicros(),
-                transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros());
+                transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros(),
+                verdict.cases(), cases == null ? 0 : cases.storedCount(), cases == null ? 0 : cases.droppedCount(),
+                verdict.rejections().size());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuit(PlayerQuitEvent event) {
+        if (alerts != null) {
+            alerts.forget(event.getPlayer().getName());
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

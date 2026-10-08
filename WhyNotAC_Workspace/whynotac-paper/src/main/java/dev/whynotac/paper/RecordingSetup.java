@@ -23,7 +23,10 @@ final class RecordingSetup {
 
     private RecordingSetup() {}
 
-    static Optional<RecordingStore> install(ConfigurationSection config, Path dataFolder, SessionRegistry registry, String pluginVersion, Logger logger)
+    /** The recording store and the listener that writes sessions into it. */
+    record Recording(RecordingStore store, RecordingListener listener) {}
+
+    static Optional<Recording> install(ConfigurationSection config, Path dataFolder, SessionRegistry registry, String pluginVersion, Logger logger)
             throws IOException {
         if (config == null || !config.getBoolean("enabled", false)) {
             return Optional.empty();
@@ -36,11 +39,12 @@ final class RecordingSetup {
                 RecordingWriter.DEFAULT_MAX_BLOCK_AGE_NANOS);
         RecordingStore store = new RecordingStore(dataFolder.resolve("recordings"), settings, logger);
         Pseudonymizer pseudonymizer = new Pseudonymizer(loadOrCreateSecret(dataFolder.resolve(SECRET_FILE)));
-        registry.addListener(new RecordingListener(store, pseudonymizer, SharedConstants.getProtocolVersion(),
-                SharedConstants.getCurrentVersion().name(), pluginVersion));
+        RecordingListener listener = new RecordingListener(store, pseudonymizer, SharedConstants.getProtocolVersion(),
+                SharedConstants.getCurrentVersion().name(), pluginVersion);
+        registry.addListener(listener);
         store.scheduleRetention();
         logger.info("WhyNotAC session recording enabled (pseudonymised) -> " + store.directory());
-        return Optional.of(store);
+        return Optional.of(new Recording(store, listener));
     }
 
     private static byte[] loadOrCreateSecret(Path file) throws IOException {

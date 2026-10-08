@@ -14,6 +14,7 @@ dependencies {
     paperweight.paperDevBundle(libs.versions.paper.dev.bundle.get())
     implementation(project(":whynotac-protocol"))
     implementation(project(":whynotac-recording"))
+    implementation(project(":whynotac-analysis"))
 }
 
 tasks.processResources {
@@ -24,9 +25,9 @@ tasks.processResources {
 
 // The plugin jar must carry the platform-agnostic modules (they are not provided by the server).
 tasks.jar {
-    dependsOn(":whynotac-recording:jar", ":whynotac-protocol:jar", ":whynotac-math:jar")
-    // The plugin jar doubles as the offline recording tool: java -jar WhyNotAC.jar inspect <file>
-    manifest.attributes("Main-Class" to "dev.whynotac.recording.cli.RecordingTool")
+    dependsOn(":whynotac-analysis:jar", ":whynotac-recording:jar", ":whynotac-protocol:jar", ":whynotac-math:jar")
+    // The plugin jar doubles as the offline tool: java -jar WhyNotAC.jar inspect|dump|find|forget|verify ...
+    manifest.attributes("Main-Class" to "dev.whynotac.analysis.cli.Tool")
     from(configurations.runtimeClasspath.map { cp ->
         cp.filter { it.name.startsWith("whynotac-") }.map { zipTree(it) }
     })

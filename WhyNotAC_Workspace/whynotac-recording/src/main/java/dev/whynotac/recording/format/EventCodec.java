@@ -374,6 +374,10 @@ public final class EventCodec {
                     }
                     body.writeVarInt(mask);
                 }
+                case ClientboundPacket.TeleportEntity t -> {
+                    body.writeVarInt(CB_TELEPORT_ENTITY);
+                    body.writeZigZag(t.entityId());
+                }
                 case ClientboundPacket.PlayerRotation r -> {
                     body.writeVarInt(CB_PLAYER_ROTATION);
                     body.writeFloat(r.yaw());
@@ -710,6 +714,7 @@ public final class EventCodec {
                     }
                     yield new ClientboundPacket.PlayerPosition(teleportId, position, delta, yaw, pitch, relatives);
                 }
+                case CB_TELEPORT_ENTITY -> new ClientboundPacket.TeleportEntity(zint(in));
                 case CB_PLAYER_ROTATION -> {
                     float yaw = in.readFloat();
                     float pitch = in.readFloat();

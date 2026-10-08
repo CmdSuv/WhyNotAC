@@ -40,6 +40,7 @@ include(
     "whynotac-math",
     "whynotac-protocol",
     "whynotac-recording",
+    "whynotac-analysis",
     "whynotac-paper",
     "whynotac-conformance",
     "whynotac-bench",

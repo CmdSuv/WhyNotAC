@@ -2,6 +2,7 @@
 """Summarizes one load-test run (see run_load.sh) as one JSON document. Stdlib only."""
 import glob
 import json
+import os
 import re
 import sys
 
@@ -58,6 +59,10 @@ def main():
         warmup = {"seconds": int(warmed), "settled": int(settled) >= 2}
     except (OSError, ValueError):
         warmup = None
+    # Every bot is honest: any case WhyNotAC opened for one of them is a false positive.
+    cases_dir = os.path.join(os.path.dirname(out_prefix), "plugins", "WhyNotAC", "cases")
+    cases = [json.load(open(os.path.join(cases_dir, f))) for f in sorted(os.listdir(cases_dir)) if f.endswith(".json")] \
+        if os.path.isdir(cases_dir) else []
     moved_wrongly = sum(1 for line in log if "moved wrongly" in line or "moved too quickly" in line)
 
     print(json.dumps({
@@ -69,6 +74,8 @@ def main():
         "whynotacStatsAfterAllLeft": stats[-1] if len(stats) > 1 else None,
         "botSide": bot_summary,
         "serverMovementCorrections": moved_wrongly,
+        "casesOpened": len(cases),
+        "caseSummaries": [c.get("playerName", "?") + " " + c.get("check", "?") + ": " + c.get("summary", "") for c in cases][:10],
     }, indent=1))
 
 

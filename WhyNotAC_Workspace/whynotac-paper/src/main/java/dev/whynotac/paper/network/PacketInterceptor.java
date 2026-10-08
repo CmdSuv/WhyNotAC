@@ -46,10 +46,17 @@ public final class PacketInterceptor {
     /** Off after uninstall: the registered listener then does nothing (it is never removed, see install). */
     private volatile boolean enabled;
     private volatile ClientFacts.Policy identityPolicy;
+    private final boolean edgeEnabled;
 
     public PacketInterceptor(SessionRegistry registry, Logger logger) {
+        this(registry, logger, true);
+    }
+
+    /** @param edgeEnabled false: no edge taps, every connection uses the game's view (declared per session) */
+    public PacketInterceptor(SessionRegistry registry, Logger logger, boolean edgeEnabled) {
         this.registry = registry;
         this.logger = logger;
+        this.edgeEnabled = edgeEnabled;
     }
 
     /**
@@ -130,7 +137,7 @@ public final class PacketInterceptor {
             observer.activeWhile(() -> enabled);
             pipeline.addBefore(ANCHOR, HANDLER_NAME, new WhyNotChannelHandler(session, translator, observer, logger));
             boolean edge = false;
-            if (fresh && pipeline.get("splitter") != null && pipeline.get("prepender") != null) {
+            if (edgeEnabled && fresh && pipeline.get("splitter") != null && pipeline.get("prepender") != null) {
                 try {
                     WireTaps.install(pipeline, observer, logger);
                     edge = true;
@@ -140,7 +147,8 @@ public final class PacketInterceptor {
                 }
             }
             if (!edge) {
-                observer.useGameView(fresh ? "edge taps unavailable" : "attached mid-session", System.nanoTime());
+                observer.useGameView(!edgeEnabled ? "edge view disabled in config.yml (observation.edge)"
+                        : fresh ? "edge taps unavailable" : "attached mid-session", System.nanoTime());
             }
         } catch (RuntimeException e) {
             // Fail open: an injection failure leaves the connection exactly as vanilla built it.

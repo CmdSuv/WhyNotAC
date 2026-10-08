@@ -73,7 +73,7 @@ class ProtocolSurfaceTest {
      */
     private static final Set<String> CLIENTBOUND_PHYSICS_PENDING = Set.of(
             "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
-            "teleport_entity", "rotate_head", "set_entity_data", "set_passengers", "set_entity_link", "move_vehicle",
+            "rotate_head", "set_entity_data", "set_passengers", "set_entity_link", "move_vehicle",
             "move_minecart_along_track", "projectile_power", "block_update", "section_blocks_update", "level_chunk_with_light",
             "forget_level_chunk", "block_changed_ack", "block_event", "initialize_border", "set_border_center", "set_border_lerp_size",
             "set_border_size", "ticking_state", "ticking_step", "cooldown", "set_held_slot", "container_set_content", "container_set_slot",

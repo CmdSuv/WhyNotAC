@@ -16,7 +16,10 @@ import jdk.jfr.consumer.RecordingFile;
  * decoders, other plugins) do not, although WhyNotAC's frame is below them on the stack.
  * {@code anywhere} counts every sample with a WhyNotAC frame at any depth: an upper bound.
  *
- * <p>Usage: {@code java JfrAttribution.java <recording.jfr>}; prints one JSON line.
+ * <p>Also reports CPU per thread group from {@code jdk.ThreadCPULoad} (in cores), which unlike execution
+ * samples includes native work (zlib, syscalls) and the JIT compiler.
+ *
+ * <p>Usage: {@code java JfrAttribution.java <recording.jfr> <machine cpus>}; prints one JSON line.
  */
 public final class JfrAttribution {
 
@@ -29,9 +32,21 @@ public final class JfrAttribution {
         long ours = 0;
         long anywhere = 0;
         long truncated = 0;
+        int cpus = args.length > 1 ? Integer.parseInt(args[1]) : Runtime.getRuntime().availableProcessors();
+        Map<String, double[]> cpuLoad = new TreeMap<>(); // group -> {sum of loads, samples}
+        Map<String, java.util.Set<Long>> cpuThreads = new TreeMap<>();
         try (RecordingFile file = new RecordingFile(Path.of(args[0]))) {
             while (file.hasMoreEvents()) {
                 RecordedEvent event = file.readEvent();
+                if (event.getEventType().getName().equals("jdk.ThreadCPULoad")) {
+                    var t = event.getThread("eventThread");
+                    String g = t == null ? "?" : t.getJavaName() == null ? "os:" + t.getOSName() : t.getJavaName().replaceAll("[0-9]+", "#");
+                    double[] v = cpuLoad.computeIfAbsent(g, k -> new double[2]);
+                    v[0] += event.getFloat("user") + event.getFloat("system");
+                    v[1]++;
+                    cpuThreads.computeIfAbsent(g, k -> new java.util.HashSet<>()).add(t == null ? -1L : t.getOSThreadId());
+                    continue;
+                }
                 if (!event.getEventType().getName().equals("jdk.ExecutionSample")) {
                     continue;
                 }
@@ -80,6 +95,15 @@ public final class JfrAttribution {
             json.append(first ? "" : ",").append('"').append(entry.getKey().replace("\"", "'")).append("\":{\"samples\":")
                     .append(entry.getValue()[0]).append(",\"whynotac\":").append(entry.getValue()[1])
                     .append(",\"anywhere\":").append(entry.getValue()[2]).append('}');
+            first = false;
+        }
+        json.append("},\"threadCpuCores\":{");
+        first = true;
+        for (Map.Entry<String, double[]> entry : cpuLoad.entrySet()) {
+            // ThreadCPULoad is a fraction of the whole machine: mean per thread x threads x cpus = cores
+            double cores = entry.getValue()[0] / entry.getValue()[1] * cpuThreads.get(entry.getKey()).size() * cpus;
+            json.append(first ? "" : ",").append('"').append(entry.getKey().replace("\"", "'")).append("\":")
+                    .append(String.format(java.util.Locale.ROOT, "%.4f", cores));
             first = false;
         }
         System.out.println(json.append("}}"));

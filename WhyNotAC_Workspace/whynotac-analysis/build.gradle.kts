@@ -1,0 +1,16 @@
+plugins {
+    id("whynotac.java-conventions")
+}
+
+description = "Checks, evidence and admissibility, the action policy (docs/POLICY.md) and the verdict layer. Platform-agnostic."
+
+dependencies {
+    api(project(":whynotac-protocol"))
+    implementation(project(":whynotac-recording")) // the verify tool re-runs checks over recordings
+}
+
+// The policy test compares the code's matrix with the table in docs/POLICY.md.
+tasks.withType<Test>().configureEach {
+    systemProperty("whynotac.policyDoc", rootProject.file("docs/POLICY.md").absolutePath)
+    inputs.file(rootProject.file("docs/POLICY.md"))
+}

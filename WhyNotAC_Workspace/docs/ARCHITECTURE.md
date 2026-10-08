@@ -13,8 +13,10 @@
 4. **Bit-tam replikasyon.** Fizik ve dönüş hesapları client'ın IEEE-754 işlemlerini aynı sırayla
    yapar ve gerçek oyun sınıflarına karşı bit seviyesinde test edilir. "Yaklaşık doğru" bir
    simülatör, yuvarlama hatasını hile sanır.
-5. **Fail-open.** WhyNotAC içindeki bir hata hiçbir oyuncuyu etkilemez: paket her durumda
-   değişmeden iletilir, istisna Netty'ye ya da oyun thread'ine sızmaz.
+5. **Fail-open.** WhyNotAC içindeki bir hata hiçbir oyuncuyu etkilemez: gözlem katmanı paketleri
+   değiştirmeden iletir, istisna Netty'ye ya da oyun thread'ine sızmaz. Sessiz önlemler (setback,
+   hasar iptali, bilgi gizleme) [POLICY.md](POLICY.md)'ye göre ayrı bir katmandan gelir ve oyunun
+   kendi mekanizmalarını kullanır (ör. teleport ile setback), paket bozmaz.
 6. **Esnek tahmin, katı sıra değil.** Grim tarzı "tek doğru tahmin + paket sırası" yerine fizik
    katmanı, kanıtla tutarlı **tüm hipotezlerin kümesini** (tuş kombinasyonları, knockback
    penceresi, gönderilmemiş mikro hareket) üretir. Gözlem bu kümenin dışına, bilgi sınırının
@@ -40,7 +42,7 @@
    ▼                       ▼                             ▼                        │
 whynotac-physics     whynotac-analysis              whynotac-ai                    │  (planlı)
 hipotez kümeli       aim / tıklama / zamanlama      oyuncu profili, anomali skoru  │
-fizik motoru         dedektörleri                   (çevrimiçi öğrenme)            │
+fizik motoru         dedektörleri                   (S sınıfı, ceza vermez)        │
    └───────────────────────┴──────────────┬──────────────┘                        │
                                           ▼ Evidence                              │
                                    whynotac-verdict ──► whynotac-storage ◄────────┘
@@ -160,17 +162,17 @@ client'larda ve çeviricilerin arkasında doğrulanacak (yol haritası).
 
 ## Sıfır yanlış-ban yaklaşımı (verdict katmanı için sözleşme)
 
-Matematiksel olarak hiçbir sistem %0 olasılık **garanti edemez**. WhyNotAC'nin taahhüdü,
-olasılığı ölçülebilir ve keyfî derecede küçük tutmaktır:
+Normatif sözleşme [POLICY.md](POLICY.md)'dir. Özeti:
 
-- Her kanıt bir **istatistik** taşır (ör. "bu gözlemin, tutarlı hipotez kümesinin dışında kalma
-  olasılığı p"). Bilgi sınırının altında kalan hiçbir şey kanıt değildir.
-- Kanıtlar bağımsızlık varsayımı **açıkça modellenerek** birleştirilir (aynı fiziksel olaydan
-  türeyen iki kontrol çift sayılmaz).
-- Karar eşiği, oyuncu-ömrü başına yanlış-pozitif olasılığı (ör. ≤ 1e-9) olarak tanımlanır ve
-  sürekli olarak ölçülür: temiz oyuncu kayıtları üzerinde geriye dönük oynatma (replay) ile.
-- Varsayılan eylem **izleme ve kanıt biriktirme**dir. Otomatik ceza, operatörün açıkça seçtiği
-  bir politikadır.
+- Kişi başına 1e-9 gibi bir yanlış-pozitif oranı replay ile **ölçülemez**. Otomatik ceza bu yüzden
+  yalnızca **inşa gereği sağlam** kanıttan (P-A) gelir: vanilla'nın bütün belirsizlikleri sınırlanmış
+  haliyle asla üretemeyeceği bir gözlem.
+- Temiz kayıtlar yalnızca yanlışlar: bir kontrolün temiz veride tek bir kanıt üretmesi onu SHADOW'a
+  geri alır ve bir regresyon testi olur.
+- İstatistik ve yapay zekâ e-değer ya da sinyal üretir: inceleme ve bağlam içindir, asla ceza vermez.
+- Kanıtlar bağımlılık grubuyla birleştirilir: aynı fiziksel olaydan türeyen iki kontrol çift sayılmaz.
+- Her eylem, POLICY.md'deki sınıf × eylem × kimlik katmanı matrisine tabidir. Operatör yasak bir
+  hücreyi açamaz.
 
 ## Modüller
 
@@ -183,9 +185,9 @@ olasılığı ölçülebilir ve keyfî derecede küçük tutmaktır:
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
 | `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
-| `whynotac-analysis` | Faz 3 (planlı) | Aim/tıklama/zamanlama dedektörleri |
+| `whynotac-analysis` | **Slice 0 ✔** | Kontroller (ilk: tick framing), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |
-| `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve karar |
+| `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve ARMED karar (Slice 0'ın SHADOW kararı şimdilik `whynotac-analysis`'te) |
 | `whynotac-storage` | Faz 4 (planlı) | Profil ve kanıt kalıcılığı |
 
 ## Bilinen sınırlar

@@ -4,6 +4,7 @@
 # usage: tools/load/run_load.sh <work-dir> <variant> [bots] [measure-seconds] [crowd]
 #   variant  baseline  - no plugin (the reference)
 #            whynotac  - WhyNotAC with session recording enabled
+#            whynotac-noping / whynotac-noedge / whynotac-norec - one component switched off (decomposition)
 #   layout   cluster (default): bots at least 8 blocks apart within 160 blocks (each sees a few dozen
 #            others, like a busy spawn or arena); spread: far apart (per-player cost only);
 #            crowd: all in one place (every bot sees every other one: N^2 entity traffic)
@@ -57,11 +58,20 @@ PROPS
 printf 'settings:\n  connection-throttle: -1\n' > "$WORK_DIR/bukkit.yml"
 mkdir -p "$WORK_DIR/plugins"
 find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' -delete
-rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings"
-if [ "$VARIANT" = whynotac ]; then
+rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/plugins/WhyNotAC/cases.db"
+if [ "${VARIANT%%-*}" = whynotac ]; then
   (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
   mkdir -p "$WORK_DIR/plugins/WhyNotAC"
   printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 4096\n  max-queued-megabytes: 64\n' > "$WORK_DIR/plugins/WhyNotAC/config.yml"
+  # Decomposition variants: whynotac-noping (no per-tick transactions), whynotac-noedge (game view only),
+  # whynotac-norec (no recording).
+  case "$VARIANT" in
+    whynotac) ;;
+    whynotac-noping) printf 'observation:\n  per-tick-transactions: false\n' >> "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
+    whynotac-noedge) printf 'observation:\n  edge: false\n' >> "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
+    whynotac-norec) sed -i 's/enabled: true/enabled: false/' "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
+    *) echo "unknown variant $VARIANT"; exit 2 ;;
+  esac
   find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' -exec cp {} "$WORK_DIR/plugins/WhyNotAC.jar" \;
 elif [ "$VARIANT" != baseline ]; then
   echo "unknown variant $VARIANT"; exit 2
@@ -133,21 +143,21 @@ jcmd "$JAVA_PID" JFR.stop name=load > /dev/null
 CPU_END=$(cpu_ticks); T_END=$(date +%s.%N)
 echo "mspt" > "$FIFO"
 echo "tps" > "$FIFO"
-[ "$VARIANT" = whynotac ] && echo "whynotac stats" > "$FIFO"
+[ "${VARIANT%%-*}" = whynotac ] && echo "whynotac stats" > "$FIFO"
 sleep 2
 jcmd "$JAVA_PID" GC.class_histogram > "$OUT-histogram.txt" 2>/dev/null || true
 touch "$STOP_FILE"   # every bot finishes its current second and reports whether it was still connected
 for pid in "${BOT_PIDS[@]}"; do wait "$pid" || true; done
 BOT_PIDS=()
 sleep 3
-[ "$VARIANT" = whynotac ] && echo "whynotac stats" > "$FIFO" && sleep 2   # after every bot has left
+[ "${VARIANT%%-*}" = whynotac ] && echo "whynotac stats" > "$FIFO" && sleep 2   # after every bot has left
 echo "stop" > "$FIFO"
 wait "$SERVER_SHELL" || true
 trap - EXIT
 kill "$HOLDER" 2>/dev/null || true
 rm -f "$FIFO"
 
-java -Xmx1G "$HERE/JfrAttribution.java" "$OUT.jfr" > "$OUT-jfr.json"
+java -Xmx1G "$HERE/JfrAttribution.java" "$OUT.jfr" "$CPUS" > "$OUT-jfr.json"
 python3 -I "$HERE/summarize_load.py" "$VARIANT" "$LAYOUT" "$BOTS" "$MEASURE" "$CPU_START" "$CPU_END" "$T_START" "$T_END" "$(getconf CLK_TCK)" \
   "$OUT-server.log" "$OUT-jfr.json" "$OUT-histogram.txt" "$OUT" > "$OUT.json"
 cat "$OUT.json"

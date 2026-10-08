@@ -5,8 +5,10 @@ import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.recording.format.RecordingFormat;
 import dev.whynotac.recording.format.RecordingHeader;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -76,6 +78,15 @@ public final class RecordingListener implements TimelineListener {
             state.writer.close();
             state.finished = true;
         }
+    }
+
+    /**
+     * Where this session's recording will be once it is finished, if it is being recorded. Call it from
+     * a listener of the same registry (the state is confined to the analysis thread of the session).
+     */
+    public Optional<Path> recordingFile(PlayerSession session) {
+        State state = session.attachment(STATE, State::new);
+        return state.writer == null ? Optional.empty() : state.writer.file();
     }
 
     private void start(State state, TimelineEvent.Bound bound) {

@@ -64,6 +64,13 @@ public sealed interface ClientboundPacket {
     /** {@code ClientboundPlayerRotationPacket}. */
     record PlayerRotation(float yaw, boolean relativeYaw, float pitch, boolean relativePitch) implements ClientboundPacket {}
 
+    /**
+     * {@code ClientboundTeleportEntityPacket}, entity id only (the position is not modelled yet). It
+     * matters to the player itself in one case: a teleport of its former vehicle moves the player, and
+     * the client answers it with a movement packet outside its tick.
+     */
+    record TeleportEntity(int entityId) implements ClientboundPacket {}
+
     /** {@code ClientboundUpdateAttributesPacket} (movement speed, gravity, step height, jump strength, scale, ...). */
     record UpdateAttributes(int entityId, List<Attribute> attributes) implements ClientboundPacket {
         public UpdateAttributes {

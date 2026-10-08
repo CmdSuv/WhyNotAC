@@ -34,6 +34,7 @@ import net.minecraft.network.protocol.game.ClientboundLoginPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerRotationPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveMobEffectPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
@@ -138,7 +139,7 @@ public final class PacketTranslator {
     /** Packet type paths that {@link #outbound} turns into a dedicated model record (see {@link #SERVERBOUND_MODELLED}). */
     public static final Set<String> CLIENTBOUND_MODELLED = Set.of(
             "explode", "game_event", "keep_alive", "login", "ping", "player_abilities", "player_position", "player_rotation",
-            "remove_mob_effect", "respawn", "set_entity_motion", "update_attributes", "update_mob_effect");
+            "remove_mob_effect", "respawn", "set_entity_motion", "teleport_entity", "update_attributes", "update_mob_effect");
 
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
     /** Packet class -> type id. A packet class always has the same type; built once per class, never per packet. */
@@ -298,6 +299,7 @@ public final class PacketTranslator {
             case ClientboundPlayerPositionPacket position -> new ClientboundPacket.PlayerPosition(
                     position.id(), vec(position.change().position()), vec(position.change().deltaMovement()),
                     position.change().yRot(), position.change().xRot(), relatives(position.relatives()));
+            case ClientboundTeleportEntityPacket teleport -> new ClientboundPacket.TeleportEntity(teleport.id());
             case ClientboundPlayerRotationPacket rotation -> new ClientboundPacket.PlayerRotation(
                     rotation.yRot(), rotation.relativeY(), rotation.xRot(), rotation.relativeX());
             case ClientboundUpdateAttributesPacket attributes -> attributes(attributes);

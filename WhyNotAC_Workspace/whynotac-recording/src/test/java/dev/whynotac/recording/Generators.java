@@ -157,6 +157,7 @@ public final class Generators {
                 yield new ClientboundPacket.PlayerPosition(anyInt(), vec(), vec(), anyFloat(), anyFloat(), flags);
             }
             case "PlayerRotation" -> new ClientboundPacket.PlayerRotation(anyFloat(), random.nextBoolean(), anyFloat(), random.nextBoolean());
+            case "TeleportEntity" -> new ClientboundPacket.TeleportEntity(anyInt());
             case "UpdateAttributes" -> {
                 List<ClientboundPacket.UpdateAttributes.Attribute> attributes = new ArrayList<>();
                 for (int i = random.nextInt(4); i > 0; i--) {

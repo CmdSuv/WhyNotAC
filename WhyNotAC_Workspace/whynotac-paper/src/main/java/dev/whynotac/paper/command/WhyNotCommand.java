@@ -1,5 +1,6 @@
 package dev.whynotac.paper.command;
 
+import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.latency.LatencySnapshot;
@@ -32,12 +33,17 @@ public final class WhyNotCommand implements BasicCommand {
     private final SessionRegistry registry;
     private final Diagnostics diagnostics;
     private final Supplier<String> stats;
+    private final CaseStore cases;
+    private final org.bukkit.plugin.Plugin plugin;
 
-    public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats) {
+    public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
+            CaseStore cases, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
         this.stats = stats;
+        this.cases = cases;
+        this.plugin = plugin;
     }
 
     @Override
@@ -70,6 +76,30 @@ public final class WhyNotCommand implements BasicCommand {
                 sender.sendMessage(Component.text(String.format(Locale.ROOT, " %2d %s%s", i, name, ours ? "   <== WhyNotAC" : ""),
                         ours ? NamedTextColor.GREEN : NamedTextColor.GRAY));
             }
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("cases")) {
+            cases.recent(10, list -> Bukkit.getScheduler().runTask(plugin, () -> {
+                sender.sendMessage(Component.text("WhyNotAC cases (newest first): " + list.size(), NamedTextColor.GOLD));
+                for (CaseStore.StoredCase c : list) {
+                    sender.sendMessage(Component.text("  " + c.id().substring(0, 8) + " " + c.playerName() + " " + c.check() + " "
+                            + c.evidenceClass() + " " + c.lifecycle() + " " + java.time.Instant.ofEpochMilli(c.createdEpochMillis())
+                            + " " + c.summary(), NamedTextColor.GRAY));
+                }
+            }));
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("case")) {
+            cases.find(args[1], found -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (found.isEmpty()) {
+                    sender.sendMessage(Component.text("No single case starts with " + args[1], NamedTextColor.RED));
+                    return;
+                }
+                CaseStore.StoredCase c = found.get();
+                for (String line : List.of("== WhyNotAC case " + c.id(), "Player " + c.playerName() + " (" + c.playerId() + ", " + c.identity() + ")",
+                        "Check " + c.check() + " v" + c.checkVersion() + " " + c.evidenceClass() + " " + c.lifecycle()
+                                + " at " + java.time.Instant.ofEpochMilli(c.createdEpochMillis()),
+                        "Finding " + c.summary(), "Window sequences " + c.fromSequence() + ".." + c.toSequence(),
+                        "Recording " + c.recording(), "Dossier " + c.dossier() + " (re-verify: java -jar WhyNotAC.jar verify <dossier>)")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.GRAY));
+                }
+            }));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("stats")) {
             sender.sendMessage(Component.text("WhyNotAC stats " + stats.get(), NamedTextColor.GRAY));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
@@ -78,7 +108,7 @@ public final class WhyNotCommand implements BasicCommand {
                 sender.sendMessage(Component.text(" " + session + " ticks=" + session.clientTicks(), NamedTextColor.GRAY));
             }
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac sessions | /whynotac stats",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id>",
                     NamedTextColor.YELLOW));
         }
     }
@@ -138,7 +168,7 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "pipeline", "sessions", "stats");
+            return List.of("inspect", "pipeline", "sessions", "stats", "cases", "case");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("pipeline"))) {
             return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();

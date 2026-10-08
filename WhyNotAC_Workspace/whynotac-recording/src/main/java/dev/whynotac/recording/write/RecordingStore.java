@@ -93,7 +93,7 @@ public final class RecordingStore implements AutoCloseable {
         Path finished = partial.resolveSibling(base + RecordingFormat.FILE_SUFFIX);
         open.add(partial);
         FileSink sink = new FileSink(header, partial, finished);
-        return new RecordingWriter(sink, settings.targetBlockBytes(), settings.maxBlockAgeNanos());
+        return new RecordingWriter(sink, settings.targetBlockBytes(), settings.maxBlockAgeNanos(), finished);
     }
 
     /** Blocks rejected so far because the I/O queue was over budget. */

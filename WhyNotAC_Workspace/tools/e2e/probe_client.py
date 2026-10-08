@@ -11,6 +11,7 @@ can be verified live:
 
   * one transaction is never answered while the next one is  -> SKIPPED_TRANSACTION
   * one transaction is answered twice                         -> DUPLICATE_TRANSACTION
+  * two movement packets in one client tick (tick 200)        -> a tick-framing case (P-M, shadow)
 
 It also keeps a trace of every transaction ping and every velocity packet addressed to itself, in
 arrival order, with velocities decoded exactly as the client's LpVec3 codec does: the ground truth the
@@ -45,6 +46,7 @@ PLAY_C_CHUNK_BATCH_FINISHED, PLAY_C_DISCONNECT, PLAY_C_KEEP_ALIVE, PLAY_C_LOGIN,
     0x0B, 0x20, 0x2B, 0x30, 0x3B, 0x46, 0x74)
 PLAY_S_ACCEPT_TELEPORT, PLAY_S_CHUNK_BATCH_RECEIVED, PLAY_S_TICK_END, PLAY_S_KEEP_ALIVE = 0x00, 0x0A, 0x0C, 0x1B
 PLAY_S_MOVE_POS_ROT, PLAY_S_MOVE_ROT, PLAY_S_INPUT, PLAY_S_LOADED, PLAY_S_PONG = 0x1E, 0x1F, 0x2A, 0x2B, 0x2C
+PLAY_S_MOVE_POS = 0x1D
 PLAY_C_SET_ENTITY_MOTION = 0x63
 
 
@@ -307,6 +309,10 @@ def main():
             client.send(PLAY_S_MOVE_ROT, struct.pack(">ffB", new_yaw, pitch, 1))
             yaw_history.append((yaw, new_yaw, counts))
             yaw = new_yaw
+        if tick == 200:
+            # Violation 3: a second movement packet in the same client tick (what mace-damage and click-teleport
+            # hacks do). The vanilla client never sends one outside a reply: WhyNotAC's tick-framing check must open a case.
+            client.send(PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))  # position only: the rotation trace stays the probe's own
         client.send(PLAY_S_TICK_END)
         if tick == 100:
             client.skip_next = True       # violation 1, at ~5 s
@@ -326,6 +332,7 @@ def main():
         "yaw_steps_bits": [[float_bits(a), float_bits(b)] for a, b, _ in yaw_history],
         "pitch_bits": float_bits(pitch),
         "inputs_sent": inputs_sent,
+        "tick_framing_violation_tick": 200 if tick > 200 else None,
         "tick_ends_sent": tick,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),

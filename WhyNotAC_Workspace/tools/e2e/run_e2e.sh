@@ -42,7 +42,7 @@ PROPS
 
 (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar :whynotac-interop-probe:jar)
 mkdir -p "$WORK_DIR/plugins/WhyNotAC"
-rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings"
+rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/plugins/WhyNotAC/cases.db"
 cat > "$WORK_DIR/plugins/WhyNotAC/config.yml" <<CONFIG
 recording:
   enabled: true
@@ -82,6 +82,7 @@ sleep $(( PROBE_SECONDS - 8 ))
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
+echo "whynotac cases" > "$FIFO"
 wait "$PROBE"
 sleep 2   # let the server see the disconnect and finalise the recording
 echo "stop" > "$FIFO"
@@ -104,6 +105,13 @@ if [ -n "$RECORDING" ]; then
   rm -rf "$WORK_DIR/forget-copy" && cp -r "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/forget-copy"
   java -jar "$WORK_DIR/plugins/WhyNotAC.jar" forget "$WORK_DIR/forget-copy" "$SECRET" "$PROBE_UUID" --yes > "$WORK_DIR/e2e-forget.json" || true
 fi
+
+# Every dossier is re-verified independently of the server: the same evidence must come out of the recording.
+rm -f "$WORK_DIR/e2e-verify.jsonl"
+for dossier in "$WORK_DIR"/plugins/WhyNotAC/cases/*.json; do
+  [ -e "$dossier" ] || continue
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" verify "$dossier" >> "$WORK_DIR/e2e-verify.jsonl" || true
+done
 
 echo "--- server view (whynotac inspect)"
 grep -E '\[WhyNotAC\]|\[wnprobe\]|== WhyNotAC|RTT last|Transactions sent|View |Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'

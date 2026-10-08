@@ -15,3 +15,17 @@ recording:
   # Memory budget for blocks waiting to be written; beyond it blocks are dropped (and marked as gaps)
   # rather than ever slowing the server down.
   max-queued-megabytes: 64
+
+observation:
+  # Record the timeline from the bytes at the network edge (true) or from the game's own view of the
+  # packets (false). The edge also sees what other plugins add, cancel or rewrite. Leave it on.
+  edge: true
+  # One transaction (ping) per player per server tick: a continuous latency trace. Physics-changing
+  # packets are always bracketed with transactions either way. Leave it on.
+  per-tick-transactions: true
+
+cases:
+  # Every finding opens a case: a row in plugins/WhyNotAC/cases.db and a dossier in plugins/WhyNotAC/cases/
+  # (re-verifiable offline: java -jar WhyNotAC.jar verify <dossier>). Cases name the player: they are
+  # personal data, kept for this many days.
+  retention-days: 90
