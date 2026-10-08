@@ -68,6 +68,9 @@ def main():
 
     client = version["downloads"]["client"]
     jars = [fetch(client["url"], os.path.join(cache, "client", f"{VERSION}.jar"), client["sha1"])]
+    # Mojang's official mappings for this exact jar: the ground-truth agent resolves obfuscated names with them.
+    mappings = version["downloads"]["client_mappings"]
+    mappings_path = fetch(mappings["url"], os.path.join(cache, "client", f"{VERSION}-client.txt"), mappings["sha1"])
     for lib in version["libraries"]:
         if not allowed(lib.get("rules")):
             continue
@@ -88,6 +91,7 @@ def main():
         "assetsDir": os.path.join(cache, "assets"),
         "assetIndex": index["id"],
         "javaMajor": version.get("javaVersion", {}).get("majorVersion"),
+        "mappings": mappings_path,
     }
     json.dump(launch, open(os.path.join(cache, "launch.json"), "w"), indent=1)
     print(os.pathsep.join(jars))

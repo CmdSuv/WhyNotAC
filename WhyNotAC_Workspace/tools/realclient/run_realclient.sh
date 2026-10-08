@@ -21,7 +21,7 @@ if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
 fi
 echo "$PAPER_SHA256  $WORK_DIR/$PAPER_JAR" | sha256sum -c --quiet -
 echo 'eula=true' > "$WORK_DIR/eula.txt"
-rm -rf "$WORK_DIR/world" "$WORK_DIR/world_nether" "$WORK_DIR/world_the_end" "$WORK_DIR/usercache.json" "$WORK_DIR/game/screenshots"
+rm -rf "$WORK_DIR/world" "$WORK_DIR/world_nether" "$WORK_DIR/world_the_end" "$WORK_DIR/usercache.json" "$WORK_DIR/game/screenshots" "$WORK_DIR/game/crash-reports"
 cat > "$WORK_DIR/server.properties" <<PROPS
 online-mode=false
 server-port=$PORT
@@ -37,7 +37,7 @@ motd=WhyNotAC real client
 PROPS
 (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
 mkdir -p "$WORK_DIR/plugins/WhyNotAC" "$WORK_DIR/game"
-rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings"
+rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/plugins/WhyNotAC/cases.db"
 printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 2048\n  max-queued-megabytes: 64\n' > "$WORK_DIR/plugins/WhyNotAC/config.yml"
 find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' -exec cp {} "$WORK_DIR/plugins/WhyNotAC.jar" \;
 find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delete
@@ -69,11 +69,23 @@ until grep -q 'Done (' "$WORK_DIR/server.log" 2>/dev/null; do
 done
 echo "server up"
 
+# The ground-truth agent: records the client's exact physics state every tick (see agent/).
+AGENT_OUT="$WORK_DIR/agent-build"
+rm -rf "$AGENT_OUT" && mkdir -p "$AGENT_OUT/classes"
+javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -d "$AGENT_OUT/classes" $(find "$HERE/agent/src" -name '*.java')
+printf 'Premain-Class: dev.whynotac.truth.TruthAgent\n' > "$AGENT_OUT/manifest.txt"
+jar --create --file "$AGENT_OUT/truth-agent.jar" --manifest "$AGENT_OUT/manifest.txt" -C "$AGENT_OUT/classes" .
+rm -f "$WORK_DIR/truth.jsonl"
+
 LAUNCH="$WORK_DIR/client-cache/launch.json"
 CP=$(python3 -I -c "import json, os, sys; print(os.pathsep.join(json.load(open(sys.argv[1]))['classpath']))" "$LAUNCH")
 INDEX=$(python3 -I -c "import json, sys; print(json.load(open(sys.argv[1]))['assetIndex'])" "$LAUNCH")
+MAPPINGS=$(python3 -I -c "import json, sys; print(json.load(open(sys.argv[1]))['mappings'])" "$LAUNCH")
 OFFLINE_UUID=$(python3 -I -c "import hashlib, uuid; print(uuid.UUID(bytes=hashlib.md5(b'OfflinePlayer:$NAME').digest(), version=3))")
-(cd "$WORK_DIR/game" && DISPLAY="$DISPLAY_NUM" LIBGL_ALWAYS_SOFTWARE=1 exec java -Xmx1500M -cp "$CP" net.minecraft.client.main.Main \
+(cd "$WORK_DIR/game" && DISPLAY="$DISPLAY_NUM" LIBGL_ALWAYS_SOFTWARE=1 exec java -Xmx1500M \
+  --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED \
+  -javaagent:"$AGENT_OUT/truth-agent.jar=$MAPPINGS,$WORK_DIR/truth.jsonl" \
+  -cp "$CP" net.minecraft.client.main.Main \
   --username "$NAME" --uuid "$OFFLINE_UUID" --version 1.21.11 --gameDir "$WORK_DIR/game" \
   --assetsDir "$WORK_DIR/client-cache/assets" --assetIndex "$INDEX" --accessToken 0 --userType legacy \
   --width 854 --height 480 --quickPlayMultiplayer "127.0.0.1:$PORT" > "$WORK_DIR/client.log" 2>&1) &
@@ -86,6 +98,7 @@ done
 grep -q "$NAME joined the game" "$WORK_DIR/server.log" || { echo "client never joined"; tail -40 "$WORK_DIR/client.log"; exit 1; }
 sleep 5 # let the world render and the player land
 (cd "$HERE" && python3 -I drive.py "$DISPLAY_NUM") > "$WORK_DIR/drive.json"
+kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2
 kill "$SERVER"; wait "$SERVER" 2>/dev/null || true
@@ -99,4 +112,8 @@ java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/dump.j
 java -cp "$JARS" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
 cat "$WORK_DIR/check.json"
 echo "--- verification"
-python3 -I "$HERE/verify_realclient.py" "$WORK_DIR"
+STATUS=0
+python3 -I "$HERE/verify_realclient.py" "$WORK_DIR" || STATUS=1
+echo "--- client truth"
+python3 -I "$HERE/verify_truth.py" "$WORK_DIR" || STATUS=1
+exit $STATUS

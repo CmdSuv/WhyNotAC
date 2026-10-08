@@ -91,6 +91,9 @@ def main():
     check(pitch_ok, f"every pitch step too: {pitch_detail}")
     rejected = {name: not aligned(c["yaw_counts"], mouse["horizontal"])[0] for name, c in result["negative_controls"].items()}
     check(all(rejected.values()), f"the same data rejects every wrong model (negative controls): {rejected}")
+    cases_dir = os.path.join(work, "plugins", "WhyNotAC", "cases")
+    cases = [f for f in os.listdir(cases_dir) if f.endswith(".json")] if os.path.isdir(cases_dir) else []
+    check(not cases, f"no case was opened for the honest, unmodified client ({len(cases)} dossiers)")
     screenshots = os.listdir(os.path.join(work, "game", "screenshots")) if os.path.isdir(os.path.join(work, "game", "screenshots")) else []
     check(len(screenshots) == 1, f"the client rendered and saved a screenshot: {screenshots}")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")

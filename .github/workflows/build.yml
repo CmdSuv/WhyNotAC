@@ -105,6 +105,7 @@ jobs:
             ${{ runner.temp }}/realclient/*.log
             ${{ runner.temp }}/realclient/*.json
             ${{ runner.temp }}/realclient/dump.jsonl
+            ${{ runner.temp }}/realclient/truth.jsonl
             ${{ runner.temp }}/realclient/game/screenshots/
             ${{ runner.temp }}/realclient/game/crash-reports/
           if-no-files-found: warn
