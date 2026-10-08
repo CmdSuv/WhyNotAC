@@ -323,4 +323,65 @@ class ClientWorldTest {
         air[Section.index(1, 2, 3)] = DIRT;
         assertEquals(ClientWorld.sectionHash(air), hashes[5]);
     }
+
+    @Test
+    void identicalSectionsAreSharedBeforeAndAfterTheSameChange() {
+        SectionPool pool = new SectionPool();
+        ClientWorld a = new ClientWorld(STATES, pool);
+        world = a;
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, 3, DIRT)));
+        assertEquals(2, pool.size()); // the air section and the one with dirt
+        ClientWorld b = new ClientWorld(STATES, pool);
+        world = b;
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, 3, DIRT)));
+        assertEquals(2, pool.size()); // the second player's identical chunk adds nothing
+        BlockPosition p = new BlockPosition(1, -64 + 3 * 16 + 5, 3);
+        out(new ClientboundPacket.BlockUpdate(p, STONE));
+        assertEquals(3, pool.size()); // b's changed section; a still holds the original
+        assertEquals(STONE, b.blockState(p.x(), p.y(), p.z()));
+        assertEquals(AIR, a.blockState(p.x(), p.y(), p.z())); // the other world is untouched
+        assertEquals(DIRT, b.blockState(1, -64 + 3 * 16 + 2, 3)); // and b keeps the rest of the section
+        world = a;
+        out(new ClientboundPacket.BlockUpdate(p, STONE)); // the same change for a: the same section again
+        assertEquals(2, pool.size());
+        a.onEvent(new TimelineEvent.Disconnected(sequence++, sequence));
+        b.onEvent(new TimelineEvent.Disconnected(sequence++, sequence));
+        assertEquals(0, pool.size());
+        assertEquals(0, pool.uniqueBytes());
+    }
+
+    @Test
+    void changesGrowThePaletteAndTheStorageLikeTheGame() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        int count = 0;
+        for (int id = 1; id < STATES.size() && count < 300; id += 97, count++) { // past 16 and 256 distinct states
+            out(new ClientboundPacket.BlockUpdate(new BlockPosition(count & 15, (count >> 4) & 15, (count >> 8) & 15), id));
+        }
+        count = 0;
+        for (int id = 1; id < STATES.size() && count < 300; id += 97, count++) {
+            assertEquals(id, world.blockState(count & 15, (count >> 4) & 15, (count >> 8) & 15));
+        }
+        assertEquals(STONE, world.blockState(15, 15, 15));
+        long[] sectionUpdate = {(long) DIRT << 12 | 15 << 8 | 15 << 4 | 15};
+        out(new ClientboundPacket.SectionBlocksUpdate(0, 0, 0, sectionUpdate));
+        assertEquals(DIRT, world.blockState(15, 15, 15));
+    }
+
+    @Test
+    void replacingForgettingAndResizingReleaseSections() {
+        SectionPool pool = new SectionPool();
+        world = new ClientWorld(STATES, pool);
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        loadStone(0, 0); // resent
+        loadStone(9, 0);
+        out(new ClientboundPacket.ForgetLevelChunk(0, 0));
+        assertEquals(1, pool.size()); // chunk (9, 0) still holds the stone section
+        out(new ClientboundPacket.ChunkCacheRadius(2)); // range 5: (9, 0) is dropped
+        assertEquals(0, pool.size());
+    }
+
 }

@@ -90,6 +90,8 @@ def run_bot(host, port, name, seconds, results, start_gate, stop_file):
                 bot.send(PLAY_S_SWING, pc.varint(0))
             bot.send(pc.PLAY_S_TICK_END)
             tick += 1
+            # As vanilla's DeltaTracker: a client that fell behind runs at most 10 ticks to catch up and drops the rest.
+            start = max(start, time.monotonic() - 0.5 - tick * 0.05)
             time.sleep(max(0.0, start + tick * 0.05 - time.monotonic()))
         result.update(ticks=tick, pings_answered=bot.pings_answered, pings_seen=bot.pings_seen,
                       teleports=bot.teleports, still_connected=bot.alive, disconnect_reason=bot.disconnect_reason)

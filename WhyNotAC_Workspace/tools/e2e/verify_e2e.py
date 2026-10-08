@@ -197,30 +197,42 @@ def verify_edge(probe, log, dump_path, check):
 
 
 def verify_cases(probe, log, work_dir, check):
-    """Slice 0: the probe's deliberate tick-framing violation went all the way: evidence, policy, case, alert, dossier, re-verification."""
+    """Each of the probe's deliberate violations went all the way: evidence, policy, case, alert, dossier, re-verification."""
     cases_dir = os.path.join(work_dir, "plugins", "WhyNotAC", "cases")
     dossiers = [json.load(open(os.path.join(cases_dir, f))) for f in sorted(os.listdir(cases_dir)) if f.endswith(".json")] \
         if os.path.isdir(cases_dir) else []
     check(probe.get("tick_framing_violation_tick") == 200, "the probe sent two movement packets in one tick")
-    check(len(dossiers) == 1, f"exactly one case opened, for the one violation ({len(dossiers)} dossiers)")
-    if not dossiers:
-        return
-    d = dossiers[0]
-    check(d["check"] == "tick-framing" and d["evidenceClass"] == "P-M" and d["details"].get("movePackets") == "2"
-          and d["details"].get("replyAllowance") == "0", f"the case is the tick-framing proof (P-M, 2 packets): {d['summary']}")
-    check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
-          f"the case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")
-    check(d["lifecycle"] == "SHADOW" and d["permittedActions"] == ["ALERT", "REVIEW"],
-          f"a shadow check may only alert and be reviewed (docs/POLICY.md): {d['lifecycle']} {d['permittedActions']}")
-    check(d["recording"] is not None and d["admissible"] is True, "the dossier points at the session's recording")
-    check(re.search(r"\[WhyNotAC\] \[shadow\] WhyNotProbe tick-framing \(P-M\)", log) is not None,
-          "a shadow alert went to the console (and to whynotac.alerts.shadow)")
+    check(probe.get("clock_violation_tick") == 240, f"the probe sent {probe.get('clock_burst')} extra ClientTickEnd at once (a timer)")
+    by_check = {}
+    for d in dossiers:
+        by_check.setdefault(d["check"], []).append(d)
+    check(len(dossiers) == 2 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1,
+          f"exactly two cases opened, one per violation: {sorted((d['check'], d['summary']) for d in dossiers)}")
+    framing = by_check.get("tick-framing", [None])[0]
+    if framing:
+        check(framing["evidenceClass"] == "P-M" and framing["details"].get("movePackets") == "2"
+              and framing["details"].get("rotationAllowance") == "0" and framing["details"].get("vehicleAllowance") == "0",
+              f"the tick-framing case is the proof (P-M, 2 packets, no reply allowance): {framing['summary']}")
+    clock = by_check.get("client-clock", [None])[0]
+    if clock:
+        ticks, allowed = int(clock["details"].get("ticks", "0")), int(clock["details"].get("allowedTicks", "0"))
+        check(clock["evidenceClass"] == "P-M" and ticks > allowed and "1%" in clock["details"].get("assumption", ""),
+              f"the client-clock case is the proof (P-M, {ticks} ticks > {allowed} allowed, its assumption stated): {clock['summary']}")
+    for d in dossiers:
+        check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
+              f"the {d['check']} case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")
+        check(d["lifecycle"] == "SHADOW" and d["permittedActions"] == ["ALERT", "REVIEW"],
+              f"a shadow check may only alert and be reviewed (docs/POLICY.md): {d['check']} {d['lifecycle']} {d['permittedActions']}")
+        check(d["recording"] is not None and d["admissible"] is True, f"the {d['check']} dossier points at the session's recording")
+        check(re.search(r"\[WhyNotAC\] \[shadow\] WhyNotProbe " + re.escape(d["check"]) + r" \(P-M\)", log) is not None,
+              f"a shadow alert for {d['check']} went to the console (and to whynotac.alerts.shadow)")
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
-    check(len(verified) == 1 and verified[0]["verified"] is True and verified[0]["evidenceInRecording"] == 1,
-          f"`verify` re-ran the check over the recording, independently, and found the same evidence: {verified}")
-    check(re.search(r"WhyNotAC cases \(newest first\): 1", log) is not None
-          and re.search(re.escape(d["id"][:8]) + r" WhyNotProbe tick-framing P-M SHADOW", log) is not None, "/whynotac cases lists it")
+    check(len(verified) == len(dossiers) == 2 and all(v["verified"] is True and v["evidenceInRecording"] == 1 for v in verified),
+          f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
+    check(re.search(r"WhyNotAC cases \(newest first\): 2", log) is not None
+          and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + r" P-M SHADOW", log) for d in dossiers),
+          "/whynotac cases lists both")
 
 
 def verify_world(log, dump_path, check):

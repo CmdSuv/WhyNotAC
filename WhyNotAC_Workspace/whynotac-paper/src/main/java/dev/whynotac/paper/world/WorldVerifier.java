@@ -33,13 +33,14 @@ public final class WorldVerifier {
 
     /** One verification's outcome, also printed as one line. */
     public record Result(String player, String dimension, boolean dimensionMatches, int chunks, int sections, int equal, int different,
-            int stale, int missingOnServer, int unsettled, ClientWorld.Stats stats, List<String> differences) {
+            int stale, int missingOnServer, int unsettled, ClientWorld.Stats stats, long allWorldsBytes, int sharedSections,
+            List<String> differences) {
         public String line() {
             return "WhyNotAC world " + player + ": dimension=" + dimension + (dimensionMatches ? "" : " (server: other)") + " chunks=" + chunks
                     + " sections=" + sections + " equal=" + equal + " different=" + different + " stale=" + stale + " missingOnServer="
                     + missingOnServer + " unsettled=" + unsettled + " blockUpdates=" + stats.blockUpdates() + " chunksReceived="
                     + stats.chunksReceived() + " chunksIgnored=" + stats.chunksIgnored() + " unreadable=" + stats.chunksUnreadable()
-                    + " retainedKiB=" + stats.retainedBytes() / 1024;
+                    + " allWorldsKiB=" + allWorldsBytes / 1024 + " sharedSections=" + sharedSections;
         }
     }
 
@@ -70,12 +71,12 @@ public final class WorldVerifier {
                     } else if (!target.isOnline()) {
                         failed.accept(target.getName() + " left");
                     } else {
-                        done.accept(compare(target, snapshot));
+                        done.accept(compare(target, snapshot, tracker));
                     }
                 }));
     }
 
-    private static Result compare(Player target, Snapshot snapshot) {
+    private static Result compare(Player target, Snapshot snapshot, ClientWorldTracker tracker) {
         ServerLevel level = ((CraftWorld) target.getWorld()).getHandle();
         ClientWorld.Digest digest = snapshot.digest();
         String serverDimension = level.dimension().identifier().toString();
@@ -113,7 +114,7 @@ public final class WorldVerifier {
             }
         }
         return new Result(target.getName(), digest.dimension(), dimensionMatches, digest.chunks().size(), sections, equal, different, stale, missing,
-                digest.unsettled(), snapshot.stats(), differences);
+                digest.unsettled(), snapshot.stats(), tracker.retainedBytes(), tracker.sharedSections(), differences);
     }
 
     /** {@link ClientWorld#sectionHash} of a server section, in the game's index order. */

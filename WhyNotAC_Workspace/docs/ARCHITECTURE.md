@@ -38,6 +38,9 @@
                            ├──────────────► whynotac-recording: kayıpsız kayıt (.wnrec),
                            │                takma ad, replay, inspect/dump aracı
                            │                (kayıtlar replay ile aynı dinleyicilere geri akar)
+                           ├──────────────► whynotac-world: client'ın dünyası (chunk'lar, bloklar,
+                           │                client'ın chunk deposu, "settled" belirsizliği),
+                           │                resmi client'tan üretilmiş blok durumu verisi
    ┌───────────────────────┼─────────────────────────────┬────────────────────────┐
    ▼                       ▼                             ▼                        │
 whynotac-physics     whynotac-analysis              whynotac-ai                    │  (planlı)
@@ -174,6 +177,33 @@ Normatif sözleşme [POLICY.md](POLICY.md)'dir. Özeti:
 - Her eylem, POLICY.md'deki sınıf × eylem × kimlik katmanı matrisine tabidir. Operatör yasak bir
   hücreyi açamaz.
 
+## Client'ın dünyası (Faz 2b-3)
+
+Fizik, client'ın çarptığı blokları bilmek zorundadır. Sunucunun dünyası bu değildir: client chunk'ları
+geç alır, kendi yerleştirdiği bloğu önceden tahmin eder, görüş aralığının dışındaki chunk'ı yok sayar,
+anti-xray ona başka bloklar gönderebilir. Bu yüzden dünya, client'ın aldığı paketlerden ve client'ın
+okuduğu sırayla yeniden kurulur:
+
+- **Yakalama:** chunk paketi kenarda client'ın aldığı baytlar olarak tutulur. Ağ thread'inde çözülmez,
+  tek bir kopya alınır. Blok ve bölüm güncellemeleri, unutulan chunk'lar, görüş merkezi/yarıçapı,
+  `block_changed_ack` ve giriş/yeniden doğuştaki boyut modellenir ve kayda girer. Posta kutusu
+  sınırları chunk baytlarını da sayar (128 bayt = 1 birim), bellek sınırı korunur.
+- **Veri:** her blok durumu için çarpışma şekli oyunun kendi biçiminde (eksen koordinatları, dolu
+  hücreler, kutular, `CubeVoxelShape`/`ArrayVoxelShape` türü), sürtünme, hız ve zıplama çarpanları,
+  sertlik ve sıvı. Veri **resmi client'ın kendisinden** üretilir (`BlockDataDump`, Mojang eşlemeleriyle).
+  Paper'ın çarpışma yamaları vanilla'nın `CubeVoxelShape` kurduğu 9.150 durumu `ArrayVoxelShape`
+  olarak kurar; geri kalan her şey aynıdır ve bir test tam olarak bunu sabitler.
+- **Replika:** `ClientChunkCache` birebir: `(2r+1)^2` yuvalı halka tampon, `r = max(2, görüş) + 3`,
+  aralık dışı chunk yok sayılır, aynı yuvaya gelen chunk eskisini siler, sorgu yalnız güncel merkezin
+  aralığında cevaplanır, yeniden doğuş yalnız boyut değişince dünyayı siler.
+- **Belirsizlik:** bir blok, son değişikliğinden sonra gönderilmiş bir transaction onaylanana kadar
+  "settled" değildir (client eski ya da yeni durumu tutuyor olabilir). Client'ın kendi tahminleri,
+  sunucunun `block_changed_ack`'i client'a ulaşana kadar belirsizdir. Olay kaybı (`Gap`) ya da
+  okunamayan bir dünya paketi dünyayı "stale" yapar. Bir kontrol, settled olmayan bir bloğu asla
+  biliniyor saymaz.
+- **Doğrulama:** `/whynotac world <oyuncu>` replikayı sunucunun dünyasıyla bölüm bölüm (4096 blok
+  durumunun 64 bit özeti) karşılaştırır. E2E ve gerçek client'ta 1944/1944 bölüm birebir eşittir.
+
 ## Modüller
 
 | Modül | Durum | Sorumluluk |
@@ -184,8 +214,9 @@ Normatif sözleşme [POLICY.md](POLICY.md)'dir. Özeti:
 | `whynotac-conformance` | **Faz 1 ✔** | Gerçek oyun sınıflarına karşı diferansiyel testler |
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
+| `whynotac-world` | **Faz 2b-3 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği |
 | `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
-| `whynotac-analysis` | **Slice 0 ✔** | Kontroller (ilk: tick framing), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
+| `whynotac-analysis` | **Slice 0 ✔** | Kontroller (tick framing, client saati), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |
 | `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve ARMED karar (Slice 0'ın SHADOW kararı şimdilik `whynotac-analysis`'te) |
 | `whynotac-storage` | Faz 4 (planlı) | Profil ve kanıt kalıcılığı |

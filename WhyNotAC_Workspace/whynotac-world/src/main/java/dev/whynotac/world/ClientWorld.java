@@ -52,6 +52,8 @@ public final class ClientWorld {
 
     private final BlockStates states;
     private final int voidAir;
+    /** Identical sections, shared with every other world. */
+    private final SectionPool pool;
 
     // --- the client's level ---
     private ClientboundPacket.Dimension dimension;
@@ -86,8 +88,14 @@ public final class ClientWorld {
     private long staleEvents;
 
     public ClientWorld(BlockStates states) {
+        this(states, new SectionPool());
+    }
+
+    /** {@code pool} is shared with the other worlds, so identical sections are stored once. */
+    public ClientWorld(BlockStates states, SectionPool pool) {
         this.states = states;
         this.voidAir = states.firstStateOf("minecraft:void_air");
+        this.pool = pool;
     }
 
     // --- timeline ---------------------------------------------------------------------------------------
@@ -99,8 +107,36 @@ public final class ClientWorld {
             case TimelineEvent.Inbound in -> onInbound(in.packet());
             case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.transactionId());
             case TimelineEvent.Gap ignored -> markAllStale();
+            case TimelineEvent.Disconnected ignored -> release(); // the session ends: nothing will read this world again
             default -> { }
         }
+    }
+
+    private void release() {
+        dropAll();
+        storage = null;
+    }
+
+    /** Gives back every column's sections (also columns outside the view kept in their slots). */
+    private void dropAll() {
+        if (storage != null) {
+            for (Column column : storage.slots) {
+                if (column != null) {
+                    drop(column);
+                }
+            }
+        }
+    }
+
+    /** A column leaves this world: its sections are released to the pool. */
+    private void drop(Column column) {
+        if (column.sections == null) {
+            return;
+        }
+        for (Section section : column.sections) {
+            pool.release(section);
+        }
+        column.sections = null;
     }
 
     private void onOutbound(long sequence, ClientboundPacket packet) {
@@ -124,24 +160,37 @@ public final class ClientWorld {
                 serverChunkRadius = radius.radius();
                 if (storage != null) {
                     viewChanged(sequence);
-                    storage = storage.resized(Storage.range(radius.radius()));
+                    Storage resized = storage.resized(Storage.range(radius.radius()));
+                    for (Column column : storage.slots) {
+                        if (column != null && resized.slots[resized.index(column.x, column.z)] != column) {
+                            drop(column); // not kept by the resize
+                        }
+                    }
+                    storage = resized;
                 }
             }
             case ClientboundPacket.LevelChunk chunk -> loadChunk(sequence, chunk);
             case ClientboundPacket.ForgetLevelChunk forget -> {
-                if (storage != null && storage.drop(forget.x(), forget.z())) {
+                Column dropped = storage == null ? null : storage.drop(forget.x(), forget.z());
+                if (dropped != null) {
+                    drop(dropped);
                     pend(sequence, Pending.CHUNK, chunkKey(forget.x(), forget.z()));
                 }
             }
-            case ClientboundPacket.BlockUpdate update -> setBlock(sequence, update.position().x(), update.position().y(), update.position().z(),
-                    update.state());
+            case ClientboundPacket.BlockUpdate update -> {
+                BlockPosition p = update.position();
+                setBlocks(sequence, p.x() >> 4, p.y() >> 4, p.z() >> 4, new int[] {Section.index(p.x(), p.y(), p.z())}, new int[] {update.state()});
+            }
             case ClientboundPacket.SectionBlocksUpdate update -> {
+                int[] indices = new int[update.size()];
+                int[] values = new int[update.size()];
                 for (int i = 0; i < update.size(); i++) {
                     long entry = update.entry(i);
-                    int local = (int) (entry & 0xFFF);
-                    setBlock(sequence, update.sectionX() << 4 | local >>> 8 & 15, update.sectionY() << 4 | local & 15,
-                            update.sectionZ() << 4 | local >>> 4 & 15, (int) (entry >>> 12));
+                    int local = (int) (entry & 0xFFF); // x << 8 | z << 4 | y on the wire
+                    indices[i] = Section.index(local >>> 8 & 15, local & 15, local >>> 4 & 15);
+                    values[i] = (int) (entry >>> 12);
                 }
+                setBlocks(sequence, update.sectionX(), update.sectionY(), update.sectionZ(), indices, values);
             }
             case ClientboundPacket.BlockChangedAck ack -> pendingBlockAcks.add(new long[] {sequence, ack.sequence()});
             case ClientboundPacket.Untranslatable untranslatable when isWorldPacket(untranslatable.type()) -> markAllStale();
@@ -203,6 +252,7 @@ public final class ClientWorld {
             sections = DEFAULT_SECTIONS;
         }
         serverChunkRadius = chunkRadius;
+        dropAll();
         storage = new Storage(Storage.range(chunkRadius));
         // Everything known about the old world is gone; what is in flight belongs to the new one.
         unsettledBlocks.clear();
@@ -231,30 +281,51 @@ public final class ClientWorld {
             chunksUnreadable++;
         } else {
             try {
-                column.sections = ChunkDecoder.decode(chunk.body(), sections, states);
+                Section[] decoded = ChunkDecoder.decode(chunk.body(), sections, states);
+                for (int i = 0; i < decoded.length; i++) {
+                    decoded[i] = pool.intern(decoded[i]);
+                }
+                column.sections = decoded;
                 chunksLoaded++;
             } catch (ChunkDecoder.FormatException e) {
                 column.stale = true; // the client fails on such a chunk; WhyNotAC knows nothing about it
                 chunksUnreadable++;
             }
         }
-        storage.replace(column);
+        Column replaced = storage.replace(column);
+        if (replaced != null) {
+            drop(replaced);
+        }
         pend(sequence, Pending.CHUNK, chunkKey(chunk.x(), chunk.z()));
     }
 
-    private void setBlock(long sequence, int x, int y, int z, int state) {
-        if (storage == null || y < minY || y >= minY + sections * 16) {
+    /**
+     * Applies block changes within one section, as {@code setServerVerifiedBlockState} would: ignored
+     * outside the build height and in chunks the client does not hold.
+     */
+    private void setBlocks(long sequence, int sectionX, int sectionY, int sectionZ, int[] indices, int[] values) {
+        if (storage == null || indices.length == 0) {
+            return;
+        }
+        int sectionIndex = sectionY - (minY >> 4);
+        if (sectionIndex < 0 || sectionIndex >= sections) {
             return; // the client ignores a block outside its build height
         }
-        Column column = storage.get(x >> 4, z >> 4);
+        Column column = storage.get(sectionX, sectionZ);
         if (column == null) {
             return; // the client ignores a block in a chunk it does not hold
         }
-        blockUpdates++;
+        blockUpdates += indices.length;
         if (column.sections != null) {
-            column.sections[(y - minY) >> 4].set(Section.index(x, y, z), state);
+            // A new section, shared again: every player near the change applies it to the same section.
+            Section old = column.sections[sectionIndex];
+            Section changed = pool.intern(old.with(indices, values, states.globalPaletteBits(), states.size()));
+            pool.release(old);
+            column.sections[sectionIndex] = changed;
         }
-        pend(sequence, Pending.BLOCK, blockKey(x, y, z));
+        for (int index : indices) {
+            pend(sequence, Pending.BLOCK, blockKey(sectionX << 4 | index & 15, sectionY << 4 | index >>> 8, sectionZ << 4 | index >>> 4 & 15));
+        }
     }
 
     private void predict(int x, int y, int z, int sequence, boolean withNeighbours) {
@@ -369,26 +440,20 @@ public final class ClientWorld {
     public Stats stats() {
         long[] loaded = {0};
         long[] stale = {0};
-        long[] bytes = {0};
         if (storage != null) {
             storage.forEach(column -> {
                 loaded[0]++;
                 if (column.stale) {
                     stale[0]++;
                 }
-                if (column.sections != null) {
-                    for (Section s : column.sections) {
-                        bytes[0] += s.retainedBytes();
-                    }
-                }
             });
         }
         return new Stats(loaded[0], stale[0], chunksLoaded, chunksIgnored, chunksUnreadable, blockUpdates, unsettledBlocks.size(),
-                unsettledChunks.size(), predictions.size(), staleEvents, bytes[0]);
+                unsettledChunks.size(), predictions.size(), staleEvents);
     }
 
     public record Stats(long chunksHeld, long chunksStale, long chunksReceived, long chunksIgnored, long chunksUnreadable, long blockUpdates,
-            int unsettledBlocks, int unsettledChunks, int predictions, long staleEvents, long retainedBytes) {}
+            int unsettledBlocks, int unsettledChunks, int predictions, long staleEvents) {}
 
     /**
      * A digest of the blocks of every chunk the client holds, one 64-bit hash per section, to compare with
@@ -510,22 +575,26 @@ public final class ClientWorld {
             return column != null && column.x == x && column.z == z ? column : null;
         }
 
-        void replace(Column column) {
-            slots[index(column.x, column.z)] = column;
+        /** Puts the column in its slot; returns what occupied it. */
+        Column replace(Column column) {
+            int index = index(column.x, column.z);
+            Column previous = slots[index];
+            slots[index] = column;
+            return previous;
         }
 
-        /** {@code drop}: true if a chunk was dropped. */
-        boolean drop(int x, int z) {
+        /** {@code drop}: the dropped chunk, or null. */
+        Column drop(int x, int z) {
             if (!inRange(x, z)) {
-                return false;
+                return null;
             }
             int index = index(x, z);
             Column column = slots[index];
             if (column != null && column.x == x && column.z == z) {
                 slots[index] = null;
-                return true;
+                return column;
             }
-            return false;
+            return null;
         }
 
         /** {@code updateViewRadius}: a new storage keeping the chunks within the new range. */

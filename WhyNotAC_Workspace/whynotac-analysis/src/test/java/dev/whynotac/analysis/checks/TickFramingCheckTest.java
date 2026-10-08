@@ -136,8 +136,10 @@ class TickFramingCheckTest {
         Evidence e = evidence.getFirst();
         assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
         assertEquals("2", e.details().get("movePackets"));
-        assertEquals("0", e.details().get("replyAllowance"));
+        assertEquals("0", e.details().get("rotationAllowance"));
+        assertEquals("0", e.details().get("vehicleAllowance"));
         assertEquals(start, e.fromSequence());
+        assertEquals(seq - 2, e.toSequence(), "judged when the excess packet arrived, not at the tick's end");
         assertEquals(Admissibility.IdentityTier.AUTHENTICATED, e.admissibility().identity());
     }
 
@@ -165,6 +167,89 @@ class TickFramingCheckTest {
         pong(id);
         tick();
         assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aRotationAllowanceOnlyCoversARotationShapedReply() {
+        nativeClient();
+        tickEnd();
+        deliver(new TimelineEvent.Outbound(next(), seq, new ClientboundPacket.PlayerRotation(90F, false, 0F, false)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.MovePlayer(1, 2, 3, 0, 0, true, false, true, false)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.MovePlayer(1, 2, 3, 0, 0, true, false, true, false))); // positions: not what handleRotatePlayer sends
+        tickEnd();
+        assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void aTeleportReplyIsPairedWithItsAcceptAndNothingElse() {
+        nativeClient();
+        tickEnd();
+        teleport();
+        teleportReply();
+        teleportReply(); // a second accept of the same id: no teleport is pending any more, so its PosRot counts
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("1", evidence.getFirst().details().get("teleportReplies"));
+    }
+
+    @Test
+    void aTeleportReplyWithOtherFlagsIsStillItsReply() {
+        nativeClient();
+        tickEnd();
+        teleport();
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.AcceptTeleportation(7)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.MovePlayer(0, 0, 0, 0, 0, true, true, true, false)));
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aNetworkThreadAnswerBetweenTheAcceptAndItsReplyChangesNothing() {
+        // The client's network thread answers keep-alive and chunk batches itself: its write can land between
+        // the accept and the PosRot that the main thread queued one after the other.
+        nativeClient();
+        tickEnd();
+        teleport();
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.AcceptTeleportation(7)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.KeepAlive(42)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.ChunkBatchReceived(9.5f)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.MovePlayer(0, 0, 0, 0, 0, true, true, false, false)));
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void anAcceptBuysOneReplyAtMost() {
+        nativeClient();
+        tickEnd();
+        teleport();
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.AcceptTeleportation(7)));
+        deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.KeepAlive(42)));
+        move(); // the reply
+        move();
+        move(); // one too many: the accept does not cover a second move
+        tickEnd();
+        assertEquals(1, evidence.size());
+        assertEquals("1", evidence.getFirst().details().get("teleportReplies"));
+    }
+
+    @Test
+    void acceptingATeleportThatWasNeverSentBuysNothing() {
+        nativeClient();
+        tickEnd();
+        teleportReply(); // a predicted teleport id (packet fly)
+        tick();
+        assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void withholdingClientTickEndDoesNotEscape() {
+        nativeClient();
+        tickEnd();
+        for (int i = 0; i < 5; i++) {
+            move(); // never ends the tick
+        }
+        assertEquals(1, evidence.size(), "judged as soon as the second packet arrived, once per interval");
     }
 
     @Test
@@ -220,19 +305,19 @@ class TickFramingCheckTest {
         pong(id);
         tickEnd();
         assertEquals(1, evidence.size());
-        assertEquals("3", evidence.getFirst().details().get("movePackets"));
-        assertEquals("1", evidence.getFirst().details().get("replyAllowance"));
+        assertEquals("2", evidence.getFirst().details().get("movePackets"));
+        assertEquals("1", evidence.getFirst().details().get("teleportReplies"));
     }
 
     @Test
-    void aFloodOfServerTeleportsSilencesTheCheckUntilItDrains() {
+    void aFloodOfServerRotationsSilencesTheCheckUntilItDrains() {
         nativeClient();
         tickEnd();
         for (int i = 0; i < TickFramingCheck.MAX_TOKENS + 10; i++) {
-            teleport();
+            deliver(new TimelineEvent.Outbound(next(), seq, new ClientboundPacket.PlayerRotation(1F, false, 0F, false)));
         }
         for (int i = 0; i < TickFramingCheck.MAX_TOKENS + 5; i++) {
-            move(); // more than the allowances that were recorded
+            deliver(new TimelineEvent.Inbound(next(), seq, 0, new ServerboundPacket.MovePlayer(0, 0, 0, 1, 0, false, true, false, false)));
         }
         tickEnd();
         assertEquals(List.of(), evidence, "saturated: some allowances were never recorded");

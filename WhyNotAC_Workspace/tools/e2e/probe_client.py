@@ -226,7 +226,8 @@ class Client:
                 yaw, pitch = r.unpack("ff")
                 self.send(PLAY_S_ACCEPT_TELEPORT, varint(teleport_id))
                 self.position = (x, y, z, yaw, pitch)
-                self.send(PLAY_S_MOVE_POS_ROT, struct.pack(">dddffB", x, y, z, yaw, pitch, 1))
+                # As vanilla's handleMovePlayer: the accept, then PosRot with onGround=false, horizontalCollision=false.
+                self.send(PLAY_S_MOVE_POS_ROT, struct.pack(">dddffB", x, y, z, yaw, pitch, 0))
                 if not self.loaded.is_set():
                     self.send(PLAY_S_LOADED)
                     self.loaded.set()
@@ -278,6 +279,10 @@ def server_list_ping(host, port):
     return b"version" in data
 
 
+# Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
+CLOCK_BURST = 40
+
+
 def main():
     host, port, name, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3], float(sys.argv[4])
     status_ok = server_list_ping(host, port)
@@ -293,6 +298,7 @@ def main():
     multiplier = d * d * d * 8.0
     yaw_history = []
     tick, sent_input = 0, None
+    extra_tick_ends = 0
     inputs_sent = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
@@ -314,11 +320,19 @@ def main():
             # hacks do). The vanilla client never sends one outside a reply: WhyNotAC's tick-framing check must open a case.
             client.send(PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))  # position only: the rotation trace stays the probe's own
         client.send(PLAY_S_TICK_END)
+        if tick == 240:
+            # Violation 4: a burst of extra ClientTickEnd (a timer, or hiding extra movement packets from the tick
+            # framing): more client ticks than the client's clock allows. WhyNotAC's client-clock check must open a case.
+            for _ in range(CLOCK_BURST):
+                client.send(PLAY_S_TICK_END)
+            extra_tick_ends += CLOCK_BURST
         if tick == 100:
             client.skip_next = True       # violation 1, at ~5 s
         if tick == 160:
             client.duplicate_next = True  # violation 2, at ~8 s
         tick += 1
+        # As vanilla's DeltaTracker: a client that fell behind runs at most 10 ticks to catch up and drops the rest.
+        start = max(start, time.monotonic() - 0.5 - tick * 0.05)
         time.sleep(max(0.0, start + tick * 0.05 - time.monotonic()))
 
     last_from, last_to, last_counts = yaw_history[-1] if yaw_history else (yaw, yaw, 0)
@@ -333,7 +347,9 @@ def main():
         "pitch_bits": float_bits(pitch),
         "inputs_sent": inputs_sent,
         "tick_framing_violation_tick": 200 if tick > 200 else None,
-        "tick_ends_sent": tick,
+        "clock_violation_tick": 240 if tick > 240 else None,
+        "clock_burst": CLOCK_BURST,
+        "tick_ends_sent": tick + extra_tick_ends,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,

@@ -1,6 +1,6 @@
 package dev.whynotac.paper;
 
-import dev.whynotac.analysis.checks.TickFramingCheck;
+import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.verdict.ShadowVerdict;
 import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
@@ -84,7 +84,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         // The client's world, before every check that reads it (listeners see an event in registration order).
         worldTracker = new ClientWorldTracker(BlockStates.vanilla());
         registry.addListener(worldTracker);
-        registry.addListener(new TickFramingCheck(verdict));
+        Checks.all(verdict).forEach(registry::addListener);
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
         }
@@ -181,14 +181,16 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
                         + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
                         + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
-                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d}}",
+                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},"
+                        + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d}}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
                 totals.outbound(), totals.lostEvents(), totals.inboundDivergences(), totals.outboundDivergences(), anomalies,
                 pendingMax, withheld, listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
                 recordings == null ? 0 : recordings.failedRecordings(), transactionLoop.runs(), transactionLoop.meanWallMicros(),
                 transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros(),
                 verdict.cases(), cases == null ? 0 : cases.storedCount(), cases == null ? 0 : cases.droppedCount(),
-                verdict.rejections().size());
+                verdict.rejections().size(), worldTracker == null ? 0 : worldTracker.retainedBytes(),
+                worldTracker == null ? 0 : worldTracker.sharedSections(), worldTracker == null ? 0 : worldTracker.worldsCreated());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

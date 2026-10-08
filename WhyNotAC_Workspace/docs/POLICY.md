@@ -26,7 +26,7 @@ bir belge bu dosyayla çelişirse bu dosya geçerlidir. [Kararlar](DECISIONS.md)
 | Sınıf | Anlamı | Örnek |
 |---|---|---|
 | **P-A** avantaj kanıtı | Vanilla fiziği/kuralları altında imkânsız ve oyuncuya avantaj sağlayan bir gözlem; ikinci bir motorla yeniden doğrulanmış | Hiçbir girdi dizisiyle ulaşılamayan bir konum, erişim sınırı dışından vuruş |
-| **P-M** değişiklik kanıtı | Vanilla client'ın protokol olarak asla göndermeyeceği bir dizi: client değiştirilmiştir. Hile kanıtı olmak zorunda değildir: meşru ama protokolü bozan bir mod da üretebilir | Bir tick içinde birden fazla hareket paketi (tick framing), atlanan transaction |
+| **P-M** değişiklik kanıtı | Vanilla client'ın protokol olarak asla göndermeyeceği bir dizi: client değiştirilmiştir. Hile kanıtı olmak zorunda değildir: meşru ama protokolü bozan bir mod da üretebilir | Bir tick içinde birden fazla hareket paketi (tick framing), client saatinin izin verdiğinden fazla tick (timer), atlanan transaction |
 | **D** tasarım-kesin istatistik | Geçerliliği deney tasarımından gelen e-değer (rastgele sondalar, honeypot) | Gizli varlığa bakma sıklığı, sahte cevher madenciliği |
 | **S** nominal istatistik / yapay zekâ | Modele dayalı sinyal | Aim/tıklama dağılımı, profil sapması |
 | **C** bağlam | Kanıt değil, inceleme için bağlam | Ping, sunucu TPS'i, client beyanları |

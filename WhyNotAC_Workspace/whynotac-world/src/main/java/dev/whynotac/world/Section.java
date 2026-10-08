@@ -1,26 +1,28 @@
 package dev.whynotac.world;
 
+import java.util.Arrays;
+
 /**
  * The block states of one 16x16x16 section, stored the way the chunk packet delivers them: one value,
- * or a palette plus bit-packed indices, or global ids bit-packed. Decoding keeps that compact form
- * (most sections cost a few hundred bytes); the first block change expands it to one {@code char}
- * per block (8 KiB). Index order is the game's: {@code (y << 8 | z << 4) | x}.
+ * or a palette plus bit-packed indices, or bit-packed global ids (most sections cost a few hundred
+ * bytes). Index order is the game's: {@code (y << 8 | z << 4) | x}.
  *
- * <p>Owned by one {@link ClientWorld} and confined to its analysis thread.
+ * <p>Immutable and compared by content: a block change makes a new section ({@link #with}), so the
+ * identical sections many players hold, before and after the same change, are stored once
+ * ({@link SectionPool}). Safe to share between threads (final fields).
  */
 public final class Section {
 
     /** A state the packet referenced but the palette or registry does not contain (the client would fail on it). */
     public static final int INVALID = -2;
-    private static final char INVALID_CHAR = '￿';
 
-    private int single;          // >= 0 or INVALID: every block has this state (when data == null and states == null)
-    private int bits;
-    private long[] data;
-    private int valuesPerLong;
-    private int[] palette;       // null: data holds global ids
-    private int globalLimit;     // global ids at or above this are not block states
-    private char[] states;       // expanded, after the first change
+    private final int single;      // the state of every block when bits == 0
+    private final int bits;
+    private final long[] data;
+    private final int valuesPerLong;
+    private final int[] palette;   // null: data holds global ids
+    private final int globalLimit; // global ids at or above this are not block states
+    private final int hash;
 
     private Section(int single, int bits, long[] data, int[] palette, int globalLimit) {
         this.single = single;
@@ -29,6 +31,7 @@ public final class Section {
         this.palette = palette;
         this.globalLimit = globalLimit;
         this.valuesPerLong = bits == 0 ? 0 : 64 / bits;
+        this.hash = ((31 * single + bits) * 31 + Arrays.hashCode(data)) * 31 + Arrays.hashCode(palette);
     }
 
     static Section uniform(int state) {
@@ -57,11 +60,7 @@ public final class Section {
 
     /** The state at {@link #index}, or {@link #INVALID}. */
     public int get(int index) {
-        if (states != null) {
-            char c = states[index];
-            return c == INVALID_CHAR ? INVALID : c;
-        }
-        if (data == null) {
+        if (bits == 0) {
             return single;
         }
         int cell = index / valuesPerLong;
@@ -72,34 +71,101 @@ public final class Section {
         return value < palette.length ? palette[value] : INVALID;
     }
 
-    void set(int index, int state) {
-        if (states == null) {
-            char[] expanded = new char[4096];
-            for (int i = 0; i < expanded.length; i++) {
-                int s = get(i);
-                expanded[i] = s < 0 ? INVALID_CHAR : (char) s;
+    /**
+     * This section with the blocks at {@code indices} set to {@code states} (in order; a later entry for
+     * the same index wins). Deterministic: the same changes to the same section give an equal section.
+     * The palette grows as needed, the storage widens like the game's (4 bits up to 16 values, then 5..8,
+     * then global ids), and a section whose values no longer fit a palette keeps global ids.
+     */
+    Section with(int[] indices, int[] states, int globalBits, int stateCount) {
+        int[] values = new int[4096];
+        for (int i = 0; i < 4096; i++) {
+            values[i] = get(i);
+        }
+        for (int i = 0; i < indices.length; i++) {
+            values[indices[i]] = states[i] >= 0 && states[i] < stateCount ? states[i] : INVALID;
+        }
+        return of(values, palette, globalBits, stateCount);
+    }
+
+    /** One block changed (see {@link #with(int[], int[], int, int)}). */
+    Section with(int index, int state, int globalBits, int stateCount) {
+        if (bits == 0 && state == single) {
+            return this;
+        }
+        return with(new int[] {index}, new int[] {state}, globalBits, stateCount);
+    }
+
+    /**
+     * Packs 4096 states. The palette keeps the order of {@code previousPalette} (so a changed section stays
+     * close to what the packet delivered) and appends new states in index order.
+     */
+    private static Section of(int[] values, int[] previousPalette, int globalBits, int stateCount) {
+        int first = values[0];
+        boolean uniform = true;
+        for (int v : values) {
+            if (v != first) {
+                uniform = false;
+                break;
             }
-            states = expanded;
-            data = null;
-            palette = null;
         }
-        states[index] = state < 0 ? INVALID_CHAR : (char) state;
+        if (uniform) {
+            return uniform(first);
+        }
+        int[] palette = new int[16];
+        int size = 0;
+        java.util.HashMap<Integer, Integer> index = new java.util.HashMap<>();
+        if (previousPalette != null) {
+            for (int state : previousPalette) {
+                if (index.putIfAbsent(state, size) == null) {
+                    if (size == palette.length) {
+                        palette = Arrays.copyOf(palette, size * 2);
+                    }
+                    palette[size++] = state;
+                }
+            }
+        }
+        for (int v : values) {
+            if (index.putIfAbsent(v, size) == null) {
+                if (size == palette.length) {
+                    palette = Arrays.copyOf(palette, size * 2);
+                }
+                palette[size++] = v;
+            }
+        }
+        int needed = 32 - Integer.numberOfLeadingZeros(Math.max(size - 1, 1));
+        boolean global = needed > 8;
+        int storedBits = global ? globalBits : Math.max(4, needed);
+        long[] data = new long[longsFor(storedBits, 4096)];
+        int perLong = 64 / storedBits;
+        for (int i = 0; i < 4096; i++) {
+            long value = global ? (values[i] < 0 ? stateCount : values[i]) : index.get(values[i]);
+            data[i / perLong] |= value << (i % perLong) * storedBits;
+        }
+        return packed(storedBits, data, global ? null : Arrays.copyOf(palette, size), stateCount);
     }
 
-    /** True if every block is {@code state} without expanding. */
-    boolean isUniform(int state) {
-        return states == null && data == null && single == state;
-    }
-
-    /** Approximate retained bytes (for memory accounting). */
+    /** Approximate retained bytes. */
     long retainedBytes() {
-        if (states != null) {
-            return 16 + 8192;
-        }
-        return 48 + (data == null ? 0 : 16 + 8L * data.length) + (palette == null ? 0 : 16 + 4L * palette.length);
+        return 56 + (data == null ? 0 : 16 + 8L * data.length) + (palette == null ? 0 : 16 + 4L * palette.length);
     }
 
     public static int index(int x, int y, int z) {
         return (y & 15) << 8 | (z & 15) << 4 | x & 15;
+    }
+
+    /** Equal content (and representation). */
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        return other instanceof Section s && s.hash == hash && s.single == single && s.bits == bits
+                && s.globalLimit == globalLimit && Arrays.equals(s.data, data) && Arrays.equals(s.palette, palette);
+    }
+
+    @Override
+    public int hashCode() {
+        return hash;
     }
 }

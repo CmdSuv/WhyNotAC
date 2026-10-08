@@ -184,7 +184,7 @@ public final class WireObserver {
             translated = table.unmodeledServerbound(id);
         }
 
-        if (HandshakePacketTypes.CLIENT_INTENTION.equals(type)) {
+        if (type == HandshakePacketTypes.CLIENT_INTENTION) {
             return onHandshake(translated, nanoTime);
         }
         if (source == null) {
@@ -193,10 +193,10 @@ public final class WireObserver {
             session.onObservation(Source.GAME, Source.GAME, -1, "first frame is not a handshake: " + typeName, nanoTime);
             return InboundAction.DETACH;
         }
-        if (LoginPacketTypes.SERVERBOUND_LOGIN_ACKNOWLEDGED.equals(type)
-                || GamePacketTypes.SERVERBOUND_CONFIGURATION_ACKNOWLEDGED.equals(type)) {
+        if (type == LoginPacketTypes.SERVERBOUND_LOGIN_ACKNOWLEDGED
+                || type == GamePacketTypes.SERVERBOUND_CONFIGURATION_ACKNOWLEDGED) {
             inboundTable = protocols.configurationServerbound;
-        } else if (ConfigurationPacketTypes.SERVERBOUND_FINISH_CONFIGURATION.equals(type)) {
+        } else if (type == ConfigurationPacketTypes.SERVERBOUND_FINISH_CONFIGURATION) {
             inboundTable = protocols.playServerbound();
         }
         session.onInbound(translated, nanoTime);
@@ -255,23 +255,23 @@ public final class WireObserver {
         }
         int id = packetId(frame);
         PacketType<?> type = table.type(id);
-        if (GamePacketTypes.CLIENTBOUND_BUNDLE_DELIMITER.equals(type)) {
+        if (type == GamePacketTypes.CLIENTBOUND_BUNDLE_DELIMITER) {
             return Outgoing.STRUCTURAL; // bundles are flattened, as in the game's view
         }
         String typeName = typeName(table, type, id);
         ClientboundPacket translated;
         if (type == null) {
             translated = new ClientboundPacket.Untranslatable(typeName);
-        } else if (GamePacketTypes.CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT.equals(type)) {
+        } else if (type == GamePacketTypes.CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT) {
             translated = rawChunk(frame, typeName);
         } else if (table.decodes(id)) {
             translated = decodeClientbound(table, frame, typeName);
         } else {
             translated = table.unmodeledClientbound(id);
         }
-        if (LoginPacketTypes.CLIENTBOUND_LOGIN_FINISHED.equals(type) || GamePacketTypes.CLIENTBOUND_START_CONFIGURATION.equals(type)) {
+        if (type == LoginPacketTypes.CLIENTBOUND_LOGIN_FINISHED || type == GamePacketTypes.CLIENTBOUND_START_CONFIGURATION) {
             outboundTable = protocols.configurationClientbound;
-        } else if (ConfigurationPacketTypes.CLIENTBOUND_FINISH_CONFIGURATION.equals(type)) {
+        } else if (type == ConfigurationPacketTypes.CLIENTBOUND_FINISH_CONFIGURATION) {
             outboundTable = protocols.playClientbound();
         }
         if (translated instanceof ClientboundPacket.Login login) {

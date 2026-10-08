@@ -15,9 +15,14 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > klavye/fare girdisiyle oynanır. Kayıt WhyNotAC'ın vanilla modelleriyle karşılaştırılır.
 > **Slice 0:** ilk kontrol (tick framing, P-M) uçtan uca çalışıyor: kanıt, kabul edilebilirlik,
 > [politika](docs/POLICY.md), SHADOW karar, vaka kaydı, uyarı, dossier ve sunucudan bağımsız `verify`
-> ([rapor](docs/phases/SLICE-0-REPORT.md)). Kontroller SHADOW'dadır: hiçbir oyuncuya işlem yapılmaz.
-> 100 botluk yük testi: dürüst oyunculara 0 yanlış bulgu ([sonuçlar](docs/benchmarks/2026-10-08-load-100/README.md)).
-> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md)
+> ([rapor](docs/phases/SLICE-0-REPORT.md)). İkinci kontrol: client saati (timer, P-M), nedensellikle
+> sınırlanmış bir kanıt. Kontroller SHADOW'dadır: hiçbir oyuncuya işlem yapılmaz.
+> 100 botluk yük testi: dürüst oyunculara 0 yanlış bulgu, düz dünyada ve gerçek arazide
+> ([sonuçlar](docs/benchmarks/2026-10-08-load-100/README.md), [gerçek arazi](docs/benchmarks/2026-10-08-world/README.md)).
+> **Faz 2b-3:** client'ın dünyası client'ın aldığı paketlerden yeniden kuruluyor: sunucunun dünyasıyla
+> blok blok eşit (E2E ve gerçek client'ta 1944/1944 bölüm). Blok verisi resmi client'tan üretiliyor
+> ([rapor](docs/phases/PHASE-2B-3-REPORT.md)).
+> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md)
 
 ## Belgeler
 - [Kararlar](docs/DECISIONS.md): proje sahibinin kararları (tek koşulsuz kural: dünyanın en iyisi)
@@ -33,6 +38,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 | `whynotac-math` | Vanilla bit-tam sayısal çekirdek ve hassas analiz primitifleri (bağımlılıksız) |
 | `whynotac-protocol` | Platformdan bağımsız paket modeli, oyuncu zaman çizelgesi, transaction/gecikme izleme |
 | `whynotac-recording` | Kayıpsız, çökmeye dayanıklı oturum kaydı, takma adlandırma, replay, inspect/dump aracı |
+| `whynotac-world` | Client'ın dünyası: blok durumu verisi (resmi client'tan), chunk decoder, client'ın chunk deposunun kopyası ve belirsizliği |
 | `whynotac-analysis` | Kontroller, kanıt ve kabul edilebilirlik, eylem politikası (POLICY.md), karar katmanı, `verify` aracı |
 | `whynotac-paper` | Paper 1.21.11 eklentisi: NMS/Netty paket yakalayıcı, kayıt entegrasyonu, vakalar ve uyarılar |
 | `whynotac-conformance` | Gerçek oyun sınıflarına karşı diferansiyel testler (dağıtılmaz) |
@@ -42,9 +48,9 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 185 test
+./gradlew build                       # tüm modüller + 227 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (57 kontrol)
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (71 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e  # aynı test, ViaVersion 5.12.0 + PacketEvents 2.14.0 yanında
 tools/realclient/run_realclient.sh /tmp/wnac-rc  # resmi client, Xvfb + XTest (bkz. tools/realclient/README.md)

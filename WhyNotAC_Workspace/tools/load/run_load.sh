@@ -9,6 +9,9 @@
 #            others, like a busy spawn or arena); spread: far apart (per-player cost only);
 #            crowd: all in one place (every bot sees every other one: N^2 entity traffic)
 #
+# LOAD_LEVEL_TYPE=normal generates real terrain (the client-world replica then holds realistic chunks);
+# the default flat world keeps runs comparable. The world seed is fixed (LOAD_SEED), so the variants of a
+# real-terrain comparison see the same terrain and the same generated mobs.
 # The server runs on CPUs 0-1 and the bots on the remaining CPUs (taskset), so their load does not mix.
 # After every bot has joined, the warm-up lasts until the tick time has settled (chunk generation done),
 # then one measurement window: Paper's tick times, the server
@@ -43,7 +46,8 @@ rm -rf "$WORK_DIR/world" "$WORK_DIR/world_nether" "$WORK_DIR/world_the_end" "$WO
 cat > "$WORK_DIR/server.properties" <<PROPS
 online-mode=false
 server-port=$PORT
-level-type=minecraft\:flat
+level-type=minecraft\:${LOAD_LEVEL_TYPE:-flat}
+level-seed=${LOAD_SEED:-20261008}
 generate-structures=false
 spawn-protection=0
 view-distance=4

@@ -6,6 +6,7 @@ import dev.whynotac.protocol.session.TimelineListener;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -24,9 +25,29 @@ public final class ClientWorldTracker implements TimelineListener {
 
     private final Supplier<ClientWorld> factory;
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();
+    private final SectionPool pool = new SectionPool();
+    private final LongAdder worlds = new LongAdder();
 
     public ClientWorldTracker(BlockStates states) {
-        this.factory = () -> new ClientWorld(states); // one capturing lambda, not one per event
+        this.factory = () -> { // one capturing lambda, not one per event
+            worlds.increment();
+            return new ClientWorld(states, pool);
+        };
+    }
+
+    /** Block data held for every session's world (bytes): each distinct section once. Any thread. */
+    public long retainedBytes() {
+        return pool.uniqueBytes();
+    }
+
+    /** Distinct shared sections. Any thread. */
+    public int sharedSections() {
+        return pool.size();
+    }
+
+    /** Worlds created since start. Any thread. */
+    public long worldsCreated() {
+        return worlds.sum();
     }
 
     @Override

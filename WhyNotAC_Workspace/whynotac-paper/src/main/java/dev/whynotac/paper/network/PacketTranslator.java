@@ -167,6 +167,29 @@ public final class PacketTranslator {
             "level_chunk_with_light", "forget_level_chunk", "block_update", "section_blocks_update", "block_changed_ack",
             "set_chunk_cache_center", "set_chunk_cache_radius");
 
+    /** The packet classes {@link #outbound} has a case for (keep in step with its switch). */
+    private static final List<Class<?>> OUTBOUND_CLASSES = List.of(
+            ClientboundPingPacket.class, ClientboundKeepAlivePacket.class, ClientboundSetEntityMotionPacket.class, ClientboundExplodePacket.class,
+            ClientboundPlayerPositionPacket.class, ClientboundTeleportEntityPacket.class, ClientboundPlayerRotationPacket.class,
+            ClientboundUpdateAttributesPacket.class, ClientboundUpdateMobEffectPacket.class, ClientboundRemoveMobEffectPacket.class,
+            ClientboundPlayerAbilitiesPacket.class, ClientboundGameEventPacket.class, ClientboundLoginPacket.class, ClientboundRespawnPacket.class,
+            ClientboundLevelChunkWithLightPacket.class, ClientboundForgetLevelChunkPacket.class, ClientboundBlockUpdatePacket.class,
+            ClientboundSectionBlocksUpdatePacket.class, ClientboundBlockChangedAckPacket.class, ClientboundSetChunkCacheCenterPacket.class,
+            ClientboundSetChunkCacheRadiusPacket.class);
+
+    /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
+    static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            for (Class<?> modelled : OUTBOUND_CLASSES) {
+                if (modelled.isAssignableFrom(type)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    };
+
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
     /** Packet class -> type id. A packet class always has the same type; built once per class, never per packet. */
     private static final Map<Class<?>, String> TYPE_NAMES = new ConcurrentHashMap<>();
@@ -314,6 +337,10 @@ public final class PacketTranslator {
      * so lossy fields already hold the client's values; otherwise it is the game's object before encoding.
      */
     public ClientboundPacket outbound(Packet<?> packet, boolean fromWire) {
+        if (!OUTBOUND_MODELLED.get(packet.getClass())) {
+            // Most outbound traffic: skip the type switch, which tests every case in turn (JDK 21 typeSwitch).
+            return unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
+        }
         return switch (packet) {
             case ClientboundPingPacket ping -> new ClientboundPacket.Ping(ping.getId());
             case ClientboundKeepAlivePacket keepAlive -> new ClientboundPacket.KeepAlive(keepAlive.getId());

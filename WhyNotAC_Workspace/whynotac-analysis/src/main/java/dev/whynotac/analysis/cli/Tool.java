@@ -1,6 +1,6 @@
 package dev.whynotac.analysis.cli;
 
-import dev.whynotac.analysis.checks.TickFramingCheck;
+import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceSink;
@@ -45,8 +45,14 @@ public final class Tool {
         String recording = field(json, "recording");
         String fingerprint = field(json, "fingerprint");
         String check = field(json, "check");
-        if (recording == null || fingerprint == null || !TickFramingCheck.ID.equals(check)) {
+        if (recording == null || fingerprint == null || check == null || Checks.version(check) < 0) {
             err.println("dossier has no recording, no fingerprint, or a check this tool cannot run: " + check);
+            return 1;
+        }
+        String version = number(json, "checkVersion");
+        if (version != null && !version.equals(Integer.toString(Checks.version(check)))) {
+            err.println("the dossier was made by " + check + " version " + version + "; this tool runs version " + Checks.version(check)
+                    + " (use the WhyNotAC build that opened the case)");
             return 1;
         }
         // The recording is named relative to the dossier (a copied plugin folder still verifies), else absolutely.
@@ -58,7 +64,7 @@ public final class Tool {
         List<Evidence> found = new ArrayList<>();
         try {
             RecordingReader reader = RecordingReader.open(file);
-            Replayer.replay(reader, List.of(new TickFramingCheck(new EvidenceSink() {
+            Replayer.replay(reader, List.of(Checks.create(check, new EvidenceSink() {
                 @Override
                 public void accept(PlayerSession session, Evidence evidence) {
                     found.add(evidence);
@@ -81,6 +87,12 @@ public final class Tool {
     static String field(String json, String name) {
         Matcher m = Pattern.compile("\"" + Pattern.quote(name) + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(json);
         return m.find() ? m.group(1).replace("\\\"", "\"").replace("\\\\", "\\") : null;
+    }
+
+    /** A numeric field of the dossier, as text. */
+    static String number(String json, String name) {
+        Matcher m = Pattern.compile("\"" + Pattern.quote(name) + "\"\\s*:\\s*(-?\\d+)").matcher(json);
+        return m.find() ? m.group(1) : null;
     }
 
     static String escape(String s) {
