@@ -7,6 +7,8 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
@@ -18,28 +20,38 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
+import net.minecraft.core.SectionPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;
-import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.ServerboundClientInformationPacket;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.ServerboundPongPacket;
 import net.minecraft.network.protocol.common.custom.BrandPayload;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.common.custom.DiscardedPayload;
+import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
+import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLoginPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerRotationPacket;
-import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveMobEffectPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
+import net.minecraft.network.protocol.game.ClientboundSetChunkCacheRadiusPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket;
+import net.minecraft.network.protocol.game.CommonPlayerSpawnInfo;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
 import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
@@ -60,10 +72,14 @@ import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.network.protocol.handshake.ClientIntent;
 import net.minecraft.network.protocol.handshake.ClientIntentionPacket;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Relative;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -78,10 +94,18 @@ public final class PacketTranslator {
 
     private static final VarHandle GAME_EVENT_TYPE_ID;
 
+    private static final VarHandle SECTION_POS;
+    private static final VarHandle SECTION_POSITIONS;
+    private static final VarHandle SECTION_STATES;
+
     static {
         try {
             GAME_EVENT_TYPE_ID = MethodHandles.privateLookupIn(ClientboundGameEventPacket.Type.class, MethodHandles.lookup())
                     .findVarHandle(ClientboundGameEventPacket.Type.class, "id", int.class);
+            MethodHandles.Lookup section = MethodHandles.privateLookupIn(ClientboundSectionBlocksUpdatePacket.class, MethodHandles.lookup());
+            SECTION_POS = section.findVarHandle(ClientboundSectionBlocksUpdatePacket.class, "sectionPos", SectionPos.class);
+            SECTION_POSITIONS = section.findVarHandle(ClientboundSectionBlocksUpdatePacket.class, "positions", short[].class);
+            SECTION_STATES = section.findVarHandle(ClientboundSectionBlocksUpdatePacket.class, "states", BlockState[].class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -139,7 +163,9 @@ public final class PacketTranslator {
     /** Packet type paths that {@link #outbound} turns into a dedicated model record (see {@link #SERVERBOUND_MODELLED}). */
     public static final Set<String> CLIENTBOUND_MODELLED = Set.of(
             "explode", "game_event", "keep_alive", "login", "ping", "player_abilities", "player_position", "player_rotation",
-            "remove_mob_effect", "respawn", "set_entity_motion", "teleport_entity", "update_attributes", "update_mob_effect");
+            "remove_mob_effect", "respawn", "set_entity_motion", "teleport_entity", "update_attributes", "update_mob_effect",
+            "level_chunk_with_light", "forget_level_chunk", "block_update", "section_blocks_update", "block_changed_ack",
+            "set_chunk_cache_center", "set_chunk_cache_radius");
 
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
     /** Packet class -> type id. A packet class always has the same type; built once per class, never per packet. */
@@ -311,10 +337,65 @@ public final class PacketTranslator {
                     abilities.isInvulnerable(), abilities.isFlying(), abilities.canFly(), abilities.canInstabuild(),
                     abilities.getFlyingSpeed(), abilities.getWalkingSpeed());
             case ClientboundGameEventPacket event -> new ClientboundPacket.GameEvent((int) GAME_EVENT_TYPE_ID.get(event.getEvent()), event.getParam());
-            case ClientboundLoginPacket login -> new ClientboundPacket.Login(login.playerId());
-            case ClientboundRespawnPacket ignored -> new ClientboundPacket.Respawn();
+            case ClientboundLoginPacket login -> new ClientboundPacket.Login(
+                    login.playerId(), login.chunkRadius(), dimension(login.commonPlayerSpawnInfo()));
+            case ClientboundRespawnPacket respawn -> new ClientboundPacket.Respawn(dimension(respawn.commonPlayerSpawnInfo()));
+            // The game's view has no bytes yet; see levelChunk(ByteBuf) for the edge and withBody for the game-only view.
+            case ClientboundLevelChunkWithLightPacket chunk -> new ClientboundPacket.LevelChunk(chunk.getX(), chunk.getZ(), null);
+            case ClientboundForgetLevelChunkPacket forget -> new ClientboundPacket.ForgetLevelChunk(forget.pos().x, forget.pos().z);
+            case ClientboundBlockUpdatePacket update -> new ClientboundPacket.BlockUpdate(position(update.getPos()), Block.getId(update.getBlockState()));
+            case ClientboundSectionBlocksUpdatePacket update -> sectionUpdate(update);
+            case ClientboundBlockChangedAckPacket ack -> new ClientboundPacket.BlockChangedAck(ack.sequence());
+            case ClientboundSetChunkCacheCenterPacket center -> new ClientboundPacket.ChunkCacheCenter(center.getX(), center.getZ());
+            case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
+    }
+
+    /**
+     * A chunk packet exactly as the client receives it, from its frame body (after the packet id): the
+     * two coordinates, then the remaining bytes copied unparsed. Nothing is decoded on the network thread.
+     */
+    public static ClientboundPacket.LevelChunk levelChunk(ByteBuf body) {
+        int x = body.readInt();
+        int z = body.readInt();
+        byte[] rest = new byte[body.readableBytes()];
+        body.readBytes(rest);
+        return new ClientboundPacket.LevelChunk(x, z, rest);
+    }
+
+    /**
+     * The game's chunk packet with its bytes, for the game-only view (no network edge): encoded with
+     * the game's own codec, exactly as the encoder will. Null bytes if no server registry is available.
+     */
+    public static ClientboundPacket.LevelChunk withBody(ClientboundLevelChunkWithLightPacket packet) {
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server == null) {
+            return new ClientboundPacket.LevelChunk(packet.getX(), packet.getZ(), null);
+        }
+        ByteBuf buffer = Unpooled.buffer();
+        try {
+            ClientboundLevelChunkWithLightPacket.STREAM_CODEC.encode(new RegistryFriendlyByteBuf(buffer, server.registryAccess()), packet);
+            return levelChunk(buffer);
+        } finally {
+            buffer.release();
+        }
+    }
+
+    private static ClientboundPacket.SectionBlocksUpdate sectionUpdate(ClientboundSectionBlocksUpdatePacket packet) {
+        SectionPos section = (SectionPos) SECTION_POS.get(packet);
+        short[] positions = (short[]) SECTION_POSITIONS.get(packet);
+        BlockState[] states = (BlockState[]) SECTION_STATES.get(packet);
+        long[] entries = new long[positions.length];
+        for (int i = 0; i < positions.length; i++) {
+            entries[i] = (long) Block.getId(states[i]) << 12 | positions[i] & 0xFFF; // the wire encoding
+        }
+        return new ClientboundPacket.SectionBlocksUpdate(section.x(), section.y(), section.z(), entries);
+    }
+
+    private static ClientboundPacket.Dimension dimension(CommonPlayerSpawnInfo spawn) {
+        DimensionType type = spawn.dimensionType().value();
+        return new ClientboundPacket.Dimension(spawn.dimension().identifier().toString(), type.minY(), type.height());
     }
 
     private static ClientboundPacket attributes(ClientboundUpdateAttributesPacket packet) {

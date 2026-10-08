@@ -3,6 +3,7 @@ package dev.whynotac.recording;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Objects;
@@ -51,6 +52,18 @@ public final class BitExact {
             int i = 0;
             while (ie.hasNext()) {
                 compare(ie.next(), ia.next(), path + "[" + i++ + "]");
+            }
+            return;
+        }
+        if (expected instanceof byte[] e && actual instanceof byte[] a) {
+            if (!Arrays.equals(e, a)) {
+                fail(path + ": byte[" + e.length + "] != byte[" + a.length + "] (first difference at " + Arrays.mismatch(e, a) + ")");
+            }
+            return;
+        }
+        if (expected instanceof long[] e && actual instanceof long[] a) {
+            if (!Arrays.equals(e, a)) {
+                fail(path + ": " + Arrays.toString(e) + " != " + Arrays.toString(a));
             }
             return;
         }

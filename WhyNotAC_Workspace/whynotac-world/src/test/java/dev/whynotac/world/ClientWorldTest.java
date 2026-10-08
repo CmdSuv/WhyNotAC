@@ -1,0 +1,326 @@
+package dev.whynotac.world;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.protocol.packet.BlockFace;
+import dev.whynotac.protocol.packet.BlockPosition;
+import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.Hand;
+import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.TimelineEvent;
+import java.io.ByteArrayOutputStream;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+class ClientWorldTest {
+
+    private static final BlockStates STATES = BlockStates.vanilla();
+    private static final int STONE = STATES.firstStateOf("minecraft:stone");
+    private static final int DIRT = STATES.firstStateOf("minecraft:dirt");
+    private static final int AIR = STATES.firstStateOf("minecraft:air");
+    private static final int VOID_AIR = STATES.firstStateOf("minecraft:void_air");
+    private static final ClientboundPacket.Dimension OVERWORLD = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384);
+    private static final ClientboundPacket.Dimension NETHER = new ClientboundPacket.Dimension("minecraft:the_nether", 0, 256);
+
+    private ClientWorld world;
+    private long sequence;
+    private int pingId;
+
+    @BeforeEach
+    void setUp() {
+        world = new ClientWorld(STATES);
+        sequence = 0;
+    }
+
+    // --- event helpers ---
+
+    private void out(ClientboundPacket packet) {
+        world.onEvent(new TimelineEvent.Outbound(sequence++, sequence, packet));
+    }
+
+    private void in(ServerboundPacket packet) {
+        world.onEvent(new TimelineEvent.Inbound(sequence++, sequence, 0, packet));
+    }
+
+    /** Sends a ping and returns its id (acknowledge it with {@link #ack}). */
+    private int ping() {
+        int id = ++pingId;
+        out(new ClientboundPacket.Ping(id));
+        return id;
+    }
+
+    private void ack(int id) {
+        world.onEvent(new TimelineEvent.Acknowledged(sequence++, sequence, id, 0, 0));
+    }
+
+    /** Ping and acknowledge: the client processed everything sent so far. */
+    private void sync() {
+        ack(ping());
+    }
+
+    private void login(int radius, ClientboundPacket.Dimension dimension) {
+        out(new ClientboundPacket.Login(1, radius, dimension));
+    }
+
+    /** A chunk whose every section is {@code state}, except section {@code index} which holds {@code special} at (1, 2, 3). */
+    static byte[] chunk(int sections, int state, int index, int special) {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        varInt(body, 0); // no heightmaps
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
+        for (int i = 0; i < sections; i++) {
+            data.write(0);
+            data.write(16); // non-empty count (short)
+            if (i == index) {
+                int bits = STATES.globalPaletteBits();
+                data.write(bits); // global ids
+                long[] longs = new long[Section.longsFor(bits, 4096)];
+                int perLong = 64 / bits;
+                for (int b = 0; b < 4096; b++) {
+                    int value = b == Section.index(1, 2, 3) ? special : state;
+                    longs[b / perLong] |= (long) value << (b % perLong) * bits;
+                }
+                for (long l : longs) {
+                    for (int k = 7; k >= 0; k--) {
+                        data.write((int) (l >>> 8 * k));
+                    }
+                }
+            } else {
+                data.write(0);
+                varInt(data, state);
+            }
+            data.write(0); // biomes: one value
+            varInt(data, 0);
+        }
+        varInt(body, data.size());
+        body.writeBytes(data.toByteArray());
+        varInt(body, 0); // block entities
+        return body.toByteArray();
+    }
+
+    private static void varInt(ByteArrayOutputStream out, int value) {
+        while ((value & ~0x7F) != 0) {
+            out.write(value & 0x7F | 0x80);
+            value >>>= 7;
+        }
+        out.write(value);
+    }
+
+    private void loadStone(int x, int z) {
+        out(new ClientboundPacket.LevelChunk(x, z, chunk(24, STONE, -1, 0)));
+    }
+
+    // --- tests ---
+
+    @Test
+    void nothingBeforeALogin() {
+        assertEquals(ClientWorld.UNKNOWN, world.blockState(0, 0, 0));
+        loadStone(0, 0);
+        assertEquals(ClientWorld.UNKNOWN, world.blockState(0, 0, 0)); // the client has no level to put it in
+    }
+
+    @Test
+    void chunksDecodeAndUnloadedChunksAreVoidAir() {
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, 5, DIRT)));
+        assertEquals(DIRT, world.blockState(1, -64 + 5 * 16 + 2, 3));
+        assertEquals(AIR, world.blockState(0, 70, 0));
+        assertEquals(VOID_AIR, world.blockState(16, 70, 0)); // a chunk the client does not hold
+        assertEquals(VOID_AIR, world.blockState(0, -65, 0)); // below the build height
+        assertEquals(VOID_AIR, world.blockState(0, 320, 0)); // above it
+        assertTrue(world.isLoaded(0, 0));
+        assertFalse(world.isLoaded(1, 0));
+    }
+
+    @Test
+    void chunksOutsideTheViewRangeAreIgnoredAsTheClientDoes() {
+        login(2, OVERWORLD); // storage range max(2, 2) + 3 = 5
+        loadStone(5, 0);
+        loadStone(6, 0);
+        assertTrue(world.isLoaded(5, 0));
+        assertFalse(world.isLoaded(6, 0));
+        assertEquals(1, world.stats().chunksIgnored());
+    }
+
+    @Test
+    void theRingBufferReplacesTheChunkInTheSameSlot() {
+        login(2, OVERWORLD); // view range 11
+        loadStone(-5, 0);
+        out(new ClientboundPacket.ChunkCacheCenter(6, 0));
+        loadStone(6, 0); // floorMod(6, 11) == floorMod(-5, 11): same slot
+        out(new ClientboundPacket.ChunkCacheCenter(0, 0));
+        assertFalse(world.isLoaded(-5, 0)); // replaced, as in ClientChunkCache.Storage.replace
+    }
+
+    @Test
+    void movingTheCentreHidesChunksWithoutDroppingThem() {
+        login(2, OVERWORLD);
+        loadStone(-5, 0);
+        out(new ClientboundPacket.ChunkCacheCenter(1, 0));
+        assertFalse(world.isLoaded(-5, 0)); // out of range of the new centre
+        assertEquals(VOID_AIR, world.blockState(-5 * 16, 0, 0));
+        out(new ClientboundPacket.ChunkCacheCenter(0, 0));
+        assertTrue(world.isLoaded(-5, 0)); // still in its slot
+    }
+
+    @Test
+    void forgetDropsAChunk() {
+        login(10, OVERWORLD);
+        loadStone(2, 3);
+        out(new ClientboundPacket.ForgetLevelChunk(2, 3));
+        assertFalse(world.isLoaded(2, 3));
+    }
+
+    @Test
+    void blockUpdatesApplyOnlyInHeldChunksAndWithinTheBuildHeight() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(5, 10, 5), DIRT));
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(40, 10, 5), DIRT)); // chunk not held: ignored
+        assertEquals(DIRT, world.blockState(5, 10, 5));
+        assertEquals(STONE, world.blockState(6, 10, 5));
+        assertEquals(VOID_AIR, world.blockState(40, 10, 5));
+        long entry = (long) DIRT << 12 | 1 << 8 | 2 << 4 | 3; // x=1, z=2, y=3 in section (0, 1, 0)
+        out(new ClientboundPacket.SectionBlocksUpdate(0, 1, 0, new long[] {entry}));
+        assertEquals(DIRT, world.blockState(1, 16 + 3, 2));
+    }
+
+    @Test
+    void aChangeIsUnsettledUntilATransactionSentAfterItIsAcknowledged() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        int before = ping();
+        sync();
+        assertTrue(world.settled(5, 10, 5));
+        int early = ping();
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(5, 10, 5), DIRT));
+        int late = ping();
+        assertFalse(world.settled(5, 10, 5));
+        assertTrue(world.settled(6, 10, 5));
+        ack(before);
+        ack(early); // sent before the change: proves nothing about it
+        assertFalse(world.settled(5, 10, 5));
+        ack(late);
+        assertTrue(world.settled(5, 10, 5));
+        assertEquals(DIRT, world.blockState(5, 10, 5));
+    }
+
+    @Test
+    void aNewChunkIsUnsettledUntilAcknowledged() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        assertFalse(world.settled(1, 1, 1));
+        sync();
+        assertTrue(world.settled(1, 1, 1));
+    }
+
+    @Test
+    void theClientsOwnPredictionsStayUnsettledUntilTheServersAckReachesIt() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        sync();
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(5, 10, 5), BlockFace.UP, new Vec3d(5.5, 11, 5.5), false, false, 7));
+        assertFalse(world.settled(5, 10, 5));
+        assertFalse(world.settled(5, 11, 5)); // the placed block
+        assertFalse(world.settled(5, 12, 5)); // and its neighbours (a door's upper half)
+        assertTrue(world.settled(9, 10, 9));
+        sync();
+        assertFalse(world.settled(5, 11, 5)); // no ack from the server yet
+        out(new ClientboundPacket.BlockChangedAck(6)); // an older action
+        sync();
+        assertFalse(world.settled(5, 11, 5));
+        out(new ClientboundPacket.BlockChangedAck(7));
+        assertFalse(world.settled(5, 11, 5)); // sent, not yet processed by the client
+        sync();
+        assertTrue(world.settled(5, 11, 5));
+    }
+
+    @Test
+    void plainItemUsesAreReportedAsUnlocatedPredictions() {
+        login(10, OVERWORLD);
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 3, 0, 0));
+        assertTrue(world.hasUnlocatedPrediction());
+        out(new ClientboundPacket.BlockChangedAck(3));
+        sync();
+        assertFalse(world.hasUnlocatedPrediction());
+    }
+
+    @Test
+    void lostEventsMakeEveryChunkStaleUntilItIsSentAgain() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        loadStone(1, 0);
+        sync();
+        world.onEvent(new TimelineEvent.Gap(sequence++, sequence, 3));
+        assertEquals(ClientWorld.UNKNOWN, world.blockState(1, 1, 1));
+        assertFalse(world.settled(1, 1, 1));
+        loadStone(0, 0);
+        sync();
+        assertEquals(STONE, world.blockState(1, 1, 1));
+        assertTrue(world.settled(1, 1, 1));
+        assertEquals(ClientWorld.UNKNOWN, world.blockState(17, 1, 1));
+    }
+
+    @Test
+    void anUnreadableWorldPacketMakesTheWorldStale() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        out(new ClientboundPacket.Untranslatable("minecraft:block_update"));
+        assertEquals(ClientWorld.UNKNOWN, world.blockState(1, 1, 1));
+    }
+
+    @Test
+    void aRespawnKeepsTheWorldUnlessTheDimensionChanges() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        out(new ClientboundPacket.Respawn(OVERWORLD));
+        assertEquals(STONE, world.blockState(1, 1, 1));
+        out(new ClientboundPacket.Respawn(NETHER));
+        assertEquals(VOID_AIR, world.blockState(1, 1, 1));
+        assertEquals(0, world.minY());
+        assertEquals(256, world.height());
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(16, DIRT, -1, 0)));
+        assertEquals(DIRT, world.blockState(1, 255, 1));
+        assertEquals(VOID_AIR, world.blockState(1, -1, 1));
+    }
+
+    @Test
+    void aSmallerViewRadiusKeepsOnlyTheChunksInTheNewRange() {
+        login(10, OVERWORLD); // range 13
+        loadStone(0, 0);
+        loadStone(9, 0);
+        out(new ClientboundPacket.ChunkCacheRadius(4)); // range 7
+        assertTrue(world.isLoaded(0, 0));
+        assertFalse(world.isLoaded(9, 0));
+        out(new ClientboundPacket.ChunkCacheRadius(10));
+        assertFalse(world.isLoaded(9, 0)); // dropped by the resize, not just hidden
+    }
+
+    @Test
+    void aViewChangeLeavesBorderChunksUnsettledUntilAcknowledged() {
+        login(2, OVERWORLD);
+        loadStone(5, 0);
+        sync();
+        assertTrue(world.settled(5 * 16, 0, 0));
+        out(new ClientboundPacket.ChunkCacheCenter(-1, 0)); // chunk 5 leaves the range
+        loadStone(-6, 0);
+        assertFalse(world.settled(-6 * 16, 0, 0)); // the client may still use the old centre
+        sync();
+        assertTrue(world.settled(-6 * 16, 0, 0));
+    }
+
+    @Test
+    void theDigestHashesEverySection() {
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, 5, DIRT)));
+        ClientWorld.Digest digest = world.digest();
+        long[] hashes = digest.chunks().get(ClientWorld.chunkKey(0, 0));
+        int[] air = new int[4096];
+        java.util.Arrays.fill(air, AIR);
+        assertEquals(ClientWorld.sectionHash(air), hashes[0]);
+        air[Section.index(1, 2, 3)] = DIRT;
+        assertEquals(ClientWorld.sectionHash(air), hashes[5]);
+    }
+}

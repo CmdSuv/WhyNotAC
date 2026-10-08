@@ -4,6 +4,7 @@
  * Module graph (arrows point at dependencies):
  *
  *   whynotac-paper ──► whynotac-recording ──► whynotac-protocol ──► whynotac-math
+ *   whynotac-paper ──► whynotac-world ──► whynotac-protocol (the client's world: block data, chunks, replica)
  *   whynotac-conformance ──► whynotac-math (+ vanilla 1.21.11 server code, test-only)
  *   whynotac-bench ──► everything (JMH micro-benchmarks, never shipped)
  *   whynotac-interop-probe: test-only Paper plugin for the live interop E2E (never shipped)
@@ -40,6 +41,7 @@ include(
     "whynotac-math",
     "whynotac-protocol",
     "whynotac-recording",
+    "whynotac-world",
     "whynotac-analysis",
     "whynotac-paper",
     "whynotac-conformance",

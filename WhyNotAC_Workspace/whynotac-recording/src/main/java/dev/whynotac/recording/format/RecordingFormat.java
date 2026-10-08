@@ -96,6 +96,17 @@ public final class RecordingFormat {
     /** SetEntityMotion with the client's exact value and, from the game's view, the server's (format 2). */
     public static final int CB_SET_ENTITY_MOTION_EXACT = 16;
     public static final int CB_TELEPORT_ENTITY = 17;
+    /** Login with the chunk radius and the dimension (CB_LOGIN: entity id only). */
+    public static final int CB_LOGIN_WORLD = 18;
+    /** Respawn with the dimension (CB_RESPAWN: no fields). */
+    public static final int CB_RESPAWN_WORLD = 19;
+    public static final int CB_LEVEL_CHUNK = 20;
+    public static final int CB_FORGET_LEVEL_CHUNK = 21;
+    public static final int CB_BLOCK_UPDATE = 22;
+    public static final int CB_SECTION_BLOCKS_UPDATE = 23;
+    public static final int CB_BLOCK_CHANGED_ACK = 24;
+    public static final int CB_CHUNK_CACHE_CENTER = 25;
+    public static final int CB_CHUNK_CACHE_RADIUS = 26;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

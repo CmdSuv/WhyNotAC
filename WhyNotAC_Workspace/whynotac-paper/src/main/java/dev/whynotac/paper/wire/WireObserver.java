@@ -262,6 +262,8 @@ public final class WireObserver {
         ClientboundPacket translated;
         if (type == null) {
             translated = new ClientboundPacket.Untranslatable(typeName);
+        } else if (GamePacketTypes.CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT.equals(type)) {
+            translated = rawChunk(frame, typeName);
         } else if (table.decodes(id)) {
             translated = decodeClientbound(table, frame, typeName);
         } else {
@@ -560,6 +562,30 @@ public final class WireObserver {
         }
     }
 
+    /**
+     * A chunk is kept as the bytes the client received: no decoding on the network thread (the world
+     * replica decodes it on an analysis thread), one copy of the frame.
+     */
+    private ClientboundPacket rawChunk(ByteBuf frame, String typeName) {
+        try {
+            ByteBuf view = frame.duplicate();
+            skipVarInt(view);
+            return PacketTranslator.levelChunk(view);
+        } catch (RuntimeException e) {
+            report("outbound " + typeName, e);
+            return new ClientboundPacket.Untranslatable(typeName);
+        }
+    }
+
+    private static void skipVarInt(ByteBuf buf) {
+        for (int i = 0; i < 5; i++) {
+            if ((buf.readByte() & 0x80) == 0) {
+                return;
+            }
+        }
+        throw new IllegalArgumentException("VarInt too long");
+    }
+
     private ClientboundPacket decodeClientbound(WireProtocols.Table table, ByteBuf frame, String typeName) {
         try {
             ByteBuf view = frame.duplicate();
@@ -574,9 +600,17 @@ public final class WireObserver {
         }
     }
 
-    /** A packet in the form the client receives it (the game's view also knows the server-side velocity). */
+    /**
+     * A packet in the form both views can compare: as the client receives it (the game's view also
+     * knows the server-side velocity), and without bulk bytes only the edge has.
+     */
     static ClientboundPacket canonical(ClientboundPacket packet) {
-        return packet instanceof ClientboundPacket.SetEntityMotion motion ? motion.asReceived() : packet;
+        return switch (packet) {
+            case ClientboundPacket.SetEntityMotion motion -> motion.asReceived();
+            // The game's view carries no chunk bytes (the edge has them): compare coordinates only.
+            case ClientboundPacket.LevelChunk chunk -> chunk.withoutBody();
+            default -> packet;
+        };
     }
 
     /**

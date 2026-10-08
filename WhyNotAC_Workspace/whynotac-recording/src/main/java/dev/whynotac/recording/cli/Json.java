@@ -53,6 +53,15 @@ final class Json {
             case Number n -> out.append(n);
             case Enum<?> e -> out.append(string(e.name()));
             case java.util.UUID u -> out.append(string(u.toString()));
+            // Bulk bytes (chunk data): their size and a digest, not the bytes themselves.
+            case byte[] bytes -> out.append("{\"bytes\":").append(bytes.length).append(",\"sha256\":").append(string(sha256(bytes))).append('}');
+            case long[] longs -> {
+                out.append('[');
+                for (int i = 0; i < longs.length; i++) {
+                    out.append(i == 0 ? "" : ",").append(longs[i]);
+                }
+                out.append(']');
+            }
             case Map<?, ?> map -> {
                 out.append('{');
                 boolean first = true;
@@ -93,6 +102,14 @@ final class Json {
                 out.append('}');
             }
             default -> out.append(string(value.toString()));
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 }

@@ -26,8 +26,12 @@ public final class SessionRegistry {
         void onListenerError(PlayerSession session, TimelineEvent event, Throwable error);
     }
 
-    public static final int DEFAULT_MAILBOX_CAPACITY = 16_384;
-    /** Events queued across all sessions (about 60 MB at the measured ~112 B per event). */
+    /**
+     * Mailbox units per session (an event is one unit, plus one per 128 bytes of chunk data it carries):
+     * about 8 MB, room for a player's whole initial chunk burst even when analysis falls behind.
+     */
+    public static final int DEFAULT_MAILBOX_CAPACITY = 65_536;
+    /** Units queued across all sessions (about 64 MB at the measured ~112 B per event, 128 B per unit of chunk data). */
     public static final long DEFAULT_GLOBAL_QUEUE_CAPACITY = 524_288;
 
     private final Executor executor;

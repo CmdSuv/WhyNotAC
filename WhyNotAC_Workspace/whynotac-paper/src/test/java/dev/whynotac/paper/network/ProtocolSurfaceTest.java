@@ -74,11 +74,10 @@ class ProtocolSurfaceTest {
     private static final Set<String> CLIENTBOUND_PHYSICS_PENDING = Set.of(
             "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
             "rotate_head", "set_entity_data", "set_passengers", "set_entity_link", "move_vehicle",
-            "move_minecart_along_track", "projectile_power", "block_update", "section_blocks_update", "level_chunk_with_light",
-            "forget_level_chunk", "block_changed_ack", "block_event", "initialize_border", "set_border_center", "set_border_lerp_size",
+            "move_minecart_along_track", "projectile_power", "block_event", "initialize_border", "set_border_center", "set_border_lerp_size",
             "set_border_size", "ticking_state", "ticking_step", "cooldown", "set_held_slot", "container_set_content", "container_set_slot",
             "set_player_inventory", "set_cursor_item", "set_equipment", "set_camera", "set_health", "player_combat_kill", "player_look_at",
-            "damage_event", "hurt_animation", "entity_event", "start_configuration", "set_chunk_cache_center", "set_chunk_cache_radius");
+            "damage_event", "hurt_animation", "entity_event", "start_configuration");
 
     private static final Set<String> CLIENTBOUND_IGNORED = Set.of(
             "animate", "award_stats", "block_destruction", "block_entity_data", "boss_event", "change_difficulty", "chunk_batch_finished",

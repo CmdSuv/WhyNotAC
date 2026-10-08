@@ -104,6 +104,17 @@ public final class ByteSource {
         return value;
     }
 
+    /** The next {@code length} bytes, copied. */
+    public byte[] readBytes(int length) {
+        if (length < 0) {
+            throw new RecordingFormatException("byte array length " + length);
+        }
+        need(length);
+        byte[] bytes = java.util.Arrays.copyOfRange(data, position, position + length);
+        position += length;
+        return bytes;
+    }
+
     public void skip(int bytes) {
         need(bytes);
         position += bytes;

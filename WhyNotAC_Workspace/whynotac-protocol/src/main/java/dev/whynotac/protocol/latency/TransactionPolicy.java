@@ -34,6 +34,16 @@ public final class TransactionPolicy {
             case ClientboundPacket.Respawn ignored -> true;
             case ClientboundPacket.KeepAlive ignored -> false;
             case ClientboundPacket.Login ignored -> false;
+            // The client's world: bounded by the per-tick transactions (one tick of uncertainty), not bracketed
+            // one by one; a burst of chunks would otherwise double the packet rate. The physics layer
+            // treats a block as uncertain until a later transaction is acknowledged.
+            case ClientboundPacket.LevelChunk ignored -> false;
+            case ClientboundPacket.BlockUpdate ignored -> false;
+            case ClientboundPacket.SectionBlocksUpdate ignored -> false;
+            case ClientboundPacket.ForgetLevelChunk ignored -> false;
+            case ClientboundPacket.BlockChangedAck ignored -> false;
+            case ClientboundPacket.ChunkCacheCenter ignored -> false;
+            case ClientboundPacket.ChunkCacheRadius ignored -> false;
             case ClientboundPacket.Untranslatable ignored -> true; // unknown effect: bracket it like a physics change
         };
     }

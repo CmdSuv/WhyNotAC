@@ -7,11 +7,14 @@ import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.TickCost;
+import dev.whynotac.paper.network.PacketInterceptor;
+import dev.whynotac.paper.world.WorldVerifier;
 import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.session.PlayerSession;
-import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
+import dev.whynotac.world.BlockStates;
+import dev.whynotac.world.ClientWorldTracker;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
 import java.util.List;
@@ -42,6 +45,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private RecordingStore recordings;
     private final ShadowVerdict verdict = new ShadowVerdict();
     private CaseStore cases;
+    private ClientWorldTracker worldTracker;
     private Alerts alerts;
     private final AtomicLong listenerErrors = new AtomicLong();
     private final TickCost transactionLoop = new TickCost();
@@ -77,6 +81,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         alerts = new Alerts(this);
         verdict.addListener(cases);
         verdict.addListener(alerts);
+        // The client's world, before every check that reads it (listeners see an event in registration order).
+        worldTracker = new ClientWorldTracker(BlockStates.vanilla());
+        registry.addListener(worldTracker);
         registry.addListener(new TickFramingCheck(verdict));
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
@@ -110,7 +117,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }, 100L, 100L);
 
         getServer().getPluginManager().registerEvents(this, this);
-        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases, this);
+        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
+                new WorldVerifier(interceptor, worldTracker, this), this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");

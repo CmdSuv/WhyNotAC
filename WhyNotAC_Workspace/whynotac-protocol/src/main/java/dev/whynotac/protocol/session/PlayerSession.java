@@ -97,7 +97,7 @@ public final class PlayerSession {
         if (packet instanceof ClientboundPacket.Ping ping) {
             transactions.onSent(ping.id(), nanoTime); // ignored unless the id was allocated here
         }
-        emit(nanoTime, seq -> new TimelineEvent.Outbound(seq, nanoTime, packet));
+        emit(nanoTime, SerialMailbox.weight(packet), seq -> new TimelineEvent.Outbound(seq, nanoTime, packet));
     }
 
     /** Records where {@link #onInbound}/{@link #onOutbound} observations come from from now on. */
@@ -237,8 +237,13 @@ public final class PlayerSession {
 
     /** Assigns the next sequence number and enqueues, converting overflow into an explicit gap. */
     private void emit(long nanoTime, LongFunction<TimelineEvent> factory) {
+        emit(nanoTime, 1, factory);
+    }
+
+    /** As {@link #emit(long, LongFunction)}, for an event of {@code units} mailbox units. */
+    private void emit(long nanoTime, int units, LongFunction<TimelineEvent> factory) {
         boolean gapPending = droppedSinceGap > 0;
-        if (!mailbox.hasRoomFor(gapPending ? 2 : 1)) {
+        if (!mailbox.hasRoomFor(gapPending ? units + 1 : units)) {
             sequence++; // dropped events still consume a sequence number, so the gap is visible in the numbering too
             droppedSinceGap++;
             droppedTotal++;
@@ -287,7 +292,8 @@ public final class PlayerSession {
 
     /**
      * Traffic counters; {@code divergences} counts packets that differ between the client's stream and
-     * the game's, {@code dropped} counts events lost to back-pressure (each one became part of a gap).
+     * the game's, {@code dropped} counts events lost to back-pressure (each one became part of a gap),
+     * {@code queued} is in mailbox units (an event, plus its chunk data in 128-byte units).
      */
     public record Counters(long inbound, long outboundModeled, long outboundUnmodeled, long divergences, long dropped, int queued) {}
 

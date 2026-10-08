@@ -17,6 +17,7 @@ import java.util.logging.Logger;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;
 import net.minecraft.network.protocol.game.ClientboundBundlePacket;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 
 /**
  * Per-connection Netty handler, installed directly in front of the game's {@code packet_handler}.
@@ -189,6 +190,9 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             writeTransaction(ctx, now);
         }
         if (!observer.edgeView()) {
+            if (packet instanceof ClientboundLevelChunkWithLightPacket chunk) {
+                translated = PacketTranslator.withBody(chunk); // the game-only view must carry the bytes itself
+            }
             session.onOutbound(translated, now);
         } else {
             try {
@@ -219,7 +223,9 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             }
             return;
         }
-        ClientboundPacket translated = translator.outbound(packet);
+        ClientboundPacket translated = !observer.edgeView() && packet instanceof ClientboundLevelChunkWithLightPacket chunk
+                ? PacketTranslator.withBody(chunk) // the game-only view must carry the bytes itself
+                : translator.outbound(packet);
         if (translated instanceof ClientboundPacket.Login login) {
             selfEntityId = login.entityId();
         }

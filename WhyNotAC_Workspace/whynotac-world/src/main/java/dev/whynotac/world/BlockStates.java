@@ -1,0 +1,389 @@
+package dev.whynotac.world;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.zip.GZIPInputStream;
+
+/**
+ * Every block state of Minecraft 1.21.11, indexed by its global id (the id chunks and block updates
+ * carry): block, properties, collision shape and the properties movement and interaction read.
+ *
+ * <p>Generated from the server's own registry ({@code BlockStatesDataTest} in whynotac-paper rewrites the
+ * resource and fails the build when it no longer matches the game), so the data cannot drift from the
+ * game. The collision shape is the one for an empty collision context; {@link #CONTEXTUAL_COLLISION}
+ * and {@link #DYNAMIC_SHAPE} mark the states where the game computes it differently.
+ *
+ * <h2>Text format (inside the gzip resource)</h2>
+ * <pre>
+ * whynotac-block-states 1
+ * minecraft &lt;version&gt;
+ * shapes &lt;n&gt;
+ * &lt;kind&gt; TAB &lt;xs&gt; TAB &lt;ys&gt; TAB &lt;zs&gt; TAB &lt;filled cells, hex longs&gt; TAB &lt;boxes&gt;   (one line per shape)
+ * states &lt;n&gt;
+ * &lt;block&gt; TAB &lt;properties&gt; TAB &lt;shape&gt; TAB &lt;flags&gt; TAB &lt;friction&gt; TAB &lt;speed factor&gt; TAB &lt;jump factor&gt; TAB &lt;destroy speed&gt; TAB &lt;fluid&gt;
+ * </pre>
+ * One state per line, in id order. Numbers are written so they read back to the same bits; lists are
+ * comma-separated, empty as {@code -}. The fluid is {@code -} or {@code key/amount/falling}.
+ */
+public final class BlockStates {
+
+    public static final String RESOURCE = "/dev/whynotac/world/block-states.txt.gz";
+    static final String HEADER = "whynotac-block-states 1";
+
+    /** {@code isAir()}. */
+    public static final int AIR = 1;
+    /** {@code hasDynamicShape()}: the game does not cache the collision shape; it may depend on the world (moving pistons, shulker boxes, offsets). */
+    public static final int DYNAMIC_SHAPE = 1 << 1;
+    /** The collision shape depends on the entity: liquids, powder snow, scaffolding. */
+    public static final int CONTEXTUAL_COLLISION = 1 << 2;
+    /** {@code hasOffsetFunction()}: shapes are moved by a position-dependent offset (bamboo, dripstone, flowers). */
+    public static final int OFFSET = 1 << 3;
+    /** {@code canBeReplaced()} (without a placement context). */
+    public static final int REPLACEABLE = 1 << 4;
+    /** {@code blocksMotion()}. */
+    public static final int BLOCKS_MOTION = 1 << 5;
+    /** {@code requiresCorrectToolForDrops()}. */
+    public static final int TOOL_REQUIRED = 1 << 6;
+    private static final String FLAG_LETTERS = "adcormt";
+
+    private static volatile BlockStates vanilla;
+
+    private final String minecraft;
+    private final Shape[] shapes;
+    private final String[] block;
+    private final String[] properties;
+    private final int[] shape;
+    private final int[] flags;
+    private final float[] friction;
+    private final float[] speedFactor;
+    private final float[] jumpFactor;
+    private final float[] destroySpeed;
+    private final String[] fluid;
+    private final Map<String, Integer> firstState;
+
+    private BlockStates(String minecraft, List<Shape> shapes, List<State> states) {
+        this.minecraft = minecraft;
+        this.shapes = shapes.toArray(Shape[]::new);
+        int n = states.size();
+        block = new String[n];
+        properties = new String[n];
+        shape = new int[n];
+        flags = new int[n];
+        friction = new float[n];
+        speedFactor = new float[n];
+        jumpFactor = new float[n];
+        destroySpeed = new float[n];
+        fluid = new String[n];
+        firstState = new HashMap<>();
+        for (int id = 0; id < n; id++) {
+            State s = states.get(id);
+            if (s.shape < 0 || s.shape >= this.shapes.length) {
+                throw new IllegalArgumentException("state " + id + ": shape " + s.shape + " of " + this.shapes.length);
+            }
+            block[id] = s.block;
+            properties[id] = s.properties;
+            shape[id] = s.shape;
+            flags[id] = s.flags;
+            friction[id] = s.friction;
+            speedFactor[id] = s.speedFactor;
+            jumpFactor[id] = s.jumpFactor;
+            destroySpeed[id] = s.destroySpeed;
+            fluid[id] = s.fluid;
+            firstState.putIfAbsent(s.block, id); // the lowest id; not always the block's default state
+        }
+    }
+
+    /** The data for the Minecraft version WhyNotAC supports, loaded once from the resource. */
+    public static BlockStates vanilla() {
+        BlockStates loaded = vanilla;
+        if (loaded == null) {
+            synchronized (BlockStates.class) {
+                loaded = vanilla;
+                if (loaded == null) {
+                    try (InputStream in = BlockStates.class.getResourceAsStream(RESOURCE)) {
+                        if (in == null) {
+                            throw new IllegalStateException("missing resource " + RESOURCE);
+                        }
+                        loaded = vanilla = read(new GZIPInputStream(in));
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                }
+            }
+        }
+        return loaded;
+    }
+
+    /** Reads the text format (uncompressed). */
+    public static BlockStates read(InputStream in) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        expect(reader.readLine(), HEADER);
+        String minecraft = field(reader.readLine(), "minecraft");
+        int shapeCount = Integer.parseInt(field(reader.readLine(), "shapes"));
+        List<Shape> shapes = new ArrayList<>(shapeCount);
+        for (int i = 0; i < shapeCount; i++) {
+            String[] f = reader.readLine().split("\t", -1);
+            if (f.length != 6) {
+                throw new IOException("shape line " + i + ": " + f.length + " fields");
+            }
+            shapes.add(new Shape(Shape.Kind.valueOf(f[0]), doubles(f[1]), doubles(f[2]), doubles(f[3]), hexLongs(f[4]), doubles(f[5])));
+        }
+        int stateCount = Integer.parseInt(field(reader.readLine(), "states"));
+        List<State> states = new ArrayList<>(stateCount);
+        for (int i = 0; i < stateCount; i++) {
+            String[] f = reader.readLine().split("\t", -1);
+            if (f.length != 9) {
+                throw new IOException("state line " + i + ": " + f.length + " fields");
+            }
+            states.add(new State(f[0].intern(), f[1].equals("-") ? "" : f[1], Integer.parseInt(f[2]), parseFlags(f[3]), Float.parseFloat(f[4]),
+                    Float.parseFloat(f[5]), Float.parseFloat(f[6]), Float.parseFloat(f[7]), f[8].equals("-") ? "" : f[8].intern()));
+        }
+        if (reader.readLine() != null) {
+            throw new IOException("trailing data after " + stateCount + " states");
+        }
+        return new BlockStates(minecraft, shapes, states);
+    }
+
+    /** Writes the text format (uncompressed); {@link #read} reads it back to equal data. */
+    public void write(Writer out) throws IOException {
+        out.write(HEADER + "\n");
+        out.write("minecraft " + minecraft + "\n");
+        out.write("shapes " + shapes.length + "\n");
+        for (Shape s : shapes) {
+            out.write(s.kind() + "\t" + doubles(s.xs()) + "\t" + doubles(s.ys()) + "\t" + doubles(s.zs()) + "\t" + hexLongs(s.full()) + "\t"
+                    + doubles(s.boxes()) + "\n");
+        }
+        out.write("states " + block.length + "\n");
+        for (int id = 0; id < block.length; id++) {
+            out.write(block[id] + "\t" + (properties[id].isEmpty() ? "-" : properties[id]) + "\t" + shape[id] + "\t" + flagLetters(flags[id]) + "\t"
+                    + friction[id] + "\t" + speedFactor[id] + "\t" + jumpFactor[id] + "\t" + destroySpeed[id] + "\t"
+                    + (fluid[id].isEmpty() ? "-" : fluid[id]) + "\n");
+        }
+    }
+
+    // --- queries -------------------------------------------------------------------------------------
+
+    public String minecraftVersion() {
+        return minecraft;
+    }
+
+    /** Number of block states (the global palette's size). */
+    public int size() {
+        return block.length;
+    }
+
+    /** Bits per entry of the global palette ({@code Mth.ceillog2(size())}): what a chunk section uses beyond 8 bits. */
+    public int globalPaletteBits() {
+        return size() <= 1 ? 0 : 32 - Integer.numberOfLeadingZeros(size() - 1);
+    }
+
+    public boolean isValid(int state) {
+        return state >= 0 && state < block.length;
+    }
+
+    /** Block id, e.g. {@code minecraft:oak_stairs}. */
+    public String block(int state) {
+        return block[state];
+    }
+
+    /** Properties as {@code name=value,...} in the game's order, or empty. */
+    public String properties(int state) {
+        return properties[state];
+    }
+
+    public Shape collisionShape(int state) {
+        return shapes[shape[state]];
+    }
+
+    public int flags(int state) {
+        return flags[state];
+    }
+
+    public boolean has(int state, int flag) {
+        return (flags[state] & flag) != 0;
+    }
+
+    public boolean isAir(int state) {
+        return has(state, AIR);
+    }
+
+    public float friction(int state) {
+        return friction[state];
+    }
+
+    public float speedFactor(int state) {
+        return speedFactor[state];
+    }
+
+    public float jumpFactor(int state) {
+        return jumpFactor[state];
+    }
+
+    public float destroySpeed(int state) {
+        return destroySpeed[state];
+    }
+
+    /** {@code fluidKey/amount/falling}, or empty for no fluid. */
+    public String fluid(int state) {
+        return fluid[state];
+    }
+
+    /** The lowest state id of {@code block} (for blocks with one state, its only state), or -1. */
+    public int firstStateOf(String block) {
+        return firstState.getOrDefault(block, -1);
+    }
+
+    public int shapeCount() {
+        return shapes.length;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (!(other instanceof BlockStates o)) {
+            return false;
+        }
+        return minecraft.equals(o.minecraft) && java.util.Arrays.equals(shapes, o.shapes) && java.util.Arrays.equals(block, o.block)
+                && java.util.Arrays.equals(properties, o.properties) && java.util.Arrays.equals(shape, o.shape)
+                && java.util.Arrays.equals(flags, o.flags) && java.util.Arrays.equals(friction, o.friction)
+                && java.util.Arrays.equals(speedFactor, o.speedFactor) && java.util.Arrays.equals(jumpFactor, o.jumpFactor)
+                && java.util.Arrays.equals(destroySpeed, o.destroySpeed) && java.util.Arrays.equals(fluid, o.fluid);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Arrays.hashCode(block) * 31 + shapes.length;
+    }
+
+    // --- building (the generator) ----------------------------------------------------------------------
+
+    /** Collects states in id order; shapes are deduplicated. */
+    public static final class Builder {
+        private final String minecraft;
+        private final List<Shape> shapes = new ArrayList<>();
+        private final Map<Shape, Integer> shapeIndex = new HashMap<>();
+        private final List<State> states = new ArrayList<>();
+
+        public Builder(String minecraft) {
+            this.minecraft = minecraft;
+        }
+
+        /** Adds the state with the next id. */
+        public Builder add(String block, String properties, Shape collision, int flags, float friction, float speedFactor, float jumpFactor,
+                float destroySpeed, String fluid) {
+            int index = shapeIndex.computeIfAbsent(collision, s -> {
+                shapes.add(s);
+                return shapes.size() - 1;
+            });
+            states.add(new State(block, properties, index, flags, friction, speedFactor, jumpFactor, destroySpeed, fluid));
+            return this;
+        }
+
+        public BlockStates build() {
+            return new BlockStates(minecraft, shapes, states);
+        }
+    }
+
+    private record State(String block, String properties, int shape, int flags, float friction, float speedFactor, float jumpFactor,
+            float destroySpeed, String fluid) {}
+
+    // --- text helpers ------------------------------------------------------------------------------------
+
+    private static void expect(String line, String expected) throws IOException {
+        if (!expected.equals(line)) {
+            throw new IOException("expected '" + expected + "', found '" + line + "'");
+        }
+    }
+
+    private static String field(String line, String name) throws IOException {
+        if (line == null || !line.startsWith(name + " ")) {
+            throw new IOException("expected '" + name + " ...', found '" + line + "'");
+        }
+        return line.substring(name.length() + 1);
+    }
+
+    private static String doubles(double[] values) {
+        if (values.length == 0) {
+            return "-";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (double v : values) {
+            if (!sb.isEmpty()) {
+                sb.append(',');
+            }
+            sb.append(v); // Double.toString reads back to the same double
+        }
+        return sb.toString();
+    }
+
+    private static double[] doubles(String field) {
+        if (field.equals("-")) {
+            return new double[0];
+        }
+        String[] parts = field.split(",");
+        double[] values = new double[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            values[i] = Double.parseDouble(parts[i]);
+        }
+        return values;
+    }
+
+    private static String hexLongs(long[] values) {
+        if (values.length == 0) {
+            return "-";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (long v : values) {
+            if (!sb.isEmpty()) {
+                sb.append(',');
+            }
+            sb.append(Long.toHexString(v));
+        }
+        return sb.toString();
+    }
+
+    private static long[] hexLongs(String field) {
+        if (field.equals("-")) {
+            return new long[0];
+        }
+        String[] parts = field.split(",");
+        long[] values = new long[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            values[i] = Long.parseUnsignedLong(parts[i], 16);
+        }
+        return values;
+    }
+
+    private static String flagLetters(int flags) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < FLAG_LETTERS.length(); i++) {
+            if ((flags & 1 << i) != 0) {
+                sb.append(FLAG_LETTERS.charAt(i));
+            }
+        }
+        return sb.isEmpty() ? "-" : sb.toString();
+    }
+
+    private static int parseFlags(String letters) throws IOException {
+        if (letters.equals("-")) {
+            return 0;
+        }
+        int flags = 0;
+        for (char c : letters.toCharArray()) {
+            int i = FLAG_LETTERS.indexOf(c);
+            if (i < 0) {
+                throw new IOException("unknown flag '" + c + "'");
+            }
+            flags |= 1 << i;
+        }
+        return flags;
+    }
+}

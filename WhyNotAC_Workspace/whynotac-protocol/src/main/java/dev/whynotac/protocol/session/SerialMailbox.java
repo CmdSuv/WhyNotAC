@@ -1,5 +1,6 @@
 package dev.whynotac.protocol.session;
 
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -26,11 +27,17 @@ import java.util.function.Consumer;
  * memory held by queued events stays bounded whatever the number of connections.
  * Overflow is handled by the caller ({@link PlayerSession}), which turns dropped events into an
  * explicit {@link TimelineEvent.Gap}.
+ *
+ * <p>Both bounds count units, not events: an event weighs one unit (about the measured 112 bytes of an
+ * ordinary event) plus one per {@link #BYTES_PER_UNIT} bytes it carries (chunk data), so a burst of
+ * chunks is bounded by its memory, not by its count.
  */
 final class SerialMailbox {
 
     /** Events processed per drain before yielding the thread to other sessions. */
     private static final int BATCH = 256;
+    /** Payload bytes per additional unit of weight. */
+    static final int BYTES_PER_UNIT = 128;
 
     private final Queue<TimelineEvent> queue = new ConcurrentLinkedQueue<>();
     private final AtomicInteger size = new AtomicInteger();
@@ -52,15 +59,26 @@ final class SerialMailbox {
         this.consumer = consumer;
     }
 
-    /** True if {@code events} more events fit under both this session's and the server-wide bound. */
-    boolean hasRoomFor(int events) {
-        return (long) size.get() + events <= capacity && globalSize.get() + events <= globalCapacity;
+    /** The units an event occupies (see the class comment). */
+    static int weight(TimelineEvent event) {
+        return event instanceof TimelineEvent.Outbound out ? weight(out.packet()) : 1;
+    }
+
+    /** The units an outbound event carrying {@code packet} occupies. */
+    static int weight(ClientboundPacket packet) {
+        return packet instanceof ClientboundPacket.LevelChunk chunk && chunk.body() != null ? 1 + chunk.body().length / BYTES_PER_UNIT : 1;
+    }
+
+    /** True if {@code units} more units fit under both this session's and the server-wide bound. */
+    boolean hasRoomFor(int units) {
+        return (long) size.get() + units <= capacity && globalSize.get() + units <= globalCapacity;
     }
 
     void enqueue(TimelineEvent event) {
+        int units = weight(event);
         queue.add(event);
-        size.incrementAndGet();
-        globalSize.incrementAndGet();
+        size.addAndGet(units);
+        globalSize.addAndGet(units);
         if (scheduled.compareAndSet(false, true)) {
             try {
                 executor.execute(this::drain);
@@ -89,8 +107,9 @@ final class SerialMailbox {
                     if (event == null) {
                         break;
                     }
-                    size.decrementAndGet();
-                    globalSize.decrementAndGet();
+                    int units = weight(event);
+                    size.addAndGet(-units);
+                    globalSize.addAndGet(-units);
                     consumer.accept(event);
                 }
             } finally {

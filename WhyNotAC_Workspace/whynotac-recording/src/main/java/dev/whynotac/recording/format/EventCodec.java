@@ -328,6 +328,15 @@ public final class EventCodec {
             }
         }
 
+        private void dimension(ClientboundPacket.Dimension dimension) {
+            body.writeByte(dimension == null ? 0 : 1);
+            if (dimension != null) {
+                string(dimension.key());
+                body.writeZigZag(dimension.minY());
+                body.writeZigZag(dimension.height());
+            }
+        }
+
         private void writeClientbound(ClientboundPacket packet) {
             switch (packet) {
                 case ClientboundPacket.Ping p -> {
@@ -339,10 +348,60 @@ public final class EventCodec {
                     body.writeLong(k.id());
                 }
                 case ClientboundPacket.Login l -> {
-                    body.writeVarInt(CB_LOGIN);
+                    body.writeVarInt(CB_LOGIN_WORLD);
                     body.writeZigZag(l.entityId());
+                    body.writeZigZag(l.chunkRadius());
+                    dimension(l.dimension());
                 }
-                case ClientboundPacket.Respawn ignored -> body.writeVarInt(CB_RESPAWN);
+                case ClientboundPacket.Respawn r -> {
+                    body.writeVarInt(CB_RESPAWN_WORLD);
+                    dimension(r.dimension());
+                }
+                case ClientboundPacket.LevelChunk c -> {
+                    body.writeVarInt(CB_LEVEL_CHUNK);
+                    body.writeZigZag(c.x());
+                    body.writeZigZag(c.z());
+                    body.writeByte(c.body() == null ? 0 : 1);
+                    if (c.body() != null) {
+                        body.writeVarInt(c.body().length);
+                        body.writeBytes(c.body());
+                    }
+                }
+                case ClientboundPacket.ForgetLevelChunk f -> {
+                    body.writeVarInt(CB_FORGET_LEVEL_CHUNK);
+                    body.writeZigZag(f.x());
+                    body.writeZigZag(f.z());
+                }
+                case ClientboundPacket.BlockUpdate b -> {
+                    body.writeVarInt(CB_BLOCK_UPDATE);
+                    body.writeZigZag(b.position().x());
+                    body.writeZigZag(b.position().y());
+                    body.writeZigZag(b.position().z());
+                    body.writeZigZag(b.state());
+                }
+                case ClientboundPacket.SectionBlocksUpdate u -> {
+                    body.writeVarInt(CB_SECTION_BLOCKS_UPDATE);
+                    body.writeZigZag(u.sectionX());
+                    body.writeZigZag(u.sectionY());
+                    body.writeZigZag(u.sectionZ());
+                    body.writeVarInt(u.size());
+                    for (int i = 0; i < u.size(); i++) {
+                        body.writeVarLong(u.entry(i));
+                    }
+                }
+                case ClientboundPacket.BlockChangedAck a -> {
+                    body.writeVarInt(CB_BLOCK_CHANGED_ACK);
+                    body.writeZigZag(a.sequence());
+                }
+                case ClientboundPacket.ChunkCacheCenter c -> {
+                    body.writeVarInt(CB_CHUNK_CACHE_CENTER);
+                    body.writeZigZag(c.x());
+                    body.writeZigZag(c.z());
+                }
+                case ClientboundPacket.ChunkCacheRadius r -> {
+                    body.writeVarInt(CB_CHUNK_CACHE_RADIUS);
+                    body.writeZigZag(r.radius());
+                }
                 case ClientboundPacket.SetEntityMotion m -> {
                     body.writeVarInt(CB_SET_ENTITY_MOTION_EXACT);
                     body.writeZigZag(m.entityId());
@@ -676,13 +735,43 @@ public final class EventCodec {
             };
         }
 
+        private ClientboundPacket.Dimension dimension(ByteSource in) {
+            return in.readUnsignedByte() != 0 ? new ClientboundPacket.Dimension(string(in), zint(in), zint(in)) : null;
+        }
+
         private ClientboundPacket readClientbound(ByteSource in) {
             int tag = in.readVarInt();
             return switch (tag) {
                 case CB_PING -> new ClientboundPacket.Ping(in.readInt());
                 case CB_KEEP_ALIVE -> new ClientboundPacket.KeepAlive(in.readLong());
-                case CB_LOGIN -> new ClientboundPacket.Login(zint(in));
-                case CB_RESPAWN -> new ClientboundPacket.Respawn();
+                case CB_LOGIN -> new ClientboundPacket.Login(zint(in), -1, null);
+                case CB_RESPAWN -> new ClientboundPacket.Respawn(null);
+                case CB_LOGIN_WORLD -> new ClientboundPacket.Login(zint(in), zint(in), dimension(in));
+                case CB_RESPAWN_WORLD -> new ClientboundPacket.Respawn(dimension(in));
+                case CB_LEVEL_CHUNK -> {
+                    int x = zint(in);
+                    int z = zint(in);
+                    yield new ClientboundPacket.LevelChunk(x, z, in.readUnsignedByte() != 0 ? in.readBytes(in.readVarInt()) : null);
+                }
+                case CB_FORGET_LEVEL_CHUNK -> new ClientboundPacket.ForgetLevelChunk(zint(in), zint(in));
+                case CB_BLOCK_UPDATE -> new ClientboundPacket.BlockUpdate(new BlockPosition(zint(in), zint(in), zint(in)), zint(in));
+                case CB_SECTION_BLOCKS_UPDATE -> {
+                    int sx = zint(in);
+                    int sy = zint(in);
+                    int sz = zint(in);
+                    int count = in.readVarInt();
+                    if (count < 0 || count > in.remaining()) {
+                        throw new RecordingFormatException("section update count " + count);
+                    }
+                    long[] entries = new long[count];
+                    for (int i = 0; i < count; i++) {
+                        entries[i] = in.readVarLong();
+                    }
+                    yield new ClientboundPacket.SectionBlocksUpdate(sx, sy, sz, entries);
+                }
+                case CB_BLOCK_CHANGED_ACK -> new ClientboundPacket.BlockChangedAck(zint(in));
+                case CB_CHUNK_CACHE_CENTER -> new ClientboundPacket.ChunkCacheCenter(zint(in), zint(in));
+                case CB_CHUNK_CACHE_RADIUS -> new ClientboundPacket.ChunkCacheRadius(zint(in));
                 // Format 1 recorded the game's view only: the server value, which the client quantizes once.
                 case CB_SET_ENTITY_MOTION -> ClientboundPacket.SetEntityMotion.sent(zint(in), vec(in));
                 case CB_SET_ENTITY_MOTION_EXACT -> {

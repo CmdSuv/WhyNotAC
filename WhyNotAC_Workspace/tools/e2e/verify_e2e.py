@@ -68,6 +68,7 @@ def main():
             verify_edge(probe, log, sys.argv[5], check)
             verify_facts(probe, sys.argv[5], check)
             verify_cases(probe, log, sys.argv[6], check)
+            verify_world(log, sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -220,6 +221,34 @@ def verify_cases(probe, log, work_dir, check):
           f"`verify` re-ran the check over the recording, independently, and found the same evidence: {verified}")
     check(re.search(r"WhyNotAC cases \(newest first\): 1", log) is not None
           and re.search(re.escape(d["id"][:8]) + r" WhyNotProbe tick-framing P-M SHADOW", log) is not None, "/whynotac cases lists it")
+
+
+def verify_world(log, dump_path, check):
+    """The world WhyNotAC rebuilt from what the client received equals the server's world."""
+    m = re.search(r"WhyNotAC world WhyNotProbe: (.*)", log)
+    check(m is not None, "/whynotac world answered")
+    if not m:
+        return
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
+    n = lambda k: int(fields.get(k, "-1"))
+    check(fields.get("dimension") == "minecraft:overworld" and "(server:" not in m.group(1),
+          f"the client's dimension is the player's world: {fields.get('dimension')}")
+    check(n("chunks") >= 9 and n("missingOnServer") == 0, f"the client holds the chunks around it ({n('chunks')}, all loaded on the server)")
+    check(n("sections") > 0 and n("different") == 0 and n("stale") == 0 and n("equal") == n("sections"),
+          f"every section the client holds equals the server's, block for block ({n('equal')}/{n('sections')} equal)")
+    check(n("unreadable") == 0, "every chunk packet decoded")
+    check(n("blockUpdates") >= 1 + 9 * 9 * 2, f"the setblock and the fill reached the client's world ({n('blockUpdates')} block changes)")
+    events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []
+    kinds = {}
+    for e in events:
+        if e["type"] == "Outbound":
+            t = e["packet"]["type"]
+            kinds[t] = kinds.get(t, 0) + 1
+    check(kinds.get("LevelChunk", 0) >= 9 and kinds.get("BlockUpdate", 0) >= 1 and kinds.get("SectionBlocksUpdate", 0) >= 1,
+          f"the recording holds the world packets: {[(k, kinds.get(k, 0)) for k in ('LevelChunk', 'BlockUpdate', 'SectionBlocksUpdate', 'ChunkCacheCenter')]}")
+    logins = [e["packet"] for e in events if e["type"] == "Outbound" and e["packet"]["type"] == "Login"]
+    check(len(logins) == 1 and logins[0].get("dimension", {}).get("minY") == -64 and logins[0].get("chunkRadius") == 3,
+          f"the login carries the dimension and chunk radius: {logins}")
 
 
 def verify_facts(probe, dump_path, check):

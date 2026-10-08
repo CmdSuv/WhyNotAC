@@ -96,6 +96,13 @@ def main():
     check(not cases, f"no case was opened for the honest, unmodified client ({len(cases)} dossiers)")
     screenshots = os.listdir(os.path.join(work, "game", "screenshots")) if os.path.isdir(os.path.join(work, "game", "screenshots")) else []
     check(len(screenshots) == 1, f"the client rendered and saved a screenshot: {screenshots}")
+    # The world WhyNotAC rebuilt from what the real client received equals the server's world.
+    m = re.search(r"WhyNotAC world RealProbe: (.*)", log)
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
+    n = lambda k: int(fields.get(k, "-1"))
+    check(m is not None and fields.get("dimension") == "minecraft:overworld" and n("chunks") >= 9 and n("missingOnServer") == 0
+          and n("different") == 0 and n("stale") == 0 and n("unreadable") == 0 and n("equal") == n("sections") > 0,
+          f"the real client's world, rebuilt from its packets, equals the server's block for block ({m.group(1) if m else 'no answer'})")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 

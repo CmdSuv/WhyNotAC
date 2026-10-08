@@ -143,8 +143,16 @@ public final class Generators {
         return switch (name) {
             case "Ping" -> new ClientboundPacket.Ping(anyInt());
             case "KeepAlive" -> new ClientboundPacket.KeepAlive(anyLong());
-            case "Login" -> new ClientboundPacket.Login(anyInt());
-            case "Respawn" -> new ClientboundPacket.Respawn();
+            case "Login" -> new ClientboundPacket.Login(anyInt(), anyInt(), random.nextBoolean() ? dimension() : null);
+            case "Respawn" -> new ClientboundPacket.Respawn(random.nextBoolean() ? dimension() : null);
+            case "LevelChunk" -> new ClientboundPacket.LevelChunk(anyInt(), anyInt(), random.nextBoolean() ? bytes(random.nextInt(5000)) : null);
+            case "ForgetLevelChunk" -> new ClientboundPacket.ForgetLevelChunk(anyInt(), anyInt());
+            case "BlockUpdate" -> new ClientboundPacket.BlockUpdate(new BlockPosition(anyInt(), anyInt(), anyInt()), anyInt());
+            case "SectionBlocksUpdate" -> new ClientboundPacket.SectionBlocksUpdate(anyInt(), anyInt(), anyInt(),
+                    java.util.stream.LongStream.generate(random::nextLong).limit(random.nextInt(20)).toArray());
+            case "BlockChangedAck" -> new ClientboundPacket.BlockChangedAck(anyInt());
+            case "ChunkCacheCenter" -> new ClientboundPacket.ChunkCacheCenter(anyInt(), anyInt());
+            case "ChunkCacheRadius" -> new ClientboundPacket.ChunkCacheRadius(anyInt());
             case "SetEntityMotion" -> new ClientboundPacket.SetEntityMotion(anyInt(), vec(), random.nextBoolean() ? vec() : null);
             case "Explosion" -> new ClientboundPacket.Explosion(vec(), anyFloat(), random.nextBoolean() ? vec() : null);
             case "PlayerPosition" -> {
@@ -223,4 +231,15 @@ public final class Generators {
         }
         return out;
     }
+
+    private ClientboundPacket.Dimension dimension() {
+        return new ClientboundPacket.Dimension(anyString(), anyInt(), anyInt());
+    }
+
+    private byte[] bytes(int length) {
+        byte[] bytes = new byte[length];
+        random.nextBytes(bytes);
+        return bytes;
+    }
+
 }

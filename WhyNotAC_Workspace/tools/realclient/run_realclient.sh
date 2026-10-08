@@ -58,10 +58,14 @@ OPTS
 
 Xvfb "$DISPLAY_NUM" -screen 0 1024x768x24 -nolisten tcp > "$WORK_DIR/xvfb.log" 2>&1 &
 XVFB=$!
-(cd "$WORK_DIR" && exec java -Xms512M -Xmx1G -jar "$PAPER_JAR" --nogui < /dev/null > "$WORK_DIR/server.log" 2>&1) &
+FIFO="$WORK_DIR/console.fifo"
+rm -f "$FIFO" && mkfifo "$FIFO"
+sleep infinity > "$FIFO" &   # keeps the console pipe open
+HOLDER=$!
+(cd "$WORK_DIR" && exec java -Xms512M -Xmx1G -jar "$PAPER_JAR" --nogui < "$FIFO" > "$WORK_DIR/server.log" 2>&1) &
 SERVER=$!
 CLIENT=
-cleanup() { [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null || true; kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; kill "$XVFB" 2>/dev/null || true; }
+cleanup() { [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null || true; kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; kill "$XVFB" "$HOLDER" 2>/dev/null || true; rm -f "$FIFO"; }
 trap cleanup EXIT
 until grep -q 'Done (' "$WORK_DIR/server.log" 2>/dev/null; do
   kill -0 "$SERVER" 2>/dev/null || { echo "server died"; tail -40 "$WORK_DIR/server.log"; exit 1; }
@@ -72,7 +76,10 @@ echo "server up"
 # The ground-truth agent: records the client's exact physics state every tick (see agent/).
 AGENT_OUT="$WORK_DIR/agent-build"
 rm -rf "$AGENT_OUT" && mkdir -p "$AGENT_OUT/classes"
-javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -d "$AGENT_OUT/classes" $(find "$HERE/agent/src" -name '*.java')
+(cd "$ROOT" && ./gradlew -q :whynotac-world:jar)
+WORLD_JAR=$(find "$ROOT/whynotac-world/build/libs" -name 'whynotac-world-*.jar' ! -name '*-sources.jar' | head -1)
+PROTOCOL_JAR=$(find "$ROOT/whynotac-protocol/build/libs" -name 'whynotac-protocol-*.jar' ! -name '*-sources.jar' | head -1)
+javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -cp "$WORLD_JAR:$PROTOCOL_JAR" -d "$AGENT_OUT/classes" $(find "$HERE/agent/src" -name '*.java')
 printf 'Premain-Class: dev.whynotac.truth.TruthAgent\n' > "$AGENT_OUT/manifest.txt"
 jar --create --file "$AGENT_OUT/truth-agent.jar" --manifest "$AGENT_OUT/manifest.txt" -C "$AGENT_OUT/classes" .
 rm -f "$WORK_DIR/truth.jsonl"
@@ -98,12 +105,16 @@ done
 grep -q "$NAME joined the game" "$WORK_DIR/server.log" || { echo "client never joined"; tail -40 "$WORK_DIR/client.log"; exit 1; }
 sleep 5 # let the world render and the player land
 (cd "$HERE" && python3 -I drive.py "$DISPLAY_NUM") > "$WORK_DIR/drive.json"
+# The world WhyNotAC rebuilt from the client's packets, compared with the server's (verify_realclient.py reads the line).
+echo "whynotac world $NAME" > "$FIFO"
+sleep 3
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2
 kill "$SERVER"; wait "$SERVER" 2>/dev/null || true
 trap - EXIT
-kill "$XVFB" 2>/dev/null || true
+kill "$XVFB" "$HOLDER" 2>/dev/null || true
+rm -f "$FIFO"
 
 RECORDING=$(find "$WORK_DIR/plugins/WhyNotAC/recordings" -name '*.wnrec' | head -1)
 echo "--- recording: ${RECORDING:-<none>}"
@@ -116,4 +127,14 @@ STATUS=0
 python3 -I "$HERE/verify_realclient.py" "$WORK_DIR" || STATUS=1
 echo "--- client truth"
 python3 -I "$HERE/verify_truth.py" "$WORK_DIR" || STATUS=1
+echo "--- block-state data"
+# whynotac-world ships block-state data generated from this very client; regenerate it and require equality.
+(cd "$WORK_DIR" && java -cp "$CP:$AGENT_OUT/classes:$WORLD_JAR:$PROTOCOL_JAR" dev.whynotac.truth.BlockDataDump "$MAPPINGS" "$WORK_DIR/block-states.txt.gz") \
+  | grep -v '^Picked up' | tail -1
+if cmp -s <(zcat "$WORK_DIR/block-states.txt.gz") <(zcat "$ROOT/whynotac-world/src/main/resources/dev/whynotac/world/block-states.txt.gz"); then
+  echo "PASS whynotac-world's block-state data is exactly what the official client's registry yields"
+else
+  echo "FAIL whynotac-world's block-state data differs from the official client (copy $WORK_DIR/block-states.txt.gz over the resource)"
+  STATUS=1
+fi
 exit $STATUS

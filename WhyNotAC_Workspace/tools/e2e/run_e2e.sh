@@ -78,7 +78,12 @@ PROBE=$!
 sleep 4; echo "wnprobe game WhyNotProbe 0 0.3 0" > "$FIFO"
 sleep 1; echo "wnprobe inject WhyNotProbe 0 0.5 0" > "$FIFO"
 sleep 1; echo "wnprobe cancel WhyNotProbe 0 0.7 0" > "$FIFO"
-sleep $(( PROBE_SECONDS - 8 ))
+# The client's world: one block (block_update) and a slab of 9x9x2 (section_blocks_update), above the probe's head.
+# Separate ticks: changes in one section in the same tick are sent together as one section update.
+sleep 1; echo "execute at WhyNotProbe run setblock ~3 ~6 ~3 minecraft:stone" > "$FIFO"
+sleep 1; echo "execute at WhyNotProbe run fill ~-4 ~7 ~-4 ~4 ~8 ~4 minecraft:glass" > "$FIFO"
+sleep $(( PROBE_SECONDS - 10 ))
+echo "whynotac world WhyNotProbe" > "$FIFO"
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
