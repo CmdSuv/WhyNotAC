@@ -37,6 +37,7 @@ public final class WireProtocols {
         private final PacketType<?>[] types;
         private final boolean[] decode;
         private final Object[] unmodeled;
+        private final String[] names;
 
         @SuppressWarnings("unchecked")
         Table(ProtocolInfo<?> info, ProtocolInfo.DetailsProvider template, Set<String> modelledPaths) {
@@ -49,10 +50,12 @@ public final class WireProtocols {
             this.types = new PacketType<?>[size[0]];
             this.decode = new boolean[size[0]];
             this.unmodeled = new Object[size[0]];
+            this.names = new String[size[0]];
             template.details().listPackets((type, id) -> {
                 types[id] = type;
                 decode[id] = modelledPaths.contains(type.id().getPath());
                 String name = type.id().toString();
+                names[id] = name;
                 unmodeled[id] = flow == PacketFlow.SERVERBOUND ? new ServerboundPacket.Unmodeled(name) : new ClientboundPacket.Unmodeled(name);
             });
         }
@@ -60,6 +63,11 @@ public final class WireProtocols {
         /** The packet type with this id, or null if the id does not exist in this state. */
         PacketType<?> type(int id) {
             return id >= 0 && id < types.length ? types[id] : null;
+        }
+
+        /** The type id of packet id {@code id} (built once), or null if the id does not exist in this state. */
+        String name(int id) {
+            return id >= 0 && id < names.length ? names[id] : null;
         }
 
         /** True if WhyNotAC models this packet and therefore decodes its body; others are recorded by type only. */

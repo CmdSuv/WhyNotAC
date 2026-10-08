@@ -141,12 +141,21 @@ public final class PacketTranslator {
             "remove_mob_effect", "respawn", "set_entity_motion", "update_attributes", "update_mob_effect");
 
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
+    /** Packet class -> type id. A packet class always has the same type; built once per class, never per packet. */
+    private static final Map<Class<?>, String> TYPE_NAMES = new ConcurrentHashMap<>();
+
     public static String typeName(Packet<?> packet) {
+        String name = TYPE_NAMES.get(packet.getClass());
+        if (name != null) {
+            return name;
+        }
         try {
-            return packet.type().id().toString();
+            name = packet.type().id().toString();
         } catch (RuntimeException | LinkageError e) {
             return packet.getClass().getName();
         }
+        TYPE_NAMES.put(packet.getClass(), name);
+        return name;
     }
 
     private final Map<Class<?>, ServerboundPacket.Unmodeled> unmodeledInbound = new ConcurrentHashMap<>();

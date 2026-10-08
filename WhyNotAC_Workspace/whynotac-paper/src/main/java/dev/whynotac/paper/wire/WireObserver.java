@@ -308,8 +308,19 @@ public final class WireObserver {
             return new Outgoing(typeName, translated, false, physics); // nothing to reconcile; the edge brackets it
         }
         boolean expected = outbound.match(typeName, translated, nanoTime);
+        if (expected && !physics && translated instanceof ClientboundPacket.Unmodeled unmodeled) {
+            Outgoing shared = unmodeledOutgoing.get(unmodeled); // most frames: no allocation
+            if (shared == null) {
+                shared = new Outgoing(typeName, unmodeled, false, false);
+                unmodeledOutgoing.put(unmodeled, shared);
+            }
+            return shared;
+        }
         return new Outgoing(typeName, translated, !expected, !expected && physics);
     }
+
+    /** One immutable Outgoing per unmodelled packet type (those packets are themselves shared per type). */
+    private final java.util.IdentityHashMap<ClientboundPacket.Unmodeled, Outgoing> unmodeledOutgoing = new java.util.IdentityHashMap<>();
 
     /** Records an outbound frame after it was forwarded towards the client. */
     void commitOutbound(Outgoing outgoing, long nanoTime) {
@@ -477,6 +488,11 @@ public final class WireObserver {
         }
     }
 
+    /** {@link #beginGameWrite(List, List, long)} for one packet (the common case: no bundle). */
+    public void beginGameWrite(String type, ClientboundPacket packet, long nanoTime) {
+        outbound.expect(type, packet, nanoTime);
+    }
+
     public void selfEntityId(int entityId) {
         this.selfEntityId = entityId;
     }
@@ -516,7 +532,7 @@ public final class WireObserver {
 
     private static String typeName(WireProtocols.Table table, PacketType<?> type, int id) {
         if (type != null) {
-            return type.id().toString();
+            return table.name(id);
         }
         return id < 0 ? "whynotac:malformed-frame/" + table : "whynotac:unknown-id/" + table + "/" + id;
     }
@@ -527,7 +543,7 @@ public final class WireObserver {
         }
         int id = packetId(frame);
         PacketType<?> type = table.type(id);
-        return type != null ? type.id().toString() : EDGE_FAILURE;
+        return type != null ? table.name(id) : EDGE_FAILURE;
     }
 
     private ServerboundPacket decodeServerbound(WireProtocols.Table table, ByteBuf frame, String typeName) {

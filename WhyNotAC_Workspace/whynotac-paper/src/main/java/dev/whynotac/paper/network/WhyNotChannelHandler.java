@@ -127,6 +127,10 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             return;
         }
         long now = System.nanoTime();
+        if (!(packet instanceof ClientboundBundlePacket)) {
+            writeOne(ctx, packet, promise, now); // the common case, without any per-write collections
+            return;
+        }
         List<ClientboundPacket> observed = new ArrayList<>(1);
         List<String> types = new ArrayList<>(1);
         boolean sandwich = false;
@@ -160,6 +164,40 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
             beginGameWrite(types, observed, now);
             super.write(ctx, msg, promise);
         }
+        if (sandwich) {
+            writeTransaction(ctx, System.nanoTime());
+        }
+    }
+
+    /** {@link #write} for one packet that is not a bundle: the same steps, nothing allocated but the record. */
+    private void writeOne(ChannelHandlerContext ctx, Packet<?> packet, ChannelPromise promise, long now) throws Exception {
+        String type = PacketTranslator.typeName(packet);
+        ClientboundPacket translated;
+        boolean sandwich;
+        try {
+            translated = translator.outbound(packet);
+            if (translated instanceof ClientboundPacket.Login login) {
+                selfEntityId = login.entityId();
+            }
+            sandwich = TransactionPolicy.requiresSandwich(translated, selfEntityId);
+        } catch (RuntimeException | LinkageError e) {
+            report("outbound " + packet.getClass().getName(), e);
+            translated = new ClientboundPacket.Untranslatable(type); // unknown effect: a marker, bracketed
+            sandwich = true;
+        }
+        if (sandwich) {
+            writeTransaction(ctx, now);
+        }
+        if (!observer.edgeView()) {
+            session.onOutbound(translated, now);
+        } else {
+            try {
+                observer.beginGameWrite(type, translated, now);
+            } catch (RuntimeException | LinkageError e) {
+                report("outbound reconciliation", e);
+            }
+        }
+        super.write(ctx, packet, promise);
         if (sandwich) {
             writeTransaction(ctx, System.nanoTime());
         }

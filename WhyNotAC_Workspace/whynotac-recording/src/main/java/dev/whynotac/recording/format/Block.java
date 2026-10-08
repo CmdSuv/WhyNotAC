@@ -1,6 +1,6 @@
 package dev.whynotac.recording.format;
 
-import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
 import java.util.zip.CRC32C;
 import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
@@ -19,13 +19,18 @@ public record Block(long baseSequence, long baseNanoTime, long baseClientTick, i
     public record Header(int compressedLength, int rawLength, long baseSequence, long baseNanoTime, long baseClientTick,
             int eventCount, long lostBefore, int crc) {}
 
+    /** Deflate output, reused per thread: a block is compressed once and copied into its exact-size array. */
+    private static final ThreadLocal<byte[][]> SCRATCH = ThreadLocal.withInitial(() -> new byte[1][]);
+
     /** On-disk bytes: marker, header fields, CRC32C over fields and payload, zlib payload. */
     public byte[] encode(Deflater deflater) {
-        byte[] compressed = deflate(raw, deflater);
-        ByteSink sink = new ByteSink(RecordingFormat.BLOCK_HEADER_BYTES + compressed.length);
+        byte[][] scratch = SCRATCH.get();
+        int compressedLength = deflate(raw, deflater, scratch);
+        byte[] compressed = scratch[0];
+        ByteSink sink = new ByteSink(RecordingFormat.BLOCK_HEADER_BYTES + compressedLength);
         sink.writeBytes(RecordingFormat.BLOCK_MARKER);
         int fieldsStart = sink.size();
-        sink.writeInt(compressed.length);
+        sink.writeInt(compressedLength);
         sink.writeInt(raw.length);
         sink.writeLong(baseSequence);
         sink.writeLong(baseNanoTime);
@@ -34,10 +39,10 @@ public record Block(long baseSequence, long baseNanoTime, long baseClientTick, i
         sink.writeLong(lostBefore);
         CRC32C crc = new CRC32C();
         crc.update(sink.array(), fieldsStart, sink.size() - fieldsStart);
-        crc.update(compressed);
+        crc.update(compressed, 0, compressedLength);
         sink.writeInt((int) crc.getValue());
-        sink.writeBytes(compressed);
-        return sink.toByteArray();
+        sink.writeBytes(compressed, 0, compressedLength);
+        return sink.size() == sink.array().length ? sink.array() : sink.toByteArray();
     }
 
     /** Parses the fixed header that follows a marker ({@code headerBytes} excludes the marker). */
@@ -83,16 +88,23 @@ public record Block(long baseSequence, long baseNanoTime, long baseClientTick, i
         }
     }
 
-    private static byte[] deflate(byte[] input, Deflater deflater) {
+    /** Compresses {@code input} into {@code scratch[0]} (grown as needed) and returns the compressed length. */
+    private static int deflate(byte[] input, Deflater deflater, byte[][] scratch) {
         deflater.reset();
         deflater.setInput(input);
         deflater.finish();
-        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, input.length / 3));
-        byte[] chunk = new byte[16 * 1024];
-        while (!deflater.finished()) {
-            int n = deflater.deflate(chunk);
-            out.write(chunk, 0, n);
+        // zlib's worst case for stored blocks, plus header and checksum: rarely exceeded, grown if it is.
+        int bound = input.length + (input.length >> 12) + (input.length >> 14) + 64;
+        if (scratch[0] == null || scratch[0].length < bound) {
+            scratch[0] = new byte[bound];
         }
-        return out.toByteArray();
+        int length = 0;
+        while (!deflater.finished()) {
+            if (length == scratch[0].length) {
+                scratch[0] = Arrays.copyOf(scratch[0], scratch[0].length * 2);
+            }
+            length += deflater.deflate(scratch[0], length, scratch[0].length - length);
+        }
+        return length;
     }
 }

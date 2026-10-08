@@ -308,7 +308,12 @@ public final class PlayerSession {
      */
     @SuppressWarnings("unchecked")
     public <T> T attachment(Object key, Supplier<T> factory) {
-        return (T) attachments.computeIfAbsent(key, k -> factory.get());
+        Object value = attachments.get(key); // no capturing lambda: this runs for every event
+        if (value == null) {
+            value = factory.get();
+            attachments.put(key, value);
+        }
+        return (T) value;
     }
 
     @Override

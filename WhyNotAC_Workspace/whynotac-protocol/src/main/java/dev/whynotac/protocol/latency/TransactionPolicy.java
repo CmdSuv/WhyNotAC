@@ -17,6 +17,9 @@ public final class TransactionPolicy {
      */
     public static boolean requiresSandwich(ClientboundPacket packet, int selfEntityId) {
         return switch (packet) {
+            // Most frequent first: a pattern switch tests its labels in order.
+            case ClientboundPacket.Unmodeled ignored -> false;
+            case ClientboundPacket.Ping ignored -> false;
             case ClientboundPacket.SetEntityMotion motion -> targetsSelf(motion.entityId(), selfEntityId);
             case ClientboundPacket.UpdateAttributes attributes -> targetsSelf(attributes.entityId(), selfEntityId);
             case ClientboundPacket.MobEffect effect -> targetsSelf(effect.entityId(), selfEntityId);
@@ -27,10 +30,8 @@ public final class TransactionPolicy {
             case ClientboundPacket.PlayerRotation ignored -> true;
             case ClientboundPacket.PlayerAbilities ignored -> true;
             case ClientboundPacket.Respawn ignored -> true;
-            case ClientboundPacket.Ping ignored -> false;
             case ClientboundPacket.KeepAlive ignored -> false;
             case ClientboundPacket.Login ignored -> false;
-            case ClientboundPacket.Unmodeled ignored -> false;
             case ClientboundPacket.Untranslatable ignored -> true; // unknown effect: bracket it like a physics change
         };
     }
