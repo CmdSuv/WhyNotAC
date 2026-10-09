@@ -101,12 +101,37 @@ sunucu onu yeniden ekleyene ya da kaldırana kadar "bilinmiyor"dur.
 | Simülasyon (gerçekçi) | Her flush çevrili, paketlerin %1'i gecikmeli: **%90,8 bit-tam, %96,2 1e-6 blok içinde**, %0,7 birden çok aday, 0 taşma. Kalan kısım, bir gecikmeden sonra küçülen yarıçaptır |
 | Simülasyon (çevrili, bölünmesiz) | Her kontrolde **%100 bit-tam** |
 | E2E (gerçek Paper) | AI'sız husk ve köylü, binici, zırh askısı, end kristali, öldürülen inek; mutlak, göreli ve dönüşlü ışınlamalar. `/whynotac entities`: sunucunun oyuncuya gösterdiği her varlık replikada, eksik ya da fazla yok. **Her varlığın kod tabanı sunucununkine 1/4096 ızgarada eşit (6/6)**, yolcu ayrıldı, taşma 0. 81 E2E kontrolü geçiyor |
+| Gerçek client (CI, 1.21.11) | Değiştirilmemiş client sunucuya bağlanıp yürüyor. `/whynotac entities`: sunucunun gösterdiği 8 varlığın hepsi replikada, 8/8 kod tabanı 1/4096 ızgarada eşit, 3 dallanma, 0 taşma |
 
-## Yük testi (100 bot, gerçek arazi)
+## Yük testi (gerçek arazi, cluster)
 
 Ayrıntılar: `docs/benchmarks/2026-10-09-entities/`.
 
-(yük testi sonuçları aşağıda)
+- **Doğruluk:** bütün koşularda 0 kayıp olay, 0 sapma, 0 anomali, 0 dinleyici hatası ve 0 vaka.
+- **Flush çevrelemesi (40 bot):**
+  - çevrili: 134.897 varlık tick'inde 1.029 dallanma, 0 taşma;
+  - çevrelemesiz: 798.816 dallanma, 237 taşma.
+- **İlk ölçüm (`5a1c8fe`, 100 bot):**
+  - sunucu 2,0 TPS'e düştü (eklentisiz 11,9) ve bir tick 11,7 saniye sürdü;
+  - sunucunun iki çekirdeği eklentisiz bile doluydu, Netty'deki ek iş ana thread'i aç bıraktı.
+- **Düzeltilen sıcak noktalar (JFR):**
+  - chunk tick'leme aramasındaki boxing ve her ping'de bütün geçmişin budanması (ilkel `LongMap`);
+  - JDK 21 tür `switch`'inde varlık paketlerinin 25. sırada olması;
+  - `MovePlayer`'ın method handle'lı `equals/hashCode`'u;
+  - blok güncellemesinde 4096 kutulanmış `HashMap` işlemi.
+
+  Sonuç 9,4 TPS oldu.
+- **Maliyet, sunucu doymadan (40 bot):**
+  - WhyNotAC yaklaşık 0,27 çekirdek harcıyor: Netty +0,13, analiz 0,13, kayıt 0,02. Bu, oyuncu başına
+    saniyede yaklaşık 8 ms.
+  - Bu koşuda her oyuncu her tick'te 31 hareket eden oyuncuyu alıyor.
+  - Flush çevrelemesinin payı Netty'de +0,024 çekirdek.
+- **Ölçüm aracındaki hata:** thread başına CPU 2 kat yüksek hesaplanıyordu. Düzeltildi ve önceki yük
+  belgeleri yeni değerlerle güncellendi:
+  - düz dünya: 1,5 ms/oyuncu/s;
+  - gerçek arazi: 3,7 ms/oyuncu/s.
+- **Hedef aynı:** oyuncu başına saniyede 1 ms'nin altı. Kalan sıcak noktalar ve sıradaki adımlar benchmark
+  belgesinde.
 
 ## Sınırlar ve sonraki adımlar
 - **Client'ta başka varlıkları iten şeyler henüz izlenmiyor:** hareket eden piston

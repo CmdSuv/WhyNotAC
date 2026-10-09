@@ -24,8 +24,9 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > ([rapor](docs/phases/PHASE-2B-3-REPORT.md)).
 > **Faz 2b-5:** client'ın gördüğü varlıklar client'ın işlediği sırayla, tick tick yeniden kuruluyor:
 > her olası sıra bir aday, yarıçap 0 bit-tam. Her flush ağ kenarında transaction'la çevrili. Bağımsız
-> referans client'la 829.571 kontrolde 0 ihlal, E2E'de sunucunun takibiyle 6/6 eşit
-> ([rapor](docs/phases/PHASE-2B-5-REPORT.md)).
+> referans client'la 829.571 kontrolde 0 ihlal, sunucunun takibiyle E2E'de 6/6, gerçek client'ta 8/8 eşit.
+> Yük testinde 0 yanlış bulgu; ölçülen maliyet hâlâ hedefin üstünde
+> ([rapor](docs/phases/PHASE-2B-5-REPORT.md), [yük testi](docs/benchmarks/2026-10-09-entities/README.md)).
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md)
 
 ## Belgeler
@@ -52,7 +53,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 264 test
+./gradlew build                       # tüm modüller + 271 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (81 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
