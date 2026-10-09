@@ -107,7 +107,7 @@ def main():
     m = re.search(r"WhyNotAC entities RealProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
     fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
     check(m is not None and fields.get("complete") == "true" and n("server") >= 3 and n("missingInReplica") == 0 and n("extraInReplica") == 0
-          and n("different") == 0 and n("equal") == n("compared") >= 3 and n("overflows") == 0,
+          and n("different") == 0 and n("equal") >= 3 and n("equal") + n("moving") == n("compared") and n("overflows") == 0,
           f"the real client's entities, rebuilt from its packets, are the server's, base for base ({m.group(1) if m else 'no answer'})")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)

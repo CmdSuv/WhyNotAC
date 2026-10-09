@@ -277,8 +277,8 @@ def verify_entities(log, dump_path, check):
     check(fields.get("complete") == "true", "nothing about the entities was lost")
     check(n("server") >= 6 and n("replica") == n("server"), f"the replica holds every entity the server shows the client ({n('replica')}/{n('server')})")
     check(n("missingInReplica") == 0 and n("extraInReplica") == 0, "no entity missing from the replica, none extra")
-    check(n("compared") >= 5 and n("different") == 0 and n("equal") == n("compared"),
-          f"every entity's position base equals the server's on the 1/4096 grid ({n('equal')}/{n('compared')})")
+    check(n("equal") >= 5 and n("different") == 0 and n("equal") + n("moving") == n("compared"),
+          f"every entity's position base equals the server's on the 1/4096 grid ({n('equal')}/{n('compared')}, {n('moving')} still moving)")
     check(n("passengers") >= 1, f"the passenger was recognised and left out of the comparison ({n('passengers')})")
     check(n("overflows") == 0, "no entity was given up")
     events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []

@@ -664,7 +664,7 @@ public final class WireObserver {
     }
 
     static Object outboundKey(String type, ClientboundPacket packet) {
-        return packet instanceof ClientboundPacket.Untranslatable ? null : canonical(packet);
+        return packet instanceof ClientboundPacket.Untranslatable || PacketTranslator.RECONCILED_BY_TYPE.contains(type) ? null : canonical(packet);
     }
 
     private void report(String what, Throwable error) {

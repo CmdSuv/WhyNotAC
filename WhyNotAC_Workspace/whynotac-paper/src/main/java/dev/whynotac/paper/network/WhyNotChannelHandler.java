@@ -173,6 +173,16 @@ final class WhyNotChannelHandler extends ChannelDuplexHandler {
     /** {@link #write} for one packet that is not a bundle: the same steps, nothing allocated but the record. */
     private void writeOne(ChannelHandlerContext ctx, Packet<?> packet, ChannelPromise promise, long now) throws Exception {
         String type = PacketTranslator.typeName(packet);
+        if (observer.edgeView() && PacketTranslator.RECONCILED_BY_TYPE.contains(type)) {
+            // The edge records what the client receives; here only the type is noted for reconciliation.
+            try {
+                observer.beginGameWrite(type, PacketTranslator.typeMarker(type), now);
+            } catch (RuntimeException | LinkageError e) {
+                report("outbound reconciliation", e);
+            }
+            super.write(ctx, packet, promise);
+            return;
+        }
         ClientboundPacket translated;
         boolean sandwich;
         try {

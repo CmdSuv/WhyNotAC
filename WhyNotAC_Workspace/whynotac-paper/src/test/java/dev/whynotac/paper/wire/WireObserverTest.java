@@ -400,6 +400,17 @@ class WireObserverTest {
         assertEquals(new ClientboundPacket.Ping(5), outbound.get(2));
     }
 
+    @Test
+    void entityMovesAreReadAtTheEdgeAndReconciledByType() {
+        channel.writeOutbound(new net.minecraft.network.protocol.game.ClientboundMoveEntityPacket.Pos(77, (short) 409, (short) -3, (short) 0, true),
+                new net.minecraft.network.protocol.game.ClientboundMoveEntityPacket.Rot(77, (byte) 5, (byte) -5, false));
+        assertTrue(eventsOf(TimelineEvent.OutboundDivergence.class).isEmpty(), events.toString());
+        List<ClientboundPacket> outbound = eventsOf(TimelineEvent.Outbound.class).stream().map(e -> ((TimelineEvent.Outbound) e).packet()).toList();
+        assertEquals(List.of(new ClientboundPacket.MoveEntity(77, (short) 409, (short) -3, (short) 0, (byte) 0, (byte) 0, true, true, false),
+                new ClientboundPacket.MoveEntity(77, (short) 0, (short) 0, (short) 0, (byte) 5, (byte) -5, false, false, true)), outbound,
+                "the client's values, from the bytes");
+    }
+
     // --- flush brackets ------------------------------------------------------------------------------
 
     /** A packet about another entity: no physics bracket of its own. */

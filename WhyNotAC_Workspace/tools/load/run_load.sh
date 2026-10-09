@@ -4,7 +4,8 @@
 # usage: tools/load/run_load.sh <work-dir> <variant> [bots] [measure-seconds] [crowd]
 #   variant  baseline  - no plugin (the reference)
 #            whynotac  - WhyNotAC with session recording enabled
-#            whynotac-noping / whynotac-noedge / whynotac-norec - one component switched off (decomposition)
+#            whynotac-noping / whynotac-noedge / whynotac-norec / whynotac-noflush - one component switched off
+#            (decomposition)
 #   layout   cluster (default): bots at least 8 blocks apart within 160 blocks (each sees a few dozen
 #            others, like a busy spawn or arena); spread: far apart (per-player cost only);
 #            crowd: all in one place (every bot sees every other one: N^2 entity traffic)
@@ -68,12 +69,13 @@ if [ "${VARIANT%%-*}" = whynotac ]; then
   mkdir -p "$WORK_DIR/plugins/WhyNotAC"
   printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 4096\n  max-queued-megabytes: 64\n' > "$WORK_DIR/plugins/WhyNotAC/config.yml"
   # Decomposition variants: whynotac-noping (no per-tick transactions), whynotac-noedge (game view only),
-  # whynotac-norec (no recording).
+  # whynotac-norec (no recording), whynotac-noflush (no transactions around flushes).
   case "$VARIANT" in
     whynotac) ;;
     whynotac-noping) printf 'observation:\n  per-tick-transactions: false\n' >> "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
     whynotac-noedge) printf 'observation:\n  edge: false\n' >> "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
     whynotac-norec) sed -i 's/enabled: true/enabled: false/' "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
+    whynotac-noflush) printf 'observation:\n  flush-transactions: false\n' >> "$WORK_DIR/plugins/WhyNotAC/config.yml" ;;
     *) echo "unknown variant $VARIANT"; exit 2 ;;
   esac
   find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' -exec cp {} "$WORK_DIR/plugins/WhyNotAC.jar" \;

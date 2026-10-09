@@ -211,6 +211,21 @@ public final class PacketTranslator {
             "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data");
 
+    /**
+     * Packets about other entities that come by the hundred per tick: the edge decodes them (the client's
+     * view is what the replicas read), while the game's view only notes their type, and the two views are
+     * reconciled by type and order. None of them ever needs a physics bracket ({@code TransactionPolicy}).
+     */
+    public static final Set<String> RECONCILED_BY_TYPE = Set.of("minecraft:move_entity_pos", "minecraft:move_entity_pos_rot",
+            "minecraft:move_entity_rot", "minecraft:rotate_head", "minecraft:set_entity_data", "minecraft:entity_position_sync");
+
+    private static final Map<String, ClientboundPacket.Unmodeled> TYPE_MARKERS = new ConcurrentHashMap<>();
+
+    /** The game's view of a {@link #RECONCILED_BY_TYPE} packet: its type alone, one shared marker per type. */
+    public static ClientboundPacket.Unmodeled typeMarker(String type) {
+        return TYPE_MARKERS.computeIfAbsent(type, ClientboundPacket.Unmodeled::new);
+    }
+
     /** The packet classes {@link #outbound} has a case for (keep in step with its switch). */
     private static final List<Class<?>> OUTBOUND_CLASSES = List.of(
             ClientboundPingPacket.class, ClientboundKeepAlivePacket.class, ClientboundSetEntityMotionPacket.class, ClientboundExplodePacket.class,

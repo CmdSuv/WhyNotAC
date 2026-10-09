@@ -1149,6 +1149,16 @@ public final class ClientEntities {
 
     /** Whether the candidate's chunk ticks entities for every prefix X in (lower, upper]. */
     private Tri chunkTicking(State s, long lower, long upper) {
+        if (s.rPos == 0.0 && chunks.settledBefore(lower, upper)) {
+            // The common case: one chunk, and no chunk changed within the prefixes in question.
+            long key = ClientWorld.chunkKey(VanillaMath.floor(s.x) >> 4, VanillaMath.floor(s.z) >> 4);
+            if (key != s.tickingKey || chunks.version != s.tickingVersion) {
+                s.tickingKey = key;
+                s.tickingVersion = chunks.version;
+                s.tickingValue = chunks.tickingNow(key);
+            }
+            return s.tickingValue ? Tri.TRUE : Tri.FALSE;
+        }
         long[] keys = chunkKeys(s);
         if (keys == null) {
             return Tri.MAYBE;
@@ -1549,6 +1559,10 @@ public final class ClientEntities {
         float pyRot;
         float rPrevRot;
         boolean rotMoved;
+        // cache of the chunk-ticking answer (ChunkTicking.version): not part of the client's state
+        long tickingKey = Long.MIN_VALUE;
+        long tickingVersion = -1;
+        boolean tickingValue;
         // LivingEntity head
         int headSteps;
         double headTarget;
@@ -1787,6 +1801,18 @@ public final class ClientEntities {
         private final Map<Long, Versioned> history = new HashMap<>();
         /** From this sequence on, which chunks tick is not known. */
         private long uncertainFrom = Long.MAX_VALUE;
+        /** Bumped on every change: answers cached against it stay valid while it does not move. */
+        long version;
+        private long lastChange = Long.MIN_VALUE;
+
+        /** True if no chunk changed after {@code lower} and nothing is uncertain up to {@code upper}: {@link #tickingNow} answers. */
+        boolean settledBefore(long lower, long upper) {
+            return lastChange <= lower && uncertainFrom >= upper;
+        }
+
+        boolean tickingNow(long key) {
+            return ticking.contains(key);
+        }
 
         ChunkTicking() {
             reset(Long.MIN_VALUE, range(-1));
@@ -1807,10 +1833,12 @@ public final class ClientEntities {
             slots = new long[viewRange * viewRange];
             Arrays.fill(slots, EMPTY);
             uncertainFrom = Long.MAX_VALUE;
+            version++;
         }
 
         void uncertain(long seq) {
             uncertainFrom = Math.min(uncertainFrom, seq);
+            version++;
         }
 
         private int index(int x, int z) {
@@ -1874,6 +1902,8 @@ public final class ClientEntities {
             if (value ? !ticking.add(key) : !ticking.remove(key)) {
                 return;
             }
+            version++;
+            lastChange = Math.max(lastChange, seq);
             history.computeIfAbsent(key, k -> new Versioned(0)).set(seq, value ? 1 : 0);
         }
 
