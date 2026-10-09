@@ -114,35 +114,74 @@ public final class Section {
         }
         int[] palette = new int[16];
         int size = 0;
-        java.util.HashMap<Integer, Integer> index = new java.util.HashMap<>();
+        PaletteIndex index = new PaletteIndex();
         if (previousPalette != null) {
-            for (int state : previousPalette) {
-                if (index.putIfAbsent(state, size) == null) {
+            for (int i = 0; i < previousPalette.length && size <= PaletteIndex.MAX; i++) {
+                if (index.add(previousPalette[i], size)) {
                     if (size == palette.length) {
                         palette = Arrays.copyOf(palette, size * 2);
                     }
-                    palette[size++] = state;
+                    palette[size++] = previousPalette[i];
                 }
             }
         }
-        for (int v : values) {
-            if (index.putIfAbsent(v, size) == null) {
+        for (int i = 0; i < 4096 && size <= PaletteIndex.MAX; i++) {
+            if (index.add(values[i], size)) {
                 if (size == palette.length) {
                     palette = Arrays.copyOf(palette, size * 2);
                 }
-                palette[size++] = v;
+                palette[size++] = values[i];
             }
         }
+        // More than PaletteIndex.MAX states need more than 8 bits: global ids, whatever the rest holds.
         int needed = 32 - Integer.numberOfLeadingZeros(Math.max(size - 1, 1));
         boolean global = needed > 8;
         int storedBits = global ? globalBits : Math.max(4, needed);
         long[] data = new long[longsFor(storedBits, 4096)];
         int perLong = 64 / storedBits;
         for (int i = 0; i < 4096; i++) {
-            long value = global ? (values[i] < 0 ? stateCount : values[i]) : index.get(values[i]);
+            long value = global ? (values[i] < 0 ? stateCount : values[i]) : index.position(values[i]);
             data[i / perLong] |= value << (i % perLong) * storedBits;
         }
         return packed(storedBits, data, global ? null : Arrays.copyOf(palette, size), stateCount);
+    }
+
+    /**
+     * State to palette position for {@link #of}, without boxing: open addressing over at most {@link #MAX} + 1
+     * entries (one more than 8 bits can index means global ids, so {@code of} stops adding there).
+     */
+    private static final class PaletteIndex {
+        static final int MAX = 256;
+        private static final int MASK = 1023;
+        private final int[] states = new int[MASK + 1];
+        private final int[] positions = new int[MASK + 1]; // position + 1; 0: empty
+
+        /** Adds {@code state} at {@code position} unless present; true if it was added. */
+        boolean add(int state, int position) {
+            int i = slot(state);
+            while (positions[i] != 0) {
+                if (states[i] == state) {
+                    return false;
+                }
+                i = (i + 1) & MASK;
+            }
+            states[i] = state;
+            positions[i] = position + 1;
+            return true;
+        }
+
+        /** The position of a state that was added. */
+        int position(int state) {
+            int i = slot(state);
+            while (states[i] != state || positions[i] == 0) {
+                i = (i + 1) & MASK;
+            }
+            return positions[i] - 1;
+        }
+
+        private static int slot(int state) {
+            return (state * 0x9E3779B9) >>> 22;
+        }
     }
 
     /** Approximate retained bytes. */
