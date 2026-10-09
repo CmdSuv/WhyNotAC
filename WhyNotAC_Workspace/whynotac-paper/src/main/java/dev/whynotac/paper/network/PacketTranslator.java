@@ -56,6 +56,10 @@ import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheRadiusPacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundTickingStatePacket;
+import net.minecraft.network.protocol.game.ClientboundTickingStepPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
@@ -202,7 +206,8 @@ public final class PacketTranslator {
             "explode", "game_event", "keep_alive", "login", "ping", "player_abilities", "player_position", "player_rotation",
             "remove_mob_effect", "respawn", "set_entity_motion", "teleport_entity", "update_attributes", "update_mob_effect",
             "level_chunk_with_light", "forget_level_chunk", "block_update", "section_blocks_update", "block_changed_ack",
-            "set_chunk_cache_center", "set_chunk_cache_radius",
+            "set_chunk_cache_center", "set_chunk_cache_radius", "ticking_state", "ticking_step", "player_info_update",
+            "player_info_remove",
             "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data");
 
@@ -216,7 +221,9 @@ public final class PacketTranslator {
             ClientboundSectionBlocksUpdatePacket.class, ClientboundBlockChangedAckPacket.class, ClientboundSetChunkCacheCenterPacket.class,
             ClientboundSetChunkCacheRadiusPacket.class, ClientboundAddEntityPacket.class, ClientboundRemoveEntitiesPacket.class,
             ClientboundMoveEntityPacket.class, ClientboundEntityPositionSyncPacket.class, ClientboundRotateHeadPacket.class,
-            ClientboundSetPassengersPacket.class, ClientboundMoveVehiclePacket.class, ClientboundSetEntityDataPacket.class);
+            ClientboundSetPassengersPacket.class, ClientboundMoveVehiclePacket.class, ClientboundSetEntityDataPacket.class,
+            ClientboundTickingStatePacket.class, ClientboundTickingStepPacket.class, ClientboundPlayerInfoUpdatePacket.class,
+            ClientboundPlayerInfoRemovePacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
     static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
@@ -420,6 +427,10 @@ public final class PacketTranslator {
             case ClientboundBlockChangedAckPacket ack -> new ClientboundPacket.BlockChangedAck(ack.sequence());
             case ClientboundSetChunkCacheCenterPacket center -> new ClientboundPacket.ChunkCacheCenter(center.getX(), center.getZ());
             case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
+            case ClientboundTickingStatePacket state -> new ClientboundPacket.TickingState(state.tickRate(), state.isFrozen());
+            case ClientboundTickingStepPacket step -> new ClientboundPacket.TickingStep(step.tickSteps());
+            case ClientboundPlayerInfoUpdatePacket info -> playerInfo(info);
+            case ClientboundPlayerInfoRemovePacket remove -> new ClientboundPacket.PlayerInfoRemove(remove.profileIds());
             case ClientboundMoveEntityPacket move -> new ClientboundPacket.MoveEntity((int) MOVE_ENTITY_ID.get(move),
                     move.getXa(), move.getYa(), move.getZa(), (byte) MOVE_ENTITY_Y_ROT.get(move), (byte) MOVE_ENTITY_X_ROT.get(move),
                     move.isOnGround(), move.hasPosition(), move.hasRotation());
@@ -477,6 +488,20 @@ public final class PacketTranslator {
                         vec(add.getMovement()), xRot, yRot, yHeadRot, add.getData())
                 : ClientboundPacket.AddEntity.sent(add.getId(), add.getUUID(), type, add.getX(), add.getY(), add.getZ(),
                         vec(add.getMovement()), xRot, yRot, yHeadRot, add.getData());
+    }
+
+    /** Which players the client learns about, and game modes; nothing else of the tab list (see the record). */
+    static ClientboundPacket.PlayerInfoUpdate playerInfo(ClientboundPlayerInfoUpdatePacket packet) {
+        boolean add = packet.actions().contains(ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER);
+        boolean gameMode = packet.actions().contains(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE);
+        if (!add && !gameMode) {
+            return new ClientboundPacket.PlayerInfoUpdate(false, false, List.of()); // latency, display names, ...
+        }
+        List<ClientboundPacket.PlayerInfoUpdate.Entry> entries = new ArrayList<>(packet.entries().size());
+        for (ClientboundPlayerInfoUpdatePacket.Entry entry : packet.entries()) {
+            entries.add(new ClientboundPacket.PlayerInfoUpdate.Entry(entry.profileId(), gameMode ? entry.gameMode().getId() : -1));
+        }
+        return new ClientboundPacket.PlayerInfoUpdate(add, gameMode, entries);
     }
 
     /** The scalar values of a synched-data packet, exactly as the client decodes them; the others counted. */

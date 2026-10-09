@@ -157,6 +157,14 @@ baytlarla kodlanan bir sandviçe alınır. Ayrıca her sunucu
 tick'inde bağımsız bir transaction gönderilerek sürekli RTT/jitter izi tutulur
 (RFC 6298 SRTT, RFC 3550 jitter).
 
+**Her flush da çevrilidir (Faz 2b-5).** Kenar, client'a giden her flush'ın ilk karesinden önce ve
+flush'tan hemen önce birer transaction yazar. Orada zaten bir transaction varsa yenisini yazmaz. Client
+bir flush'ı neredeyse her zaman tek seferde okur, bu yüzden iki cevap aynı iki tick'i arasına düşer.
+Böylece flush'taki her paketin client'ın hangi tick'inden önce işlendiği kesin bilinir. Bunun
+istisnası nadirdir: bir TCP bölünmesi ile bir tick üst üste gelirse olur. O durumda replikalar her
+olasılığı taşır. Ping bundle içine, login'den önceye ve yapılandırmaya geçişten sonraya yazılmaz
+(`observation.flush-transactions`).
+
 Gerçek client'ta ölçülen sıra kuralı (resmi 1.21.11 client'ı, `tools/realclient`): oyun fazında
 client pong'ları kare başında, tick'in paketlerinden önce gönderir. Bir tick'in ilk paketi ile
 `ClientTickEnd` arasında hiç pong yoktur (558 pong'da 0 ihlal). Bu kural, ping'leri ayrı bir thread'den
@@ -204,6 +212,24 @@ okuduğu sırayla yeniden kurulur:
 - **Doğrulama:** `/whynotac world <oyuncu>` replikayı sunucunun dünyasıyla bölüm bölüm (4096 blok
   durumunun 64 bit özeti) karşılaştırır. E2E ve gerçek client'ta 1944/1944 bölüm birebir eşittir.
 
+## Client'ın gördüğü varlıklar (Faz 2b-5)
+
+Reach ve hitbox kontrolleri, diğer varlıkların client'taki konumunu bilmek zorundadır. Bu konum
+sunucununki değildir. Client paketleri kare başında işler, konumu üç tick boyunca enterpolasyonla
+yaklaştırır, bazı paketleri hiç uygulamaz. Model şudur:
+
+- **Önek kuralı:** client her an gönderilen akışın bir önekini işlemiştir. Bu önek en az cevapladığı son
+  ping'e kadardır, en fazla cevaplamadığı ilk ping'den öncesidir. `ClientTickEnd` tick'leri sayar.
+- **Adaylar:** her varlık için, pencerenin paketleri ile tick'lerin her olası sırasına bir aday düşer.
+  Kurallar decompile edilmiş client'tan alınmıştır: `VecDeltaCodec`, `InterpolationHandler`, snap,
+  kafa enterpolasyonu, chunk'a bağlı tick'lenme, donma, yolcular, oyuncu profili. Aynı hedeflere
+  varan adaylar, her üyeyi kapsayan bir yarıçapla birleşir. Yarıçap 0 bit-tam demektir.
+- **Bilinmeyen açıkça söylenir:** yolcular, kontrol edilebilir araç, kendi fiziğini çalıştıran türler,
+  olay kaybı. Bir kontrol bilinmeyen ya da yarıçaplı bir konumu asla kesin saymaz.
+- **Doğrulama:** `/whynotac entities <oyuncu>` replikanın varlık kümesini ve kod tabanlarını sunucunun
+  takibiyle karşılaştırır (E2E'de 6/6 eşit). Bağımsız bir referans client'la yapılan simülasyonda
+  829.571 kontrolde 0 ihlal çıktı.
+
 ## Modüller
 
 | Modül | Durum | Sorumluluk |
@@ -214,7 +240,7 @@ okuduğu sırayla yeniden kurulur:
 | `whynotac-conformance` | **Faz 1 ✔** | Gerçek oyun sınıflarına karşı diferansiyel testler |
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
-| `whynotac-world` | **Faz 2b-3 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği |
+| `whynotac-world` | **Faz 2b-3 ✔ · 2b-5 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği. Client'ın gördüğü varlıklar: client sırasıyla, tick tick, aday durumlar ve yarıçaplarla |
 | `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
 | `whynotac-analysis` | **Slice 0 ✔** | Kontroller (tick framing, client saati), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |

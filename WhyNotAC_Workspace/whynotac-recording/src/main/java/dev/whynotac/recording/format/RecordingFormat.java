@@ -117,6 +117,10 @@ public final class RecordingFormat {
     public static final int CB_SET_PASSENGERS = 33;
     public static final int CB_MOVE_VEHICLE = 34;
     public static final int CB_SET_ENTITY_DATA = 35;
+    public static final int CB_TICKING_STATE = 36;
+    public static final int CB_TICKING_STEP = 37;
+    public static final int CB_PLAYER_INFO_UPDATE = 38;
+    public static final int CB_PLAYER_INFO_REMOVE = 39;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

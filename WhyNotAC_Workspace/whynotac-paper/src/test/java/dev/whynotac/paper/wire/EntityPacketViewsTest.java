@@ -38,6 +38,10 @@ import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundTickingStatePacket;
+import net.minecraft.network.protocol.game.ClientboundTickingStepPacket;
 import net.minecraft.network.protocol.game.GameProtocols;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -205,5 +209,29 @@ class EntityPacketViewsTest {
                 new DataEntry(23, Kind.OPTIONAL_BLOCK_STATE, -1),
                 new DataEntry(24, Kind.OPTIONAL_BLOCK_STATE, -1),
                 new DataEntry(25, Kind.OPTIONAL_BLOCK_STATE, stone)), 2), data);
+    }
+
+    @Test
+    void tickingStateAndStepKeepTheirValues() {
+        assertEquals(new ClientboundPacket.TickingState(12.5F, true), bothViews(new ClientboundTickingStatePacket(12.5F, true)));
+        assertEquals(new ClientboundPacket.TickingState(20.0F, false), bothViews(new ClientboundTickingStatePacket(20.0F, false)));
+        assertEquals(new ClientboundPacket.TickingStep(37), bothViews(new ClientboundTickingStepPacket(37)));
+    }
+
+    @Test
+    void playerInfoKeepsWhoTheClientKnowsAndGameModes() {
+        UUID a = UUID.fromString("00000000-0000-4000-8000-00000000000a");
+        UUID b = UUID.fromString("00000000-0000-4000-8000-00000000000b");
+        com.mojang.authlib.GameProfile profile = new com.mojang.authlib.GameProfile(a, "Alice");
+        ClientboundPlayerInfoUpdatePacket.Entry alice = new ClientboundPlayerInfoUpdatePacket.Entry(a, profile, true, 12,
+                net.minecraft.world.level.GameType.SPECTATOR, null, true, 0, null);
+        ClientboundPlayerInfoUpdatePacket add = new ClientboundPlayerInfoUpdatePacket(java.util.EnumSet.of(
+                ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER, ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE,
+                ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY), List.of(alice));
+        assertEquals(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(a, 3))), bothViews(add));
+        ClientboundPlayerInfoUpdatePacket latency = new ClientboundPlayerInfoUpdatePacket(
+                java.util.EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY), List.of(alice));
+        assertEquals(new ClientboundPacket.PlayerInfoUpdate(false, false, List.of()), bothViews(latency));
+        assertEquals(new ClientboundPacket.PlayerInfoRemove(List.of(a, b)), bothViews(new ClientboundPlayerInfoRemovePacket(List.of(a, b))));
     }
 }

@@ -8,13 +8,16 @@ import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.TickCost;
 import dev.whynotac.paper.network.PacketInterceptor;
+import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.WorldVerifier;
 import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
 import dev.whynotac.world.BlockStates;
+import dev.whynotac.world.ClientEntitiesTracker;
 import dev.whynotac.world.ClientWorldTracker;
+import dev.whynotac.world.EntityTypes;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
 import java.util.List;
@@ -46,6 +49,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private final ShadowVerdict verdict = new ShadowVerdict();
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
+    private ClientEntitiesTracker entitiesTracker;
     private Alerts alerts;
     private final AtomicLong listenerErrors = new AtomicLong();
     private final TickCost transactionLoop = new TickCost();
@@ -84,6 +88,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         // The client's world, before every check that reads it (listeners see an event in registration order).
         worldTracker = new ClientWorldTracker(BlockStates.vanilla());
         registry.addListener(worldTracker);
+        entitiesTracker = new ClientEntitiesTracker(EntityTypes.vanilla());
+        registry.addListener(entitiesTracker);
         Checks.all(verdict).forEach(registry::addListener);
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
@@ -91,11 +97,13 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
         boolean edge = getConfig().getBoolean("observation.edge", true);
         boolean perTickTransactions = getConfig().getBoolean("observation.per-tick-transactions", true);
-        if (!edge || !perTickTransactions) {
+        boolean flushTransactions = getConfig().getBoolean("observation.flush-transactions", true);
+        if (!edge || !perTickTransactions || !flushTransactions) {
             getLogger().warning("WhyNotAC observation reduced by config.yml: edge=" + edge + ", per-tick-transactions=" + perTickTransactions
+                    + ", flush-transactions=" + flushTransactions
                     + " (detection quality is lower; meant for measurements and troubleshooting)");
         }
-        interceptor = new PacketInterceptor(registry, getLogger(), edge);
+        interceptor = new PacketInterceptor(registry, getLogger(), edge, flushTransactions);
         interceptor.install();
         Bukkit.getScheduler().runTask(this, interceptor::injectExisting); // connections still pending at install time
         Bukkit.getScheduler().runTask(this, () -> Bukkit.getOnlinePlayers().forEach(interceptor::bind));
@@ -118,7 +126,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
-                new WorldVerifier(interceptor, worldTracker, this), this);
+                new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this), this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -182,7 +190,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
                         + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
                         + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},"
-                        + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d}}",
+                        + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d},"
+                        + "\"entities\":{\"ticks\":%d,\"branches\":%d,\"merges\":%d,\"overflows\":%d,\"losses\":%d}}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
                 totals.outbound(), totals.lostEvents(), totals.inboundDivergences(), totals.outboundDivergences(), anomalies,
                 pendingMax, withheld, listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
@@ -190,7 +199,10 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros(),
                 verdict.cases(), cases == null ? 0 : cases.storedCount(), cases == null ? 0 : cases.droppedCount(),
                 verdict.rejections().size(), worldTracker == null ? 0 : worldTracker.retainedBytes(),
-                worldTracker == null ? 0 : worldTracker.sharedSections(), worldTracker == null ? 0 : worldTracker.worldsCreated());
+                worldTracker == null ? 0 : worldTracker.sharedSections(), worldTracker == null ? 0 : worldTracker.worldsCreated(),
+                entitiesTracker == null ? 0 : entitiesTracker.totals().ticks(), entitiesTracker == null ? 0 : entitiesTracker.totals().branches(),
+                entitiesTracker == null ? 0 : entitiesTracker.totals().merges(), entitiesTracker == null ? 0 : entitiesTracker.totals().overflows(),
+                entitiesTracker == null ? 0 : entitiesTracker.totals().losses());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

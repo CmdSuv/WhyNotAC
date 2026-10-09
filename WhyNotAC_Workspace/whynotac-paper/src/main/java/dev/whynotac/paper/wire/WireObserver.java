@@ -72,6 +72,8 @@ public final class WireObserver {
     /** Result of decoding an outbound frame, committed after the frame was forwarded. */
     record Outgoing(String type, ClientboundPacket packet, boolean wireOnly, boolean sandwich) {
         static final Outgoing STRUCTURAL = new Outgoing(null, null, false, false);
+        /** A bundle delimiter: the frames up to the next one are one packet to the client. */
+        static final Outgoing DELIMITER = new Outgoing(null, null, false, false);
     }
 
     private final PlayerSession session;
@@ -82,6 +84,9 @@ public final class WireObserver {
 
     private WireProtocols.Table inboundTable;
     private WireProtocols.Table outboundTable;
+    /** After the play login and before a switch back to configuration: pings may go anywhere between frames. */
+    private boolean inPlayLevel;
+    private volatile boolean flushBrackets = true;
     /** Reference: the edge (what the client sent); matched by the game. Missing = cancelled before the game. */
     private final Reconciler<ServerboundPacket> inbound;
     /** After the edge view ended: inbound packets the edge recorded that had not reached the game yet. */
@@ -106,6 +111,7 @@ public final class WireObserver {
     private volatile long outboundWireOnly;
     private volatile long outboundGameOnly;
     private volatile long edgeTransactions;
+    private volatile long flushTransactions;
     private volatile long placementRepairs;
 
     public WireObserver(PlayerSession session, PacketTranslator translator, WireProtocols protocols, Logger logger) {
@@ -159,6 +165,11 @@ public final class WireObserver {
         inboundTable = protocols.playServerbound();
         outboundTable = protocols.playClientbound();
         session.onObservation(Source.WIRE, Source.WIRE, serverProtocol, "edge decoding (test)", nanoTime);
+    }
+
+    /** Test hook: as after the play login (flushes are bracketed from now on). */
+    void loggedIn() {
+        inPlayLevel = true;
     }
 
     // --- edge side (taps) ------------------------------------------------------------------------
@@ -256,7 +267,7 @@ public final class WireObserver {
         int id = packetId(frame);
         PacketType<?> type = table.type(id);
         if (type == GamePacketTypes.CLIENTBOUND_BUNDLE_DELIMITER) {
-            return Outgoing.STRUCTURAL; // bundles are flattened, as in the game's view
+            return Outgoing.DELIMITER; // bundles are flattened, as in the game's view
         }
         String typeName = typeName(table, type, id);
         ClientboundPacket translated;
@@ -271,11 +282,13 @@ public final class WireObserver {
         }
         if (type == LoginPacketTypes.CLIENTBOUND_LOGIN_FINISHED || type == GamePacketTypes.CLIENTBOUND_START_CONFIGURATION) {
             outboundTable = protocols.configurationClientbound;
+            inPlayLevel = false;
         } else if (type == ConfigurationPacketTypes.CLIENTBOUND_FINISH_CONFIGURATION) {
             outboundTable = protocols.playClientbound();
         }
         if (translated instanceof ClientboundPacket.Login login) {
             selfEntityId = login.entityId();
+            inPlayLevel = true;
         }
         return correlateOutbound(table, typeName, translated, nanoTime);
     }
@@ -341,9 +354,22 @@ public final class WireObserver {
      * plugin wrote below the game's send path. Encoded with the client's own (774) codec.
      */
     void writeEdgeTransaction(ChannelHandlerContext ctx, long nanoTime) {
+        if (writeTransaction(ctx, nanoTime)) {
+            edgeTransactions++;
+        }
+    }
+
+    /** Writes one of the transactions around a flush ({@link #bracketsFlushes}). */
+    void writeFlushTransaction(ChannelHandlerContext ctx, long nanoTime) {
+        if (writeTransaction(ctx, nanoTime)) {
+            flushTransactions++;
+        }
+    }
+
+    private boolean writeTransaction(ChannelHandlerContext ctx, long nanoTime) {
         OptionalInt id = session.allocateTransaction();
         if (id.isEmpty()) {
-            return;
+            return false;
         }
         ByteBuf buf = ctx.alloc().buffer(8);
         try {
@@ -352,9 +378,23 @@ public final class WireObserver {
             buf.release();
             throw e;
         }
-        edgeTransactions++;
         session.onOutbound(new ClientboundPacket.Ping(id.getAsInt()), nanoTime);
         ctx.write(buf, ctx.newPromise());
+        return true;
+    }
+
+    /** Whether every flush to the client is bracketed with transactions (config: observation.flush-transactions). */
+    public void bracketFlushes(boolean enabled) {
+        flushBrackets = enabled;
+    }
+
+    /**
+     * True if the edge brackets the frames of each flush with transactions now: the client reads the
+     * frames of a flush in one go almost always, so its answers place the whole flush between two of its
+     * ticks. Only in play after the login, where a ping may stand between any two frames.
+     */
+    boolean bracketsFlushes() {
+        return flushBrackets && source == Source.WIRE && inPlayLevel && outboundTable != null;
     }
 
     /** Ties this connection's handlers to the lifetime of the WhyNotAC instance that installed them. */
@@ -506,12 +546,12 @@ public final class WireObserver {
     /** Snapshot for diagnostics (any thread). */
     public Status status() {
         return new Status(source, clientProtocol, inboundWireOnly, inboundGameOnly, outboundWireOnly, outboundGameOnly,
-                edgeTransactions, placementRepairs);
+                edgeTransactions, flushTransactions, placementRepairs);
     }
 
     /** Diagnostics snapshot; {@code source} is null until the handshake. */
     public record Status(Source source, int clientProtocol, long inboundWireOnly, long inboundGameOnly,
-            long outboundWireOnly, long outboundGameOnly, long edgeTransactions, long placementRepairs) {}
+            long outboundWireOnly, long outboundGameOnly, long edgeTransactions, long flushTransactions, long placementRepairs) {}
 
     // --- internals ---------------------------------------------------------------------------------
 

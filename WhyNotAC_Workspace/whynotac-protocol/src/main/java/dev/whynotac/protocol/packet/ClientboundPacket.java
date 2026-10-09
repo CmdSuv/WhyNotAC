@@ -129,6 +129,40 @@ public sealed interface ClientboundPacket {
     record ChunkCacheRadius(int radius) implements ClientboundPacket {}
 
     /**
+     * {@code ClientboundTickingStatePacket}: the server's tick rate and whether it is frozen. A frozen
+     * client stops ticking every entity but players and their vehicles; a rate below 20 also slows the
+     * client's own ticks (never above 20: the client waits {@code max(50 ms, 1000 / tickRate)}).
+     */
+    record TickingState(float tickRate, boolean frozen) implements ClientboundPacket {}
+
+    /** {@code ClientboundTickingStepPacket}: a frozen game runs this many more ticks. */
+    record TickingStep(int steps) implements ClientboundPacket {}
+
+    /**
+     * {@code ClientboundPlayerInfoUpdatePacket}, the parts that decide which players the client has and
+     * how it treats them: the client only creates a player entity whose profile it was given
+     * ({@code addPlayers}), and a player in spectator mode is neither pickable nor visible. Entries are
+     * kept only when one of the two actions is present; {@code gameMode} is the {@code GameType} id, or
+     * -1 without {@code updateGameMode}.
+     */
+    record PlayerInfoUpdate(boolean addPlayers, boolean updateGameMode, List<Entry> entries) implements ClientboundPacket {
+        public PlayerInfoUpdate {
+            entries = List.copyOf(entries);
+        }
+
+        public record Entry(java.util.UUID profileId, int gameMode) {}
+
+        public static final int SPECTATOR = 3;
+    }
+
+    /** {@code ClientboundPlayerInfoRemovePacket}: the client forgets these profiles (entities already created stay). */
+    record PlayerInfoRemove(List<java.util.UUID> profileIds) implements ClientboundPacket {
+        public PlayerInfoRemove {
+            profileIds = List.copyOf(profileIds);
+        }
+    }
+
+    /**
      * {@code ClientboundSetEntityMotionPacket}. The client <em>replaces</em> its velocity with
      * {@code clientMotion}: exactly what it decodes from the lossy {@code LpVec3} encoding. Physics must
      * use this value and never quantize it again ({@code LpVec3} is not idempotent: re-quantizing

@@ -44,6 +44,7 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBundlePacket;
+import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.GameProtocols;
 import net.minecraft.network.protocol.game.ServerGamePacketListener;
@@ -397,6 +398,61 @@ class WireObserverTest {
         List<ClientboundPacket> outbound = eventsOf(TimelineEvent.Outbound.class).stream().map(e -> ((TimelineEvent.Outbound) e).packet()).toList();
         assertEquals(4, outbound.size(), "transaction, knockback, foreign ping, transaction: " + outbound);
         assertEquals(new ClientboundPacket.Ping(5), outbound.get(2));
+    }
+
+    // --- flush brackets ------------------------------------------------------------------------------
+
+    /** A packet about another entity: no physics bracket of its own. */
+    private static ClientboundRemoveEntitiesPacket other(int id) {
+        return new ClientboundRemoveEntitiesPacket(id);
+    }
+
+    private List<Class<?>> receivedTypes() {
+        return clientReceived().stream().<Class<?>>map(Object::getClass).toList();
+    }
+
+    @Test
+    void everyFlushAfterTheLoginIsBracketedWithTransactions() {
+        observer.loggedIn();
+        channel.writeOutbound(other(5), other(6));
+        assertEquals(List.of(ClientboundPingPacket.class, ClientboundRemoveEntitiesPacket.class, ClientboundRemoveEntitiesPacket.class,
+                ClientboundPingPacket.class), receivedTypes());
+        List<ClientboundPacket> outbound = eventsOf(TimelineEvent.Outbound.class).stream().map(e -> ((TimelineEvent.Outbound) e).packet()).toList();
+        assertEquals(4, outbound.size(), outbound.toString());
+        assertInstanceOf(ClientboundPacket.Ping.class, outbound.getFirst());
+        assertInstanceOf(ClientboundPacket.Ping.class, outbound.getLast());
+        channel.writeOutbound(other(7)); // the next flush has its own
+        assertEquals(List.of(ClientboundPingPacket.class, ClientboundRemoveEntitiesPacket.class, ClientboundPingPacket.class), receivedTypes());
+    }
+
+    @Test
+    void aTransactionAlreadyAtTheEdgeOfAFlushServesAsItsBracket() {
+        observer.loggedIn();
+        channel.writeOutbound(new ClientboundPingPacket(41), other(5), new ClientboundPingPacket(42));
+        assertEquals(List.of(ClientboundPingPacket.class, ClientboundRemoveEntitiesPacket.class, ClientboundPingPacket.class), receivedTypes());
+        channel.writeOutbound(knockback(0.1, 0.2, 0.3)); // bracketed for physics already
+        assertEquals(List.of(ClientboundPingPacket.class, ClientboundSetEntityMotionPacket.class, ClientboundPingPacket.class), receivedTypes());
+    }
+
+    @Test
+    void bracketsStayOutsideBundles() {
+        observer.loggedIn();
+        channel.writeOutbound(new ClientboundBundlePacket(List.of(other(5), other(6))));
+        List<Class<?>> types = receivedTypes();
+        assertEquals(6, types.size(), types.toString());
+        assertEquals(ClientboundPingPacket.class, types.getFirst());
+        assertEquals(ClientboundPingPacket.class, types.getLast());
+        assertEquals(List.of(ClientboundRemoveEntitiesPacket.class, ClientboundRemoveEntitiesPacket.class), types.subList(2, 4));
+    }
+
+    @Test
+    void noBracketsBeforeTheLoginOrWhenDisabled() {
+        channel.writeOutbound(other(5));
+        assertEquals(List.of(ClientboundRemoveEntitiesPacket.class), receivedTypes(), "not logged in yet");
+        observer.loggedIn();
+        observer.bracketFlushes(false);
+        channel.writeOutbound(other(6));
+        assertEquals(List.of(ClientboundRemoveEntitiesPacket.class), receivedTypes(), "observation.flush-transactions: false");
     }
 
     // --- handshake and placement ---------------------------------------------------------------------

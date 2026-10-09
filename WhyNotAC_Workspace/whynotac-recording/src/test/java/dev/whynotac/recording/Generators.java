@@ -168,6 +168,22 @@ public final class Generators {
             case "BlockChangedAck" -> new ClientboundPacket.BlockChangedAck(anyInt());
             case "ChunkCacheCenter" -> new ClientboundPacket.ChunkCacheCenter(anyInt(), anyInt());
             case "ChunkCacheRadius" -> new ClientboundPacket.ChunkCacheRadius(anyInt());
+            case "TickingState" -> new ClientboundPacket.TickingState(anyFloat(), random.nextBoolean());
+            case "TickingStep" -> new ClientboundPacket.TickingStep(anyInt());
+            case "PlayerInfoUpdate" -> {
+                List<ClientboundPacket.PlayerInfoUpdate.Entry> entries = new ArrayList<>();
+                for (int i = random.nextInt(4); i > 0; i--) {
+                    entries.add(new ClientboundPacket.PlayerInfoUpdate.Entry(new java.util.UUID(anyLong(), anyLong()), anyInt()));
+                }
+                yield new ClientboundPacket.PlayerInfoUpdate(random.nextBoolean(), random.nextBoolean(), entries);
+            }
+            case "PlayerInfoRemove" -> {
+                List<java.util.UUID> ids = new ArrayList<>();
+                for (int i = random.nextInt(4); i > 0; i--) {
+                    ids.add(new java.util.UUID(anyLong(), anyLong()));
+                }
+                yield new ClientboundPacket.PlayerInfoRemove(ids);
+            }
             case "SetEntityMotion" -> new ClientboundPacket.SetEntityMotion(anyInt(), vec(), random.nextBoolean() ? vec() : null);
             case "Explosion" -> new ClientboundPacket.Explosion(vec(), anyFloat(), random.nextBoolean() ? vec() : null);
             case "PlayerPosition" -> new ClientboundPacket.PlayerPosition(anyInt(), vec(), vec(), anyFloat(), anyFloat(), relativeFlags());

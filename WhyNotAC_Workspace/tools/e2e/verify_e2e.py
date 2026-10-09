@@ -69,6 +69,7 @@ def main():
             verify_facts(probe, sys.argv[5], check)
             verify_cases(probe, log, sys.argv[6], check)
             verify_world(log, sys.argv[5], check)
+            verify_entities(log, sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -190,6 +191,8 @@ def verify_edge(probe, log, dump_path, check):
     edge = re.search(r"edge transactions (\d+)", log)
     check(edge is not None and int(edge.group(1)) == 2,
           f"exactly one sandwich was written at the edge, for the injected knockback (edge transactions {edge.group(1) if edge else '?'})")
+    flush = re.search(r"flush transactions (\d+)", log)
+    check(flush is not None and int(flush.group(1)) > 0, f"flushes are bracketed with transactions at the edge ({flush.group(1) if flush else '?'})")
     m = re.search(r"\[wnprobe\] inject via (\S+)", log)
     c = re.search(r"\[wnprobe\] (\S+) cancelled a velocity packet", log)
     check(m is not None and c is not None and m.group(1) == c.group(1),
@@ -261,6 +264,32 @@ def verify_world(log, dump_path, check):
     logins = [e["packet"] for e in events if e["type"] == "Outbound" and e["packet"]["type"] == "Login"]
     check(len(logins) == 1 and logins[0].get("dimension", {}).get("minY") == -64 and logins[0].get("chunkRadius") == 3,
           f"the login carries the dimension and chunk radius: {logins}")
+
+
+def verify_entities(log, dump_path, check):
+    """The entities WhyNotAC rebuilt from what the client received are the ones the server shows it, at the same bases."""
+    m = re.search(r"WhyNotAC entities WhyNotProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
+    check(m is not None, "/whynotac entities answered")
+    if not m:
+        return
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
+    n = lambda k: int(fields.get(k, "-1"))
+    check(fields.get("complete") == "true", "nothing about the entities was lost")
+    check(n("server") >= 6 and n("replica") == n("server"), f"the replica holds every entity the server shows the client ({n('replica')}/{n('server')})")
+    check(n("missingInReplica") == 0 and n("extraInReplica") == 0, "no entity missing from the replica, none extra")
+    check(n("compared") >= 5 and n("different") == 0 and n("equal") == n("compared"),
+          f"every entity's position base equals the server's on the 1/4096 grid ({n('equal')}/{n('compared')})")
+    check(n("passengers") >= 1, f"the passenger was recognised and left out of the comparison ({n('passengers')})")
+    check(n("overflows") == 0, "no entity was given up")
+    events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []
+    kinds = {}
+    for e in events:
+        if e["type"] == "Outbound":
+            t = e["packet"]["type"]
+            kinds[t] = kinds.get(t, 0) + 1
+    check(all(kinds.get(k, 0) >= 1 for k in ("AddEntity", "RemoveEntities", "EntityPositionSync", "SetPassengers", "SetEntityData")),
+          f"the recording holds the entity packets: {[(k, kinds.get(k, 0)) for k in ('AddEntity', 'RemoveEntities', 'MoveEntity', 'EntityPositionSync', 'RotateHead', 'SetPassengers', 'SetEntityData', 'PlayerInfoUpdate', 'TickingState')]}")
+    check(kinds.get("TickingState", 0) >= 1 and kinds.get("PlayerInfoUpdate", 0) >= 1, "the ticking state and the player list are recorded")
 
 
 def verify_facts(probe, dump_path, check):

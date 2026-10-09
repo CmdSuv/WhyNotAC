@@ -23,6 +23,10 @@ observation:
   # One transaction (ping) per player per server tick: a continuous latency trace. Physics-changing
   # packets are always bracketed with transactions either way. Leave it on.
   per-tick-transactions: true
+  # A transaction before and after every flush to the client (at the network edge): the client's answers
+  # then tell, for every packet, which of its ticks came before and after it handled the packet. The
+  # entity replica is exact with them; without, it keeps every possible order. Leave it on.
+  flush-transactions: true
 
 cases:
   # Every finding opens a case: a row in plugins/WhyNotAC/cases.db and a dossier in plugins/WhyNotAC/cases/

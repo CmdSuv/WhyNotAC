@@ -104,9 +104,15 @@ for _ in $(seq 1 180); do
 done
 grep -q "$NAME joined the game" "$WORK_DIR/server.log" || { echo "client never joined"; tail -40 "$WORK_DIR/client.log"; exit 1; }
 sleep 5 # let the world render and the player land
+# Entities the real client must hold exactly as the server tracks them (no AI: only the commands move them).
+echo "execute at $NAME run summon minecraft:husk ~3 ~ ~3 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wnz\"]}" > "$FIFO"
+echo "execute at $NAME run summon minecraft:villager ~-3 ~ ~3 {NoAI:1b,PersistenceRequired:1b}" > "$FIFO"
+echo "execute at $NAME run summon minecraft:armor_stand ~3 ~ ~-3" > "$FIFO"
+sleep 1; echo "execute at $NAME run tp @e[tag=wnz,limit=1] ~2.3172 ~ ~3.7071 45 10" > "$FIFO"
 (cd "$HERE" && python3 -I drive.py "$DISPLAY_NUM") > "$WORK_DIR/drive.json"
 # The world WhyNotAC rebuilt from the client's packets, compared with the server's (verify_realclient.py reads the line).
 echo "whynotac world $NAME" > "$FIFO"
+echo "whynotac entities $NAME" > "$FIFO"
 sleep 3
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=

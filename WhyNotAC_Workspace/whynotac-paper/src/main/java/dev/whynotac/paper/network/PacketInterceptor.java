@@ -47,16 +47,21 @@ public final class PacketInterceptor {
     private volatile boolean enabled;
     private volatile ClientFacts.Policy identityPolicy;
     private final boolean edgeEnabled;
+    private final boolean flushTransactions;
 
     public PacketInterceptor(SessionRegistry registry, Logger logger) {
-        this(registry, logger, true);
+        this(registry, logger, true, true);
     }
 
-    /** @param edgeEnabled false: no edge taps, every connection uses the game's view (declared per session) */
-    public PacketInterceptor(SessionRegistry registry, Logger logger, boolean edgeEnabled) {
+    /**
+     * @param edgeEnabled false: no edge taps, every connection uses the game's view (declared per session)
+     * @param flushTransactions bracket every flush with transactions at the edge
+     */
+    public PacketInterceptor(SessionRegistry registry, Logger logger, boolean edgeEnabled, boolean flushTransactions) {
         this.registry = registry;
         this.logger = logger;
         this.edgeEnabled = edgeEnabled;
+        this.flushTransactions = flushTransactions;
     }
 
     /**
@@ -135,6 +140,7 @@ public final class PacketInterceptor {
             PlayerSession session = registry.open(address == null ? "unknown" : address.toString());
             WireObserver observer = new WireObserver(session, translator, protocols, logger, upstreamTranslation(channel));
             observer.activeWhile(() -> enabled);
+            observer.bracketFlushes(flushTransactions);
             pipeline.addBefore(ANCHOR, HANDLER_NAME, new WhyNotChannelHandler(session, translator, observer, logger));
             boolean edge = false;
             if (edgeEnabled && fresh && pipeline.get("splitter") != null && pipeline.get("prepender") != null) {

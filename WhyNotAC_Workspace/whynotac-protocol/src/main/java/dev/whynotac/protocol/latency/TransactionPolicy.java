@@ -49,6 +49,11 @@ public final class TransactionPolicy {
             case ClientboundPacket.BlockChangedAck ignored -> false;
             case ClientboundPacket.ChunkCacheCenter ignored -> false;
             case ClientboundPacket.ChunkCacheRadius ignored -> false;
+            // Entity ticking only (never faster than 20 Hz for the client, players never frozen): placed by the prefix bounds.
+            case ClientboundPacket.TickingState ignored -> false;
+            case ClientboundPacket.TickingStep ignored -> false;
+            case ClientboundPacket.PlayerInfoUpdate ignored -> false; // other players; the player's own game mode comes with game_event
+            case ClientboundPacket.PlayerInfoRemove ignored -> false;
             case ClientboundPacket.AddEntity ignored -> false;
             case ClientboundPacket.RemoveEntities ignored -> false;
             // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).

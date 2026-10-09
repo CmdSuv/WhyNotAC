@@ -1,5 +1,6 @@
 package dev.whynotac.paper.wire;
 
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -186,11 +187,22 @@ public final class WireTaps {
         }
     }
 
+    /**
+     * The outbound tap. Besides recording, it brackets every flush with transactions: one before the first
+     * frame after a flush and one before the flush itself, unless a transaction already stands there
+     * (the per-tick one, or a physics bracket). The client handles what it read in one go, so the two
+     * answers fall between the same two of its ticks and place every packet of the flush exactly; see
+     * {@code ClientEntities}. Never inside a bundle.
+     */
     @ChannelHandler.Sharable
     static final class Outbound extends ChannelOutboundHandlerAdapter {
         private final WireObserver observer;
         private final Logger logger;
         private int failures;
+        /** Frames went out since the last flush (and the first of them stood after a transaction). */
+        private boolean flushOpen;
+        private boolean lastWasTransaction;
+        private boolean inBundle;
 
         Outbound(WireObserver observer, Logger logger) {
             this.observer = observer;
@@ -210,7 +222,14 @@ public final class WireTaps {
             }
             WireObserver.Outgoing outgoing = WireObserver.Outgoing.STRUCTURAL;
             try {
+                boolean bracket = !flushOpen && !inBundle && observer.bracketsFlushes(); // before the frame: never ahead of the login
                 outgoing = observer.beforeWireOutbound(frame, System.nanoTime());
+                if (bracket) {
+                    flushOpen = true;
+                    if (!(outgoing.packet() instanceof ClientboundPacket.Ping) && !outgoing.sandwich()) {
+                        observer.writeFlushTransaction(ctx, System.nanoTime()); // opens the flush
+                    }
+                }
                 if (outgoing.sandwich()) {
                     observer.writeEdgeTransaction(ctx, System.nanoTime());
                 }
@@ -229,9 +248,28 @@ public final class WireTaps {
                 if (outgoing.sandwich()) {
                     observer.writeEdgeTransaction(ctx, System.nanoTime());
                 }
+                if (outgoing == WireObserver.Outgoing.DELIMITER) {
+                    inBundle = !inBundle;
+                }
+                lastWasTransaction = outgoing.packet() instanceof ClientboundPacket.Ping || outgoing.sandwich();
             } catch (RuntimeException | LinkageError e) {
                 failures = report(logger, failures, "outbound frame", e);
             }
+        }
+
+        @Override
+        public void flush(ChannelHandlerContext ctx) throws Exception {
+            try {
+                if (flushOpen && !lastWasTransaction && !inBundle && observer.bracketsFlushes()) {
+                    observer.writeFlushTransaction(ctx, System.nanoTime()); // closes the flush
+                }
+            } catch (RuntimeException | LinkageError e) {
+                failures = report(logger, failures, "flush bracket", e);
+            }
+            if (!inBundle) {
+                flushOpen = false;
+            }
+            ctx.flush();
         }
     }
 

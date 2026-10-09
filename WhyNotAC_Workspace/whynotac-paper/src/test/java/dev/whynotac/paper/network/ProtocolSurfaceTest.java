@@ -73,7 +73,7 @@ class ProtocolSurfaceTest {
      */
     private static final Set<String> CLIENTBOUND_PHYSICS_PENDING = Set.of(
             "set_entity_link", "move_minecart_along_track", "projectile_power", "block_event", "initialize_border", "set_border_center", "set_border_lerp_size",
-            "set_border_size", "ticking_state", "ticking_step", "cooldown", "set_held_slot", "container_set_content", "container_set_slot",
+            "set_border_size", "cooldown", "set_held_slot", "container_set_content", "container_set_slot",
             "set_player_inventory", "set_cursor_item", "set_equipment", "set_camera", "set_health", "player_combat_kill", "player_look_at",
             "damage_event", "hurt_animation", "entity_event", "start_configuration");
 
@@ -84,7 +84,7 @@ class ProtocolSurfaceTest {
             "debug/chunk_value", "debug/entity_value", "debug/event", "debug_sample", "delete_chat", "disconnect", "disguised_chat",
             "game_test_highlight_pos", "level_event", "level_particles", "light_update", "map_item_data", "merchant_offers",
             "mount_screen_open", "open_book", "open_screen", "open_sign_editor", "place_ghost_recipe", "player_chat", "player_combat_end",
-            "player_combat_enter", "player_info_remove", "player_info_update", "pong_response", "recipe_book_add", "recipe_book_remove",
+            "player_combat_enter", "pong_response", "recipe_book_add", "recipe_book_remove",
             "recipe_book_settings", "reset_score", "resource_pack_pop", "resource_pack_push", "select_advancements_tab", "server_data",
             "server_links", "set_action_bar_text", "set_border_warning_delay", "set_border_warning_distance", "set_default_spawn_position",
             "set_display_objective", "set_experience", "set_objective", "set_player_team", "set_score", "set_simulation_distance",

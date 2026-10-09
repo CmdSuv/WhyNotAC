@@ -11,7 +11,7 @@
 #   see fetch_interop_plugins.sh), and E2E_EXPECT_PLUGINS="ViaVersion packetevents" checks they were enabled.
 set -euo pipefail
 WORK_DIR=$(mkdir -p "$1" && cd "$1" && pwd)
-PROBE_SECONDS=${2:-14}
+PROBE_SECONDS=${2:-19}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PAPER_JAR=paper-1.21.11-132.jar
@@ -82,7 +82,24 @@ sleep 1; echo "wnprobe cancel WhyNotProbe 0 0.7 0" > "$FIFO"
 # Separate ticks: changes in one section in the same tick are sent together as one section update.
 sleep 1; echo "execute at WhyNotProbe run setblock ~3 ~6 ~3 minecraft:stone" > "$FIFO"
 sleep 1; echo "execute at WhyNotProbe run fill ~-4 ~7 ~-4 ~4 ~8 ~4 minecraft:glass" > "$FIFO"
-sleep $(( PROBE_SECONDS - 10 ))
+# The client's entities: still mobs (no AI: only the commands move them; a husk does not burn in daylight), a
+# passenger, an armor stand, an end crystal, and a cow that is killed (removed from the client).
+sleep 1
+echo "execute at WhyNotProbe run summon minecraft:husk ~2 ~ ~2 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wnz\"]}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:villager ~-2 ~ ~2 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wnv\"]}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:armor_stand ~-2 ~ ~-2" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:end_crystal ~3 ~ ~-3 {ShowBottom:0b}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:pig ~4 ~ ~0.5 {NoAI:1b,Passengers:[{id:\"minecraft:armor_stand\",Small:1b}]}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:cow ~-4 ~ ~0.5 {NoAI:1b,Tags:[\"wnc\"]}" > "$FIFO"
+# Moves: absolute and relative positions and rotations; the cow is removed.
+sleep 1; echo "execute at WhyNotProbe run tp @e[tag=wnz,limit=1] ~1.3172 ~ ~2.7071 45 10" > "$FIFO"
+echo "execute at WhyNotProbe run tp @e[tag=wnv,limit=1] ~-1.5 ~ ~1.25 -170 0" > "$FIFO"
+sleep 1; echo "execute at WhyNotProbe run tp @e[tag=wnz,limit=1] ~1.1 ~ ~2.9 -60 0" > "$FIFO"
+echo "kill @e[tag=wnc]" > "$FIFO"
+sleep 1; echo "execute as @e[tag=wnz,limit=1] at @s run tp @s ~0.0371 ~ ~-0.0518 ~15 ~" > "$FIFO"
+sleep 1
+echo "whynotac entities WhyNotProbe" > "$FIFO"
+sleep $(( PROBE_SECONDS - 15 ))
 echo "whynotac world WhyNotProbe" > "$FIFO"
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"

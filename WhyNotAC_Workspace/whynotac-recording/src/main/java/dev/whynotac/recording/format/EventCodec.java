@@ -531,6 +531,31 @@ public final class EventCodec {
                     body.writeVarInt(relativeMask(t.relatives()));
                     body.writeByte(t.onGround() ? 1 : 0);
                 }
+                case ClientboundPacket.TickingState t -> {
+                    body.writeVarInt(CB_TICKING_STATE);
+                    body.writeFloat(t.tickRate());
+                    body.writeByte(t.frozen() ? 1 : 0);
+                }
+                case ClientboundPacket.TickingStep t -> {
+                    body.writeVarInt(CB_TICKING_STEP);
+                    body.writeZigZag(t.steps());
+                }
+                case ClientboundPacket.PlayerInfoUpdate u -> {
+                    body.writeVarInt(CB_PLAYER_INFO_UPDATE);
+                    body.writeByte((u.addPlayers() ? 1 : 0) | (u.updateGameMode() ? 2 : 0));
+                    body.writeVarInt(u.entries().size());
+                    for (ClientboundPacket.PlayerInfoUpdate.Entry entry : u.entries()) {
+                        writeUuid(entry.profileId());
+                        body.writeZigZag(entry.gameMode());
+                    }
+                }
+                case ClientboundPacket.PlayerInfoRemove r -> {
+                    body.writeVarInt(CB_PLAYER_INFO_REMOVE);
+                    body.writeVarInt(r.profileIds().size());
+                    for (java.util.UUID id : r.profileIds()) {
+                        writeUuid(id);
+                    }
+                }
                 case ClientboundPacket.PlayerRotation r -> {
                     body.writeVarInt(CB_PLAYER_ROTATION);
                     body.writeFloat(r.yaw());
@@ -963,6 +988,29 @@ public final class EventCodec {
                     Vec3d position = vec(in);
                     float yRot = in.readFloat();
                     yield new ClientboundPacket.MoveVehicle(position, yRot, in.readFloat());
+                }
+                case CB_TICKING_STATE -> {
+                    float tickRate = in.readFloat();
+                    yield new ClientboundPacket.TickingState(tickRate, in.readUnsignedByte() != 0);
+                }
+                case CB_TICKING_STEP -> new ClientboundPacket.TickingStep(zint(in));
+                case CB_PLAYER_INFO_UPDATE -> {
+                    int flags = in.readUnsignedByte();
+                    int count = boundedCount(in);
+                    List<ClientboundPacket.PlayerInfoUpdate.Entry> entries = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        UUID id = readUuid(in);
+                        entries.add(new ClientboundPacket.PlayerInfoUpdate.Entry(id, zint(in)));
+                    }
+                    yield new ClientboundPacket.PlayerInfoUpdate((flags & 1) != 0, (flags & 2) != 0, entries);
+                }
+                case CB_PLAYER_INFO_REMOVE -> {
+                    int count = boundedCount(in);
+                    List<UUID> ids = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        ids.add(readUuid(in));
+                    }
+                    yield new ClientboundPacket.PlayerInfoRemove(ids);
                 }
                 case CB_PLAYER_ROTATION -> {
                     float yaw = in.readFloat();

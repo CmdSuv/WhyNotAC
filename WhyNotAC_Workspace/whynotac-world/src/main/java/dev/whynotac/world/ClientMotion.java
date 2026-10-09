@@ -1,0 +1,41 @@
+package dev.whynotac.world;
+
+import java.util.Set;
+
+/**
+ * Entity types whose position the 1.21.11 client does not take from the packets alone, for an entity it
+ * does not control: {@link ClientEntities} does not claim to know where they are. Read from the decompiled
+ * client (every tick, aiStep and baseTick override, and what they call), with these results:
+ * <ul>
+ *   <li>Every other living entity moves on the client only by interpolation: {@code LivingEntity.aiStep}
+ *       interpolates, and travel, AI, goals, navigation and the brain run only for an entity the client
+ *       controls ({@code canSimulateMovement}, {@code isEffectiveAi}, {@code Mob.serverAiStep});
+ *       {@code RemotePlayer.aiStep} only interpolates. Fluids and pushing change velocity only.</li>
+ *   <li>Most non-living entities run their own physics on the client (items, experience orbs, TNT,
+ *       falling blocks, arrows, tridents, thrown items, fireballs, fireworks, fishing hooks, eyes of ender,
+ *       llama spit, shulker bullets); boats and minecarts also depend on who controls them and on feature
+ *       flags. Only the types in {@link #STATIC} never move.</li>
+ * </ul>
+ * Not followed yet, and therefore never to be relied on near them: a moving piston
+ * ({@code PistonMovingBlockEntity} moves every entity on the client) and a peeking shulker
+ * ({@code Shulker.onPeekAmountChange} moves entities next to it).
+ */
+final class ClientMotion {
+
+    private ClientMotion() {}
+
+    /** Living entities that the client moves besides interpolating. */
+    static final Set<String> LIVING = Set.of(
+            "minecraft:bat",          // Bat.tick: a resting bat is put under the block above it (setPosRaw), on both sides
+            "minecraft:ender_dragon", // EnderDragon.tickDeath: moves up while dying; its parts are placed in aiStep
+            "minecraft:shulker");     // Shulker.setPos: snapped to the block centre; no interpolation
+
+    /** Non-living entities whose client tick never moves them and whose position is the packet's. */
+    static final Set<String> STATIC = Set.of(
+            "minecraft:interaction", "minecraft:marker", "minecraft:end_crystal", "minecraft:area_effect_cloud", "minecraft:evoker_fangs",
+            "minecraft:lightning_bolt", "minecraft:ominous_item_spawner");
+
+    static boolean movesItself(String type, EntityTypes.Kind kind) {
+        return kind.living() ? LIVING.contains(type) : !STATIC.contains(type);
+    }
+}
