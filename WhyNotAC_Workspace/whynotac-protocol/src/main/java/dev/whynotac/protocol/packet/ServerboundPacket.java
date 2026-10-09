@@ -37,6 +37,30 @@ public sealed interface ServerboundPacket {
             return hasPosition && !(Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z))
                     || hasRotation && !(Float.isFinite(yaw) && Float.isFinite(pitch));
         }
+
+        // The record's own equals and hashCode, written out: the generated ones go through method handles,
+        // which cost several times more on the network thread (every move is reconciled by value).
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof MovePlayer m
+                    && Double.doubleToLongBits(x) == Double.doubleToLongBits(m.x)
+                    && Double.doubleToLongBits(y) == Double.doubleToLongBits(m.y)
+                    && Double.doubleToLongBits(z) == Double.doubleToLongBits(m.z)
+                    && Float.floatToIntBits(yaw) == Float.floatToIntBits(m.yaw)
+                    && Float.floatToIntBits(pitch) == Float.floatToIntBits(m.pitch)
+                    && hasPosition == m.hasPosition && hasRotation == m.hasRotation
+                    && onGround == m.onGround && horizontalCollision == m.horizontalCollision;
+        }
+
+        @Override
+        public int hashCode() {
+            int h = Double.hashCode(x);
+            h = 31 * h + Double.hashCode(y);
+            h = 31 * h + Double.hashCode(z);
+            h = 31 * h + Float.hashCode(yaw);
+            h = 31 * h + Float.hashCode(pitch);
+            return 31 * h + (hasPosition ? 1 : 0) + (hasRotation ? 2 : 0) + (onGround ? 4 : 0) + (horizontalCollision ? 8 : 0);
+        }
     }
 
     /**
@@ -89,10 +113,30 @@ public sealed interface ServerboundPacket {
     record SetCarriedItem(int slot) implements ServerboundPacket {}
 
     /** {@code ServerboundClientTickEndPacket}: the client finished one tick (since 1.21.2). */
-    record ClientTickEnd() implements ServerboundPacket {}
+    record ClientTickEnd() implements ServerboundPacket {
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof ClientTickEnd; // written out, as in MovePlayer
+        }
+
+        @Override
+        public int hashCode() {
+            return 0x7e1c;
+        }
+    }
 
     /** {@code ServerboundPongPacket}: answer to a {@code ClientboundPingPacket}, processed in order. */
-    record Pong(int id) implements ServerboundPacket {}
+    record Pong(int id) implements ServerboundPacket {
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof Pong pong && pong.id == id; // written out, as in MovePlayer
+        }
+
+        @Override
+        public int hashCode() {
+            return id;
+        }
+    }
 
     /** {@code ServerboundKeepAlivePacket}. */
     record KeepAlive(long id) implements ServerboundPacket {}

@@ -404,29 +404,52 @@ public final class PacketTranslator {
             // Most outbound traffic: skip the type switch, which tests every case in turn (JDK 21 typeSwitch).
             return unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         }
+        // The type switch tests its cases in turn (JDK 21 typeSwitch): the most frequent come first.
         return switch (packet) {
-            case ClientboundPingPacket ping -> new ClientboundPacket.Ping(ping.getId());
-            case ClientboundKeepAlivePacket keepAlive -> new ClientboundPacket.KeepAlive(keepAlive.getId());
+            case ClientboundMoveEntityPacket move -> new ClientboundPacket.MoveEntity((int) MOVE_ENTITY_ID.get(move),
+                    move.getXa(), move.getYa(), move.getZa(), (byte) MOVE_ENTITY_Y_ROT.get(move), (byte) MOVE_ENTITY_X_ROT.get(move),
+                    move.isOnGround(), move.hasPosition(), move.hasRotation());
+            case ClientboundRotateHeadPacket head -> new ClientboundPacket.RotateHead((int) ROTATE_HEAD_ID.get(head),
+                    (byte) ROTATE_HEAD_Y_HEAD_ROT.get(head));
+            case ClientboundSetEntityDataPacket data -> entityData(data);
+            case ClientboundEntityPositionSyncPacket sync -> new ClientboundPacket.EntityPositionSync(sync.id(),
+                    vec(sync.values().position()), vec(sync.values().deltaMovement()), sync.values().yRot(), sync.values().xRot(), sync.onGround());
             case ClientboundSetEntityMotionPacket motion -> fromWire
                     ? ClientboundPacket.SetEntityMotion.received(motion.getId(), vec(motion.getMovement()))
                     : ClientboundPacket.SetEntityMotion.sent(motion.getId(), vec(motion.getMovement()));
-            case ClientboundExplodePacket explode -> new ClientboundPacket.Explosion(
-                    vec(explode.center()), explode.radius(), explode.playerKnockback().map(PacketTranslator::vec).orElse(null));
-            case ClientboundPlayerPositionPacket position -> new ClientboundPacket.PlayerPosition(
-                    position.id(), vec(position.change().position()), vec(position.change().deltaMovement()),
-                    position.change().yRot(), position.change().xRot(), relatives(position.relatives()));
+            case ClientboundPingPacket ping -> new ClientboundPacket.Ping(ping.getId());
+            case ClientboundKeepAlivePacket keepAlive -> new ClientboundPacket.KeepAlive(keepAlive.getId());
             case ClientboundTeleportEntityPacket teleport -> {
                 PositionMoveRotation change = teleport.change();
                 yield new ClientboundPacket.TeleportEntity(teleport.id(), vec(change.position()), vec(change.deltaMovement()), change.yRot(),
                         change.xRot(), relatives(teleport.relatives()), teleport.onGround());
             }
-            case ClientboundPlayerRotationPacket rotation -> new ClientboundPacket.PlayerRotation(
-                    rotation.yRot(), rotation.relativeY(), rotation.xRot(), rotation.relativeX());
+            case ClientboundAddEntityPacket add -> addEntity(add, fromWire);
+            case ClientboundRemoveEntitiesPacket remove -> new ClientboundPacket.RemoveEntities(remove.getEntityIds().toIntArray());
             case ClientboundUpdateAttributesPacket attributes -> attributes(attributes);
+            case ClientboundBlockUpdatePacket update -> new ClientboundPacket.BlockUpdate(position(update.getPos()), Block.getId(update.getBlockState()));
+            case ClientboundSectionBlocksUpdatePacket update -> sectionUpdate(update);
+            // The game's view has no bytes yet; see levelChunk(ByteBuf) for the edge and withBody for the game-only view.
+            case ClientboundLevelChunkWithLightPacket chunk -> new ClientboundPacket.LevelChunk(chunk.getX(), chunk.getZ(), null);
+            case ClientboundForgetLevelChunkPacket forget -> new ClientboundPacket.ForgetLevelChunk(forget.pos().x, forget.pos().z);
+            case ClientboundSetChunkCacheCenterPacket center -> new ClientboundPacket.ChunkCacheCenter(center.getX(), center.getZ());
+            case ClientboundBlockChangedAckPacket ack -> new ClientboundPacket.BlockChangedAck(ack.sequence());
+            case ClientboundSetPassengersPacket passengers -> new ClientboundPacket.SetPassengers(passengers.getVehicle(),
+                    passengers.getPassengers().clone());
+            case ClientboundMoveVehiclePacket vehicle -> new ClientboundPacket.MoveVehicle(vec(vehicle.position()), vehicle.yRot(), vehicle.xRot());
+            case ClientboundPlayerInfoUpdatePacket info -> playerInfo(info);
+            case ClientboundPlayerInfoRemovePacket remove -> new ClientboundPacket.PlayerInfoRemove(remove.profileIds());
             case ClientboundUpdateMobEffectPacket effect -> new ClientboundPacket.MobEffect(
                     effect.getEntityId(), key(effect.getEffect()), effect.getEffectAmplifier(), effect.getEffectDurationTicks(),
                     (effect.isEffectAmbient() ? 1 : 0) | (effect.isEffectVisible() ? 2 : 0) | (effect.effectShowsIcon() ? 4 : 0) | (effect.shouldBlend() ? 8 : 0));
             case ClientboundRemoveMobEffectPacket remove -> new ClientboundPacket.RemoveMobEffect(remove.entityId(), key(remove.effect()));
+            case ClientboundExplodePacket explode -> new ClientboundPacket.Explosion(
+                    vec(explode.center()), explode.radius(), explode.playerKnockback().map(PacketTranslator::vec).orElse(null));
+            case ClientboundPlayerPositionPacket position -> new ClientboundPacket.PlayerPosition(
+                    position.id(), vec(position.change().position()), vec(position.change().deltaMovement()),
+                    position.change().yRot(), position.change().xRot(), relatives(position.relatives()));
+            case ClientboundPlayerRotationPacket rotation -> new ClientboundPacket.PlayerRotation(
+                    rotation.yRot(), rotation.relativeY(), rotation.xRot(), rotation.relativeX());
             case ClientboundPlayerAbilitiesPacket abilities -> new ClientboundPacket.PlayerAbilities(
                     abilities.isInvulnerable(), abilities.isFlying(), abilities.canFly(), abilities.canInstabuild(),
                     abilities.getFlyingSpeed(), abilities.getWalkingSpeed());
@@ -434,31 +457,9 @@ public final class PacketTranslator {
             case ClientboundLoginPacket login -> new ClientboundPacket.Login(
                     login.playerId(), login.chunkRadius(), dimension(login.commonPlayerSpawnInfo()));
             case ClientboundRespawnPacket respawn -> new ClientboundPacket.Respawn(dimension(respawn.commonPlayerSpawnInfo()));
-            // The game's view has no bytes yet; see levelChunk(ByteBuf) for the edge and withBody for the game-only view.
-            case ClientboundLevelChunkWithLightPacket chunk -> new ClientboundPacket.LevelChunk(chunk.getX(), chunk.getZ(), null);
-            case ClientboundForgetLevelChunkPacket forget -> new ClientboundPacket.ForgetLevelChunk(forget.pos().x, forget.pos().z);
-            case ClientboundBlockUpdatePacket update -> new ClientboundPacket.BlockUpdate(position(update.getPos()), Block.getId(update.getBlockState()));
-            case ClientboundSectionBlocksUpdatePacket update -> sectionUpdate(update);
-            case ClientboundBlockChangedAckPacket ack -> new ClientboundPacket.BlockChangedAck(ack.sequence());
-            case ClientboundSetChunkCacheCenterPacket center -> new ClientboundPacket.ChunkCacheCenter(center.getX(), center.getZ());
             case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
             case ClientboundTickingStatePacket state -> new ClientboundPacket.TickingState(state.tickRate(), state.isFrozen());
             case ClientboundTickingStepPacket step -> new ClientboundPacket.TickingStep(step.tickSteps());
-            case ClientboundPlayerInfoUpdatePacket info -> playerInfo(info);
-            case ClientboundPlayerInfoRemovePacket remove -> new ClientboundPacket.PlayerInfoRemove(remove.profileIds());
-            case ClientboundMoveEntityPacket move -> new ClientboundPacket.MoveEntity((int) MOVE_ENTITY_ID.get(move),
-                    move.getXa(), move.getYa(), move.getZa(), (byte) MOVE_ENTITY_Y_ROT.get(move), (byte) MOVE_ENTITY_X_ROT.get(move),
-                    move.isOnGround(), move.hasPosition(), move.hasRotation());
-            case ClientboundEntityPositionSyncPacket sync -> new ClientboundPacket.EntityPositionSync(sync.id(),
-                    vec(sync.values().position()), vec(sync.values().deltaMovement()), sync.values().yRot(), sync.values().xRot(), sync.onGround());
-            case ClientboundSetEntityDataPacket data -> entityData(data);
-            case ClientboundRotateHeadPacket head -> new ClientboundPacket.RotateHead((int) ROTATE_HEAD_ID.get(head),
-                    (byte) ROTATE_HEAD_Y_HEAD_ROT.get(head));
-            case ClientboundAddEntityPacket add -> addEntity(add, fromWire);
-            case ClientboundRemoveEntitiesPacket remove -> new ClientboundPacket.RemoveEntities(remove.getEntityIds().toIntArray());
-            case ClientboundSetPassengersPacket passengers -> new ClientboundPacket.SetPassengers(passengers.getVehicle(),
-                    passengers.getPassengers().clone());
-            case ClientboundMoveVehiclePacket vehicle -> new ClientboundPacket.MoveVehicle(vec(vehicle.position()), vehicle.yRot(), vehicle.xRot());
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }

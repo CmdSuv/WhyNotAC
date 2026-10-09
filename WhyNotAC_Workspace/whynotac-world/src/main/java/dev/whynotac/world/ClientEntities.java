@@ -1025,13 +1025,14 @@ public final class ClientEntities {
             return;
         }
         // LivingEntity.aiStep (RemotePlayer.aiStep for players): interpolation, then the head.
-        List<State> stepped = new ArrayList<>(1);
+        int from = out.size();
         if (s.kind.interpolationSteps() > 0 && s.steps > 0) {
-            interpolate(s, stepped);
+            interpolate(s, out);
         } else {
-            stepped.add(s);
+            out.add(s);
         }
-        for (State t : stepped) {
+        for (int i = from; i < out.size(); i++) {
+            State t = out.get(i);
             if (t.headSteps > 0) {
                 // LivingEntity.lerpHeadRotationStep: yHeadRot = (float) rotLerp(1.0 / steps, yHeadRot, target).
                 double step = 1.0 / t.headSteps;
@@ -1042,13 +1043,12 @@ public final class ClientEntities {
                 t.headSteps--;
             }
         }
-        out.addAll(stepped);
     }
 
     /** {@code InterpolationHandler.interpolate}. */
     private void interpolate(State s, List<State> out) {
         double d = 1.0 / s.steps;
-        List<State> branched = new ArrayList<>(2);
+        int from = out.size();
         if (s.hasPrevPos) {
             // If the entity was moved since the last step, the target moves with it when the box at the
             // moved target is free of collisions: unknown here, so both. Not moved: the movement is exactly
@@ -1066,12 +1066,13 @@ public final class ClientEntities {
                 added.tz = s.tz + dz;
                 added.rTarget = s.rTarget + dr + (dr > 0 || s.rTarget > 0
                         ? margin(Math.max(Math.abs(added.tx), Math.max(Math.abs(added.ty), Math.abs(added.tz))), 0.0) : 0.0);
-                branched.add(added);
+                out.add(added);
                 branches++;
             }
         }
-        branched.add(s);
-        for (State t : branched) {
+        out.add(s);
+        for (int i = from; i < out.size(); i++) {
+            State t = out.get(i);
             if (t.hasPrevRot) {
                 // The same for the rotation, without a collision test.
                 float dyRot = t.rotMoved ? t.yRot - t.pyRot : 0.0F;
@@ -1115,7 +1116,6 @@ public final class ClientEntities {
             t.pyRot = t.yRot;
             t.rPrevRot = t.rRot;
             t.rotMoved = false;
-            out.add(t);
         }
     }
 
@@ -1149,24 +1149,22 @@ public final class ClientEntities {
 
     /** Whether the candidate's chunk ticks entities for every prefix X in (lower, upper]. */
     private Tri chunkTicking(State s, long lower, long upper) {
-        if (s.rPos == 0.0 && chunks.settledBefore(lower, upper)) {
-            // The common case: one chunk, and no chunk changed within the prefixes in question.
-            long key = ClientWorld.chunkKey(VanillaMath.floor(s.x) >> 4, VanillaMath.floor(s.z) >> 4);
-            if (key != s.tickingKey || chunks.version != s.tickingVersion) {
-                s.tickingKey = key;
-                s.tickingVersion = chunks.version;
-                s.tickingValue = chunks.tickingNow(key);
-            }
-            return s.tickingValue ? Tri.TRUE : Tri.FALSE;
-        }
-        long[] keys = chunkKeys(s);
-        if (keys == null) {
+        // Every chunk the candidate may be in (blockPosition >> 4): one when its position is exact.
+        int x0 = VanillaMath.floor(s.x - s.rPos) >> 4;
+        int x1 = VanillaMath.floor(s.x + s.rPos) >> 4;
+        int z0 = VanillaMath.floor(s.z - s.rPos) >> 4;
+        int z1 = VanillaMath.floor(s.z + s.rPos) >> 4;
+        if ((long) (x1 - x0 + 1) * (z1 - z0 + 1) > 16) {
             return Tri.MAYBE;
         }
-        Tri result = chunks.ticking(keys[0], lower, upper);
-        for (int i = 1; i < keys.length && result != Tri.MAYBE; i++) {
-            if (chunks.ticking(keys[i], lower, upper) != result) {
-                result = Tri.MAYBE;
+        Tri result = null;
+        for (int x = x0; x <= x1; x++) {
+            for (int z = z0; z <= z1; z++) {
+                Tri chunk = chunks.ticking(ClientWorld.chunkKey(x, z), lower, upper);
+                if (result != null && chunk != result || chunk == Tri.MAYBE) {
+                    return Tri.MAYBE;
+                }
+                result = chunk;
             }
         }
         return result;
@@ -1175,25 +1173,6 @@ public final class ClientEntities {
     /** At the exact prefix just after {@code seq - 1}: the client processes the op at {@code seq}. */
     private Tri chunkTickingAt(State s, long lower, long seq) {
         return chunkTicking(s, lower, seq);
-    }
-
-    /** The chunks the candidate may be in ({@code blockPosition >> 4}); null when there are too many to list. */
-    private static long[] chunkKeys(State s) {
-        int x0 = VanillaMath.floor(s.x - s.rPos) >> 4;
-        int x1 = VanillaMath.floor(s.x + s.rPos) >> 4;
-        int z0 = VanillaMath.floor(s.z - s.rPos) >> 4;
-        int z1 = VanillaMath.floor(s.z + s.rPos) >> 4;
-        if ((long) (x1 - x0 + 1) * (z1 - z0 + 1) > 16) {
-            return null;
-        }
-        long[] keys = new long[(x1 - x0 + 1) * (z1 - z0 + 1)];
-        int i = 0;
-        for (int x = x0; x <= x1; x++) {
-            for (int z = z0; z <= z1; z++) {
-                keys[i++] = ClientWorld.chunkKey(x, z);
-            }
-        }
-        return keys;
     }
 
     private static Tri distanceSqrAtMost(double x, double y, double z, double radius, Vec3d p, double limit) {
@@ -1559,10 +1538,6 @@ public final class ClientEntities {
         float pyRot;
         float rPrevRot;
         boolean rotMoved;
-        // cache of the chunk-ticking answer (ChunkTicking.version): not part of the client's state
-        long tickingKey = Long.MIN_VALUE;
-        long tickingVersion = -1;
-        boolean tickingValue;
         // LivingEntity head
         int headSteps;
         double headTarget;
@@ -1797,22 +1772,13 @@ public final class ClientEntities {
         private long[] slots;
         private int centerX;
         private int centerZ;
-        private final java.util.HashSet<Long> ticking = new java.util.HashSet<>();
-        private final Map<Long, Versioned> history = new HashMap<>();
+        /** Per chunk: whether it ticks (the head) and the changes not every prefix has seen. Absent: it does not tick. */
+        private final LongMap<Versioned> history = new LongMap<>();
+        /** The chunks whose history holds changes, the only ones {@link #prune} has to visit. */
+        private long[] changed = new long[16];
+        private int changedCount;
         /** From this sequence on, which chunks tick is not known. */
         private long uncertainFrom = Long.MAX_VALUE;
-        /** Bumped on every change: answers cached against it stay valid while it does not move. */
-        long version;
-        private long lastChange = Long.MIN_VALUE;
-
-        /** True if no chunk changed after {@code lower} and nothing is uncertain up to {@code upper}: {@link #tickingNow} answers. */
-        boolean settledBefore(long lower, long upper) {
-            return lastChange <= lower && uncertainFrom >= upper;
-        }
-
-        boolean tickingNow(long key) {
-            return ticking.contains(key);
-        }
 
         ChunkTicking() {
             reset(Long.MIN_VALUE, range(-1));
@@ -1824,21 +1790,20 @@ public final class ClientEntities {
         }
 
         void reset(long seq, int newRadius) {
-            for (Long key : List.copyOf(ticking)) {
-                change(seq, key, false);
-            }
-            ticking.clear();
+            history.forEach((key, h) -> {
+                if (h.head() == 1) {
+                    change(seq, key, false);
+                }
+            });
             radius = newRadius;
             viewRange = newRadius * 2 + 1;
             slots = new long[viewRange * viewRange];
             Arrays.fill(slots, EMPTY);
             uncertainFrom = Long.MAX_VALUE;
-            version++;
         }
 
         void uncertain(long seq) {
             uncertainFrom = Math.min(uncertainFrom, seq);
-            version++;
         }
 
         private int index(int x, int z) {
@@ -1898,13 +1863,23 @@ public final class ClientEntities {
             }
         }
 
-        private void change(long seq, long key, boolean value) {
-            if (value ? !ticking.add(key) : !ticking.remove(key)) {
+        private void change(long seq, long key, boolean ticks) {
+            int value = ticks ? 1 : 0;
+            Versioned h = history.get(key);
+            if ((h == null ? 0 : h.head()) == value) {
                 return;
             }
-            version++;
-            lastChange = Math.max(lastChange, seq);
-            history.computeIfAbsent(key, k -> new Versioned(0)).set(seq, value ? 1 : 0);
+            if (h == null) {
+                h = new Versioned(0);
+                history.put(key, h);
+            }
+            if (h.size == 0) {
+                if (changedCount == changed.length) {
+                    changed = Arrays.copyOf(changed, changedCount * 2);
+                }
+                changed[changedCount++] = key;
+            }
+            h.set(seq, value);
         }
 
         Tri ticking(long key, long lower, long upper) {
@@ -1923,13 +1898,18 @@ public final class ClientEntities {
         }
 
         void prune(long certain) {
-            for (Iterator<Versioned> it = history.values().iterator(); it.hasNext(); ) {
-                Versioned h = it.next();
+            int kept = 0;
+            for (int i = 0; i < changedCount; i++) {
+                long key = changed[i];
+                Versioned h = history.get(key);
                 h.prune(certain);
-                if (h.size == 0 && h.initial == 0) {
-                    it.remove();
+                if (h.size > 0) {
+                    changed[kept++] = key;
+                } else if (h.initial == 0) {
+                    history.remove(key);
                 }
             }
+            changedCount = kept;
         }
     }
 }
