@@ -20,6 +20,11 @@ public final class TransactionPolicy {
             // Most frequent first: a pattern switch tests its labels in order.
             case ClientboundPacket.Unmodeled ignored -> false;
             case ClientboundPacket.Ping ignored -> false;
+            // Other entities, as the client sees them: bounded by the per-tick transactions, like the world.
+            case ClientboundPacket.MoveEntity ignored -> false;
+            case ClientboundPacket.EntityPositionSync ignored -> false;
+            case ClientboundPacket.SetEntityData ignored -> false;
+            case ClientboundPacket.RotateHead ignored -> false;
             case ClientboundPacket.SetEntityMotion motion -> targetsSelf(motion.entityId(), selfEntityId);
             case ClientboundPacket.UpdateAttributes attributes -> targetsSelf(attributes.entityId(), selfEntityId);
             case ClientboundPacket.MobEffect effect -> targetsSelf(effect.entityId(), selfEntityId);
@@ -44,6 +49,11 @@ public final class TransactionPolicy {
             case ClientboundPacket.BlockChangedAck ignored -> false;
             case ClientboundPacket.ChunkCacheCenter ignored -> false;
             case ClientboundPacket.ChunkCacheRadius ignored -> false;
+            case ClientboundPacket.AddEntity ignored -> false;
+            case ClientboundPacket.RemoveEntities ignored -> false;
+            // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).
+            case ClientboundPacket.SetPassengers ignored -> true;
+            case ClientboundPacket.MoveVehicle ignored -> true; // moves the vehicle the player controls
             case ClientboundPacket.Untranslatable ignored -> true; // unknown effect: bracket it like a physics change
         };
     }

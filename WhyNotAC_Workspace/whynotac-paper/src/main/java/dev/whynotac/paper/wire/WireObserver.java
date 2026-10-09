@@ -607,6 +607,7 @@ public final class WireObserver {
     static ClientboundPacket canonical(ClientboundPacket packet) {
         return switch (packet) {
             case ClientboundPacket.SetEntityMotion motion -> motion.asReceived();
+            case ClientboundPacket.AddEntity add -> add.asReceived();
             // The game's view carries no chunk bytes (the edge has them): compare coordinates only.
             case ClientboundPacket.LevelChunk chunk -> chunk.withoutBody();
             default -> packet;

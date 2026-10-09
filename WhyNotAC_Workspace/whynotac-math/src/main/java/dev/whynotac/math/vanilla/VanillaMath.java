@@ -184,6 +184,26 @@ public final class VanillaMath {
         return wrapDegrees(to - from);
     }
 
+    /** {@code Mth.packDegrees(float)}: an angle as the protocol's byte, {@code floor(deg * 256 / 360)} in float. */
+    public static byte packDegrees(float degrees) {
+        return (byte) floor(degrees * 256.0F / 360.0F);
+    }
+
+    /** {@code Mth.unpackDegrees(byte)}: an int product, then a float division. */
+    public static float unpackDegrees(byte packed) {
+        return packed * 360 / 256.0F;
+    }
+
+    /** {@code Mth.rotLerp(float, float, float)}: {@code start + delta * wrapDegrees(end - start)}. */
+    public static float rotLerp(float delta, float start, float end) {
+        return start + delta * wrapDegrees(end - start);
+    }
+
+    /** {@code Mth.rotLerp(double, double, double)} (entity interpolation calls it with widened float angles). */
+    public static double rotLerp(double delta, double start, double end) {
+        return start + delta * wrapDegrees(end - start);
+    }
+
     /** {@code Mth.positiveModulo(double, double)}. */
     public static double positiveModulo(double value, double modulus) {
         return (value % modulus + modulus) % modulus;

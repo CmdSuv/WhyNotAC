@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import net.minecraft.network.protocol.game.ClientboundAnimatePacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,8 @@ class OutboundFastPathTest {
     @Test
     void classesAreClassified() {
         assertTrue(PacketTranslator.OUTBOUND_MODELLED.get(ClientboundLevelChunkWithLightPacket.class));
-        assertFalse(PacketTranslator.OUTBOUND_MODELLED.get(ClientboundMoveEntityPacket.Pos.class));
+        assertTrue(PacketTranslator.OUTBOUND_MODELLED.get(ClientboundMoveEntityPacket.Pos.class), "a subclass of a modelled class");
+        assertFalse(PacketTranslator.OUTBOUND_MODELLED.get(ClientboundAnimatePacket.class));
     }
 
     private static Set<String> names(String text, String regex) {

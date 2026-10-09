@@ -169,11 +169,132 @@ public sealed interface ClientboundPacket {
     record PlayerRotation(float yaw, boolean relativeYaw, float pitch, boolean relativePitch) implements ClientboundPacket {}
 
     /**
-     * {@code ClientboundTeleportEntityPacket}, entity id only (the position is not modelled yet). It
-     * matters to the player itself in one case: a teleport of its former vehicle moves the player, and
-     * the client answers it with a movement packet outside its tick.
+     * {@code ClientboundTeleportEntityPacket}: an entity's position, velocity and rotation, each absolute
+     * or relative ({@code relatives}). It also matters to the player itself: a teleport of its former
+     * vehicle moves the player, and the client answers it with a movement packet outside its tick.
+     * {@code position} is null in recordings older than these fields (entity id only).
      */
-    record TeleportEntity(int entityId) implements ClientboundPacket {}
+    record TeleportEntity(int entityId, Vec3d position, Vec3d deltaMovement, float yRot, float xRot, Set<RelativeFlag> relatives,
+                          boolean onGround) implements ClientboundPacket {
+        public TeleportEntity {
+            relatives = relatives == null ? null : Set.copyOf(relatives);
+        }
+
+        /** As read from a recording that kept the entity id only. */
+        public static TeleportEntity idOnly(int entityId) {
+            return new TeleportEntity(entityId, null, null, 0F, 0F, null, false);
+        }
+    }
+
+    /**
+     * {@code ClientboundAddEntityPacket}: a new entity in the client's world. Angles are the wire bytes
+     * (the client unpacks them with {@code Mth.unpackDegrees}); {@code type} is the entity type key;
+     * {@code data} is the type-specific int (a falling block's state, a projectile's owner, a hanging
+     * entity's direction). Velocity as for {@link SetEntityMotion}: the client's value from the lossy
+     * {@code LpVec3}, and the server's own value in the game's view only.
+     */
+    record AddEntity(int entityId, java.util.UUID uuid, String type, double x, double y, double z, Vec3d clientMotion, Vec3d serverMotion,
+                     byte xRot, byte yRot, byte yHeadRot, int data) implements ClientboundPacket {
+        /** As decoded at the network edge: what the client received. */
+        public static AddEntity received(int entityId, java.util.UUID uuid, String type, double x, double y, double z, Vec3d clientMotion,
+                byte xRot, byte yRot, byte yHeadRot, int data) {
+            return new AddEntity(entityId, uuid, type, x, y, z, clientMotion, null, xRot, yRot, yHeadRot, data);
+        }
+
+        /** As the game sent it: the client will apply the single quantization of the velocity. */
+        public static AddEntity sent(int entityId, java.util.UUID uuid, String type, double x, double y, double z, Vec3d serverMotion,
+                byte xRot, byte yRot, byte yHeadRot, int data) {
+            return new AddEntity(entityId, uuid, type, x, y, z, LpVec3.quantize(serverMotion), serverMotion, xRot, yRot, yHeadRot, data);
+        }
+
+        /** This packet as the client sees it (without the server-side value), for comparing views. */
+        public AddEntity asReceived() {
+            return serverMotion == null ? this : received(entityId, uuid, type, x, y, z, clientMotion, xRot, yRot, yHeadRot, data);
+        }
+    }
+
+    /** {@code ClientboundRemoveEntitiesPacket}. */
+    record RemoveEntities(int[] entityIds) implements ClientboundPacket {
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof RemoveEntities r && Arrays.equals(r.entityIds, entityIds);
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(entityIds);
+        }
+
+        @Override
+        public String toString() {
+            return "RemoveEntities" + Arrays.toString(entityIds);
+        }
+    }
+
+    /**
+     * {@code ClientboundMoveEntityPacket} ({@code Pos}, {@code PosRot}, {@code Rot}): position deltas in
+     * 1/4096 block relative to the client's codec base for the entity ({@code VecDeltaCodec}), angles as
+     * wire bytes. Fields a shape does not carry are zero.
+     */
+    record MoveEntity(int entityId, short xa, short ya, short za, byte yRot, byte xRot, boolean onGround, boolean hasPosition,
+                      boolean hasRotation) implements ClientboundPacket {}
+
+    /** {@code ClientboundEntityPositionSyncPacket}: an entity's absolute position, velocity and rotation. */
+    record EntityPositionSync(int entityId, Vec3d position, Vec3d deltaMovement, float yRot, float xRot, boolean onGround)
+            implements ClientboundPacket {}
+
+    /** {@code ClientboundRotateHeadPacket}; the head yaw as the wire byte. */
+    record RotateHead(int entityId, byte yHeadRot) implements ClientboundPacket {}
+
+    /** {@code ClientboundSetPassengersPacket}: the complete passenger list of a vehicle. */
+    record SetPassengers(int vehicleId, int[] passengerIds) implements ClientboundPacket {
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof SetPassengers p && p.vehicleId == vehicleId && Arrays.equals(p.passengerIds, passengerIds);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * vehicleId + Arrays.hashCode(passengerIds);
+        }
+
+        @Override
+        public String toString() {
+            return "SetPassengers[vehicleId=" + vehicleId + ", passengerIds=" + Arrays.toString(passengerIds) + "]";
+        }
+    }
+
+    /** {@code ClientboundMoveVehiclePacket}: the server moves the vehicle the player controls. */
+    record MoveVehicle(Vec3d position, float yRot, float xRot) implements ClientboundPacket {}
+
+    /**
+     * {@code ClientboundSetEntityDataPacket}: synched data values of an entity. Scalar values are kept
+     * exactly ({@link DataEntry}): flags, pose, sizes, ages, booleans. Values of other serializers (items,
+     * text, NBT, particles, vectors, ...) are only counted in {@code dropped}: never misread, and none of
+     * them changes where an entity is or how big it is.
+     */
+    record SetEntityData(int entityId, List<DataEntry> entries, int dropped) implements ClientboundPacket {
+        public SetEntityData {
+            entries = List.copyOf(entries);
+        }
+
+        /**
+         * One value: the accessor's index (its meaning depends on the entity type) and the value's bits
+         * by {@code kind}: a float as {@code Float.floatToRawIntBits}, a boolean as 0/1, a pose or direction
+         * as the ordinal of {@link EntityPose} or {@link BlockFace}, an optional int or block state as
+         * -1 when empty.
+         */
+        public record DataEntry(int index, Kind kind, long value) {}
+
+        /** The scalar serializers kept. {@code UNKNOWN}: a constant this build does not know (never produced for data). */
+        public enum Kind { BYTE, INT, LONG, FLOAT, BOOLEAN, POSE, DIRECTION, OPTIONAL_UNSIGNED_INT, BLOCK_STATE, OPTIONAL_BLOCK_STATE }
+    }
+
+    /** {@code net.minecraft.world.entity.Pose}, by name. {@code UNKNOWN}: a constant this build does not know. Always last. */
+    enum EntityPose {
+        STANDING, FALL_FLYING, SLEEPING, SWIMMING, SPIN_ATTACK, CROUCHING, LONG_JUMPING, DYING, CROAKING, USING_TONGUE, SITTING, ROARING,
+        SNIFFING, EMERGING, DIGGING, SLIDING, SHOOTING, INHALING, UNKNOWN
+    }
 
     /** {@code ClientboundUpdateAttributesPacket} (movement speed, gravity, step height, jump strength, scale, ...). */
     record UpdateAttributes(int entityId, List<Attribute> attributes) implements ClientboundPacket {

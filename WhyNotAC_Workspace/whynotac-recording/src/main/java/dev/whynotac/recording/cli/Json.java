@@ -62,6 +62,13 @@ final class Json {
                 }
                 out.append(']');
             }
+            case int[] ints -> {
+                out.append('[');
+                for (int i = 0; i < ints.length; i++) {
+                    out.append(i == 0 ? "" : ",").append(ints[i]);
+                }
+                out.append(']');
+            }
             case Map<?, ?> map -> {
                 out.append('{');
                 boolean first = true;

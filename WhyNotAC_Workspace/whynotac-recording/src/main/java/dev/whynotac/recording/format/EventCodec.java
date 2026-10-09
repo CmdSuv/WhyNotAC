@@ -167,6 +167,14 @@ public final class EventCodec {
             body.writeDouble(v.z());
         }
 
+        private static int relativeMask(Set<RelativeFlag> relatives) {
+            int mask = 0;
+            for (RelativeFlag flag : relatives) {
+                mask |= 1 << flag.ordinal();
+            }
+            return mask;
+        }
+
         private void position(BlockPosition p) {
             body.writeZigZag(p.x());
             body.writeZigZag(p.y());
@@ -427,15 +435,101 @@ public final class EventCodec {
                     vec(p.deltaMovement());
                     body.writeFloat(p.yaw());
                     body.writeFloat(p.pitch());
-                    int mask = 0;
-                    for (RelativeFlag flag : p.relatives()) {
-                        mask |= 1 << flag.ordinal();
+                    body.writeVarInt(relativeMask(p.relatives()));
+                }
+                case ClientboundPacket.MoveEntity m -> {
+                    body.writeVarInt(CB_MOVE_ENTITY);
+                    body.writeZigZag(m.entityId());
+                    // Each shape carries only its own fields (the others are zero); a packet that breaks that is written in full.
+                    boolean full = !m.hasPosition() && (m.xa() | m.ya() | m.za()) != 0 || !m.hasRotation() && (m.yRot() | m.xRot()) != 0;
+                    body.writeByte((m.onGround() ? 1 : 0) | (m.hasPosition() ? 2 : 0) | (m.hasRotation() ? 4 : 0) | (full ? 8 : 0));
+                    if (m.hasPosition() || full) {
+                        body.writeZigZag(m.xa());
+                        body.writeZigZag(m.ya());
+                        body.writeZigZag(m.za());
                     }
-                    body.writeVarInt(mask);
+                    if (m.hasRotation() || full) {
+                        body.writeByte(m.yRot());
+                        body.writeByte(m.xRot());
+                    }
+                }
+                case ClientboundPacket.EntityPositionSync p -> {
+                    body.writeVarInt(CB_ENTITY_POSITION_SYNC);
+                    body.writeZigZag(p.entityId());
+                    vec(p.position());
+                    vec(p.deltaMovement());
+                    body.writeFloat(p.yRot());
+                    body.writeFloat(p.xRot());
+                    body.writeByte(p.onGround() ? 1 : 0);
+                }
+                case ClientboundPacket.SetEntityData d -> {
+                    body.writeVarInt(CB_SET_ENTITY_DATA);
+                    body.writeZigZag(d.entityId());
+                    body.writeVarInt(d.dropped());
+                    body.writeVarInt(d.entries().size());
+                    for (ClientboundPacket.SetEntityData.DataEntry entry : d.entries()) {
+                        body.writeVarInt(entry.index());
+                        body.writeVarInt(entry.kind().ordinal());
+                        body.writeZigZag(entry.value());
+                    }
+                }
+                case ClientboundPacket.RotateHead h -> {
+                    body.writeVarInt(CB_ROTATE_HEAD);
+                    body.writeZigZag(h.entityId());
+                    body.writeByte(h.yHeadRot());
+                }
+                case ClientboundPacket.AddEntity a -> {
+                    body.writeVarInt(CB_ADD_ENTITY);
+                    body.writeZigZag(a.entityId());
+                    writeUuid(a.uuid());
+                    string(a.type());
+                    body.writeDouble(a.x());
+                    body.writeDouble(a.y());
+                    body.writeDouble(a.z());
+                    vec(a.clientMotion());
+                    body.writeByte(a.serverMotion() == null ? 0 : 1);
+                    if (a.serverMotion() != null) {
+                        vec(a.serverMotion());
+                    }
+                    body.writeByte(a.xRot());
+                    body.writeByte(a.yRot());
+                    body.writeByte(a.yHeadRot());
+                    body.writeZigZag(a.data());
+                }
+                case ClientboundPacket.RemoveEntities r -> {
+                    body.writeVarInt(CB_REMOVE_ENTITIES);
+                    body.writeVarInt(r.entityIds().length);
+                    for (int id : r.entityIds()) {
+                        body.writeZigZag(id);
+                    }
+                }
+                case ClientboundPacket.SetPassengers p -> {
+                    body.writeVarInt(CB_SET_PASSENGERS);
+                    body.writeZigZag(p.vehicleId());
+                    body.writeVarInt(p.passengerIds().length);
+                    for (int id : p.passengerIds()) {
+                        body.writeZigZag(id);
+                    }
+                }
+                case ClientboundPacket.MoveVehicle v -> {
+                    body.writeVarInt(CB_MOVE_VEHICLE);
+                    vec(v.position());
+                    body.writeFloat(v.yRot());
+                    body.writeFloat(v.xRot());
+                }
+                case ClientboundPacket.TeleportEntity t when t.position() == null -> {
+                    body.writeVarInt(CB_TELEPORT_ENTITY); // read from an older recording: written back as it was
+                    body.writeZigZag(t.entityId());
                 }
                 case ClientboundPacket.TeleportEntity t -> {
-                    body.writeVarInt(CB_TELEPORT_ENTITY);
+                    body.writeVarInt(CB_TELEPORT_ENTITY_FULL);
                     body.writeZigZag(t.entityId());
+                    vec(t.position());
+                    vec(t.deltaMovement());
+                    body.writeFloat(t.yRot());
+                    body.writeFloat(t.xRot());
+                    body.writeVarInt(relativeMask(t.relatives()));
+                    body.writeByte(t.onGround() ? 1 : 0);
                 }
                 case ClientboundPacket.PlayerRotation r -> {
                     body.writeVarInt(CB_PLAYER_ROTATION);
@@ -791,19 +885,85 @@ public final class EventCodec {
                     Vec3d delta = vec(in);
                     float yaw = in.readFloat();
                     float pitch = in.readFloat();
-                    int mask = in.readVarInt();
-                    Set<RelativeFlag> relatives = EnumSet.noneOf(RelativeFlag.class);
-                    for (RelativeFlag flag : RelativeFlag.values()) {
-                        if ((mask & 1 << flag.ordinal()) != 0) {
-                            relatives.add(flag);
-                        }
-                    }
-                    if (mask >>> RelativeFlag.values().length != 0) {
-                        throw new RecordingFormatException("unknown relative flags " + Integer.toBinaryString(mask));
-                    }
-                    yield new ClientboundPacket.PlayerPosition(teleportId, position, delta, yaw, pitch, relatives);
+                    yield new ClientboundPacket.PlayerPosition(teleportId, position, delta, yaw, pitch, relatives(in.readVarInt()));
                 }
-                case CB_TELEPORT_ENTITY -> new ClientboundPacket.TeleportEntity(zint(in));
+                case CB_TELEPORT_ENTITY -> ClientboundPacket.TeleportEntity.idOnly(zint(in));
+                case CB_TELEPORT_ENTITY_FULL -> {
+                    int entityId = zint(in);
+                    Vec3d position = vec(in);
+                    Vec3d delta = vec(in);
+                    float yRot = in.readFloat();
+                    float xRot = in.readFloat();
+                    Set<RelativeFlag> relatives = relatives(in.readVarInt());
+                    yield new ClientboundPacket.TeleportEntity(entityId, position, delta, yRot, xRot, relatives, in.readUnsignedByte() != 0);
+                }
+                case CB_MOVE_ENTITY -> {
+                    int entityId = zint(in);
+                    int flags = in.readUnsignedByte();
+                    boolean full = (flags & 8) != 0;
+                    boolean hasPosition = (flags & 2) != 0;
+                    boolean hasRotation = (flags & 4) != 0;
+                    short xa = 0;
+                    short ya = 0;
+                    short za = 0;
+                    byte yRot = 0;
+                    byte xRot = 0;
+                    if (hasPosition || full) {
+                        xa = (short) in.readZigZag();
+                        ya = (short) in.readZigZag();
+                        za = (short) in.readZigZag();
+                    }
+                    if (hasRotation || full) {
+                        yRot = (byte) in.readUnsignedByte();
+                        xRot = (byte) in.readUnsignedByte();
+                    }
+                    yield new ClientboundPacket.MoveEntity(entityId, xa, ya, za, yRot, xRot, (flags & 1) != 0, hasPosition, hasRotation);
+                }
+                case CB_ENTITY_POSITION_SYNC -> {
+                    int entityId = zint(in);
+                    Vec3d position = vec(in);
+                    Vec3d delta = vec(in);
+                    float yRot = in.readFloat();
+                    float xRot = in.readFloat();
+                    yield new ClientboundPacket.EntityPositionSync(entityId, position, delta, yRot, xRot, in.readUnsignedByte() != 0);
+                }
+                case CB_SET_ENTITY_DATA -> {
+                    int entityId = zint(in);
+                    int dropped = in.readVarInt();
+                    int count = boundedCount(in);
+                    List<ClientboundPacket.SetEntityData.DataEntry> entries = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        int index = in.readVarInt();
+                        ClientboundPacket.SetEntityData.Kind kind = enumAt(ClientboundPacket.SetEntityData.Kind.values(), in.readVarInt());
+                        entries.add(new ClientboundPacket.SetEntityData.DataEntry(index, kind, in.readZigZag()));
+                    }
+                    yield new ClientboundPacket.SetEntityData(entityId, entries, dropped);
+                }
+                case CB_ROTATE_HEAD -> new ClientboundPacket.RotateHead(zint(in), (byte) in.readUnsignedByte());
+                case CB_ADD_ENTITY -> {
+                    int entityId = zint(in);
+                    UUID uuid = readUuid(in);
+                    String type = string(in);
+                    double x = in.readDouble();
+                    double y = in.readDouble();
+                    double z = in.readDouble();
+                    Vec3d client = vec(in);
+                    Vec3d server = in.readUnsignedByte() != 0 ? vec(in) : null;
+                    byte xRot = (byte) in.readUnsignedByte();
+                    byte yRot = (byte) in.readUnsignedByte();
+                    byte yHeadRot = (byte) in.readUnsignedByte();
+                    yield new ClientboundPacket.AddEntity(entityId, uuid, type, x, y, z, client, server, xRot, yRot, yHeadRot, zint(in));
+                }
+                case CB_REMOVE_ENTITIES -> new ClientboundPacket.RemoveEntities(ids(in));
+                case CB_SET_PASSENGERS -> {
+                    int vehicle = zint(in);
+                    yield new ClientboundPacket.SetPassengers(vehicle, ids(in));
+                }
+                case CB_MOVE_VEHICLE -> {
+                    Vec3d position = vec(in);
+                    float yRot = in.readFloat();
+                    yield new ClientboundPacket.MoveVehicle(position, yRot, in.readFloat());
+                }
                 case CB_PLAYER_ROTATION -> {
                     float yaw = in.readFloat();
                     float pitch = in.readFloat();
@@ -842,6 +1002,27 @@ public final class EventCodec {
                     yield new ClientboundPacket.Unmodeled(UNKNOWN_PACKET_PREFIX + tag);
                 }
             };
+        }
+
+        private static int[] ids(ByteSource in) {
+            int[] ids = new int[boundedCount(in)];
+            for (int i = 0; i < ids.length; i++) {
+                ids[i] = zint(in);
+            }
+            return ids;
+        }
+
+        private static Set<RelativeFlag> relatives(int mask) {
+            Set<RelativeFlag> relatives = EnumSet.noneOf(RelativeFlag.class);
+            for (RelativeFlag flag : RelativeFlag.values()) {
+                if ((mask & 1 << flag.ordinal()) != 0) {
+                    relatives.add(flag);
+                }
+            }
+            if (mask >>> RelativeFlag.values().length != 0) {
+                throw new RecordingFormatException("unknown relative flags " + Integer.toBinaryString(mask));
+            }
+            return relatives;
         }
 
         private static int boundedCount(ByteSource in) {

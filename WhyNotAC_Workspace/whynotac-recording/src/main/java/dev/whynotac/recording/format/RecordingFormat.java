@@ -107,6 +107,16 @@ public final class RecordingFormat {
     public static final int CB_BLOCK_CHANGED_ACK = 24;
     public static final int CB_CHUNK_CACHE_CENTER = 25;
     public static final int CB_CHUNK_CACHE_RADIUS = 26;
+    /** TeleportEntity with position, velocity, rotation, relatives and onGround (CB_TELEPORT_ENTITY: entity id only). */
+    public static final int CB_TELEPORT_ENTITY_FULL = 27;
+    public static final int CB_ADD_ENTITY = 28;
+    public static final int CB_REMOVE_ENTITIES = 29;
+    public static final int CB_MOVE_ENTITY = 30;
+    public static final int CB_ENTITY_POSITION_SYNC = 31;
+    public static final int CB_ROTATE_HEAD = 32;
+    public static final int CB_SET_PASSENGERS = 33;
+    public static final int CB_MOVE_VEHICLE = 34;
+    public static final int CB_SET_ENTITY_DATA = 35;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

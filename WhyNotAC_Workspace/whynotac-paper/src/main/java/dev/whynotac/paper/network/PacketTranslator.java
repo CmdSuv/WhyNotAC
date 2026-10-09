@@ -32,7 +32,16 @@ import net.minecraft.network.protocol.common.ServerboundPongPacket;
 import net.minecraft.network.protocol.common.custom.BrandPayload;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.common.custom.DiscardedPayload;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
+import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
+import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundMoveVehiclePacket;
+import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
+import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
@@ -74,6 +83,11 @@ import net.minecraft.network.protocol.handshake.ClientIntent;
 import net.minecraft.network.protocol.handshake.ClientIntentionPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.network.syncher.EntityDataSerializer;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.world.entity.PositionMoveRotation;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.Relative;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.player.Input;
@@ -94,6 +108,15 @@ public final class PacketTranslator {
 
     private static final VarHandle GAME_EVENT_TYPE_ID;
 
+    private static final VarHandle ADD_ENTITY_X_ROT;
+    private static final VarHandle ADD_ENTITY_Y_ROT;
+    private static final VarHandle ADD_ENTITY_Y_HEAD_ROT;
+    private static final VarHandle MOVE_ENTITY_ID;
+    private static final VarHandle MOVE_ENTITY_Y_ROT;
+    private static final VarHandle MOVE_ENTITY_X_ROT;
+    private static final VarHandle ROTATE_HEAD_ID;
+    private static final VarHandle ROTATE_HEAD_Y_HEAD_ROT;
+
     private static final VarHandle SECTION_POS;
     private static final VarHandle SECTION_POSITIONS;
     private static final VarHandle SECTION_STATES;
@@ -106,6 +129,18 @@ public final class PacketTranslator {
             SECTION_POS = section.findVarHandle(ClientboundSectionBlocksUpdatePacket.class, "sectionPos", SectionPos.class);
             SECTION_POSITIONS = section.findVarHandle(ClientboundSectionBlocksUpdatePacket.class, "positions", short[].class);
             SECTION_STATES = section.findVarHandle(ClientboundSectionBlocksUpdatePacket.class, "states", BlockState[].class);
+            // The client unpacks angles from these bytes; the getters return floats it never sees.
+            MethodHandles.Lookup add = MethodHandles.privateLookupIn(ClientboundAddEntityPacket.class, MethodHandles.lookup());
+            ADD_ENTITY_X_ROT = add.findVarHandle(ClientboundAddEntityPacket.class, "xRot", byte.class);
+            ADD_ENTITY_Y_ROT = add.findVarHandle(ClientboundAddEntityPacket.class, "yRot", byte.class);
+            ADD_ENTITY_Y_HEAD_ROT = add.findVarHandle(ClientboundAddEntityPacket.class, "yHeadRot", byte.class);
+            MethodHandles.Lookup move = MethodHandles.privateLookupIn(ClientboundMoveEntityPacket.class, MethodHandles.lookup());
+            MOVE_ENTITY_ID = move.findVarHandle(ClientboundMoveEntityPacket.class, "entityId", int.class);
+            MOVE_ENTITY_Y_ROT = move.findVarHandle(ClientboundMoveEntityPacket.class, "yRot", byte.class);
+            MOVE_ENTITY_X_ROT = move.findVarHandle(ClientboundMoveEntityPacket.class, "xRot", byte.class);
+            MethodHandles.Lookup head = MethodHandles.privateLookupIn(ClientboundRotateHeadPacket.class, MethodHandles.lookup());
+            ROTATE_HEAD_ID = head.findVarHandle(ClientboundRotateHeadPacket.class, "entityId", int.class);
+            ROTATE_HEAD_Y_HEAD_ROT = head.findVarHandle(ClientboundRotateHeadPacket.class, "yHeadRot", byte.class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -145,6 +180,8 @@ public final class PacketTranslator {
     static final EnumMapping<AttributeModifier.Operation, ClientboundPacket.UpdateAttributes.Operation> OPERATION =
             new EnumMapping<>(AttributeModifier.Operation.class, ClientboundPacket.UpdateAttributes.Operation.class, ClientboundPacket.UpdateAttributes.Operation.UNKNOWN);
     static final EnumMapping<Relative, RelativeFlag> RELATIVE = new EnumMapping<>(Relative.class, RelativeFlag.class, RelativeFlag.UNKNOWN);
+    static final EnumMapping<Pose, ClientboundPacket.EntityPose> POSE =
+            new EnumMapping<>(Pose.class, ClientboundPacket.EntityPose.class, ClientboundPacket.EntityPose.UNKNOWN);
     static final EnumMapping<ClientIntent, ServerboundPacket.Handshake.Intent> INTENT =
             new EnumMapping<>(ClientIntent.class, ServerboundPacket.Handshake.Intent.class, ServerboundPacket.Handshake.Intent.UNKNOWN);
 
@@ -165,7 +202,9 @@ public final class PacketTranslator {
             "explode", "game_event", "keep_alive", "login", "ping", "player_abilities", "player_position", "player_rotation",
             "remove_mob_effect", "respawn", "set_entity_motion", "teleport_entity", "update_attributes", "update_mob_effect",
             "level_chunk_with_light", "forget_level_chunk", "block_update", "section_blocks_update", "block_changed_ack",
-            "set_chunk_cache_center", "set_chunk_cache_radius");
+            "set_chunk_cache_center", "set_chunk_cache_radius",
+            "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
+            "rotate_head", "set_passengers", "move_vehicle", "set_entity_data");
 
     /** The packet classes {@link #outbound} has a case for (keep in step with its switch). */
     private static final List<Class<?>> OUTBOUND_CLASSES = List.of(
@@ -175,7 +214,9 @@ public final class PacketTranslator {
             ClientboundPlayerAbilitiesPacket.class, ClientboundGameEventPacket.class, ClientboundLoginPacket.class, ClientboundRespawnPacket.class,
             ClientboundLevelChunkWithLightPacket.class, ClientboundForgetLevelChunkPacket.class, ClientboundBlockUpdatePacket.class,
             ClientboundSectionBlocksUpdatePacket.class, ClientboundBlockChangedAckPacket.class, ClientboundSetChunkCacheCenterPacket.class,
-            ClientboundSetChunkCacheRadiusPacket.class);
+            ClientboundSetChunkCacheRadiusPacket.class, ClientboundAddEntityPacket.class, ClientboundRemoveEntitiesPacket.class,
+            ClientboundMoveEntityPacket.class, ClientboundEntityPositionSyncPacket.class, ClientboundRotateHeadPacket.class,
+            ClientboundSetPassengersPacket.class, ClientboundMoveVehiclePacket.class, ClientboundSetEntityDataPacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
     static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
@@ -352,7 +393,11 @@ public final class PacketTranslator {
             case ClientboundPlayerPositionPacket position -> new ClientboundPacket.PlayerPosition(
                     position.id(), vec(position.change().position()), vec(position.change().deltaMovement()),
                     position.change().yRot(), position.change().xRot(), relatives(position.relatives()));
-            case ClientboundTeleportEntityPacket teleport -> new ClientboundPacket.TeleportEntity(teleport.id());
+            case ClientboundTeleportEntityPacket teleport -> {
+                PositionMoveRotation change = teleport.change();
+                yield new ClientboundPacket.TeleportEntity(teleport.id(), vec(change.position()), vec(change.deltaMovement()), change.yRot(),
+                        change.xRot(), relatives(teleport.relatives()), teleport.onGround());
+            }
             case ClientboundPlayerRotationPacket rotation -> new ClientboundPacket.PlayerRotation(
                     rotation.yRot(), rotation.relativeY(), rotation.xRot(), rotation.relativeX());
             case ClientboundUpdateAttributesPacket attributes -> attributes(attributes);
@@ -375,6 +420,19 @@ public final class PacketTranslator {
             case ClientboundBlockChangedAckPacket ack -> new ClientboundPacket.BlockChangedAck(ack.sequence());
             case ClientboundSetChunkCacheCenterPacket center -> new ClientboundPacket.ChunkCacheCenter(center.getX(), center.getZ());
             case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
+            case ClientboundMoveEntityPacket move -> new ClientboundPacket.MoveEntity((int) MOVE_ENTITY_ID.get(move),
+                    move.getXa(), move.getYa(), move.getZa(), (byte) MOVE_ENTITY_Y_ROT.get(move), (byte) MOVE_ENTITY_X_ROT.get(move),
+                    move.isOnGround(), move.hasPosition(), move.hasRotation());
+            case ClientboundEntityPositionSyncPacket sync -> new ClientboundPacket.EntityPositionSync(sync.id(),
+                    vec(sync.values().position()), vec(sync.values().deltaMovement()), sync.values().yRot(), sync.values().xRot(), sync.onGround());
+            case ClientboundSetEntityDataPacket data -> entityData(data);
+            case ClientboundRotateHeadPacket head -> new ClientboundPacket.RotateHead((int) ROTATE_HEAD_ID.get(head),
+                    (byte) ROTATE_HEAD_Y_HEAD_ROT.get(head));
+            case ClientboundAddEntityPacket add -> addEntity(add, fromWire);
+            case ClientboundRemoveEntitiesPacket remove -> new ClientboundPacket.RemoveEntities(remove.getEntityIds().toIntArray());
+            case ClientboundSetPassengersPacket passengers -> new ClientboundPacket.SetPassengers(passengers.getVehicle(),
+                    passengers.getPassengers().clone());
+            case ClientboundMoveVehiclePacket vehicle -> new ClientboundPacket.MoveVehicle(vec(vehicle.position()), vehicle.yRot(), vehicle.xRot());
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }
@@ -407,6 +465,70 @@ public final class PacketTranslator {
         } finally {
             buffer.release();
         }
+    }
+
+    private static ClientboundPacket.AddEntity addEntity(ClientboundAddEntityPacket add, boolean fromWire) {
+        String type = BuiltInRegistries.ENTITY_TYPE.getKey(add.getType()).toString();
+        byte xRot = (byte) ADD_ENTITY_X_ROT.get(add);
+        byte yRot = (byte) ADD_ENTITY_Y_ROT.get(add);
+        byte yHeadRot = (byte) ADD_ENTITY_Y_HEAD_ROT.get(add);
+        return fromWire
+                ? ClientboundPacket.AddEntity.received(add.getId(), add.getUUID(), type, add.getX(), add.getY(), add.getZ(),
+                        vec(add.getMovement()), xRot, yRot, yHeadRot, add.getData())
+                : ClientboundPacket.AddEntity.sent(add.getId(), add.getUUID(), type, add.getX(), add.getY(), add.getZ(),
+                        vec(add.getMovement()), xRot, yRot, yHeadRot, add.getData());
+    }
+
+    /** The scalar values of a synched-data packet, exactly as the client decodes them; the others counted. */
+    static ClientboundPacket.SetEntityData entityData(ClientboundSetEntityDataPacket packet) {
+        List<ClientboundPacket.SetEntityData.DataEntry> entries = new ArrayList<>(packet.packedItems().size());
+        int dropped = 0;
+        for (SynchedEntityData.DataValue<?> value : packet.packedItems()) {
+            ClientboundPacket.SetEntityData.DataEntry entry = dataEntry(value);
+            if (entry == null) {
+                dropped++;
+            } else {
+                entries.add(entry);
+            }
+        }
+        return new ClientboundPacket.SetEntityData(packet.id(), entries, dropped);
+    }
+
+    private static ClientboundPacket.SetEntityData.DataEntry dataEntry(SynchedEntityData.DataValue<?> data) {
+        EntityDataSerializer<?> serializer = data.serializer();
+        Object value = data.value();
+        int index = data.id();
+        if (serializer == EntityDataSerializers.BYTE) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.BYTE, (Byte) value);
+        } else if (serializer == EntityDataSerializers.INT) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.INT, (Integer) value);
+        } else if (serializer == EntityDataSerializers.LONG) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.LONG, (Long) value);
+        } else if (serializer == EntityDataSerializers.FLOAT) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.FLOAT, Float.floatToRawIntBits((Float) value));
+        } else if (serializer == EntityDataSerializers.BOOLEAN) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.BOOLEAN, (Boolean) value ? 1 : 0);
+        } else if (serializer == EntityDataSerializers.POSE) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.POSE, POSE.map((Pose) value).ordinal());
+        } else if (serializer == EntityDataSerializers.DIRECTION) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.DIRECTION, ((Direction) value).ordinal());
+        } else if (serializer == EntityDataSerializers.OPTIONAL_UNSIGNED_INT) {
+            java.util.OptionalInt optional = (java.util.OptionalInt) value;
+            return entry(index, ClientboundPacket.SetEntityData.Kind.OPTIONAL_UNSIGNED_INT, optional.isPresent() ? optional.getAsInt() : -1);
+        } else if (serializer == EntityDataSerializers.BLOCK_STATE) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.BLOCK_STATE, Block.getId((BlockState) value));
+        } else if (serializer == EntityDataSerializers.OPTIONAL_BLOCK_STATE) {
+            // The wire writes an empty optional as id 0 (air), so the client reads Optional.of(air) as empty too.
+            @SuppressWarnings("unchecked")
+            java.util.Optional<BlockState> optional = (java.util.Optional<BlockState>) value;
+            int id = optional.map(Block::getId).orElse(0);
+            return entry(index, ClientboundPacket.SetEntityData.Kind.OPTIONAL_BLOCK_STATE, id == 0 ? -1 : id);
+        }
+        return null;
+    }
+
+    private static ClientboundPacket.SetEntityData.DataEntry entry(int index, ClientboundPacket.SetEntityData.Kind kind, long value) {
+        return new ClientboundPacket.SetEntityData.DataEntry(index, kind, value);
     }
 
     private static ClientboundPacket.SectionBlocksUpdate sectionUpdate(ClientboundSectionBlocksUpdatePacket packet) {

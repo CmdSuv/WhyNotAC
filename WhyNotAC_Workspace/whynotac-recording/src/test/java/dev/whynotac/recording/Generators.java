@@ -11,6 +11,7 @@ import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.UUID;
 
@@ -138,6 +139,20 @@ public final class Generators {
         };
     }
 
+    private Set<RelativeFlag> relativeFlags() {
+        EnumSet<RelativeFlag> flags = EnumSet.noneOf(RelativeFlag.class);
+        for (RelativeFlag flag : RelativeFlag.values()) {
+            if (random.nextBoolean()) {
+                flags.add(flag);
+            }
+        }
+        return flags;
+    }
+
+    private int[] ints() {
+        return java.util.stream.IntStream.generate(random::nextInt).limit(random.nextInt(6)).toArray();
+    }
+
     public ClientboundPacket clientbound(Class<?> type) {
         String name = type.getSimpleName();
         return switch (name) {
@@ -155,17 +170,36 @@ public final class Generators {
             case "ChunkCacheRadius" -> new ClientboundPacket.ChunkCacheRadius(anyInt());
             case "SetEntityMotion" -> new ClientboundPacket.SetEntityMotion(anyInt(), vec(), random.nextBoolean() ? vec() : null);
             case "Explosion" -> new ClientboundPacket.Explosion(vec(), anyFloat(), random.nextBoolean() ? vec() : null);
-            case "PlayerPosition" -> {
-                EnumSet<RelativeFlag> flags = EnumSet.noneOf(RelativeFlag.class);
-                for (RelativeFlag flag : RelativeFlag.values()) {
-                    if (random.nextBoolean()) {
-                        flags.add(flag);
-                    }
-                }
-                yield new ClientboundPacket.PlayerPosition(anyInt(), vec(), vec(), anyFloat(), anyFloat(), flags);
-            }
+            case "PlayerPosition" -> new ClientboundPacket.PlayerPosition(anyInt(), vec(), vec(), anyFloat(), anyFloat(), relativeFlags());
             case "PlayerRotation" -> new ClientboundPacket.PlayerRotation(anyFloat(), random.nextBoolean(), anyFloat(), random.nextBoolean());
-            case "TeleportEntity" -> new ClientboundPacket.TeleportEntity(anyInt());
+            case "TeleportEntity" -> random.nextInt(4) == 0
+                    ? ClientboundPacket.TeleportEntity.idOnly(anyInt())
+                    : new ClientboundPacket.TeleportEntity(anyInt(), vec(), vec(), anyFloat(), anyFloat(), relativeFlags(), random.nextBoolean());
+            case "AddEntity" -> new ClientboundPacket.AddEntity(anyInt(), new java.util.UUID(anyLong(), anyLong()), anyString(),
+                    anyDouble(), anyDouble(), anyDouble(), vec(), random.nextBoolean() ? vec() : null,
+                    (byte) random.nextInt(), (byte) random.nextInt(), (byte) random.nextInt(), anyInt());
+            case "RemoveEntities" -> new ClientboundPacket.RemoveEntities(ints());
+            case "MoveEntity" -> {
+                boolean position = random.nextBoolean();
+                boolean rotation = !position || random.nextBoolean();
+                boolean odd = random.nextInt(8) == 0; // fields outside the shape set anyway: still lossless
+                yield new ClientboundPacket.MoveEntity(anyInt(),
+                        position || odd ? (short) random.nextInt() : 0, position || odd ? (short) random.nextInt() : 0,
+                        position || odd ? (short) random.nextInt() : 0, rotation || odd ? (byte) random.nextInt() : 0,
+                        rotation || odd ? (byte) random.nextInt() : 0, random.nextBoolean(), position, rotation);
+            }
+            case "EntityPositionSync" -> new ClientboundPacket.EntityPositionSync(anyInt(), vec(), vec(), anyFloat(), anyFloat(), random.nextBoolean());
+            case "RotateHead" -> new ClientboundPacket.RotateHead(anyInt(), (byte) random.nextInt());
+            case "SetPassengers" -> new ClientboundPacket.SetPassengers(anyInt(), ints());
+            case "MoveVehicle" -> new ClientboundPacket.MoveVehicle(vec(), anyFloat(), anyFloat());
+            case "SetEntityData" -> {
+                List<ClientboundPacket.SetEntityData.DataEntry> entries = new ArrayList<>();
+                for (int i = random.nextInt(6); i > 0; i--) {
+                    entries.add(new ClientboundPacket.SetEntityData.DataEntry(random.nextInt(32),
+                            pick(ClientboundPacket.SetEntityData.Kind.values()), anyLong()));
+                }
+                yield new ClientboundPacket.SetEntityData(anyInt(), entries, random.nextInt(4));
+            }
             case "UpdateAttributes" -> {
                 List<ClientboundPacket.UpdateAttributes.Attribute> attributes = new ArrayList<>();
                 for (int i = random.nextInt(4); i > 0; i--) {

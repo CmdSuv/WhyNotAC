@@ -67,6 +67,12 @@ public final class BitExact {
             }
             return;
         }
+        if (expected instanceof int[] e && actual instanceof int[] a) {
+            if (!Arrays.equals(e, a)) {
+                fail(path + ": " + Arrays.toString(e) + " != " + Arrays.toString(a));
+            }
+            return;
+        }
         if (!Objects.equals(expected, actual)) {
             fail(path + ": " + expected + " != " + actual);
         }
