@@ -163,7 +163,8 @@ trap - EXIT
 kill "$HOLDER" 2>/dev/null || true
 rm -f "$FIFO"
 
-java -Xmx1G "$HERE/JfrAttribution.java" "$OUT.jfr" "$CPUS" > "$OUT-jfr.json"
+# JFR's per-thread load is relative to the CPUs the server may use, not to the machine.
+java -Xmx1G "$HERE/JfrAttribution.java" "$OUT.jfr" "$(taskset -c "$SERVER_CPUS" nproc)" > "$OUT-jfr.json"
 python3 -I "$HERE/summarize_load.py" "$VARIANT" "$LAYOUT" "$BOTS" "$MEASURE" "$CPU_START" "$CPU_END" "$T_START" "$T_END" "$(getconf CLK_TCK)" \
   "$OUT-server.log" "$OUT-jfr.json" "$OUT-histogram.txt" "$OUT" > "$OUT.json"
 cat "$OUT.json"

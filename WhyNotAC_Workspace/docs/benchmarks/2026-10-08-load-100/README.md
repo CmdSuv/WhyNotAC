@@ -17,35 +17,40 @@ biri yaklaşık 650 bin olay için:
 
 ## Maliyet ayrıştırması
 
-Thread başına CPU (çekirdek, JFR `jdk.ThreadCPULoad`). Süreç toplamı JIT derleyicisinin ±0.15 çekirdeklik
+> **Düzeltme (2026-10-09):** Bu belgedeki thread CPU değerleri ilk yayımlandığında 2 kat yüksekti. JFR
+> `jdk.ThreadCPULoad` yükü sunucunun bağlı olduğu CPU'lara (taskset, 2) göre verir; araç ise makinenin 4
+> çekirdeğiyle çarpıyordu. Thread toplamları her koşuda süreç CPU'sunun 2 katıydı. Aşağıdaki değerler
+> düzeltildi; bu klasördeki JSON dosyalarındaki `threadCpuCores` ham hâliyle (2 kat) duruyor.
+
+Thread başına CPU (çekirdek, JFR `jdk.ThreadCPULoad`). Süreç toplamı JIT derleyicisinin ±0.08 çekirdeklik
 oynaması yüzünden gürültülüdür; bileşen maliyeti için Netty ve WhyNotAC thread'lerine bakın.
 
 | Varyant | Netty I/O | Ana thread | WhyNotAC analiz | Kayıt I/O | MSPT (1 dk ort.) |
 |---|---|---|---|---|---|
-| baseline (eklenti yok) | 0.406 | 0.770 | - | - | 27.9 |
-| whynotac (hepsi açık) | 0.588 | 0.766 | 0.115 | 0.011 | 32.8 |
-| whynotac-noping (tick başına transaction yok) | 0.507 | 0.776 | 0.073 | 0.009 | 30.0 |
-| whynotac-noedge (yalnız oyun görünümü) | 0.513 | 0.747 | 0.105 | 0.011 | 21.4 |
-| whynotac-norec (kayıt kapalı) | 0.545 | 0.761 | 0.096 | 0.000 | 30.6 |
+| baseline (eklenti yok) | 0.203 | 0.385 | - | - | 27.9 |
+| whynotac (hepsi açık) | 0.294 | 0.383 | 0.058 | 0.006 | 32.8 |
+| whynotac-noping (tick başına transaction yok) | 0.254 | 0.388 | 0.037 | 0.005 | 30.0 |
+| whynotac-noedge (yalnız oyun görünümü) | 0.257 | 0.374 | 0.053 | 0.006 | 21.4 |
+| whynotac-norec (kayıt kapalı) | 0.273 | 0.381 | 0.048 | 0.000 | 30.6 |
 
-100 oyuncu için WhyNotAC'ın toplam maliyeti yaklaşık **0.29 çekirdek**, yani oyuncu başına saniyede
-yaklaşık 2.9 ms CPU:
+100 oyuncu için WhyNotAC'ın toplam maliyeti yaklaşık **0.15 çekirdek**, yani oyuncu başına saniyede
+yaklaşık 1.5 ms CPU:
 
-- Netty +0.18 çekirdek:
-  - tick başına transaction yaklaşık 0.08 (saniyede 2.000 ping ve 2.000 pong: her ping ayrı bir
+- Netty +0.09 çekirdek:
+  - tick başına transaction yaklaşık 0.04 (saniyede 2.000 ping ve 2.000 pong: her ping ayrı bir
     thread uyandırması, yazma ve flush),
-  - ağ kenarı yaklaşık 0.075,
+  - ağ kenarı yaklaşık 0.04,
   - kalanı oyun görünümü ve oturum kuyruğu.
-- Analiz thread'leri 0.1 çekirdek.
-- Kayıt 0.01 çekirdek.
+- Analiz thread'leri 0.05 çekirdek.
+- Kayıt 0.005 çekirdek.
 
 Ana thread etkilenmiyor: tick başına transaction döngüsü 100 oyuncu için tick başına 0.34 ms CPU
-harcıyor.
+harcıyor (bu ölçüm doğrudan thread CPU zamanından, düzeltme gerektirmiyor).
 
 ## Sonuç ve sıradaki işler
 
 - Gözlem katmanı doğru: yükte bile dürüst oyuncuya karşı hiçbir yanlış bulgu yok.
-- Henüz hiçbir kontrol çalışmadan 2.9 ms/oyuncu/saniye, "dünyanın en iyisi" için fazla. Yol haritasındaki
+- Henüz hiçbir kontrol çalışmadan 1.5 ms/oyuncu/saniye (ilk yayımlanan 2.9 ms 2 kat yüksekti), "dünyanın en iyisi" için fazla. Yol haritasındaki
   optimizasyonlar:
   - tick başına ping'i tick'in kendi flush'ına bindirmek ve RTT'yi flush anından ölçmek;
   - analiz thread'inde olay başına ayırmayı azaltmak;

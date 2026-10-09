@@ -19,7 +19,7 @@ import jdk.jfr.consumer.RecordingFile;
  * <p>Also reports CPU per thread group from {@code jdk.ThreadCPULoad} (in cores), which unlike execution
  * samples includes native work (zlib, syscalls) and the JIT compiler.
  *
- * <p>Usage: {@code java JfrAttribution.java <recording.jfr> <machine cpus>}; prints one JSON line.
+ * <p>Usage: {@code java JfrAttribution.java <recording.jfr> <cpus the server may run on>}; prints one JSON line.
  */
 public final class JfrAttribution {
 
@@ -100,7 +100,8 @@ public final class JfrAttribution {
         json.append("},\"threadCpuCores\":{");
         first = true;
         for (Map.Entry<String, double[]> entry : cpuLoad.entrySet()) {
-            // ThreadCPULoad is a fraction of the whole machine: mean per thread x threads x cpus = cores
+            // ThreadCPULoad is a fraction of the CPUs the JVM may run on (os::active_processor_count honours the
+            // affinity mask, taskset here): mean per thread x threads x those cpus = cores
             double cores = entry.getValue()[0] / entry.getValue()[1] * cpuThreads.get(entry.getKey()).size() * cpus;
             json.append(first ? "" : ",").append('"').append(entry.getKey().replace("\"", "'")).append("\":")
                     .append(String.format(java.util.Locale.ROOT, "%.4f", cores));

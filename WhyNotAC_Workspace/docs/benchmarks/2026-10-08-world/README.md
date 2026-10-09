@@ -27,20 +27,25 @@ eklentisiz koşuda 17, eklentili koşuda 12. Botlar fizik yapmadan tepelerde sab
 
 ## Maliyet
 
+> **Düzeltme (2026-10-09):** Bu belgedeki thread CPU değerleri ilk yayımlandığında 2 kat yüksekti. JFR
+> `jdk.ThreadCPULoad` yükü sunucunun bağlı olduğu CPU'lara (taskset, 2) göre verir; araç ise makinenin 4
+> çekirdeğiyle çarpıyordu. Thread toplamları her koşuda süreç CPU'sunun 2 katıydı. Aşağıdaki değerler
+> düzeltildi; bu klasördeki JSON dosyalarındaki `threadCpuCores` ham hâliyle (2 kat) duruyor.
+
 Thread başına CPU (çekirdek, JFR `jdk.ThreadCPULoad`). Sunucu iki çekirdekte doymuş durumda, bu yüzden ek
 CPU doğrudan tick süresine yansıyor.
 
 | Varyant | Netty I/O | Ana thread | WhyNotAC analiz | Kayıt I/O | MSPT (1 dk ort.) | TPS |
 |---|---|---|---|---|---|---|
-| baseline (eklenti yok) | 0,657 | 1,074 | - | - | 48,4 | 17,0 |
-| whynotac | 1,052 | 0,944 | 0,260 | 0,078 | 68,4 | 13,8 |
+| baseline (eklenti yok) | 0,329 | 0,537 | - | - | 48,4 | 17,0 |
+| whynotac | 0,526 | 0,472 | 0,130 | 0,039 | 68,4 | 13,8 |
 
-Gerçek arazide WhyNotAC yaklaşık **0,74 çekirdek** harcıyor: 100 oyuncu için oyuncu başına saniyede
-7,4 ms CPU. Düz dünyada bu 0,29 çekirdekti (`docs/benchmarks/2026-10-08-load-100`). Farkın kaynağı tek bir
+Gerçek arazide WhyNotAC yaklaşık **0,37 çekirdek** harcıyor: 100 oyuncu için oyuncu başına saniyede
+3,7 ms CPU. Düz dünyada bu 0,15 çekirdekti (`docs/benchmarks/2026-10-08-load-100`). Farkın kaynağı tek bir
 sıcak nokta değil, gerçek arazinin getirdiği paket hacmi:
-- Netty +0,40 çekirdek: kenar tap'leri, pipeline'daki ek yazma adımları ve tick başına transaction;
-- analiz +0,26 çekirdek: chunk'ları client'ın okuduğu gibi çözmek ve replika;
-- kayıt +0,08 çekirdek: chunk baytları kayda olduğu gibi giriyor.
+- Netty +0,20 çekirdek: kenar tap'leri, pipeline'daki ek yazma adımları ve tick başına transaction;
+- analiz +0,13 çekirdek: chunk'ları client'ın okuduğu gibi çözmek ve replika;
+- kayıt +0,04 çekirdek: chunk baytları kayda olduğu gibi giriyor.
 
 Replika: 100 oyuncunun dünyası için 20,0 MB (8.836 paylaşılan bölüm). Paylaşım olmadan ilk ölçüm 252,7 MB
 idi (başka bir seed). Oyuncular çıkınca 0'a döndü.
@@ -48,7 +53,7 @@ idi (başka bir seed). Oyuncular çıkınca 0'a döndü.
 ## Sonuç
 
 - Doğruluk: iki kontrol de dürüst trafikte, iki arazide ve yükte 0 yanlış bulgu verdi.
-- Performans: gerçek arazide oyuncu başına 7,4 ms/s, "dünyanın en iyisi" için çok fazla. Hedef aynı
+- Performans: gerçek arazide oyuncu başına 3,7 ms/s (ilk yayımlanan 7,4 ms 2 kat yüksekti), "dünyanın en iyisi" için çok fazla. Hedef aynı
   düzenekte oyuncu başına saniyede 1 ms'nin altı. Yapılacaklar: ping'i tick'in kendi flush'ına
   bindirmek, kenarda yalnız gereken paketleri çözmek, chunk'ları tembel çözmek (yalnız fizik soruyorsa),
   kayıtta chunk'ları sıkıştırmak ya da içerik adresli saklamak.

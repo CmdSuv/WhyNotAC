@@ -103,8 +103,9 @@ sabit (`LOAD_SEED`), varyantlar aynı araziyi ve aynı mob'ları görüyor.
 Sonuçlar, sabit seed ile:
 - **Doğruluk:** 0 kayıp olay, 0 sapma, 0 anomali, 0 dinleyici hatası, iki kontrol açıkken 0 vaka ve 0
   reddedilen aday (669.587 client tick'i). Oyuncular çıkınca replika belleği 0'a döndü.
-- **Maliyet:** WhyNotAC yaklaşık 0,74 çekirdek harcıyor (Netty +0,40, analiz 0,26, kayıt 0,08), yani
-  oyuncu başına saniyede 7,4 ms. Düz dünyada bu 0,29 çekirdekti. Sunucu iki çekirdekte doymuş durumda:
+- **Maliyet:** WhyNotAC yaklaşık 0,37 çekirdek harcıyor (Netty +0,20, analiz 0,13, kayıt 0,04), yani
+  oyuncu başına saniyede 3,7 ms. Düz dünyada bu 0,15 çekirdekti. (2026-10-09 düzeltmesi: ilk yayımlanan
+  değerler, ölçüm aracındaki bir hata yüzünden 2 kat yüksekti; ayrıntı benchmark belgesinde.) Sunucu iki çekirdekte doymuş durumda:
   MSPT 48,4'ten 68,4'e çıktı. Bu bir performans eksiği: hedef, oyuncu başına saniyede 1 ms'nin altı
   (yapılacaklar benchmark belgesinde).
 
