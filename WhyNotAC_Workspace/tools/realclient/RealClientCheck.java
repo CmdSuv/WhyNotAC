@@ -121,7 +121,11 @@ public class RealClientCheck {
 
     static final class Lattice {
         long yawSteps, yawOne, yawMulti, yawUnexplained, pitchSteps, pitchExplained;
-        /** Per yaw step in order: the unique one-frame count, or null when no single frame explains it. */
+        /**
+         * Per yaw step in order: the unique one-frame count; for a step only 2-3 frames explain (the mouse
+         * moved in more than one frame of the tick), the total count if every such explanation has the same
+         * total; else null.
+         */
         final List<Long> yawCounts = new ArrayList<>();
         /** Per pitch step in order: the one-frame count, or null. */
         final List<Long> pitchCounts = new ArrayList<>();
@@ -138,7 +142,7 @@ public class RealClientCheck {
             if (from != to) {
                 l.yawSteps++;
                 MouseTurnModel.CountRange range = MouseTurnModel.yawCountsFor(from, to, multiplier);
-                l.yawCounts.add(!range.isEmpty() && range.isUnique() ? range.min() : null);
+                Long count = !range.isEmpty() && range.isUnique() ? range.min() : null;
                 if (!range.isEmpty() && Math.abs(range.min()) <= MAX_COUNTS) {
                     l.yawOne++;
                     if (range.isUnique()) {
@@ -146,12 +150,14 @@ public class RealClientCheck {
                     }
                 } else if (explainedByFrames(from, to, multiplier, MAX_FRAMES)) {
                     l.yawMulti++;
+                    count = framesTotal(from, to, multiplier, MAX_FRAMES);
                 } else {
                     l.yawUnexplained++;
                     if (l.unexplained.size() < 10) {
                         l.unexplained.add(from + " -> " + to);
                     }
                 }
+                l.yawCounts.add(count);
             }
             float pFrom = rotations.get(k - 1).pitch();
             float pTo = rotations.get(k).pitch();
@@ -191,6 +197,37 @@ public class RealClientCheck {
             }
         }
         return false;
+    }
+
+    /**
+     * The total count of every way 2..frames frames of integer counts in [-MAX_COUNTS, MAX_COUNTS] turn
+     * {@code from} into {@code to} exactly, if they all have the same total; null otherwise.
+     */
+    static Long framesTotal(float from, float to, double multiplier, int frames) {
+        java.util.Set<Long> totals = new java.util.TreeSet<>();
+        for (long c = -MAX_COUNTS; c <= MAX_COUNTS; c++) {
+            if (c != 0) {
+                totals(MouseTurnModel.turnYaw(from, c * multiplier), to, multiplier, frames - 1, c, totals);
+            }
+        }
+        return totals.size() == 1 ? totals.iterator().next() : null;
+    }
+
+    /** Adds {@code sofar} plus the counts of 1..frames further frames that end at {@code to}. */
+    private static void totals(float from, float to, double multiplier, int frames, long sofar, java.util.Set<Long> totals) {
+        MouseTurnModel.CountRange last = MouseTurnModel.yawCountsFor(from, to, multiplier);
+        for (long c = Math.max(last.min(), -MAX_COUNTS); c <= Math.min(last.max(), MAX_COUNTS); c++) {
+            if (c != 0) {
+                totals.add(sofar + c);
+            }
+        }
+        if (frames > 1) {
+            for (long c = -MAX_COUNTS; c <= MAX_COUNTS; c++) {
+                if (c != 0) {
+                    totals(MouseTurnModel.turnYaw(from, c * multiplier), to, multiplier, frames - 1, sofar + c, totals);
+                }
+            }
+        }
     }
 
     /** The unique one-frame count turning pitch {@code from} into {@code to}, or null. */
