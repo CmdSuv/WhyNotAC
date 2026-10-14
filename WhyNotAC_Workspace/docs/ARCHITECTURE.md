@@ -227,8 +227,20 @@ yaklaştırır, bazı paketleri hiç uygulamaz. Model şudur:
 - **Bilinmeyen açıkça söylenir:** yolcular, kontrol edilebilir araç, kendi fiziğini çalıştıran türler,
   olay kaybı. Bir kontrol bilinmeyen ya da yarıçaplı bir konumu asla kesin saymaz.
 - **Doğrulama:** `/whynotac entities <oyuncu>` replikanın varlık kümesini ve kod tabanlarını sunucunun
-  takibiyle karşılaştırır (E2E'de 6/6 eşit). Bağımsız bir referans client'la yapılan simülasyonda
+  takibiyle karşılaştırır (E2E'de 11/11 eşit). Bağımsız bir referans client'la yapılan simülasyonda
   829.571 kontrolde 0 ihlal çıktı.
+
+## Varlıkların boyutları (Faz 2b-6)
+
+Kutunun boyutu türe, poza, bebek bayrağına ve ölçek özelliğine bağlıdır (`LivingEntity.getDimensions`).
+- **Tablo:** `EntitySizes` boyut tablosunu taşır. Tablo oyunun sınıflarından üretilir
+  (`EntitySizesDataTest`). Boyutu belirleyen metotları geçersiz kılan her sınıf kayıtlı bir listeyle
+  karşılaştırılır.
+- **Replika:** bebek bayrağını ve ölçeği client sırasıyla izler. Her olası durum bir boyut taşır.
+- **Bilinmeyen:** boyutu takip edilmeyen veriye bağlı türler (slime, pufferfish, zırh askısı...) ve
+  sırası belirsiz değiştiricili ölçekler için boyut iddia edilmez.
+- **Doğrulama:** `/whynotac entities`, boyutları sunucunun kendi hesabıyla karşılaştırır (E2E'de 7 eşit,
+  0 farklı; gerçek client'ta 6 eşit, 0 farklı).
 
 ## Modüller
 
@@ -240,7 +252,7 @@ yaklaştırır, bazı paketleri hiç uygulamaz. Model şudur:
 | `whynotac-conformance` | **Faz 1 ✔** | Gerçek oyun sınıflarına karşı diferansiyel testler |
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
-| `whynotac-world` | **Faz 2b-3 ✔ · 2b-5 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği. Client'ın gördüğü varlıklar: client sırasıyla, tick tick, aday durumlar ve yarıçaplarla |
+| `whynotac-world` | **Faz 2b-3 ✔ · 2b-5 ✔ · 2b-6 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği. Client'ın gördüğü varlıklar: client sırasıyla, tick tick, aday durumlar ve yarıçaplarla; boyutları oyunun kendi tablosundan |
 | `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
 | `whynotac-analysis` | **Slice 0 ✔** | Kontroller (tick framing, client saati), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |

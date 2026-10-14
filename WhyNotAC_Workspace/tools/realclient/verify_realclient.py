@@ -109,6 +109,8 @@ def main():
     check(m is not None and fields.get("complete") == "true" and n("server") >= 3 and n("missingInReplica") == 0 and n("extraInReplica") == 0
           and n("different") == 0 and n("equal") >= 3 and n("equal") + n("moving") == n("compared") and n("overflows") == 0,
           f"the real client's entities, rebuilt from its packets, are the server's, base for base ({m.group(1) if m else 'no answer'})")
+    check(m is not None and n("sizeDifferent") == 0 and n("sizeEqual") >= 3 and n("sizeEqualNonDefault") >= 1,
+          f"every size the replica claims for the real client's entities is the server's own, a baby's too ({n('sizeEqual')} equal, {n('sizeEqualNonDefault')} not the default, {n('sizeDifferent')} different)")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 

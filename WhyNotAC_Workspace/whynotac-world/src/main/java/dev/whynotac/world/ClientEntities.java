@@ -64,12 +64,15 @@ public final class ClientEntities {
     private static final int POSE_SLEEPING = ClientboundPacket.EntityPose.SLEEPING.ordinal();
     /** {@code Entity.DATA_SHARED_FLAGS_ID} and {@code Entity.DATA_POSE}. */
     private static final int DATA_FLAGS = 0;
+    /** The attribute the size scales with ({@code Attributes.SCALE}). */
+    static final String SCALE_ATTRIBUTE = "minecraft:scale";
     private static final int DATA_POSE = 6;
 
     /** Whether the client has an entity with a given id. */
     public enum Existence { PRESENT, ABSENT, MAYBE, UNKNOWN }
 
     private final EntityTypes types;
+    private final EntitySizes sizes = EntitySizes.vanilla();
 
     // --- server order: what the client will hold once it has processed everything sent so far ---------
     private boolean level;
@@ -266,6 +269,7 @@ public final class ClientEntities {
                 }
             }
             case ClientboundPacket.SetEntityData data -> entityData(seq, data);
+            case ClientboundPacket.UpdateAttributes attributes -> updateAttributes(seq, attributes);
             case ClientboundPacket.SetPassengers passengers -> setPassengers(seq, passengers);
             case ClientboundPacket.Unmodeled unmodeled -> unmodeled(seq, unmodeled.type());
             case ClientboundPacket.Untranslatable untranslatable -> untranslatable(seq, untranslatable.type());
@@ -389,16 +393,82 @@ public final class ClientEntities {
         }
         int pose = NONE;
         int flags = NONE;
+        int baby = NONE;
+        EntitySizes.Entry size = sizes.entry(head.type);
+        int babyIndex = size == null ? -1 : size.babyIndex();
         for (ClientboundPacket.SetEntityData.DataEntry entry : data.entries()) {
             if (entry.index() == DATA_POSE && entry.kind() == ClientboundPacket.SetEntityData.Kind.POSE) {
                 pose = (int) entry.value();
             } else if (entry.index() == DATA_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
                 flags = (int) entry.value() & 0xFF;
+            } else if (entry.index() == babyIndex && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
+                baby = entry.value() != 0 ? 1 : 0; // the flag isBaby() reads (DATA_BABY_ID of the type's class)
             }
         }
-        if (pose != NONE || flags != NONE) {
-            enqueue(seq, head.id, new Op.Data(seq, pose, flags));
+        if (pose != NONE || flags != NONE || baby != NONE) {
+            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby));
         }
+    }
+
+    /**
+     * {@code handleUpdateAttributes}: base value set, modifiers replaced. Only the scale attribute matters
+     * here (the size). Its value is exact unless one operation has two modifiers or more: the client sums
+     * them in its hash map's order, and floating-point sums depend on the order.
+     */
+    private void updateAttributes(long seq, ClientboundPacket.UpdateAttributes packet) {
+        Head head = heads.get(packet.entityId());
+        if (head == null) {
+            return;
+        }
+        for (ClientboundPacket.UpdateAttributes.Attribute attribute : packet.attributes()) {
+            if (attribute.key().equals(SCALE_ATTRIBUTE)) {
+                enqueue(seq, head.id, new Op.Scale(seq, attributeValue(attribute)));
+            }
+        }
+    }
+
+    /** {@code AttributeInstance.calculateValue} then the scale's range; NaN when the client's order of modifiers matters. */
+    static double attributeValue(ClientboundPacket.UpdateAttributes.Attribute attribute) {
+        ClientboundPacket.UpdateAttributes.Modifier add = null;
+        ClientboundPacket.UpdateAttributes.Modifier multiplyBase = null;
+        ClientboundPacket.UpdateAttributes.Modifier multiplyTotal = null;
+        for (ClientboundPacket.UpdateAttributes.Modifier modifier : attribute.modifiers()) {
+            switch (modifier.operation()) {
+                case ADD_VALUE -> {
+                    if (add != null) {
+                        return Double.NaN;
+                    }
+                    add = modifier;
+                }
+                case ADD_MULTIPLIED_BASE -> {
+                    if (multiplyBase != null) {
+                        return Double.NaN;
+                    }
+                    multiplyBase = modifier;
+                }
+                case ADD_MULTIPLIED_TOTAL -> {
+                    if (multiplyTotal != null) {
+                        return Double.NaN;
+                    }
+                    multiplyTotal = modifier;
+                }
+                default -> {
+                    return Double.NaN; // an operation this build does not know
+                }
+            }
+        }
+        double base = attribute.base();
+        if (add != null) {
+            base += add.amount();
+        }
+        double value = base;
+        if (multiplyBase != null) {
+            value += base * multiplyBase.amount();
+        }
+        if (multiplyTotal != null) {
+            value *= 1.0 + multiplyTotal.amount();
+        }
+        return EntitySizes.clampScale(value);
     }
 
     /** {@code handleSetEntityPassengersPacket}: eject everyone, then {@code startRiding(vehicle, true, false)} each. */
@@ -774,6 +844,15 @@ public final class ClientEntities {
                     if (data.flags() != NONE) {
                         s.flags = data.flags();
                     }
+                    if (data.baby() != NONE) {
+                        s.baby = data.baby() == 1;
+                    }
+                }
+                out.add(s);
+            }
+            case Op.Scale scale -> {
+                if (s.present && !s.lostAll && s.kind.living()) {
+                    s.scale = scale.value(); // a non-living entity: the client throws (Server tried to update attributes of a non-living entity)
                 }
                 out.add(s);
             }
@@ -1248,7 +1327,7 @@ public final class ClientEntities {
     /** One state the client may hold for an entity right now. Radii bound the true value (0: exact). */
     public record PossibleState(boolean present, boolean known, boolean positionKnown, String type, boolean player, double x, double y, double z,
                                 double positionRadius, float yRot, float xRot, float rotationRadius, float yHeadRot, float headRadius, int pose,
-                                int flags, int onGround, int vehicle) {}
+                                int flags, int onGround, int vehicle, EntitySizes.Size size) {}
 
     /**
      * Every state the client may hold for {@code entityId} now: each candidate, after any further prefix
@@ -1258,7 +1337,7 @@ public final class ClientEntities {
         Track track = tracks.get(entityId);
         if (track == null) {
             if (complete) {
-                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE));
+                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE, null));
             }
             return;
         }
@@ -1329,11 +1408,29 @@ public final class ClientEntities {
      * once it has processed everything sent so far: per entity id its type, codec base (null if unknown)
      * and vehicle (-1: none). For comparing with the server's own tracking.
      */
+    /**
+     * The size the client gives {@code entityId} now, if every state it may hold has it present with the
+     * same known size; null otherwise (absent, unknown, a size the table does not follow, or several).
+     */
+    public EntitySizes.Size size(int entityId) {
+        EntitySizes.Size[] size = {null};
+        boolean[] one = {true, false};
+        forEachPossibleState(entityId, s -> {
+            one[1] = true;
+            if (!s.present() || !s.known() || s.size() == null || size[0] != null && !size[0].equals(s.size())) {
+                one[0] = false;
+            } else {
+                size[0] = s.size();
+            }
+        });
+        return one[0] && one[1] ? size[0] : null;
+    }
+
     public ServerOrder serverOrder() {
         Map<Integer, ServerOrder.Entity> entities = new HashMap<>();
         for (Head head : heads.values()) {
             entities.put(head.id, new ServerOrder.Entity(head.type, head.baseKnown ? new Vec3d(head.bx, head.by, head.bz) : null, head.vehicle,
-                    knowledge(tracks.get(head.id))));
+                    knowledge(tracks.get(head.id)), size(head.id)));
         }
         return new ServerOrder(level, complete, Map.copyOf(entities), stats());
     }
@@ -1364,8 +1461,11 @@ public final class ClientEntities {
     }
 
     public record ServerOrder(boolean level, boolean complete, Map<Integer, Entity> entities, Stats stats) {
-        /** {@code knowledge}: "exact", "within-r", "n-candidates", "position-unknown" or "unknown". */
-        public record Entity(String type, Vec3d base, int vehicle, String knowledge) {}
+        /**
+         * {@code knowledge}: "exact", "within-r", "n-candidates", "position-unknown" or "unknown".
+         * {@code size}: the size the client gives it now, in client order (see {@link ClientEntities#size}).
+         */
+        public record Entity(String type, Vec3d base, int vehicle, String knowledge, EntitySizes.Size size) {}
     }
 
     /** Counters for diagnostics. */
@@ -1485,8 +1585,11 @@ public final class ClientEntities {
 
         record HeadRotation(long seq, float yHeadRot) implements Op {}
 
-        /** -1: not in the packet. */
-        record Data(long seq, int pose, int flags) implements Op {}
+        /** -1: not in the packet. {@code baby}: 0 or 1. */
+        record Data(long seq, int pose, int flags, int baby) implements Op {}
+
+        /** The scale attribute's value; NaN when it is not known exactly. */
+        record Scale(long seq, double value) implements Op {}
 
         record Vehicle(long seq, int vehicleId) implements Op {}
     }
@@ -1518,6 +1621,9 @@ public final class ClientEntities {
         int pose = POSE_STANDING;
         int flags;
         int vehicle = NONE;
+        // the size: isBaby() and the scale attribute's value (NaN: not known exactly)
+        boolean baby;
+        double scale = 1.0;
         // InterpolationHandler
         int steps;
         double tx;
@@ -1610,6 +1716,8 @@ public final class ClientEntities {
             c.pose = pose;
             c.flags = flags;
             c.vehicle = vehicle;
+            c.baby = baby;
+            c.scale = scale;
             c.steps = steps;
             c.tx = tx;
             c.ty = ty;
@@ -1644,7 +1752,7 @@ public final class ClientEntities {
                 return true;
             }
             if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || minY != o.minY || lostPosition != o.lostPosition
-                    || vehicle != o.vehicle || pose != o.pose || flags != o.flags) {
+                    || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0) {
                 return false;
             }
             if (lostPosition) {
@@ -1692,8 +1800,9 @@ public final class ClientEntities {
         PossibleState view() {
             boolean known = !lostAll;
             boolean positionKnown = known && present && !lostPosition;
+            EntitySizes.Size size = known && present ? EntitySizes.vanilla().size(type, pose, baby, scale) : null;
             return new PossibleState(present, known, positionKnown, type, player, x, y, z, rPos, yRot, xRot, rRot, yHeadRot, rHead, pose, flags,
-                    onGroundKnown ? (onGround ? 1 : 0) : -1, vehicle);
+                    onGroundKnown ? (onGround ? 1 : 0) : -1, vehicle, size);
         }
     }
 

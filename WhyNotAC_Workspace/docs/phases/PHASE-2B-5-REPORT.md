@@ -103,6 +103,11 @@ sunucu onu yeniden ekleyene ya da kaldırana kadar "bilinmiyor"dur.
 | E2E (gerçek Paper) | AI'sız husk ve köylü, binici, zırh askısı, end kristali, öldürülen inek; mutlak, göreli ve dönüşlü ışınlamalar. `/whynotac entities`: sunucunun oyuncuya gösterdiği her varlık replikada, eksik ya da fazla yok. **Her varlığın kod tabanı sunucununkine 1/4096 ızgarada eşit (6/6)**, yolcu ayrıldı, taşma 0. 81 E2E kontrolü geçiyor |
 | Gerçek client (CI, 1.21.11) | Değiştirilmemiş client sunucuya bağlanıp yürüyor. `/whynotac entities`: sunucunun gösterdiği 8 varlığın hepsi replikada, 8/8 kod tabanı 1/4096 ızgarada eşit, 3 dallanma, 0 taşma |
 
+> **Düzeltme (2026-10-14):** Bu tablodaki E2E ve gerçek client testleri "peaceful" zorlukta çalıştı. Bu
+> zorlukta düşman mob oluşturulamadığı için husk aslında hiç yoktu ve "6/6" onu içermiyordu. Testler artık
+> varlık bölümünden önce zorluğu "easy"ye alıyor. Konum tabanları husk'larla birlikte E2E'de 11/11, gerçek
+> client'ta 7/7 eşit ([Faz 2b-6](PHASE-2B-6-REPORT.md)).
+
 ## Yük testi (gerçek arazi, cluster)
 
 Ayrıntılar: `docs/benchmarks/2026-10-09-entities/`.

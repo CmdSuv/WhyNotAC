@@ -105,8 +105,13 @@ done
 grep -q "$NAME joined the game" "$WORK_DIR/server.log" || { echo "client never joined"; tail -40 "$WORK_DIR/client.log"; exit 1; }
 sleep 5 # let the world render and the player land
 # Entities the real client must hold exactly as the server tracks them (no AI: only the commands move them).
+# Hostile mobs cannot be summoned on peaceful. Natural monster spawning is a game rule in 1.21.11 (the
+# server property no longer applies): off first, or a slime from a slime chunk may kill the player.
+echo "gamerule spawn_monsters false" > "$FIFO"
+echo "difficulty easy" > "$FIFO"
 echo "execute at $NAME run summon minecraft:husk ~3 ~ ~3 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wnz\"]}" > "$FIFO"
 echo "execute at $NAME run summon minecraft:villager ~-3 ~ ~3 {NoAI:1b,PersistenceRequired:1b}" > "$FIFO"
+echo "execute at $NAME run summon minecraft:villager ~-3 ~ ~-3 {NoAI:1b,PersistenceRequired:1b,Age:-24000}" > "$FIFO"
 echo "execute at $NAME run summon minecraft:armor_stand ~3 ~ ~-3" > "$FIFO"
 sleep 1; echo "execute at $NAME run tp @e[tag=wnz,limit=1] ~2.3172 ~ ~3.7071 45 10" > "$FIFO"
 (cd "$HERE" && python3 -I drive.py "$DISPLAY_NUM") > "$WORK_DIR/drive.json"

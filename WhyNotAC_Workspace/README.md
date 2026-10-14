@@ -24,10 +24,13 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > ([rapor](docs/phases/PHASE-2B-3-REPORT.md)).
 > **Faz 2b-5:** client'ın gördüğü varlıklar client'ın işlediği sırayla, tick tick yeniden kuruluyor:
 > her olası sıra bir aday, yarıçap 0 bit-tam. Her flush ağ kenarında transaction'la çevrili. Bağımsız
-> referans client'la 829.571 kontrolde 0 ihlal, sunucunun takibiyle E2E'de 6/6, gerçek client'ta 8/8 eşit.
+> referans client'la 829.571 kontrolde 0 ihlal, sunucunun takibiyle E2E'de 11/11, gerçek client'ta 7/7 eşit.
 > Yük testinde 0 yanlış bulgu; ölçülen maliyet hâlâ hedefin üstünde
 > ([rapor](docs/phases/PHASE-2B-5-REPORT.md), [yük testi](docs/benchmarks/2026-10-09-entities/README.md)).
-> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md)
+> **Faz 2b-6:** varlıkların boyutları (tür, poz, bebek, ölçek) oyunun sınıflarından üretilen tablodan.
+> Sunucunun kendi hesabıyla E2E'de 7, gerçek client'ta 6 boyut eşit, hiç fark yok
+> ([rapor](docs/phases/PHASE-2B-6-REPORT.md)).
+> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md)
 
 ## Belgeler
 - [Kararlar](docs/DECISIONS.md): proje sahibinin kararları (tek koşulsuz kural: dünyanın en iyisi)
@@ -53,9 +56,9 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 271 test
+./gradlew build                       # tüm modüller + 286 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (81 kontrol)
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (84 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e  # aynı test, ViaVersion 5.12.0 + PacketEvents 2.14.0 yanında
 tools/realclient/run_realclient.sh /tmp/wnac-rc  # resmi client, Xvfb + XTest (bkz. tools/realclient/README.md)
@@ -76,8 +79,8 @@ SNAPSHOT derlemeyi durdurur. Aynı commit'ten iki temiz derleme bayt bayt aynı 
   paketinin tam değerleri, kesin yaw/pitch farkı ve o yaw'ın float çözünürlüğü, basılı tuşlar,
   anomaliler
 - `/whynotac world <oyuncu>`: client'ın dünyasını sunucununkiyle bölüm bölüm karşılaştırır
-- `/whynotac entities <oyuncu>`: client'ın varlıklarını sunucunun takibiyle karşılaştırır (küme ve kod
-  tabanları), varlık başına client durumunu söyler (kesin, yarıçaplı, aday sayısı, bilinmiyor)
+- `/whynotac entities <oyuncu>`: client'ın varlıklarını sunucunun takibiyle karşılaştırır (küme, kod
+  tabanları ve boyutlar), varlık başına client durumunu söyler (kesin, yarıçaplı, aday sayısı, bilinmiyor)
 - `/whynotac sessions`: canlı oturumlar
 - `/whynotac stats`: başlangıçtan beri toplamlar (JSON): anomaliler, sapmalar, kayıp olaylar, vakalar
 - `/whynotac cases`, `/whynotac case <id>`: açılan vakalar. Her vakanın bir dossier'si vardır:

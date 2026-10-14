@@ -12,7 +12,9 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -395,5 +397,106 @@ class ClientEntitiesTest {
         out(new ClientboundPacket.Login(SELF, 8, OVERWORLD));
         sync();
         assertEquals(ClientEntities.Existence.ABSENT, entities.existence(5));
+    }
+
+    // --- sizes ---
+
+    private static final int STANDING = ClientboundPacket.EntityPose.STANDING.ordinal();
+    private static final EntitySizes SIZES = EntitySizes.vanilla();
+
+    private EntitySizes.Size onlySize(int id) {
+        List<ClientEntities.PossibleState> states = states(id);
+        assertEquals(1, states.size(), "one possible state");
+        return states.getFirst().size();
+    }
+
+    private Set<EntitySizes.Size> sizes(int id) {
+        Set<EntitySizes.Size> sizes = new HashSet<>();
+        for (ClientEntities.PossibleState state : states(id)) {
+            sizes.add(state.size());
+        }
+        return sizes;
+    }
+
+    private static ClientboundPacket.SetEntityData data(int id, int index, ClientboundPacket.SetEntityData.Kind kind, long value) {
+        return new ClientboundPacket.SetEntityData(id, List.of(new ClientboundPacket.SetEntityData.DataEntry(index, kind, value)), 0);
+    }
+
+    private static ClientboundPacket.UpdateAttributes scale(int id, double base, ClientboundPacket.UpdateAttributes.Modifier... modifiers) {
+        return new ClientboundPacket.UpdateAttributes(id,
+                List.of(new ClientboundPacket.UpdateAttributes.Attribute(ClientEntities.SCALE_ATTRIBUTE, base, List.of(modifiers))));
+    }
+
+    private static ClientboundPacket.UpdateAttributes.Modifier modifier(double amount, ClientboundPacket.UpdateAttributes.Operation operation) {
+        return new ClientboundPacket.UpdateAttributes.Modifier("test:" + operation + amount, amount, operation);
+    }
+
+    @Test
+    void aBabyHasItsBabySizeOnceTheClientProcessedItsFlag() {
+        int flag = SIZES.entry("minecraft:husk").babyIndex();
+        EntitySizes.Size adult = SIZES.size("minecraft:husk", STANDING, false, 1.0);
+        EntitySizes.Size baby = SIZES.size("minecraft:husk", STANDING, true, 1.0);
+        out(add(5, "minecraft:husk", 0.5, 64.0, 0.5));
+        sync();
+        assertEquals(adult, onlySize(5), "a new entity has the default data: not a baby");
+        out(data(5, flag, ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1));
+        assertEquals(Set.of(adult, baby), sizes(5), "not processed yet: either");
+        sync();
+        assertEquals(baby, onlySize(5));
+        out(data(5, flag + 1, ClientboundPacket.SetEntityData.Kind.BOOLEAN, 0));
+        sync();
+        assertEquals(baby, onlySize(5), "another index is not the flag a husk reads");
+    }
+
+    @Test
+    void theScaleAttributeScalesTheSizeWhenItsValueIsExact() {
+        EntitySizes.Size adult = SIZES.size("minecraft:husk", STANDING, false, 1.0);
+        out(add(5, "minecraft:husk", 0.5, 64.0, 0.5));
+        out(scale(5, 1.5));
+        sync();
+        assertEquals(adult.scale(1.5F), onlySize(5));
+        // One modifier per operation: AttributeInstance.calculateValue in its fixed operation order.
+        out(scale(5, 1.0, modifier(0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL),
+                modifier(0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE),
+                modifier(0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_BASE)));
+        sync();
+        assertEquals(adult.scale((float) ((1.5 + 1.5 * 0.5) * 1.5)), onlySize(5));
+        // Two of one operation: the client sums them in its hash map's order, which is not followed.
+        out(scale(5, 1.0, modifier(0.1, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE),
+                modifier(0.2, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE)));
+        sync();
+        assertNull(onlySize(5));
+        // The attribute's range: at most 16.
+        out(scale(5, 40.0));
+        sync();
+        assertEquals(adult.scale(16.0F), onlySize(5));
+    }
+
+    @Test
+    void aNonLivingEntityIgnoresAttributes() {
+        out(add(5, "minecraft:end_crystal", 0.5, 64.0, 0.5));
+        out(scale(5, 3.0));
+        sync();
+        assertEquals(SIZES.entry("minecraft:end_crystal").size(), onlySize(5));
+    }
+
+    @Test
+    void aPlayersSizeFollowsItsPose() {
+        out(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 0))));
+        out(ClientboundPacket.AddEntity.received(6, ALICE, EntityTypes.PLAYER, 0, 64, 0, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        assertEquals(SIZES.size(EntityTypes.PLAYER, STANDING, false, 1.0), onlySize(6));
+        int crouching = ClientboundPacket.EntityPose.CROUCHING.ordinal();
+        out(data(6, 6, ClientboundPacket.SetEntityData.Kind.POSE, crouching));
+        sync();
+        assertEquals(new EntitySizes.Size(0.6F, 1.5F, 1.27F, false), onlySize(6));
+    }
+
+    @Test
+    void aSizeTheTableDoesNotFollowIsNotClaimed() {
+        out(add(5, "minecraft:slime", 0.5, 64.0, 0.5));
+        sync();
+        assertNull(onlySize(5));
+        assertEquals(ClientEntities.Existence.PRESENT, entities.existence(5));
     }
 }

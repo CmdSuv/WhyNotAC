@@ -6,6 +6,7 @@ import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.world.ClientEntities;
 import dev.whynotac.world.ClientEntitiesTracker;
+import dev.whynotac.world.EntitySizes;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,6 +20,7 @@ import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.phys.Vec3;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
@@ -36,22 +38,29 @@ import org.bukkit.plugin.Plugin;
  * are skipped: the server moves a passenger's base without telling the client (the client places it by its
  * vehicle). Expected differences: entities that moved in the last moments (the replica follows the network,
  * the server is ahead), and entities other plugins show the client with their own packets.
+ *
+ * <p>Sizes: the size the replica gives each compared entity (pose, baby flag, scale attribute, in client
+ * order) against the server's own {@code getDimensions(getPose())}, which runs the same code on the same
+ * data. A size the replica does not claim (a type whose size depends on other data, a scale it cannot
+ * compute exactly) is counted apart.
  */
 public final class EntityVerifier {
 
     /** One verification's outcome, also printed as one line. */
     public record Result(String player, boolean complete, int server, int replica, int compared, int equal, int different, int moving,
-            int passengers, int missingInReplica, int extraInReplica, int rounds, ClientEntities.Stats stats, List<String> differences) {
+            int passengers, int missingInReplica, int extraInReplica, int sizeEqual, int sizeEqualNonDefault, int sizeDifferent, int sizeUnknown,
+            int rounds, ClientEntities.Stats stats, List<String> differences) {
         public String line() {
             return "WhyNotAC entities " + player + ": complete=" + complete + " server=" + server + " replica=" + replica + " compared=" + compared
                     + " equal=" + equal + " different=" + different + " moving=" + moving + " passengers=" + passengers + " missingInReplica="
-                    + missingInReplica + " extraInReplica=" + extraInReplica + " rounds=" + rounds + " candidates=" + stats.candidates()
+                    + missingInReplica + " extraInReplica=" + extraInReplica + " sizeEqual=" + sizeEqual + " sizeEqualNonDefault=" + sizeEqualNonDefault
+                    + " sizeDifferent=" + sizeDifferent + " sizeUnknown=" + sizeUnknown + " rounds=" + rounds + " candidates=" + stats.candidates()
                     + " exact=" + stats.exact() + " lost=" + stats.lost() + " pendingOps=" + stats.pendingOps() + " ticks=" + stats.ticks()
                     + " branches=" + stats.branches() + " merges=" + stats.merges() + " overflows=" + stats.overflows();
         }
 
         public boolean clean() {
-            return different == 0 && missingInReplica == 0 && extraInReplica == 0;
+            return different == 0 && missingInReplica == 0 && extraInReplica == 0 && sizeDifferent == 0;
         }
     }
 
@@ -63,8 +72,9 @@ public final class EntityVerifier {
     private static final int ROUNDS = 6;
     private static final long ROUND_TICKS = 2;
 
-    /** What the server shows the player: per entity id its codec base, type and whether it is a passenger. */
-    private record ServerView(Map<Integer, Vec3> bases, Map<Integer, String> types, java.util.Set<Integer> passengers) {}
+    /** What the server shows the player: per entity id its codec base, type, size and whether it is a passenger. */
+    private record ServerView(Map<Integer, Vec3> bases, Map<Integer, String> types, Map<Integer, EntitySizes.Size> sizes,
+            java.util.Set<Integer> passengers) {}
 
     private final PacketInterceptor interceptor;
     private final ClientEntitiesTracker tracker;
@@ -113,6 +123,7 @@ public final class EntityVerifier {
         ServerLevel level = player.level();
         Map<Integer, Vec3> bases = new HashMap<>();
         Map<Integer, String> types = new HashMap<>();
+        Map<Integer, EntitySizes.Size> sizes = new HashMap<>();
         java.util.Set<Integer> passengers = new java.util.HashSet<>();
         for (Int2ObjectMap.Entry<ChunkMap.TrackedEntity> entry : level.getChunkSource().chunkMap.entityMap.int2ObjectEntrySet()) {
             ChunkMap.TrackedEntity tracked = entry.getValue();
@@ -121,12 +132,16 @@ public final class EntityVerifier {
                 Entity entity = level.getEntity(id);
                 bases.put(id, tracked.serverEntity.getPositionBase());
                 types.put(id, typeOf(entity));
-                if (entity != null && entity.isPassenger()) {
-                    passengers.add(id);
+                if (entity != null) {
+                    EntityDimensions d = entity.getDimensions(entity.getPose());
+                    sizes.put(id, new EntitySizes.Size(d.width(), d.height(), d.eyeHeight(), d.fixed()));
+                    if (entity.isPassenger()) {
+                        passengers.add(id);
+                    }
                 }
             }
         }
-        return new ServerView(bases, types, passengers);
+        return new ServerView(bases, types, sizes, passengers);
     }
 
     private static Result compare(String player, ServerView server, ServerView previous, ClientEntities.ServerOrder snapshot, int round) {
@@ -137,6 +152,10 @@ public final class EntityVerifier {
         int passengers = 0;
         int missing = 0;
         int extra = 0;
+        int sizeEqual = 0;
+        int sizeEqualNonDefault = 0;
+        int sizeDifferent = 0;
+        int sizeUnknown = 0;
         List<String> differences = new ArrayList<>();
         Map<Integer, ClientEntities.ServerOrder.Entity> replica = snapshot.entities();
         for (Map.Entry<Integer, Vec3> entry : server.bases().entrySet()) {
@@ -158,6 +177,22 @@ public final class EntityVerifier {
                 continue;
             }
             compared++;
+            EntitySizes.Size theirSize = server.sizes().get(id);
+            EntitySizes.Size ourSize = ours.size();
+            if (ourSize == null) {
+                sizeUnknown++;
+            } else if (ourSize.equals(theirSize)) {
+                sizeEqual++;
+                EntitySizes.Entry table = EntitySizes.vanilla().entry(type);
+                if (table != null && !ourSize.equals(table.size())) {
+                    sizeEqualNonDefault++;
+                }
+            } else if (previous != null && theirSize != null && theirSize.equals(previous.sizes().get(id))) {
+                sizeDifferent++;
+                note(differences, "size of " + id + " " + type + ": server " + theirSize + " replica " + ourSize);
+            } else {
+                moving++;
+            }
             Vec3 theirs = entry.getValue();
             Vec3d base = ours.base();
             boolean sameType = type.equals(ours.type());
@@ -185,7 +220,7 @@ public final class EntityVerifier {
             }
         }
         return new Result(player, snapshot.complete(), server.bases().size(), replica.size(), compared, equal, different, moving, passengers,
-                missing, extra, round, snapshot.stats(), differences);
+                missing, extra, sizeEqual, sizeEqualNonDefault, sizeDifferent, sizeUnknown, round, snapshot.stats(), differences);
     }
 
     private static void note(List<String> differences, String line) {
