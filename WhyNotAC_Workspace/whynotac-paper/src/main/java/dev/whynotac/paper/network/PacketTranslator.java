@@ -564,6 +564,8 @@ public final class PacketTranslator {
             java.util.Optional<BlockState> optional = (java.util.Optional<BlockState>) value;
             int id = optional.map(Block::getId).orElse(0);
             return entry(index, ClientboundPacket.SetEntityData.Kind.OPTIONAL_BLOCK_STATE, id == 0 ? -1 : id);
+        } else if (serializer == EntityDataSerializers.SNIFFER_STATE) {
+            return entry(index, ClientboundPacket.SetEntityData.Kind.SNIFFER_STATE, ((net.minecraft.world.entity.animal.sniffer.Sniffer.State) value).id());
         }
         return null;
     }

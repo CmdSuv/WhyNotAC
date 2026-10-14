@@ -21,6 +21,7 @@ import java.util.TreeSet;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.Avatar;
 import net.minecraft.world.entity.Entity;
@@ -48,8 +49,10 @@ import org.junit.jupiter.api.Test;
  *   <li>{@code getScale()} is the scale attribute (clamped to 0.0625..16) through {@code sanitizeScale}
  *       ({@link #SCALE_CAPS});</li>
  *   <li>classes in {@link #BABY_SIZE} return a constant {@code BABY_DIMENSIONS} for a baby; classes in
- *       {@link #POSE_SIZE} a constant size in one pose; classes in {@link #STATE} depend on other data
- *       (size, puff state, digging, an animation, flags) and are not followed yet.</li>
+ *       {@link #POSE_SIZE} a constant size in one pose; classes in {@link #DATA_SIZE} and
+ *       {@link #DATA_DIMENSIONS} a size from their data (the indices, initial values and constants are
+ *       read here, the formulas checked by {@code EntitySizesGameTest}); classes in {@link #STATE} depend on
+ *       what is not followed yet.</li>
  * </ul>
  */
 class EntitySizesDataTest {
@@ -76,16 +79,27 @@ class EntitySizesDataTest {
             "net.minecraft.world.entity.animal.camel.Camel", new String[] {"SITTING", "SITTING_DIMENSIONS"},
             "net.minecraft.world.entity.animal.goat.Goat", new String[] {"LONG_JUMPING", "LONG_JUMPING_DIMENSIONS"});
 
-    /** Classes whose size depends on data this table does not follow. */
+    /** Classes declaring getDefaultDimensions(Pose) from their data: the rule EntitySizes applies (its tail is read below). */
+    private static final Map<String, String> DATA_SIZE = Map.of(
+            "net.minecraft.world.entity.decoration.ArmorStand", "armor_stand", // marker and small flags
+            "net.minecraft.world.entity.animal.sniffer.Sniffer", "sniffer",     // digging state
+            "net.minecraft.world.entity.animal.fish.Salmon", "salmon",          // variant
+            "net.minecraft.world.entity.animal.fish.Pufferfish", "pufferfish",  // puff state
+            "net.minecraft.world.entity.monster.Phantom", "phantom",            // size
+            "net.minecraft.world.entity.monster.Slime", "slime",                // size
+            "net.minecraft.world.entity.monster.warden.Warden", "warden");      // digging or emerging pose
+
+    /** Classes whose size depends on what this table does not follow. */
     private static final Set<String> STATE = Set.of(
-            "net.minecraft.world.entity.decoration.ArmorStand",      // marker and small flags
-            "net.minecraft.world.entity.animal.polarbear.PolarBear", // a client-side standing animation
-            "net.minecraft.world.entity.animal.sniffer.Sniffer",     // digging state
-            "net.minecraft.world.entity.animal.fish.Salmon",         // variant
-            "net.minecraft.world.entity.animal.fish.Pufferfish",     // puff state
-            "net.minecraft.world.entity.monster.Phantom",            // size
-            "net.minecraft.world.entity.monster.Slime",              // size
-            "net.minecraft.world.entity.monster.warden.Warden");     // digging or emerging
+            "net.minecraft.world.entity.animal.polarbear.PolarBear"); // a client-side standing animation
+
+    /** Non-living classes declaring getDimensions(Pose) from their data: the rule EntitySizes applies. */
+    private static final Map<String, String> DATA_DIMENSIONS = Map.of(
+            "net.minecraft.world.entity.AreaEffectCloud", "cloud",
+            "net.minecraft.world.entity.Interaction", "interaction");
+
+    /** Classes declaring makeBoundingBox(Vec3) as their size around the position ({@code getDimensions().makeBoundingBox(pos)}). */
+    private static final Set<String> BOX_OF_SIZE = Set.of("net.minecraft.world.entity.Interaction");
 
     /** Every class declaring getDefaultDimensions(Pose) besides the ones above. */
     private static final Set<String> DEFAULT_SIZE = Set.of(LivingEntity.class.getName(), Avatar.class.getName());
@@ -124,7 +138,34 @@ class EntitySizesDataTest {
             "net.minecraft.world.entity.animal.frog.Frog", "",
             "net.minecraft.world.entity.animal.parrot.Parrot", "",
             "net.minecraft.world.entity.animal.nautilus.ZombieNautilus", "",
-            "net.minecraft.world.entity.decoration.ArmorStand", ""); // small flag; its size is STATE anyway
+            "net.minecraft.world.entity.decoration.ArmorStand", ""); // the small flag, which its size rule reads itself
+
+    /** isPickable(), per declaring class, as EntitySizes.Pick. */
+    private static final Map<String, String> PICK = Map.ofEntries(
+            Map.entry(Entity.class.getName(), "never"),
+            Map.entry(LivingEntity.class.getName(), "always"), // !isRemoved()
+            Map.entry("net.minecraft.world.entity.decoration.ArmorStand", "armor_stand"),
+            Map.entry("net.minecraft.world.entity.boss.enderdragon.EnderDragon", "never"), // its parts are picked
+            Map.entry("net.minecraft.world.entity.projectile.Projectile", "tag"),
+            Map.entry("net.minecraft.world.entity.projectile.arrow.AbstractArrow", "tag"), // the tag, and not in the ground
+            Map.entry("net.minecraft.world.entity.projectile.ShulkerBullet", "always"),
+            Map.entry("net.minecraft.world.entity.item.FallingBlockEntity", "always"),
+            Map.entry("net.minecraft.world.entity.item.PrimedTnt", "always"),
+            Map.entry("net.minecraft.world.entity.Interaction", "always"),
+            Map.entry("net.minecraft.world.entity.decoration.BlockAttachedEntity", "always"),
+            Map.entry("net.minecraft.world.entity.boss.enderdragon.EndCrystal", "always"),
+            Map.entry("net.minecraft.world.entity.vehicle.boat.AbstractBoat", "always"),
+            Map.entry("net.minecraft.world.entity.vehicle.minecart.AbstractMinecart", "always"));
+
+    /** getPickRadius(), per declaring class: a constant, or "1 if pickable" (Projectile). */
+    private static final Map<String, String> PICK_RADIUS = Map.of(
+            Entity.class.getName(), "0",
+            "net.minecraft.world.entity.projectile.Projectile", "pickable:1.0");
+
+    /** isSpectator(), per declaring class: players read their game mode from the client's player list. */
+    private static final Map<String, Boolean> SPECTATOR = Map.of(
+            Entity.class.getName(), false,
+            "net.minecraft.world.entity.player.Player", true);
 
     @BeforeAll
     static void bootstrap() {
@@ -148,12 +189,20 @@ class EntitySizesDataTest {
             String rule;
             String age = "-";
             int babyIndex = -1;
-            String alt = "-";
+            String alt = "";
             String scale = "-";
+            Data allocated = new Data(type, entityClass);
             if (!living) {
-                boolean custom = !getDimensions.equals(Entity.class.getName()) || !box.equals(Entity.class.getName())
-                        || BlockAttachedEntity.class.isAssignableFrom(entityClass); // hanging: a box from its block and facing
-                rule = custom ? "state" : "type";
+                boolean ownBox = !box.equals(Entity.class.getName()) && !BOX_OF_SIZE.contains(box);
+                if (DATA_DIMENSIONS.containsKey(getDimensions) && !ownBox) {
+                    rule = DATA_DIMENSIONS.get(getDimensions);
+                    alt = rule.equals("cloud") ? data(allocated, getDimensions, "DATA_RADIUS")
+                            : data(allocated, getDimensions, "DATA_WIDTH_ID", "DATA_HEIGHT_ID");
+                } else {
+                    boolean custom = !getDimensions.equals(Entity.class.getName()) || ownBox
+                            || BlockAttachedEntity.class.isAssignableFrom(entityClass); // hanging: a box from its block and facing
+                    rule = custom ? "state" : "type";
+                }
             } else {
                 String defaults = declaring(entityClass, "getDefaultDimensions", declaring, Pose.class);
                 String ageScale = declaring(entityClass, "getAgeScale", declaring);
@@ -173,21 +222,41 @@ class EntitySizesDataTest {
                 } else if (BABY_SIZE.containsKey(defaults)) {
                     rule = "baby";
                     String where = BABY_SIZE.get(defaults);
-                    alt = "-\t" + size(where.equals("*0.5") ? type.getDimensions().scale(0.5F) : constant(defaults, where));
+                    alt = "alt=-:" + cell(where.equals("*0.5") ? type.getDimensions().scale(0.5F) : constant(defaults, where));
                 } else if (POSE_SIZE.containsKey(defaults)) {
                     rule = "pose";
                     String[] pose = POSE_SIZE.get(defaults);
-                    alt = Pose.valueOf(pose[0]).name() + "\t" + size(constant(defaults, pose[1]));
+                    alt = "alt=" + Pose.valueOf(pose[0]).name() + ":" + cell(constant(defaults, pose[1]));
+                } else if (DATA_SIZE.containsKey(defaults)) {
+                    rule = DATA_SIZE.get(defaults);
+                    alt = dataTail(rule, allocated, defaults);
                 } else {
                     rule = "living";
                 }
             }
-            lines.add(String.join("\t", BuiltInRegistries.ENTITY_TYPE.getKey(type).toString(), rule, size(type.getDimensions()), age,
-                    Integer.toString(babyIndex), scale, alt));
+            String line = String.join("\t", BuiltInRegistries.ENTITY_TYPE.getKey(type).toString(), rule, size(type.getDimensions()), age,
+                    Integer.toString(babyIndex), scale);
+            if (!alt.isEmpty()) {
+                line += "\t" + alt;
+            }
+            String pick = known(PICK, declaring(entityClass, "isPickable", declaring), "isPickable");
+            if (known(SPECTATOR, declaring(entityClass, "isSpectator", declaring), "isSpectator")) {
+                assertEquals("always", pick, "a player is pickable while present");
+                pick = "player";
+            }
+            String radius = known(PICK_RADIUS, declaring(entityClass, "getPickRadius", declaring), "getPickRadius");
+            if (!pick.equals("never")) {
+                line += "\tpick=" + pick;
+                if (radius.startsWith("pickable:")) {
+                    line += "\tpickRadius=" + radius.substring("pickable:".length());
+                }
+            }
+            lines.add(line);
         }
         Set<String> knownDefaults = new TreeSet<>(DEFAULT_SIZE);
         knownDefaults.addAll(BABY_SIZE.keySet());
         knownDefaults.addAll(POSE_SIZE.keySet());
+        knownDefaults.addAll(DATA_SIZE.keySet());
         knownDefaults.addAll(STATE);
         assertEquals(knownDefaults, declaring.get("getDefaultDimensions"), "classes with their own getDefaultDimensions");
         assertEquals(new TreeSet<>(GET_DIMENSIONS), declaring.get("getDimensions"), "classes with their own getDimensions");
@@ -195,6 +264,8 @@ class EntitySizesDataTest {
         assertEquals(new TreeSet<>(AGE_SCALES.keySet()), declaring.get("getAgeScale"), "classes with their own getAgeScale");
         assertEquals(new TreeSet<>(SCALE_CAPS.keySet()), declaring.get("sanitizeScale"), "classes with their own sanitizeScale");
         assertEquals(new TreeSet<>(BABY_FLAG.keySet()), declaring.get("isBaby"), "classes with their own isBaby");
+        assertEquals(new TreeSet<>(PICK.keySet()), declaring.get("isPickable"), "classes with their own isPickable");
+        assertEquals(new TreeSet<>(PICK_RADIUS.keySet()), declaring.get("getPickRadius"), "classes with their own getPickRadius");
         lines.sort(null);
         assertEquals(BuiltInRegistries.ENTITY_TYPE.size(), lines.size(), "one field per registered type");
         compare("entity-sizes.tsv", String.join("\n", lines) + "\n", EntitySizes.vanillaTable());
@@ -249,6 +320,87 @@ class EntitySizesDataTest {
         Field field = Class.forName(className).getDeclaredField(fieldName);
         field.setAccessible(true);
         return (EntityDimensions) field.get(null);
+    }
+
+    /** The tail of a rule sized by data: the data fields it reads and the constants it applies, read from the game. */
+    /** The type, allocated when a rule reads its data. */
+    private record Data(EntityType<?> type, Class<?> entityClass) {
+        GameEntities.Allocated allocate() throws ReflectiveOperationException {
+            return GameEntities.allocate(type, entityClass);
+        }
+    }
+
+    private static String dataTail(String rule, Data allocated, String owner) throws ReflectiveOperationException {
+        Class<?> c = Class.forName(owner);
+        return switch (rule) {
+            case "slime", "phantom" -> data(allocated, owner, "ID_SIZE");
+            case "pufferfish" -> {
+                Method scale = c.getDeclaredMethod("getScale", int.class);
+                scale.setAccessible(true);
+                yield data(allocated, owner, "PUFF_STATE") + "\tfactors=" + scale.invoke(null, 0) + "," + scale.invoke(null, 1) + "," + scale.invoke(null, 2);
+            }
+            case "salmon" -> {
+                // Variant.BY_ID is ByIdMap.continuous over the ids: they must be the ordinals.
+                Class<?> variant = Class.forName(owner + "$Variant");
+                Field id = variant.getDeclaredField("id");
+                Field factor = variant.getDeclaredField("boundingBoxScale");
+                id.setAccessible(true);
+                factor.setAccessible(true);
+                List<String> factors = new ArrayList<>();
+                for (Object v : variant.getEnumConstants()) {
+                    assertEquals(((Enum<?>) v).ordinal(), id.getInt(v), "salmon variant ids are their ordinals");
+                    factors.add(Float.toString(factor.getFloat(v)));
+                }
+                yield data(allocated, owner, "DATA_TYPE") + "\tfactors=" + String.join(",", factors);
+            }
+            case "armor_stand" -> {
+                assertEquals(EntitySizes.ARMOR_STAND_SMALL, c.getField("CLIENT_FLAG_SMALL").getInt(null), "the armor stand's small flag");
+                assertEquals(EntitySizes.ARMOR_STAND_MARKER, c.getField("CLIENT_FLAG_MARKER").getInt(null), "the armor stand's marker flag");
+                yield data(allocated, owner, "DATA_CLIENT_FLAGS") + "\talt=-:" + cell(constant(owner, "BABY_DIMENSIONS"))
+                        + "\tmarker=" + cell(constant(owner, "MARKER_DIMENSIONS"));
+            }
+            case "sniffer" -> {
+                int select = net.minecraft.world.entity.animal.sniffer.Sniffer.State.DIGGING.id();
+                yield data(allocated, owner, "DATA_STATE") + "\talt=-:" + cell(constant(owner, "DIGGING_DIMENSIONS")) + "\tselect=" + select;
+            }
+            case "warden" -> "";
+            default -> throw new AssertionError(rule);
+        };
+    }
+
+    /** {@code data=index:KIND:initial,...}: the fields of {@code owner}, with the values the entity starts with. */
+    private static String data(Data type, String owner, String... fields) throws ReflectiveOperationException {
+        GameEntities.Allocated allocated = type.allocate();
+        assertEquals(true, allocated.initial(), owner + " defines its data without a level");
+        List<String> cells = new ArrayList<>();
+        for (String name : fields) {
+            EntityDataAccessor<?> accessor = GameEntities.accessor(Class.forName(owner), name);
+            Object value = allocated.entity().getEntityData().get(accessor);
+            String kind;
+            String initial;
+            if (accessor.serializer() == EntityDataSerializers.INT) {
+                kind = "INT";
+                initial = value.toString();
+            } else if (accessor.serializer() == EntityDataSerializers.BYTE) {
+                kind = "BYTE";
+                initial = Integer.toString((Byte) value & 0xFF);
+            } else if (accessor.serializer() == EntityDataSerializers.FLOAT) {
+                kind = "FLOAT";
+                initial = value.toString();
+            } else if (accessor.serializer() == EntityDataSerializers.SNIFFER_STATE) {
+                kind = "SNIFFER_STATE";
+                initial = Integer.toString(((net.minecraft.world.entity.animal.sniffer.Sniffer.State) value).id());
+            } else {
+                throw new AssertionError(owner + "." + name + ": a serializer the table does not read");
+            }
+            cells.add(accessor.id() + ":" + kind + ":" + initial);
+        }
+        return "data=" + String.join(",", cells);
+    }
+
+    /** {@link #size} joined by colons, for a name=value cell. */
+    private static String cell(EntityDimensions d) {
+        return size(d).replace('\t', ':');
     }
 
     /** width, height, eye height, fixed: floats as Float.toString (exact round trip). */

@@ -493,8 +493,85 @@ class ClientEntitiesTest {
     }
 
     @Test
-    void aSizeTheTableDoesNotFollowIsNotClaimed() {
+    void sizesFollowTheTypesData() {
+        // A slime starts at size 1 (defineSynchedData); its size data scales it once processed.
+        EntitySizes.DataField slimeSize = SIZES.entry("minecraft:slime").data().getFirst();
         out(add(5, "minecraft:slime", 0.5, 64.0, 0.5));
+        sync();
+        assertEquals(SIZES.entry("minecraft:slime").size(), onlySize(5));
+        out(data(5, slimeSize.index(), ClientboundPacket.SetEntityData.Kind.INT, 4));
+        assertEquals(2, sizes(5).size(), "not processed yet: either");
+        sync();
+        assertEquals(SIZES.entry("minecraft:slime").size().scale(4.0F), onlySize(5));
+        out(data(5, slimeSize.index(), ClientboundPacket.SetEntityData.Kind.FLOAT, 7));
+        sync();
+        assertEquals(SIZES.entry("minecraft:slime").size().scale(4.0F), onlySize(5), "another serializer at the index is not the size");
+
+        // An armor stand's flags: small, then marker (fixed, no scale changes it).
+        EntitySizes.DataField flags = SIZES.entry("minecraft:armor_stand").data().getFirst();
+        out(add(6, "minecraft:armor_stand", 2.5, 64.0, 0.5));
+        out(data(6, flags.index(), ClientboundPacket.SetEntityData.Kind.BYTE, (byte) EntitySizes.ARMOR_STAND_SMALL));
+        sync();
+        assertEquals(SIZES.entry("minecraft:armor_stand").alt(), onlySize(6));
+        out(data(6, flags.index(), ClientboundPacket.SetEntityData.Kind.BYTE, (byte) (EntitySizes.ARMOR_STAND_MARKER | 0x80)));
+        out(scale(6, 2.0));
+        sync();
+        assertEquals(new EntitySizes.Size(0.0F, 0.0F, 0.0F, true), onlySize(6));
+
+        // An interaction: width and height from two floats, in either packet.
+        List<EntitySizes.DataField> box = SIZES.entry("minecraft:interaction").data();
+        out(add(7, "minecraft:interaction", 4.5, 64.0, 0.5));
+        sync();
+        assertEquals(new EntitySizes.Size(1.0F, 1.0F, 0.85F, false), onlySize(7), "1 x 1 until told otherwise");
+        out(data(7, box.get(1).index(), ClientboundPacket.SetEntityData.Kind.FLOAT, Float.floatToRawIntBits(0.5F)));
+        out(data(7, box.get(0).index(), ClientboundPacket.SetEntityData.Kind.FLOAT, Float.floatToRawIntBits(2.25F)));
+        sync();
+        assertEquals(new EntitySizes.Size(2.25F, 0.5F, 0.5F * 0.85F, false), onlySize(7));
+    }
+
+    @Test
+    void spectatorsMarkersAndTaggedProjectilesAreNotPickedOrNotClaimed() {
+        out(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 3))));
+        out(ClientboundPacket.AddEntity.received(6, ALICE, EntityTypes.PLAYER, 0, 64, 0, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        assertEquals(0, entities.pickable(6), "a spectator cannot be picked");
+        out(new ClientboundPacket.PlayerInfoUpdate(false, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 0))));
+        assertEquals(-1, entities.pickable(6), "not processed yet: either");
+        sync();
+        assertEquals(1, entities.pickable(6));
+        out(new ClientboundPacket.PlayerInfoUpdate(false, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 3))));
+        out(new ClientboundPacket.PlayerInfoUpdate(true, false, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, -1))));
+        sync();
+        assertEquals(0, entities.pickable(6), "adding a listed profile again keeps its PlayerInfo (putIfAbsent): still a spectator");
+        out(new ClientboundPacket.PlayerInfoUpdate(false, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 0))));
+        sync();
+        out(new ClientboundPacket.PlayerInfoRemove(List.of(ALICE)));
+        out(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 0))));
+        sync();
+        assertEquals(-1, entities.pickable(6), "the entity keeps the PlayerInfo it looked up, which is no longer followed");
+
+        EntitySizes.DataField flags = SIZES.entry("minecraft:armor_stand").data().getFirst();
+        out(add(7, "minecraft:armor_stand", 2.5, 64.0, 0.5));
+        sync();
+        assertEquals(1, entities.pickable(7));
+        out(data(7, flags.index(), ClientboundPacket.SetEntityData.Kind.BYTE, (byte) EntitySizes.ARMOR_STAND_MARKER));
+        sync();
+        assertEquals(0, entities.pickable(7), "a marker cannot be picked");
+
+        out(add(8, "minecraft:arrow", 4.5, 64.0, 0.5));
+        out(add(9, "minecraft:ender_dragon", 8.5, 64.0, 0.5));
+        out(add(10, "minecraft:shulker_bullet", 10.5, 64.0, 0.5));
+        sync();
+        assertEquals(-1, entities.pickable(8), "projectiles: by a tag the server sends");
+        assertEquals(0, entities.pickable(9), "the dragon itself: only its parts");
+        assertEquals(1, entities.pickable(10));
+        assertEquals(1.0F, states(10).getFirst().pickRadius(), "a projectile's box is inflated by 1 when picked");
+        assertEquals(0, entities.pickable(11), "an id the client never got: absent, nothing to pick");
+    }
+
+    @Test
+    void aSizeTheTableDoesNotFollowIsNotClaimed() {
+        out(add(5, "minecraft:polar_bear", 0.5, 64.0, 0.5));
         sync();
         assertNull(onlySize(5));
         assertEquals(ClientEntities.Existence.PRESENT, entities.existence(5));

@@ -5,6 +5,7 @@ import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.ClientWorldTracker;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,21 +24,25 @@ import org.bukkit.plugin.Plugin;
  * {@code /whynotac world <player>}: compares the world WhyNotAC rebuilt from what the client received
  * with the server's world, section by section (a 64-bit hash of the 4096 block-state ids each).
  *
- * <p>Equal means the client holds exactly the server's blocks, so the replica is right. Expected
- * differences: blocks changed in the last moments (the replica follows the network, the server is
- * ahead), the client's unconfirmed predictions, and anti-xray (the client deliberately receives other
- * blocks). The server side is hashed on the main thread: a diagnostic, it costs a few milliseconds per
- * hundred chunks.
+ * <p>Equal means the client holds exactly the server's blocks, so the replica is right. A difference
+ * counts only once it stood still: the server's section unchanged since the previous round (two ticks
+ * earlier, long enough for its packets to have passed the edge) and the replica's still different. A
+ * block the server changed in the last moments (an animal eating grass, a fluid) is not sent until the
+ * tick's end; such sections are re-checked, and reported as {@code changing} if the server kept changing
+ * them until the last round. Other expected differences: the client's unconfirmed predictions, and
+ * anti-xray (the client deliberately receives other blocks). The server side is hashed on the main thread:
+ * a diagnostic, it costs a few milliseconds per hundred chunks.
  */
 public final class WorldVerifier {
 
     /** One verification's outcome, also printed as one line. */
     public record Result(String player, String dimension, boolean dimensionMatches, int chunks, int sections, int equal, int different,
-            int stale, int missingOnServer, int unsettled, ClientWorld.Stats stats, long allWorldsBytes, int sharedSections,
-            List<String> differences) {
+            int changing, int stale, int missingOnServer, int unsettled, ClientWorld.Stats stats, long allWorldsBytes, int sharedSections,
+            int rounds, List<String> differences) {
         public String line() {
             return "WhyNotAC world " + player + ": dimension=" + dimension + (dimensionMatches ? "" : " (server: other)") + " chunks=" + chunks
-                    + " sections=" + sections + " equal=" + equal + " different=" + different + " stale=" + stale + " missingOnServer="
+                    + " sections=" + sections + " equal=" + equal + " different=" + different + " changing=" + changing + " rounds=" + rounds
+                    + " stale=" + stale + " missingOnServer="
                     + missingOnServer + " unsettled=" + unsettled + " blockUpdates=" + stats.blockUpdates() + " chunksReceived="
                     + stats.chunksReceived() + " chunksIgnored=" + stats.chunksIgnored() + " unreadable=" + stats.chunksUnreadable()
                     + " allWorldsKiB=" + allWorldsBytes / 1024 + " sharedSections=" + sharedSections;
@@ -45,6 +50,15 @@ public final class WorldVerifier {
     }
 
     private record Snapshot(ClientWorld.Digest digest, ClientWorld.Stats stats) {}
+
+    /** A section: its chunk's key and its index from the bottom. */
+    private record SectionKey(long chunk, int index) {}
+
+    /** A round's result and the server's hash of each section that differed in it. */
+    private record Comparison(Result result, Map<SectionKey, Long> differing) {}
+
+    private static final int ROUNDS = 6;
+    private static final long ROUND_TICKS = 2;
 
     private final PacketInterceptor interceptor;
     private final ClientWorldTracker tracker;
@@ -63,7 +77,12 @@ public final class WorldVerifier {
             failed.accept(target.getName() + " has no WhyNotAC session");
             return;
         }
-        tracker.query(session.get(), world -> new Snapshot(world.digest(), world.stats()))
+        round(target, session.get(), Map.of(), 1, done, failed);
+    }
+
+    private void round(Player target, PlayerSession session, Map<SectionKey, Long> previous, int round, Consumer<Result> done,
+            Consumer<String> failed) {
+        tracker.query(session, world -> new Snapshot(world.digest(), world.stats()))
                 .orTimeout(5, TimeUnit.SECONDS)
                 .whenComplete((snapshot, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (error != null) {
@@ -71,12 +90,18 @@ public final class WorldVerifier {
                     } else if (!target.isOnline()) {
                         failed.accept(target.getName() + " left");
                     } else {
-                        done.accept(compare(target, snapshot, tracker));
+                        Comparison comparison = compare(target, snapshot, tracker, previous, round);
+                        if (comparison.result().changing() == 0 || round >= ROUNDS) {
+                            done.accept(comparison.result());
+                        } else {
+                            Bukkit.getScheduler().runTaskLater(plugin,
+                                    () -> round(target, session, comparison.differing(), round + 1, done, failed), ROUND_TICKS);
+                        }
                     }
                 }));
     }
 
-    private static Result compare(Player target, Snapshot snapshot, ClientWorldTracker tracker) {
+    private static Comparison compare(Player target, Snapshot snapshot, ClientWorldTracker tracker, Map<SectionKey, Long> previous, int round) {
         ServerLevel level = ((CraftWorld) target.getWorld()).getHandle();
         ClientWorld.Digest digest = snapshot.digest();
         String serverDimension = level.dimension().identifier().toString();
@@ -84,9 +109,11 @@ public final class WorldVerifier {
         int sections = 0;
         int equal = 0;
         int different = 0;
+        int changing = 0;
         int stale = 0;
         int missing = 0;
         List<String> differences = new ArrayList<>();
+        Map<SectionKey, Long> differing = new HashMap<>();
         for (Map.Entry<Long, long[]> entry : digest.chunks().entrySet()) {
             int cx = ClientWorld.chunkX(entry.getKey());
             int cz = ClientWorld.chunkZ(entry.getKey());
@@ -103,18 +130,27 @@ public final class WorldVerifier {
                     stale++;
                     continue;
                 }
-                if (ours[i] == hash(theirs[i])) {
+                long hash = hash(theirs[i]);
+                if (ours[i] == hash) {
                     equal++;
-                } else {
-                    different++;
+                    continue;
+                }
+                SectionKey key = new SectionKey(entry.getKey(), i);
+                differing.put(key, hash);
+                if (Long.valueOf(hash).equals(previous.get(key))) {
+                    different++; // the server's side stood still for a round and the replica still differs
                     if (differences.size() < 10) {
                         differences.add("chunk " + cx + "," + cz + " section y=" + (level.getMinSectionY() + i));
                     }
+                } else {
+                    changing++;
                 }
             }
         }
-        return new Result(target.getName(), digest.dimension(), dimensionMatches, digest.chunks().size(), sections, equal, different, stale, missing,
-                digest.unsettled(), snapshot.stats(), tracker.retainedBytes(), tracker.sharedSections(), differences);
+        Result result = new Result(target.getName(), digest.dimension(), dimensionMatches, digest.chunks().size(), sections, equal, different,
+                changing, stale, missing, digest.unsettled(), snapshot.stats(), tracker.retainedBytes(), tracker.sharedSections(), round,
+                differences);
+        return new Comparison(result, differing);
     }
 
     /** {@link ClientWorld#sectionHash} of a server section, in the game's index order. */

@@ -42,25 +42,28 @@ import org.bukkit.plugin.Plugin;
  * <p>Sizes: the size the replica gives each compared entity (pose, baby flag, scale attribute, in client
  * order) against the server's own {@code getDimensions(getPose())}, which runs the same code on the same
  * data. A size the replica does not claim (a type whose size depends on other data, a scale it cannot
- * compute exactly) is counted apart.
+ * compute exactly) is counted apart. Pickability likewise: whether the client's crosshair can pick the
+ * entity against the server's {@code isPickable() && !isSpectator()}, except for living entities a plugin
+ * made non-collidable (Bukkit's {@code collides}, read by Paper's {@code isPickable} only).
  */
 public final class EntityVerifier {
 
     /** One verification's outcome, also printed as one line. */
     public record Result(String player, boolean complete, int server, int replica, int compared, int equal, int different, int moving,
             int passengers, int missingInReplica, int extraInReplica, int sizeEqual, int sizeEqualNonDefault, int sizeDifferent, int sizeUnknown,
-            int rounds, ClientEntities.Stats stats, List<String> differences) {
+            int pickEqual, int pickDifferent, int pickUnknown, int rounds, ClientEntities.Stats stats, List<String> differences) {
         public String line() {
             return "WhyNotAC entities " + player + ": complete=" + complete + " server=" + server + " replica=" + replica + " compared=" + compared
                     + " equal=" + equal + " different=" + different + " moving=" + moving + " passengers=" + passengers + " missingInReplica="
                     + missingInReplica + " extraInReplica=" + extraInReplica + " sizeEqual=" + sizeEqual + " sizeEqualNonDefault=" + sizeEqualNonDefault
-                    + " sizeDifferent=" + sizeDifferent + " sizeUnknown=" + sizeUnknown + " rounds=" + rounds + " candidates=" + stats.candidates()
+                    + " sizeDifferent=" + sizeDifferent + " sizeUnknown=" + sizeUnknown + " pickEqual=" + pickEqual + " pickDifferent=" + pickDifferent
+                    + " pickUnknown=" + pickUnknown + " rounds=" + rounds + " candidates=" + stats.candidates()
                     + " exact=" + stats.exact() + " lost=" + stats.lost() + " pendingOps=" + stats.pendingOps() + " ticks=" + stats.ticks()
                     + " branches=" + stats.branches() + " merges=" + stats.merges() + " overflows=" + stats.overflows();
         }
 
         public boolean clean() {
-            return different == 0 && missingInReplica == 0 && extraInReplica == 0 && sizeDifferent == 0;
+            return different == 0 && missingInReplica == 0 && extraInReplica == 0 && sizeDifferent == 0 && pickDifferent == 0;
         }
     }
 
@@ -74,7 +77,7 @@ public final class EntityVerifier {
 
     /** What the server shows the player: per entity id its codec base, type, size and whether it is a passenger. */
     private record ServerView(Map<Integer, Vec3> bases, Map<Integer, String> types, Map<Integer, EntitySizes.Size> sizes,
-            java.util.Set<Integer> passengers) {}
+            Map<Integer, Boolean> pickable, java.util.Set<Integer> passengers) {}
 
     private final PacketInterceptor interceptor;
     private final ClientEntitiesTracker tracker;
@@ -124,6 +127,7 @@ public final class EntityVerifier {
         Map<Integer, Vec3> bases = new HashMap<>();
         Map<Integer, String> types = new HashMap<>();
         Map<Integer, EntitySizes.Size> sizes = new HashMap<>();
+        Map<Integer, Boolean> pickable = new HashMap<>();
         java.util.Set<Integer> passengers = new java.util.HashSet<>();
         for (Int2ObjectMap.Entry<ChunkMap.TrackedEntity> entry : level.getChunkSource().chunkMap.entityMap.int2ObjectEntrySet()) {
             ChunkMap.TrackedEntity tracked = entry.getValue();
@@ -135,13 +139,17 @@ public final class EntityVerifier {
                 if (entity != null) {
                     EntityDimensions d = entity.getDimensions(entity.getPose());
                     sizes.put(id, new EntitySizes.Size(d.width(), d.height(), d.eyeHeight(), d.fixed()));
+                    // Bukkit's setCollidable(false) makes isPickable false on the server only: the client cannot know it.
+                    if (!(entity instanceof net.minecraft.world.entity.LivingEntity living) || living.collides) {
+                        pickable.put(id, entity.isPickable() && !entity.isSpectator());
+                    }
                     if (entity.isPassenger()) {
                         passengers.add(id);
                     }
                 }
             }
         }
-        return new ServerView(bases, types, sizes, passengers);
+        return new ServerView(bases, types, sizes, pickable, passengers);
     }
 
     private static Result compare(String player, ServerView server, ServerView previous, ClientEntities.ServerOrder snapshot, int round) {
@@ -156,6 +164,9 @@ public final class EntityVerifier {
         int sizeEqualNonDefault = 0;
         int sizeDifferent = 0;
         int sizeUnknown = 0;
+        int pickEqual = 0;
+        int pickDifferent = 0;
+        int pickUnknown = 0;
         List<String> differences = new ArrayList<>();
         Map<Integer, ClientEntities.ServerOrder.Entity> replica = snapshot.entities();
         for (Map.Entry<Integer, Vec3> entry : server.bases().entrySet()) {
@@ -193,6 +204,17 @@ public final class EntityVerifier {
             } else {
                 moving++;
             }
+            Boolean theirPick = server.pickable().get(id);
+            if (ours.pickable() < 0 || theirPick == null) {
+                pickUnknown++;
+            } else if ((ours.pickable() == 1) == theirPick) {
+                pickEqual++;
+            } else if (previous != null && theirPick.equals(previous.pickable().get(id))) {
+                pickDifferent++;
+                note(differences, "pickable " + id + " " + type + ": server " + theirPick + " replica " + (ours.pickable() == 1));
+            } else {
+                moving++;
+            }
             Vec3 theirs = entry.getValue();
             Vec3d base = ours.base();
             boolean sameType = type.equals(ours.type());
@@ -220,7 +242,8 @@ public final class EntityVerifier {
             }
         }
         return new Result(player, snapshot.complete(), server.bases().size(), replica.size(), compared, equal, different, moving, passengers,
-                missing, extra, sizeEqual, sizeEqualNonDefault, sizeDifferent, sizeUnknown, round, snapshot.stats(), differences);
+                missing, extra, sizeEqual, sizeEqualNonDefault, sizeDifferent, sizeUnknown, pickEqual, pickDifferent, pickUnknown, round,
+                snapshot.stats(), differences);
     }
 
     private static void note(List<String> differences, String line) {

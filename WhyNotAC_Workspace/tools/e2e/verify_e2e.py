@@ -249,8 +249,9 @@ def verify_world(log, dump_path, check):
     check(fields.get("dimension") == "minecraft:overworld" and "(server:" not in m.group(1),
           f"the client's dimension is the player's world: {fields.get('dimension')}")
     check(n("chunks") >= 9 and n("missingOnServer") == 0, f"the client holds the chunks around it ({n('chunks')}, all loaded on the server)")
-    check(n("sections") > 0 and n("different") == 0 and n("stale") == 0 and n("equal") == n("sections"),
-          f"every section the client holds equals the server's, block for block ({n('equal')}/{n('sections')} equal)")
+    # A section the server kept changing through every round (12 ticks) is not compared; at most two may be.
+    check(n("sections") > 0 and n("different") == 0 and n("stale") == 0 and n("equal") + n("changing") == n("sections") and n("changing") <= 2,
+          f"every section the client holds equals the server's, block for block ({n('equal')}/{n('sections')} equal, {n('changing')} changing, {n('rounds')} rounds)")
     check(n("unreadable") == 0, "every chunk packet decoded")
     check(n("blockUpdates") >= 1 + 9 * 9 * 2, f"the setblock and the fill reached the client's world ({n('blockUpdates')} block changes)")
     events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []
@@ -281,10 +282,12 @@ def verify_entities(log, dump_path, check):
           f"every entity's position base equals the server's on the 1/4096 grid ({n('equal')}/{n('compared')}, {n('moving')} still moving)")
     check(n("passengers") >= 1, f"the passenger was recognised and left out of the comparison ({n('passengers')})")
     check(n("overflows") == 0, "no entity was given up")
-    check(n("sizeDifferent") == 0 and n("sizeEqual") >= 7,
-          f"every size the replica claims is the server's own (pose, baby, scale): {n('sizeEqual')} equal, {n('sizeDifferent')} different")
-    check(n("sizeEqualNonDefault") >= 3, f"the baby husk, the scaled husk and the baby chicken are among them ({n('sizeEqualNonDefault')} not the type's default size)")
-    check(n("sizeUnknown") >= 2, f"sizes that depend on data not followed (armor stand, slime) are not claimed ({n('sizeUnknown')})")
+    check(n("sizeDifferent") == 0 and n("sizeEqual") >= 16,
+          f"every size the replica claims is the server's own (pose, baby, scale, size data): {n('sizeEqual')} equal, {n('sizeDifferent')} different")
+    check(n("sizeEqualNonDefault") >= 11,
+          f"the babies, the scaled husk and the sizes from data are among them ({n('sizeEqualNonDefault')} not the type's default size)")
+    check(n("pickDifferent") == 0 and n("pickEqual") >= 15,
+          f"whether the client can pick each entity is the server's own, the marker and the cloud not ({n('pickEqual')} equal, {n('pickDifferent')} different, {n('pickUnknown')} unknown)")
     events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []
     kinds = {}
     for e in events:

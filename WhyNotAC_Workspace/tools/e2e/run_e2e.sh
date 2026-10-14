@@ -95,12 +95,20 @@ echo "execute at WhyNotProbe run summon minecraft:armor_stand ~-2 ~ ~-2" > "$FIF
 echo "execute at WhyNotProbe run summon minecraft:end_crystal ~3 ~ ~-3 {ShowBottom:0b}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:pig ~4 ~ ~0.5 {NoAI:1b,Passengers:[{id:\"minecraft:armor_stand\",Small:1b}]}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:cow ~-4 ~ ~0.5 {NoAI:1b,Tags:[\"wnc\"]}" > "$FIFO"
-# Sizes: a baby (zombie's baby size), a scaled husk, a baby chicken (its own baby size) and a slime (its size
-# depends on data the replica does not follow yet).
+# Sizes: a baby (zombie's baby size), a scaled husk, a baby chicken (its own baby size), and sizes from data:
+# slime and magma cube sizes, a phantom's, a puffed pufferfish, a large salmon, a marker armor stand, an
+# interaction and an area effect cloud (no AI and invulnerable: nothing changes them but the commands).
 echo "execute at WhyNotProbe run summon minecraft:husk ~-3 ~ ~-4 {NoAI:1b,PersistenceRequired:1b,IsBaby:1b}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:husk ~3 ~ ~4 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wns\"]}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:chicken ~0.5 ~ ~-4 {NoAI:1b,Age:-24000}" > "$FIFO"
-echo "execute at WhyNotProbe run summon minecraft:slime ~-0.5 ~ ~4 {NoAI:1b,Size:1}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:slime ~-0.5 ~ ~4 {NoAI:1b,PersistenceRequired:1b,Size:1}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:magma_cube ~-5 ~ ~-2 {NoAI:1b,PersistenceRequired:1b,Size:2}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:phantom ~5 ~1 ~-2 {NoAI:1b,PersistenceRequired:1b,Invulnerable:1b,size:3}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:pufferfish ~-5 ~ ~2 {NoAI:1b,PersistenceRequired:1b,Invulnerable:1b,PuffState:1}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:salmon ~5 ~ ~2 {NoAI:1b,PersistenceRequired:1b,Invulnerable:1b,type:\"large\"}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:armor_stand ~0.5 ~ ~6 {Marker:1b}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:interaction ~-6 ~ ~-5 {width:2.5f,height:0.75f}" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:area_effect_cloud ~6 ~ ~-5 {Radius:1.25f,Duration:6000,WaitTime:0}" > "$FIFO"
 # Moves: absolute and relative positions and rotations; the cow is removed.
 sleep 1; echo "execute at WhyNotProbe run tp @e[tag=wnz,limit=1] ~1.3172 ~ ~2.7071 45 10" > "$FIFO"
 echo "execute at WhyNotProbe run tp @e[tag=wnv,limit=1] ~-1.5 ~ ~1.25 -170 0" > "$FIFO"

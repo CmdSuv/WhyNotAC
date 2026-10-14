@@ -65,9 +65,51 @@ class EntitySizesTest {
     @Test
     void nonLivingTypesKeepTheirSizeAndStateTypesClaimNone() {
         assertEquals(new EntitySizes.Size(2.0F, 2.0F, 1.7F, false), SIZES.size("minecraft:end_crystal", EntityPose.SLEEPING.ordinal(), true, 9.0));
-        assertNull(SIZES.size("minecraft:slime", STANDING, false, 1.0));
+        assertNull(SIZES.size("minecraft:polar_bear", STANDING, false, 1.0));
         assertNull(SIZES.size("minecraft:item_frame", STANDING, false, 1.0));
         assertNull(SIZES.size("minecraft:not_a_type", STANDING, false, 1.0));
+    }
+
+    @Test
+    void dataScalesOrReplacesTheDefault() {
+        EntitySizes.Size slime = SIZES.entry("minecraft:slime").size();
+        assertEquals(slime, SIZES.size("minecraft:slime", STANDING, false, 1.0), "size 1 at first");
+        assertEquals(slime.scale(4.0F).scale(1.5F), SIZES.size("minecraft:slime", STANDING, false, 1.5, 4, 0));
+        EntitySizes.Size phantom = SIZES.entry("minecraft:phantom").size();
+        assertEquals(phantom.scale(1.0F + 0.15F * 5), SIZES.size("minecraft:phantom", STANDING, false, 1.0, 5, 0));
+        // Puff state 0 and 1 have their own factor, every other state the last; the fish starts deflated.
+        EntitySizes.Size puffer = SIZES.entry("minecraft:pufferfish").size();
+        assertEquals(puffer.scale(0.5F), SIZES.size("minecraft:pufferfish", STANDING, false, 1.0));
+        assertEquals(puffer.scale(0.7F), SIZES.size("minecraft:pufferfish", STANDING, false, 1.0, 1, 0));
+        assertEquals(puffer, SIZES.size("minecraft:pufferfish", STANDING, false, 1.0, -3, 0));
+        // Salmon variants clamp their id.
+        EntitySizes.Size salmon = SIZES.entry("minecraft:salmon").size();
+        assertEquals(salmon.scale(1.5F), SIZES.size("minecraft:salmon", STANDING, false, 1.0, 9, 0));
+        assertEquals(salmon.scale(0.5F), SIZES.size("minecraft:salmon", STANDING, false, 1.0, -1, 0));
+        // A digging or emerging warden: fixed, 1 high, the eye at 0.85; scales do not change it.
+        assertEquals(new EntitySizes.Size(0.9F, 1.0F, 0.85F, true), SIZES.size("minecraft:warden", EntityPose.EMERGING.ordinal(), false, 2.0));
+        // A digging sniffer, a baby one at half.
+        EntitySizes.Entry sniffer = SIZES.entry("minecraft:sniffer");
+        assertEquals(sniffer.alt().scale(0.5F), SIZES.size("minecraft:sniffer", STANDING, true, 1.0, sniffer.select(), 0));
+        // An area effect cloud: twice the radius wide.
+        assertEquals(new EntitySizes.Size(6.0F, 0.5F, 0.425F, false), SIZES.size("minecraft:area_effect_cloud", STANDING, false, 1.0));
+    }
+
+    @Test
+    void pickabilityFollowsTheType() {
+        assertEquals(1, SIZES.pickable("minecraft:husk", 0, -1));
+        assertEquals(0, SIZES.pickable("minecraft:item", 0, -1));
+        assertEquals(0, SIZES.pickable("minecraft:armor_stand", EntitySizes.ARMOR_STAND_MARKER | EntitySizes.ARMOR_STAND_SMALL, -1));
+        assertEquals(1, SIZES.pickable("minecraft:armor_stand", EntitySizes.ARMOR_STAND_SMALL, -1));
+        assertEquals(0, SIZES.pickable("minecraft:player", 0, 1), "a spectator");
+        assertEquals(1, SIZES.pickable("minecraft:player", 0, 0));
+        assertEquals(-1, SIZES.pickable("minecraft:player", 0, -1));
+        assertEquals(1, SIZES.pickable("minecraft:mannequin", 0, -1), "not a player: no game mode");
+        assertEquals(-1, SIZES.pickable("minecraft:snowball", 0, -1), "a projectile: by a tag the server sends");
+        assertEquals(1, SIZES.pickable("minecraft:interaction", 0, -1));
+        assertEquals(-1, SIZES.pickable("minecraft:not_a_type", 0, -1));
+        assertEquals(0.0F, SIZES.entry("minecraft:husk").pickRadius());
+        assertEquals(1.0F, SIZES.entry("minecraft:snowball").pickRadius());
     }
 
     @Test

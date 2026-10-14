@@ -101,7 +101,8 @@ def main():
     fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
     n = lambda k: int(fields.get(k, "-1"))
     check(m is not None and fields.get("dimension") == "minecraft:overworld" and n("chunks") >= 9 and n("missingOnServer") == 0
-          and n("different") == 0 and n("stale") == 0 and n("unreadable") == 0 and n("equal") == n("sections") > 0,
+          and n("different") == 0 and n("stale") == 0 and n("unreadable") == 0 and n("equal") + n("changing") == n("sections") > 0
+          and n("changing") <= 2,
           f"the real client's world, rebuilt from its packets, equals the server's block for block ({m.group(1) if m else 'no answer'})")
     # The entities WhyNotAC rebuilt from what the real client received are the ones the server shows it, at the same bases.
     m = re.search(r"WhyNotAC entities RealProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
@@ -109,8 +110,10 @@ def main():
     check(m is not None and fields.get("complete") == "true" and n("server") >= 3 and n("missingInReplica") == 0 and n("extraInReplica") == 0
           and n("different") == 0 and n("equal") >= 3 and n("equal") + n("moving") == n("compared") and n("overflows") == 0,
           f"the real client's entities, rebuilt from its packets, are the server's, base for base ({m.group(1) if m else 'no answer'})")
-    check(m is not None and n("sizeDifferent") == 0 and n("sizeEqual") >= 3 and n("sizeEqualNonDefault") >= 1,
-          f"every size the replica claims for the real client's entities is the server's own, a baby's too ({n('sizeEqual')} equal, {n('sizeEqualNonDefault')} not the default, {n('sizeDifferent')} different)")
+    check(m is not None and n("sizeDifferent") == 0 and n("sizeEqual") >= 5 and n("sizeEqualNonDefault") >= 3,
+          f"every size the replica claims for the real client's entities is the server's own, a baby's, a slime's and an interaction's too ({n('sizeEqual')} equal, {n('sizeEqualNonDefault')} not the default, {n('sizeDifferent')} different)")
+    check(m is not None and n("pickDifferent") == 0 and n("pickEqual") >= 5,
+          f"whether the real client can pick each entity is the server's own ({n('pickEqual')} equal, {n('pickDifferent')} different, {n('pickUnknown')} unknown)")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 

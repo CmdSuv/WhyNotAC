@@ -27,8 +27,10 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > referans client'la 829.571 kontrolde 0 ihlal, sunucunun takibiyle E2E'de 11/11, gerçek client'ta 7/7 eşit.
 > Yük testinde 0 yanlış bulgu; ölçülen maliyet hâlâ hedefin üstünde
 > ([rapor](docs/phases/PHASE-2B-5-REPORT.md), [yük testi](docs/benchmarks/2026-10-09-entities/README.md)).
-> **Faz 2b-6:** varlıkların boyutları (tür, poz, bebek, ölçek) oyunun sınıflarından üretilen tablodan.
-> Sunucunun kendi hesabıyla E2E'de 7, gerçek client'ta 6 boyut eşit, hiç fark yok
+> **Faz 2b-6:** varlıkların boyutları (tür, poz, bebek, ölçek, slime boyutu ve zırh askısı bayrakları gibi
+> veriler) ve client'ın onları seçip seçemeyeceği, oyunun sınıflarından üretilen tablodan. Her kural
+> oyunun kendi `getDimensions`'ıyla 100.000'den fazla durumda karşılaştırıldı. Sunucunun kendi hesabıyla
+> E2E'de 16 boyut ve 16 seçilebilirlik, gerçek client'ta 12 boyut ve 12 seçilebilirlik eşit, hiç fark yok
 > ([rapor](docs/phases/PHASE-2B-6-REPORT.md)).
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md)
 
@@ -56,7 +58,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 286 test
+./gradlew build                       # tüm modüller + 293 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (84 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
@@ -80,7 +82,8 @@ SNAPSHOT derlemeyi durdurur. Aynı commit'ten iki temiz derleme bayt bayt aynı 
   anomaliler
 - `/whynotac world <oyuncu>`: client'ın dünyasını sunucununkiyle bölüm bölüm karşılaştırır
 - `/whynotac entities <oyuncu>`: client'ın varlıklarını sunucunun takibiyle karşılaştırır (küme, kod
-  tabanları ve boyutlar), varlık başına client durumunu söyler (kesin, yarıçaplı, aday sayısı, bilinmiyor)
+  tabanları, boyutlar ve seçilebilirlik), varlık başına client durumunu söyler (kesin, yarıçaplı, aday
+  sayısı, bilinmiyor)
 - `/whynotac sessions`: canlı oturumlar
 - `/whynotac stats`: başlangıçtan beri toplamlar (JSON): anomaliler, sapmalar, kayıp olaylar, vakalar
 - `/whynotac cases`, `/whynotac case <id>`: açılan vakalar. Her vakanın bir dossier'si vardır:

@@ -316,12 +316,12 @@ public sealed interface ClientboundPacket {
          * One value: the accessor's index (its meaning depends on the entity type) and the value's bits
          * by {@code kind}: a float as {@code Float.floatToRawIntBits}, a boolean as 0/1, a pose or direction
          * as the ordinal of {@link EntityPose} or {@link BlockFace}, an optional int or block state as
-         * -1 when empty.
+         * -1 when empty, a sniffer state by its id ({@code Sniffer.State.id()}).
          */
         public record DataEntry(int index, Kind kind, long value) {}
 
-        /** The scalar serializers kept. {@code UNKNOWN}: a constant this build does not know (never produced for data). */
-        public enum Kind { BYTE, INT, LONG, FLOAT, BOOLEAN, POSE, DIRECTION, OPTIONAL_UNSIGNED_INT, BLOCK_STATE, OPTIONAL_BLOCK_STATE }
+        /** The scalar serializers kept. Recorded by ordinal: new constants go last. */
+        public enum Kind { BYTE, INT, LONG, FLOAT, BOOLEAN, POSE, DIRECTION, OPTIONAL_UNSIGNED_INT, BLOCK_STATE, OPTIONAL_BLOCK_STATE, SNIFFER_STATE }
     }
 
     /** {@code net.minecraft.world.entity.Pose}, by name. {@code UNKNOWN}: a constant this build does not know. Always last. */

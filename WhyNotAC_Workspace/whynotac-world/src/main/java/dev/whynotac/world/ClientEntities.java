@@ -60,6 +60,9 @@ public final class ClientEntities {
     /** Ops kept per entity while the client does not answer pings; beyond it the entity is lost. */
     private static final int MAX_PENDING_OPS = 4096;
     private static final int NONE = -1;
+    /** {@code GameType} ids. */
+    private static final int GAME_MODE_SURVIVAL = 0;
+    private static final int GAME_MODE_SPECTATOR = ClientboundPacket.PlayerInfoUpdate.SPECTATOR;
     private static final int POSE_STANDING = ClientboundPacket.EntityPose.STANDING.ordinal();
     private static final int POSE_SLEEPING = ClientboundPacket.EntityPose.SLEEPING.ordinal();
     /** {@code Entity.DATA_SHARED_FLAGS_ID} and {@code Entity.DATA_POSE}. */
@@ -85,6 +88,11 @@ public final class ClientEntities {
     private int serverChunkRadius = -1;
     private final Map<Integer, Head> heads = new HashMap<>();
     private final Set<UUID> playerInfo = new java.util.HashSet<>();
+    /**
+     * The game mode of each profile in the client's player list (server order; GameType ids), while the list
+     * is known ({@link #playerInfoComplete}). Spectators cannot be picked.
+     */
+    private final Map<UUID, Integer> gameModes = new HashMap<>();
     private Head self = new Head(NONE, null, EntityTypes.PLAYER, true);
     private final ChunkTicking chunks = new ChunkTicking();
     private final Versioned frozen = new Versioned(FROZEN_NO);
@@ -198,6 +206,7 @@ public final class ClientEntities {
                 self = new Head(selfId, null, EntityTypes.PLAYER, true);
                 serverChunkRadius = login.chunkRadius();
                 playerInfo.clear();
+                gameModes.clear();
                 playerInfoComplete = true;
                 newLevel(seq, login.dimension());
             }
@@ -227,14 +236,19 @@ public final class ClientEntities {
                     }
                 }
             }
-            case ClientboundPacket.PlayerInfoUpdate update -> {
-                if (update.addPlayers()) {
-                    for (ClientboundPacket.PlayerInfoUpdate.Entry entry : update.entries()) {
-                        playerInfo.add(entry.profileId());
-                    }
+            case ClientboundPacket.PlayerInfoUpdate update -> playerInfoUpdate(seq, update);
+            case ClientboundPacket.PlayerInfoRemove remove -> {
+                for (UUID profile : remove.profileIds()) {
+                    playerInfo.remove(profile);
+                    gameModes.remove(profile);
+                    // A player entity keeps the PlayerInfo it looked up (AbstractClientPlayer.getPlayerInfo caches it):
+                    // what that object says from now on is not followed.
+                    forPlayer(profile, head -> {
+                        head.infoReplaced = true;
+                        enqueue(seq, head.id, new Op.GameMode(seq, NONE));
+                    });
                 }
             }
-            case ClientboundPacket.PlayerInfoRemove remove -> remove.profileIds().forEach(playerInfo::remove);
             case ClientboundPacket.AddEntity add -> addEntity(seq, add);
             case ClientboundPacket.RemoveEntities remove -> {
                 for (int id : remove.entityIds()) {
@@ -335,13 +349,14 @@ public final class ClientEntities {
         }
         EntityTypes.Kind kind = types.kind(add.type());
         Head head = new Head(id, kind, add.type(), player);
+        head.uuid = add.uuid();
         head.base(new Vec3d(add.x(), add.y(), add.z())); // syncPacketPositionCodec
         heads.put(id, head);
         if (!tracks.containsKey(id)) {
             tracks.put(id, new Track(id, complete ? State.absent() : State.lostAll()));
         }
         enqueue(seq, id, new Op.Add(seq, kind, add.type(), player, minY, add.x(), add.y(), add.z(), VanillaMath.unpackDegrees(add.yRot()),
-                VanillaMath.unpackDegrees(add.xRot()), VanillaMath.unpackDegrees(add.yHeadRot()), maybe));
+                VanillaMath.unpackDegrees(add.xRot()), VanillaMath.unpackDegrees(add.yHeadRot()), maybe, player ? spectator(add.uuid()) : 0));
     }
 
     /** The entity leaves the client's level: its passengers stop riding it, it stops riding its vehicle. */
@@ -394,8 +409,12 @@ public final class ClientEntities {
         int pose = NONE;
         int flags = NONE;
         int baby = NONE;
+        int dataSet = 0;
+        int data0 = 0;
+        int data1 = 0;
         EntitySizes.Entry size = sizes.entry(head.type);
         int babyIndex = size == null ? -1 : size.babyIndex();
+        List<EntitySizes.DataField> fields = size == null ? List.of() : size.data();
         for (ClientboundPacket.SetEntityData.DataEntry entry : data.entries()) {
             if (entry.index() == DATA_POSE && entry.kind() == ClientboundPacket.SetEntityData.Kind.POSE) {
                 pose = (int) entry.value();
@@ -403,10 +422,24 @@ public final class ClientEntities {
                 flags = (int) entry.value() & 0xFF;
             } else if (entry.index() == babyIndex && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
                 baby = entry.value() != 0 ? 1 : 0; // the flag isBaby() reads (DATA_BABY_ID of the type's class)
+            } else {
+                // the values the type's size reads (slime size, armor stand flags, interaction width and height, ...)
+                for (int i = 0; i < fields.size(); i++) {
+                    EntitySizes.DataField field = fields.get(i);
+                    if (entry.index() == field.index() && entry.kind() == field.kind()) {
+                        int value = field.kind() == ClientboundPacket.SetEntityData.Kind.BYTE ? (int) entry.value() & 0xFF : (int) entry.value();
+                        if (i == 0) {
+                            data0 = value;
+                        } else {
+                            data1 = value;
+                        }
+                        dataSet |= 1 << i;
+                    }
+                }
             }
         }
-        if (pose != NONE || flags != NONE || baby != NONE) {
-            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby));
+        if (pose != NONE || flags != NONE || baby != NONE || dataSet != 0) {
+            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1));
         }
     }
 
@@ -548,17 +581,66 @@ public final class ClientEntities {
                 stepSeen = true;
                 frozen.set(seq, FROZEN_MAYBE);
             }
-            case "minecraft:player_info_update", "minecraft:player_info_remove" -> playerInfoComplete = false;
+            case "minecraft:player_info_update", "minecraft:player_info_remove" -> losePlayerList(seq);
             case "minecraft:login", "minecraft:respawn" -> {
                 lostFrom(seq);
                 chunks.uncertain(seq);
                 frozen.set(seq, FROZEN_MAYBE);
-                playerInfoComplete = false;
+                losePlayerList(seq);
             }
             case "minecraft:add_entity", "minecraft:remove_entities", "minecraft:move_entity_pos", "minecraft:move_entity_pos_rot",
                     "minecraft:move_entity_rot", "minecraft:entity_position_sync", "minecraft:teleport_entity", "minecraft:rotate_head",
                     "minecraft:set_entity_data", "minecraft:set_passengers" -> lostFrom(seq);
             default -> { }
+        }
+    }
+
+    /**
+     * {@code handlePlayerInfoUpdate}: entries added first ({@code putIfAbsent}: a profile already listed keeps
+     * its PlayerInfo; a new one is survival), then each entry's game mode if the packet carries it.
+     */
+    private void playerInfoUpdate(long seq, ClientboundPacket.PlayerInfoUpdate update) {
+        for (ClientboundPacket.PlayerInfoUpdate.Entry entry : update.entries()) {
+            UUID profile = entry.profileId();
+            if (update.addPlayers() && playerInfo.add(profile)) {
+                gameModes.put(profile, GAME_MODE_SURVIVAL); // a new PlayerInfo: GameType.DEFAULT_MODE
+            }
+            if (update.updateGameMode() && entry.gameMode() >= 0 && gameModes.containsKey(profile)) {
+                gameModes.put(profile, entry.gameMode());
+            }
+            if (update.addPlayers() || update.updateGameMode()) {
+                int spectator = spectator(profile);
+                forPlayer(profile, head -> {
+                    if (!head.infoReplaced) {
+                        enqueue(seq, head.id, new Op.GameMode(seq, spectator));
+                    }
+                });
+            }
+        }
+    }
+
+    /** 1 if the client's player list says {@code profile} is a spectator, 0 if not, -1 if not known. */
+    private int spectator(UUID profile) {
+        Integer mode = playerInfoComplete ? gameModes.get(profile) : null;
+        return mode == null ? NONE : mode == GAME_MODE_SPECTATOR ? 1 : 0;
+    }
+
+    private void forPlayer(UUID profile, Consumer<Head> action) {
+        for (Head head : heads.values()) {
+            if (head.player && profile.equals(head.uuid)) {
+                action.accept(head);
+            }
+        }
+    }
+
+    /** The player list is no longer known: neither is any player's game mode. */
+    private void losePlayerList(long seq) {
+        playerInfoComplete = false;
+        gameModes.clear();
+        for (Head head : heads.values()) {
+            if (head.player) {
+                enqueue(seq, head.id, new Op.GameMode(seq, NONE));
+            }
         }
     }
 
@@ -583,6 +665,7 @@ public final class ClientEntities {
         self.passengers.clear();
         complete = false;
         playerInfoComplete = false;
+        gameModes.clear();
         chunks.uncertain(Long.MIN_VALUE);
         frozen.set(Long.MIN_VALUE, FROZEN_MAYBE);
         stepSeen = true;
@@ -847,6 +930,18 @@ public final class ClientEntities {
                     if (data.baby() != NONE) {
                         s.baby = data.baby() == 1;
                     }
+                    if ((data.dataSet() & 1) != 0) {
+                        s.data0 = data.data0();
+                    }
+                    if ((data.dataSet() & 2) != 0) {
+                        s.data1 = data.data1();
+                    }
+                }
+                out.add(s);
+            }
+            case Op.GameMode mode -> {
+                if (s.present && !s.lostAll && s.player) {
+                    s.spectator = mode.spectator();
                 }
                 out.add(s);
             }
@@ -1327,7 +1422,7 @@ public final class ClientEntities {
     /** One state the client may hold for an entity right now. Radii bound the true value (0: exact). */
     public record PossibleState(boolean present, boolean known, boolean positionKnown, String type, boolean player, double x, double y, double z,
                                 double positionRadius, float yRot, float xRot, float rotationRadius, float yHeadRot, float headRadius, int pose,
-                                int flags, int onGround, int vehicle, EntitySizes.Size size) {}
+                                int flags, int onGround, int vehicle, EntitySizes.Size size, int pickable, float pickRadius) {}
 
     /**
      * Every state the client may hold for {@code entityId} now: each candidate, after any further prefix
@@ -1337,7 +1432,7 @@ public final class ClientEntities {
         Track track = tracks.get(entityId);
         if (track == null) {
             if (complete) {
-                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE, null));
+                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE, null, 0, 0.0F));
             }
             return;
         }
@@ -1404,11 +1499,6 @@ public final class ClientEntities {
     }
 
     /**
-     * Everything the server has added to this client's level and not removed, as the client will hold it
-     * once it has processed everything sent so far: per entity id its type, codec base (null if unknown)
-     * and vehicle (-1: none). For comparing with the server's own tracking.
-     */
-    /**
      * The size the client gives {@code entityId} now, if every state it may hold has it present with the
      * same known size; null otherwise (absent, unknown, a size the table does not follow, or several).
      */
@@ -1426,11 +1516,33 @@ public final class ClientEntities {
         return one[0] && one[1] ? size[0] : null;
     }
 
+    /**
+     * Whether the client can pick {@code entityId} now ({@link EntitySizes#pickable}): 1 if every state it
+     * may hold has it present and pickable, 0 if none does, -1 otherwise (unknown, or the states disagree).
+     */
+    public int pickable(int entityId) {
+        int[] seen = {0, 0}; // pickable states, not pickable (or absent) states
+        boolean[] unknown = {false};
+        forEachPossibleState(entityId, s -> {
+            if (s.pickable() < 0) {
+                unknown[0] = true;
+            } else {
+                seen[s.pickable()]++;
+            }
+        });
+        return unknown[0] || seen[0] > 0 && seen[1] > 0 ? NONE : seen[1] > 0 ? 1 : 0;
+    }
+
+    /**
+     * Everything the server has added to this client's level and not removed, as the client will hold it
+     * once it has processed everything sent so far: per entity id its type, codec base (null if unknown)
+     * and vehicle (-1: none). For comparing with the server's own tracking.
+     */
     public ServerOrder serverOrder() {
         Map<Integer, ServerOrder.Entity> entities = new HashMap<>();
         for (Head head : heads.values()) {
             entities.put(head.id, new ServerOrder.Entity(head.type, head.baseKnown ? new Vec3d(head.bx, head.by, head.bz) : null, head.vehicle,
-                    knowledge(tracks.get(head.id)), size(head.id)));
+                    knowledge(tracks.get(head.id)), size(head.id), pickable(head.id)));
         }
         return new ServerOrder(level, complete, Map.copyOf(entities), stats());
     }
@@ -1465,7 +1577,8 @@ public final class ClientEntities {
          * {@code knowledge}: "exact", "within-r", "n-candidates", "position-unknown" or "unknown".
          * {@code size}: the size the client gives it now, in client order (see {@link ClientEntities#size}).
          */
-        public record Entity(String type, Vec3d base, int vehicle, String knowledge, EntitySizes.Size size) {}
+        /** {@code pickable}: {@link #pickable(int)}. */
+        public record Entity(String type, Vec3d base, int vehicle, String knowledge, EntitySizes.Size size, int pickable) {}
     }
 
     /** Counters for diagnostics. */
@@ -1516,6 +1629,9 @@ public final class ClientEntities {
         final EntityTypes.Kind kind;
         final String type;
         final boolean player;
+        /** A player's profile; {@code infoReplaced}: its PlayerInfo was removed while the entity existed. */
+        UUID uuid;
+        boolean infoReplaced;
         double bx;
         double by;
         double bz;
@@ -1573,8 +1689,12 @@ public final class ClientEntities {
             }
         }
 
+        /** {@code spectator}: for a player, whether its PlayerInfo says spectator (1, 0, -1 unknown). */
         record Add(long seq, EntityTypes.Kind kind, String type, boolean player, int minY, double x, double y, double z, float yRot, float xRot,
-                   float yHeadRot, boolean maybe) implements Op {}
+                   float yHeadRot, boolean maybe, int spectator) implements Op {}
+
+        /** A player's PlayerInfo changed its game mode: spectator 1, 0, or -1 when no longer known. */
+        record GameMode(long seq, int spectator) implements Op {}
 
         /** {@code position} null: rotation only; {@code positionKnown} false: decoded against a lost base. */
         record Move(long seq, Vec3d position, boolean positionKnown, boolean hasRotation, float yRot, float xRot, boolean onGround) implements Op {}
@@ -1585,8 +1705,8 @@ public final class ClientEntities {
 
         record HeadRotation(long seq, float yHeadRot) implements Op {}
 
-        /** -1: not in the packet. {@code baby}: 0 or 1. */
-        record Data(long seq, int pose, int flags, int baby) implements Op {}
+        /** -1: not in the packet. {@code baby}: 0 or 1. {@code dataSet}: which of the size's data values are in it (bit 0, bit 1). */
+        record Data(long seq, int pose, int flags, int baby, int dataSet, int data0, int data1) implements Op {}
 
         /** The scale attribute's value; NaN when it is not known exactly. */
         record Scale(long seq, double value) implements Op {}
@@ -1621,9 +1741,13 @@ public final class ClientEntities {
         int pose = POSE_STANDING;
         int flags;
         int vehicle = NONE;
-        // the size: isBaby() and the scale attribute's value (NaN: not known exactly)
+        // the size: isBaby(), the scale attribute's value (NaN: not known exactly) and the type's size data (EntitySizes.Entry.data)
         boolean baby;
         double scale = 1.0;
+        int data0;
+        int data1;
+        /** A player's: 1 a spectator in the client's player list, 0 not, -1 not known. */
+        int spectator;
         // InterpolationHandler
         int steps;
         double tx;
@@ -1667,6 +1791,7 @@ public final class ClientEntities {
             s.kind = add.kind();
             s.type = add.type();
             s.player = add.player();
+            s.spectator = add.spectator();
             s.minY = add.minY();
             if (add.kind().living()) {
                 // LivingEntity.recreateFromPacket: head and body from the head angle, absSnapTo.
@@ -1686,6 +1811,11 @@ public final class ClientEntities {
             }
             // Types the client moves itself, or places other than at the packet's position (ClientMotion).
             s.lostPosition = ClientMotion.movesItself(add.type(), add.kind());
+            EntitySizes.Entry size = EntitySizes.vanilla().entry(add.type());
+            if (size != null) {
+                s.data0 = size.initial(0); // defineSynchedData
+                s.data1 = size.initial(1);
+            }
             return s;
         }
 
@@ -1718,6 +1848,9 @@ public final class ClientEntities {
             c.vehicle = vehicle;
             c.baby = baby;
             c.scale = scale;
+            c.data0 = data0;
+            c.data1 = data1;
+            c.spectator = spectator;
             c.steps = steps;
             c.tx = tx;
             c.ty = ty;
@@ -1752,7 +1885,8 @@ public final class ClientEntities {
                 return true;
             }
             if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || minY != o.minY || lostPosition != o.lostPosition
-                    || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0) {
+                    || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
+                    || data0 != o.data0 || data1 != o.data1 || spectator != o.spectator) {
                 return false;
             }
             if (lostPosition) {
@@ -1800,9 +1934,12 @@ public final class ClientEntities {
         PossibleState view() {
             boolean known = !lostAll;
             boolean positionKnown = known && present && !lostPosition;
-            EntitySizes.Size size = known && present ? EntitySizes.vanilla().size(type, pose, baby, scale) : null;
+            EntitySizes sizes = EntitySizes.vanilla();
+            EntitySizes.Size size = known && present ? sizes.size(type, pose, baby, scale, data0, data1) : null;
+            int pickable = !known ? NONE : !present ? 0 : sizes.pickable(type, data0, spectator);
+            EntitySizes.Entry entry = known && present ? sizes.entry(type) : null;
             return new PossibleState(present, known, positionKnown, type, player, x, y, z, rPos, yRot, xRot, rRot, yHeadRot, rHead, pose, flags,
-                    onGroundKnown ? (onGround ? 1 : 0) : -1, vehicle, size);
+                    onGroundKnown ? (onGround ? 1 : 0) : -1, vehicle, size, pickable, entry == null ? 0.0F : entry.pickRadius());
         }
     }
 

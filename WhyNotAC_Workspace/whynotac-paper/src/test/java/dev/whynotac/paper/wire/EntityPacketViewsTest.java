@@ -182,6 +182,7 @@ class EntityPacketViewsTest {
                 // Written as id 0, which the client reads back as empty: the record holds what the client sees.
                 new SynchedEntityData.DataValue<>(24, EntityDataSerializers.OPTIONAL_BLOCK_STATE, Optional.of(Blocks.AIR.defaultBlockState())),
                 new SynchedEntityData.DataValue<>(25, EntityDataSerializers.OPTIONAL_BLOCK_STATE, Optional.of(Blocks.STONE.defaultBlockState())),
+                new SynchedEntityData.DataValue<>(26, EntityDataSerializers.SNIFFER_STATE, net.minecraft.world.entity.animal.sniffer.Sniffer.State.DIGGING),
                 new SynchedEntityData.DataValue<>(8, EntityDataSerializers.ROTATIONS, new Rotations(1F, 2F, 3F)),
                 new SynchedEntityData.DataValue<>(2, EntityDataSerializers.OPTIONAL_COMPONENT, Optional.of(Component.literal("name")))));
         // Paper's encoder needs its global configuration (it sanitizes item values; scalars pass unchanged): the
@@ -208,7 +209,8 @@ class EntityPacketViewsTest {
                 new DataEntry(22, Kind.BLOCK_STATE, stone),
                 new DataEntry(23, Kind.OPTIONAL_BLOCK_STATE, -1),
                 new DataEntry(24, Kind.OPTIONAL_BLOCK_STATE, -1),
-                new DataEntry(25, Kind.OPTIONAL_BLOCK_STATE, stone)), 2), data);
+                new DataEntry(25, Kind.OPTIONAL_BLOCK_STATE, stone),
+                new DataEntry(26, Kind.SNIFFER_STATE, 5)), 2), data);
     }
 
     @Test

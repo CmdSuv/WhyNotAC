@@ -155,6 +155,8 @@ class FormatStabilityTest {
         assertEquals(List.of("DOWN", "UP", "NORTH", "SOUTH", "WEST", "EAST"), names(BlockFace.values()));
         assertEquals(List.of("X", "Y", "Z", "Y_ROT", "X_ROT", "DELTA_X", "DELTA_Y", "DELTA_Z", "ROTATE_DELTA", "UNKNOWN"), names(RelativeFlag.values()));
         assertEquals(List.of("ADD_VALUE", "ADD_MULTIPLIED_BASE", "ADD_MULTIPLIED_TOTAL", "UNKNOWN"), names(ClientboundPacket.UpdateAttributes.Operation.values()));
+        assertEquals(List.of("BYTE", "INT", "LONG", "FLOAT", "BOOLEAN", "POSE", "DIRECTION", "OPTIONAL_UNSIGNED_INT", "BLOCK_STATE", "OPTIONAL_BLOCK_STATE",
+                "SNIFFER_STATE"), names(ClientboundPacket.SetEntityData.Kind.values()));
     }
 
     private static List<String> names(Enum<?>[] values) {
