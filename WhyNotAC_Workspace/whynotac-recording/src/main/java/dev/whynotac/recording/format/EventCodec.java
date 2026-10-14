@@ -9,6 +9,7 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -156,6 +157,30 @@ public final class EventCodec {
             }
         }
 
+        /** A stack: present flag, item, count, the patch's added and removed types, the attack range if carried, hashed. */
+        private void stack(Stack stack) {
+            if (stack.isEmpty()) {
+                body.writeByte(0);
+                return;
+            }
+            body.writeByte((stack.attackRange() != null ? 2 : 0) | (stack.hashed() ? 4 : 0) | 1);
+            string(stack.item());
+            body.writeZigZag(stack.count());
+            body.writeVarInt(stack.added().size());
+            stack.added().forEach(this::string);
+            body.writeVarInt(stack.removed().size());
+            stack.removed().forEach(this::string);
+            Stack.AttackRange r = stack.attackRange();
+            if (r != null) {
+                body.writeFloat(r.minRange());
+                body.writeFloat(r.maxRange());
+                body.writeFloat(r.minCreativeRange());
+                body.writeFloat(r.maxCreativeRange());
+                body.writeFloat(r.hitboxMargin());
+                body.writeFloat(r.mobFactor());
+            }
+        }
+
         private void writeUuid(UUID id) {
             body.writeLong(id.getMostSignificantBits());
             body.writeLong(id.getLeastSignificantBits());
@@ -284,12 +309,25 @@ public final class EventCodec {
                     body.writeByte((p.left() ? 1 : 0) | (p.right() ? 2 : 0));
                 }
                 case ServerboundPacket.ContainerClick c -> {
-                    body.writeVarInt(SB_CONTAINER_CLICK);
+                    body.writeVarInt(c.carried() == null ? SB_CONTAINER_CLICK : SB_CONTAINER_CLICK_ITEMS);
                     body.writeZigZag(c.containerId());
                     body.writeZigZag(c.stateId());
                     body.writeZigZag(c.slot());
                     body.writeZigZag(c.button());
                     string(c.clickType());
+                    if (c.carried() != null) {
+                        body.writeVarInt(c.changed().size());
+                        for (ServerboundPacket.ContainerClick.ChangedSlot changed : c.changed()) {
+                            body.writeZigZag(changed.slot());
+                            stack(changed.item());
+                        }
+                        stack(c.carried());
+                    }
+                }
+                case ServerboundPacket.SetCreativeModeSlot c -> {
+                    body.writeVarInt(SB_SET_CREATIVE_MODE_SLOT);
+                    body.writeZigZag(c.slot());
+                    stack(c.item());
                 }
                 case ServerboundPacket.ContainerClose c -> {
                     body.writeVarInt(SB_CONTAINER_CLOSE);
@@ -556,6 +594,49 @@ public final class EventCodec {
                         writeUuid(id);
                     }
                 }
+                case ClientboundPacket.ContainerSetContent c -> {
+                    body.writeVarInt(CB_CONTAINER_SET_CONTENT);
+                    body.writeZigZag(c.containerId());
+                    body.writeZigZag(c.stateId());
+                    body.writeVarInt(c.items().size());
+                    c.items().forEach(this::stack);
+                    stack(c.carried());
+                }
+                case ClientboundPacket.ContainerSetSlot c -> {
+                    body.writeVarInt(CB_CONTAINER_SET_SLOT);
+                    body.writeZigZag(c.containerId());
+                    body.writeZigZag(c.stateId());
+                    body.writeZigZag(c.slot());
+                    stack(c.item());
+                }
+                case ClientboundPacket.SetCursorItem c -> {
+                    body.writeVarInt(CB_SET_CURSOR_ITEM);
+                    stack(c.item());
+                }
+                case ClientboundPacket.SetPlayerInventory c -> {
+                    body.writeVarInt(CB_SET_PLAYER_INVENTORY);
+                    body.writeZigZag(c.slot());
+                    stack(c.item());
+                }
+                case ClientboundPacket.SetHeldSlot h -> {
+                    body.writeVarInt(CB_SET_HELD_SLOT);
+                    body.writeZigZag(h.slot());
+                }
+                case ClientboundPacket.OpenScreen o -> {
+                    body.writeVarInt(CB_OPEN_SCREEN);
+                    body.writeZigZag(o.containerId());
+                    string(o.menuType());
+                }
+                case ClientboundPacket.MountScreenOpen m -> {
+                    body.writeVarInt(CB_MOUNT_SCREEN_OPEN);
+                    body.writeZigZag(m.containerId());
+                    body.writeZigZag(m.inventoryColumns());
+                    body.writeZigZag(m.entityId());
+                }
+                case ClientboundPacket.ContainerClose c -> {
+                    body.writeVarInt(CB_CONTAINER_CLOSE);
+                    body.writeZigZag(c.containerId());
+                }
                 case ClientboundPacket.PlayerRotation r -> {
                     body.writeVarInt(CB_PLAYER_ROTATION);
                     body.writeFloat(r.yaw());
@@ -721,6 +802,28 @@ public final class EventCodec {
             return new Decoded.Event(event);
         }
 
+        private Stack readStack(ByteSource in) {
+            int flags = in.readUnsignedByte();
+            if ((flags & 1) == 0) {
+                return Stack.EMPTY;
+            }
+            String item = string(in);
+            int count = zint(in);
+            int added = boundedCount(in);
+            List<String> addedTypes = new ArrayList<>(added);
+            for (int i = 0; i < added; i++) {
+                addedTypes.add(string(in));
+            }
+            int removed = boundedCount(in);
+            List<String> removedTypes = new ArrayList<>(removed);
+            for (int i = 0; i < removed; i++) {
+                removedTypes.add(string(in));
+            }
+            Stack.AttackRange range = (flags & 2) == 0 ? null
+                    : new Stack.AttackRange(in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat());
+            return new Stack(item, count, addedTypes, removedTypes, range, (flags & 4) != 0);
+        }
+
         private String string(ByteSource in) {
             int reference = in.readVarInt();
             if (reference == 0) {
@@ -826,6 +929,20 @@ public final class EventCodec {
                     yield new ServerboundPacket.PaddleBoat((b & 1) != 0, (b & 2) != 0);
                 }
                 case SB_CONTAINER_CLICK -> new ServerboundPacket.ContainerClick(zint(in), zint(in), zint(in), zint(in), string(in));
+                case SB_CONTAINER_CLICK_ITEMS -> {
+                    int containerId = zint(in);
+                    int stateId = zint(in);
+                    int slot = zint(in);
+                    int button = zint(in);
+                    String clickType = string(in);
+                    int count = boundedCount(in);
+                    List<ServerboundPacket.ContainerClick.ChangedSlot> changed = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        changed.add(new ServerboundPacket.ContainerClick.ChangedSlot(zint(in), readStack(in)));
+                    }
+                    yield new ServerboundPacket.ContainerClick(containerId, stateId, slot, button, clickType, changed, readStack(in));
+                }
+                case SB_SET_CREATIVE_MODE_SLOT -> new ServerboundPacket.SetCreativeModeSlot(zint(in), readStack(in));
                 case SB_CONTAINER_CLOSE -> new ServerboundPacket.ContainerClose(zint(in));
                 case SB_PLAYER_LOADED -> new ServerboundPacket.PlayerLoaded();
                 case SB_CHUNK_BATCH_RECEIVED -> new ServerboundPacket.ChunkBatchReceived(in.readFloat());
@@ -1012,6 +1129,23 @@ public final class EventCodec {
                     }
                     yield new ClientboundPacket.PlayerInfoRemove(ids);
                 }
+                case CB_CONTAINER_SET_CONTENT -> {
+                    int containerId = zint(in);
+                    int stateId = zint(in);
+                    int count = boundedCount(in);
+                    List<Stack> items = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        items.add(readStack(in));
+                    }
+                    yield new ClientboundPacket.ContainerSetContent(containerId, stateId, items, readStack(in));
+                }
+                case CB_CONTAINER_SET_SLOT -> new ClientboundPacket.ContainerSetSlot(zint(in), zint(in), zint(in), readStack(in));
+                case CB_SET_CURSOR_ITEM -> new ClientboundPacket.SetCursorItem(readStack(in));
+                case CB_SET_PLAYER_INVENTORY -> new ClientboundPacket.SetPlayerInventory(zint(in), readStack(in));
+                case CB_SET_HELD_SLOT -> new ClientboundPacket.SetHeldSlot(zint(in));
+                case CB_OPEN_SCREEN -> new ClientboundPacket.OpenScreen(zint(in), string(in));
+                case CB_MOUNT_SCREEN_OPEN -> new ClientboundPacket.MountScreenOpen(zint(in), zint(in), zint(in));
+                case CB_CONTAINER_CLOSE -> new ClientboundPacket.ContainerClose(zint(in));
                 case CB_PLAYER_ROTATION -> {
                     float yaw = in.readFloat();
                     float pitch = in.readFloat();

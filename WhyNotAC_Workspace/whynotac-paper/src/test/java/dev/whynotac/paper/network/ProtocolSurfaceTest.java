@@ -59,7 +59,7 @@ class ProtocolSurfaceTest {
             "container_button_click", "container_slot_state_changed", "cookie_response", "custom_click_action", "debug_subscription_request",
             "edit_book", "entity_tag_query", "jigsaw_generate", "lock_difficulty", "ping_request", "place_recipe",
             "recipe_book_change_settings", "recipe_book_seen_recipe", "rename_item", "resource_pack", "seen_advancements", "select_trade",
-            "set_beacon", "set_command_block", "set_command_minecart", "set_creative_mode_slot", "set_jigsaw_block", "set_structure_block",
+            "set_beacon", "set_command_block", "set_command_minecart", "set_jigsaw_block", "set_structure_block",
             "set_test_block", "sign_update", "teleport_to_entity", "test_instance_block_action");
 
     // --- clientbound -----------------------------------------------------------------------------
@@ -73,17 +73,16 @@ class ProtocolSurfaceTest {
      */
     private static final Set<String> CLIENTBOUND_PHYSICS_PENDING = Set.of(
             "set_entity_link", "move_minecart_along_track", "projectile_power", "block_event", "initialize_border", "set_border_center", "set_border_lerp_size",
-            "set_border_size", "cooldown", "set_held_slot", "container_set_content", "container_set_slot",
-            "set_player_inventory", "set_cursor_item", "set_equipment", "set_camera", "set_health", "player_combat_kill", "player_look_at",
+            "set_border_size", "cooldown", "set_equipment", "set_camera", "set_health", "player_combat_kill", "player_look_at",
             "damage_event", "hurt_animation", "entity_event", "start_configuration");
 
     private static final Set<String> CLIENTBOUND_IGNORED = Set.of(
             "animate", "award_stats", "block_destruction", "block_entity_data", "boss_event", "change_difficulty", "chunk_batch_finished",
-            "chunk_batch_start", "chunks_biomes", "clear_dialog", "clear_titles", "command_suggestions", "commands", "container_close",
+            "chunk_batch_start", "chunks_biomes", "clear_dialog", "clear_titles", "command_suggestions", "commands",
             "container_set_data", "cookie_request", "custom_chat_completions", "custom_payload", "custom_report_details", "debug/block_value",
             "debug/chunk_value", "debug/entity_value", "debug/event", "debug_sample", "delete_chat", "disconnect", "disguised_chat",
             "game_test_highlight_pos", "level_event", "level_particles", "light_update", "map_item_data", "merchant_offers",
-            "mount_screen_open", "open_book", "open_screen", "open_sign_editor", "place_ghost_recipe", "player_chat", "player_combat_end",
+            "open_book", "open_sign_editor", "place_ghost_recipe", "player_chat", "player_combat_end",
             "player_combat_enter", "pong_response", "recipe_book_add", "recipe_book_remove",
             "recipe_book_settings", "reset_score", "resource_pack_pop", "resource_pack_push", "select_advancements_tab", "server_data",
             "server_links", "set_action_bar_text", "set_border_warning_delay", "set_border_warning_distance", "set_default_spawn_position",

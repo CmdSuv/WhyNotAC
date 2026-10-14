@@ -123,7 +123,13 @@ public final class Generators {
             case "PlayerAbilities" -> new ServerboundPacket.PlayerAbilities(random.nextBoolean());
             case "MoveVehicle" -> new ServerboundPacket.MoveVehicle(vec(), anyFloat(), anyFloat(), random.nextBoolean());
             case "PaddleBoat" -> new ServerboundPacket.PaddleBoat(random.nextBoolean(), random.nextBoolean());
-            case "ContainerClick" -> new ServerboundPacket.ContainerClick(anyInt(), anyInt(), anyInt(), anyInt(), anyString());
+            case "ContainerClick" -> random.nextBoolean()
+                    ? new ServerboundPacket.ContainerClick(anyInt(), anyInt(), anyInt(), anyInt(), anyString())
+                    : new ServerboundPacket.ContainerClick(anyInt(), anyInt(), anyInt(), anyInt(), anyString(),
+                            java.util.stream.IntStream.range(0, random.nextInt(4))
+                                    .mapToObj(n -> new ServerboundPacket.ContainerClick.ChangedSlot(anyInt(), stack(true))).toList(),
+                            stack(true));
+            case "SetCreativeModeSlot" -> new ServerboundPacket.SetCreativeModeSlot(anyInt(), stack(false));
             case "ContainerClose" -> new ServerboundPacket.ContainerClose(anyInt());
             case "PlayerLoaded" -> new ServerboundPacket.PlayerLoaded();
             case "ChunkBatchReceived" -> new ServerboundPacket.ChunkBatchReceived(anyFloat());
@@ -233,10 +239,31 @@ public final class Generators {
             case "PlayerAbilities" -> new ClientboundPacket.PlayerAbilities(random.nextBoolean(), random.nextBoolean(), random.nextBoolean(),
                     random.nextBoolean(), anyFloat(), anyFloat());
             case "GameEvent" -> new ClientboundPacket.GameEvent(anyInt(), anyFloat());
+            case "ContainerSetContent" -> new ClientboundPacket.ContainerSetContent(anyInt(), anyInt(),
+                    java.util.stream.IntStream.range(0, random.nextInt(6)).mapToObj(n -> stack(false)).toList(), stack(false));
+            case "ContainerSetSlot" -> new ClientboundPacket.ContainerSetSlot(anyInt(), anyInt(), anyInt(), stack(false));
+            case "SetCursorItem" -> new ClientboundPacket.SetCursorItem(stack(false));
+            case "SetPlayerInventory" -> new ClientboundPacket.SetPlayerInventory(anyInt(), stack(false));
+            case "SetHeldSlot" -> new ClientboundPacket.SetHeldSlot(anyInt());
+            case "OpenScreen" -> new ClientboundPacket.OpenScreen(anyInt(), anyString());
+            case "MountScreenOpen" -> new ClientboundPacket.MountScreenOpen(anyInt(), anyInt(), anyInt());
+            case "ContainerClose" -> new ClientboundPacket.ContainerClose(anyInt());
             case "Unmodeled" -> new ClientboundPacket.Unmodeled(anyString());
             case "Untranslatable" -> new ClientboundPacket.Untranslatable(anyString());
             default -> throw new AssertionError("no generator for clientbound " + name + ": add one (and a codec case)");
         };
+    }
+
+    /** An arbitrary stack (the empty one now and then); a hashed one carries no attack range values. */
+    public dev.whynotac.protocol.packet.Stack stack(boolean hashed) {
+        if (random.nextInt(4) == 0) {
+            return dev.whynotac.protocol.packet.Stack.EMPTY;
+        }
+        List<String> added = java.util.stream.IntStream.range(0, random.nextInt(3)).mapToObj(n -> anyString()).toList();
+        List<String> removed = java.util.stream.IntStream.range(0, random.nextInt(2)).mapToObj(n -> anyString()).toList();
+        dev.whynotac.protocol.packet.Stack.AttackRange range = hashed || random.nextBoolean() ? null
+                : new dev.whynotac.protocol.packet.Stack.AttackRange(anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat());
+        return new dev.whynotac.protocol.packet.Stack(anyString(), anyInt(), added, removed, range, hashed);
     }
 
     /** Next event with a strictly increasing sequence and arbitrary (also backwards) time steps. */

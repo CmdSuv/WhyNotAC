@@ -87,8 +87,9 @@ class RecordingStoreTest {
 
     @Test
     void backPressureRejectsBlocksInsteadOfBlocking() throws IOException {
-        // A budget smaller than one block: every block is rejected, the writer is never blocked.
-        RecordingStore store = new RecordingStore(dir, new RecordingStore.Settings(100, Duration.ofDays(1), 1L << 30, 1024, Long.MAX_VALUE), LOG);
+        // A budget smaller than any block (the last one may hold a single small event): every block is
+        // rejected, the writer is never blocked.
+        RecordingStore store = new RecordingStore(dir, new RecordingStore.Settings(1, Duration.ofDays(1), 1L << 30, 1024, Long.MAX_VALUE), LOG);
         RecordingWriter writer = store.open(header());
         new Generators(7).stream(2_000).forEach(writer::append);
         writer.close();

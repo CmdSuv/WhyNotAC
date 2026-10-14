@@ -56,6 +56,15 @@ public final class TransactionPolicy {
             case ClientboundPacket.PlayerInfoRemove ignored -> false;
             case ClientboundPacket.AddEntity ignored -> false;
             case ClientboundPacket.RemoveEntities ignored -> false;
+            // The player's inventory and menus: placed by the flush brackets, like the entities.
+            case ClientboundPacket.ContainerSetContent ignored -> false;
+            case ClientboundPacket.ContainerSetSlot ignored -> false;
+            case ClientboundPacket.SetCursorItem ignored -> false;
+            case ClientboundPacket.SetPlayerInventory ignored -> false;
+            case ClientboundPacket.SetHeldSlot ignored -> false;
+            case ClientboundPacket.OpenScreen ignored -> false;
+            case ClientboundPacket.MountScreenOpen ignored -> false;
+            case ClientboundPacket.ContainerClose ignored -> false;
             // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).
             case ClientboundPacket.SetPassengers ignored -> true;
             case ClientboundPacket.MoveVehicle ignored -> true; // moves the vehicle the player controls

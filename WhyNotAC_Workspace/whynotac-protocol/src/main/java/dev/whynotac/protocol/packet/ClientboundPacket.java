@@ -364,6 +364,37 @@ public sealed interface ClientboundPacket {
     }
 
     /** Any other clientbound packet (counted, never queued). */
+    /**
+     * {@code ClientboundContainerSetContentPacket}: every slot of a menu, in menu order, and the stack the
+     * cursor carries. Container 0 is the player's own inventory menu.
+     */
+    record ContainerSetContent(int containerId, int stateId, List<Stack> items, Stack carried) implements ClientboundPacket {
+        public ContainerSetContent {
+            items = List.copyOf(items);
+        }
+    }
+
+    /** {@code ClientboundContainerSetSlotPacket}: one slot of a menu, by menu index. */
+    record ContainerSetSlot(int containerId, int stateId, int slot, Stack item) implements ClientboundPacket {}
+
+    /** {@code ClientboundSetCursorItemPacket}: the stack the cursor carries. */
+    record SetCursorItem(Stack item) implements ClientboundPacket {}
+
+    /** {@code ClientboundSetPlayerInventoryPacket}: one slot of the player's inventory, by inventory index (0-8 hotbar, 40 off hand). */
+    record SetPlayerInventory(int slot, Stack item) implements ClientboundPacket {}
+
+    /** {@code ClientboundSetHeldSlotPacket}: the selected hotbar slot. */
+    record SetHeldSlot(int slot) implements ClientboundPacket {}
+
+    /** {@code ClientboundOpenScreenPacket}: a menu opens with this container id; {@code menuType} by key. */
+    record OpenScreen(int containerId, String menuType) implements ClientboundPacket {}
+
+    /** {@code ClientboundMountScreenOpenPacket}: a mount's inventory menu opens. */
+    record MountScreenOpen(int containerId, int inventoryColumns, int entityId) implements ClientboundPacket {}
+
+    /** {@code ClientboundContainerClosePacket}: the client goes back to its inventory menu. */
+    record ContainerClose(int containerId) implements ClientboundPacket {}
+
     record Unmodeled(String type) implements ClientboundPacket {}
 
     /**

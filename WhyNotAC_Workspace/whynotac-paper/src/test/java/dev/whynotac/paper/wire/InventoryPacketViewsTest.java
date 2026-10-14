@@ -1,0 +1,174 @@
+package dev.whynotac.paper.wire;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import dev.whynotac.paper.network.PacketTranslator;
+import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
+import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import java.util.List;
+import net.minecraft.SharedConstants;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.HashedStack;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundSetCursorItemPacket;
+import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
+import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.AttackRange;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The inventory packets translate to the same records from the game's objects and from the bytes the
+ * client receives: item, count, the component patch (types sorted) and a patched attack range; a click's
+ * hashed stacks keep the item, count and patch types, never values.
+ */
+class InventoryPacketViewsTest {
+
+    private static RegistryAccess registries;
+    private final PacketTranslator translator = new PacketTranslator();
+
+    @BeforeAll
+    static void bootstrap() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
+    }
+
+    /**
+     * Paper's item encoder needs a running server (it sanitizes components): the test writes the stacks
+     * itself, as the vanilla codec does (count, item, component patch), and the client's codec reads them.
+     */
+    private static RegistryFriendlyByteBuf bytes() {
+        return new RegistryFriendlyByteBuf(Unpooled.buffer(), registries);
+    }
+
+    private static void writeStack(RegistryFriendlyByteBuf buf, ItemStack stack) {
+        buf.writeVarInt(stack.getCount());
+        if (stack.isEmpty()) {
+            return;
+        }
+        Item.STREAM_CODEC.encode(buf, stack.getItemHolder());
+        // DataComponentPatch.STREAM_CODEC: added count, removed count, then each added type with its value, each removed type.
+        DataComponentPatch patch = stack.getComponentsPatch();
+        List<java.util.Map.Entry<DataComponentType<?>, java.util.Optional<?>>> entries = List.copyOf(patch.entrySet());
+        buf.writeVarInt((int) entries.stream().filter(e -> e.getValue().isPresent()).count());
+        buf.writeVarInt((int) entries.stream().filter(e -> e.getValue().isEmpty()).count());
+        for (java.util.Map.Entry<DataComponentType<?>, java.util.Optional<?>> entry : entries) {
+            if (entry.getValue().isPresent()) {
+                DataComponentType.STREAM_CODEC.encode(buf, entry.getKey());
+                writeValue(buf, entry.getKey(), entry.getValue().get());
+            }
+        }
+        for (java.util.Map.Entry<DataComponentType<?>, java.util.Optional<?>> entry : entries) {
+            if (entry.getValue().isEmpty()) {
+                DataComponentType.STREAM_CODEC.encode(buf, entry.getKey());
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> void writeValue(RegistryFriendlyByteBuf buf, DataComponentType<T> type, Object value) {
+        type.streamCodec().encode(buf, (T) value);
+    }
+
+    private static <P> P decoded(RegistryFriendlyByteBuf buf, net.minecraft.network.codec.StreamCodec<RegistryFriendlyByteBuf, P> codec) {
+        P packet = codec.decode(buf);
+        assertEquals(0, buf.readableBytes(), "the codec read every byte");
+        return packet;
+    }
+
+    private ClientboundPacket bothViews(Packet<? super ClientGamePacketListener> packet, Packet<?> received) {
+        ClientboundPacket game = translator.outbound(packet, false);
+        ClientboundPacket wire = translator.outbound(received, true);
+        assertEquals(WireObserver.canonical(game), WireObserver.canonical(wire), "views agree on " + packet);
+        return wire;
+    }
+
+    private ClientboundPacket setSlot(int container, int state, int slot, ItemStack stack) {
+        RegistryFriendlyByteBuf buf = bytes();
+        buf.writeContainerId(container);
+        buf.writeVarInt(state);
+        buf.writeShort(slot);
+        writeStack(buf, stack);
+        return bothViews(new ClientboundContainerSetSlotPacket(container, state, slot, stack), decoded(buf, ClientboundContainerSetSlotPacket.STREAM_CODEC));
+    }
+
+    private ClientboundPacket setContent(int container, int state, List<ItemStack> items, ItemStack carried) {
+        RegistryFriendlyByteBuf buf = bytes();
+        buf.writeContainerId(container);
+        buf.writeVarInt(state);
+        buf.writeVarInt(items.size());
+        items.forEach(item -> writeStack(buf, item));
+        writeStack(buf, carried);
+        return bothViews(new ClientboundContainerSetContentPacket(container, state, items, carried),
+                decoded(buf, ClientboundContainerSetContentPacket.STREAM_CODEC));
+    }
+
+    private ClientboundPacket cursor(ItemStack stack) {
+        RegistryFriendlyByteBuf buf = bytes();
+        writeStack(buf, stack);
+        return bothViews(new ClientboundSetCursorItemPacket(stack), decoded(buf, ClientboundSetCursorItemPacket.STREAM_CODEC));
+    }
+
+    private ClientboundPacket playerInventory(int slot, ItemStack stack) {
+        RegistryFriendlyByteBuf buf = bytes();
+        buf.writeVarInt(slot);
+        writeStack(buf, stack);
+        return bothViews(new ClientboundSetPlayerInventoryPacket(slot, stack), decoded(buf, ClientboundSetPlayerInventoryPacket.STREAM_CODEC));
+    }
+
+    /** A stick that reaches like a weapon and cannot be stacked: two patched types, one cleared. */
+    private static ItemStack reachStick() {
+        ItemStack stick = new ItemStack(Items.STICK, 1);
+        stick.set(DataComponents.ATTACK_RANGE, new AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F));
+        stick.set(DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("reach"));
+        stick.remove(DataComponents.MAX_STACK_SIZE);
+        return stick;
+    }
+
+    private static final Stack REACH_STICK = new Stack("minecraft:stick", 1, List.of("minecraft:attack_range", "minecraft:custom_name"),
+            List.of("minecraft:max_stack_size"), new Stack.AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F), false);
+
+    @Test
+    void stacksKeepTheirItemCountAndPatch() {
+        assertEquals(new ClientboundPacket.ContainerSetSlot(0, 7, 36, REACH_STICK), setSlot(0, 7, 36, reachStick()));
+        Stack dirt = new Stack("minecraft:dirt", 12, List.of(), List.of(), null, false);
+        assertEquals(new ClientboundPacket.ContainerSetContent(3, 9, List.of(Stack.EMPTY, dirt, REACH_STICK), Stack.EMPTY),
+                setContent(3, 9, List.of(ItemStack.EMPTY, new ItemStack(Items.DIRT, 12), reachStick()), ItemStack.EMPTY));
+        assertEquals(new ClientboundPacket.SetCursorItem(dirt), cursor(new ItemStack(Items.DIRT, 12)));
+        assertEquals(new ClientboundPacket.SetPlayerInventory(40, REACH_STICK), playerInventory(40, reachStick()));
+        assertEquals(new ClientboundPacket.SetHeldSlot(4), translator.outbound(new ClientboundSetHeldSlotPacket(4), true));
+    }
+
+    @Test
+    void aClickKeepsWhatTheClientPredictedWithoutValues() {
+        Int2ObjectOpenHashMap<HashedStack> changed = new Int2ObjectOpenHashMap<>();
+        changed.put(38, HashedStack.create(reachStick(), component -> 17));
+        changed.put(12, HashedStack.EMPTY);
+        ServerboundContainerClickPacket click = new ServerboundContainerClickPacket(0, 5, (short) 12, (byte) 2, ClickType.SWAP, changed,
+                HashedStack.create(new ItemStack(Items.DIRT, 3), component -> 0));
+        Stack hashedStick = new Stack("minecraft:stick", 1, List.of("minecraft:attack_range", "minecraft:custom_name"),
+                List.of("minecraft:max_stack_size"), null, true);
+        assertEquals(new ServerboundPacket.ContainerClick(0, 5, 12, 2, "SWAP",
+                        List.of(new ServerboundPacket.ContainerClick.ChangedSlot(12, Stack.EMPTY), new ServerboundPacket.ContainerClick.ChangedSlot(38, hashedStick)),
+                        new Stack("minecraft:dirt", 3, List.of(), List.of(), null, true)),
+                translator.inbound(click));
+    }
+}

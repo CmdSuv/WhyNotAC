@@ -109,6 +109,12 @@ echo "execute at WhyNotProbe run summon minecraft:salmon ~5 ~ ~2 {NoAI:1b,Persis
 echo "execute at WhyNotProbe run summon minecraft:armor_stand ~0.5 ~ ~6 {Marker:1b}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:interaction ~-6 ~ ~-5 {width:2.5f,height:0.75f}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:area_effect_cloud ~6 ~ ~-5 {Radius:1.25f,Duration:6000,WaitTime:0}" > "$FIFO"
+# Items in the probe's inventory: a sword, a spear (its prototype's attack range), a stick with an attack
+# range of its own and no lore, and a shield in the off hand.
+echo "give WhyNotProbe minecraft:diamond_sword" > "$FIFO"
+echo "give WhyNotProbe minecraft:iron_spear" > "$FIFO"
+echo "give WhyNotProbe minecraft:stick[minecraft:attack_range={max_reach:4.5f,hitbox_margin:0.25f},!minecraft:lore] 2" > "$FIFO"
+echo "item replace entity WhyNotProbe weapon.offhand with minecraft:shield" > "$FIFO"
 # Moves: absolute and relative positions and rotations; the cow is removed.
 sleep 1; echo "execute at WhyNotProbe run tp @e[tag=wnz,limit=1] ~1.3172 ~ ~2.7071 45 10" > "$FIFO"
 echo "execute at WhyNotProbe run tp @e[tag=wnv,limit=1] ~-1.5 ~ ~1.25 -170 0" > "$FIFO"

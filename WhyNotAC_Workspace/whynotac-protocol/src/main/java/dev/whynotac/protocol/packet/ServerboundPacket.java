@@ -153,8 +153,28 @@ public sealed interface ServerboundPacket {
     /** {@code ServerboundPaddleBoatPacket}. */
     record PaddleBoat(boolean left, boolean right) implements ServerboundPacket {}
 
-    /** {@code ServerboundContainerClickPacket} (inventory timing; item payload not modelled). */
-    record ContainerClick(int containerId, int stateId, int slot, int button, String clickType) implements ServerboundPacket {}
+    /**
+     * {@code ServerboundContainerClickPacket}. The client applies the click itself and sends what it
+     * predicts: every slot it changed ({@code changed}, by menu index) and the stack the cursor carries
+     * then ({@code carried}), as hashed stacks. Recordings older than these fields hold none and a null
+     * {@code carried}.
+     */
+    record ContainerClick(int containerId, int stateId, int slot, int button, String clickType, List<ChangedSlot> changed, Stack carried)
+            implements ServerboundPacket {
+        public ContainerClick {
+            changed = List.copyOf(changed);
+        }
+
+        /** Timing only: no predicted contents. */
+        public ContainerClick(int containerId, int stateId, int slot, int button, String clickType) {
+            this(containerId, stateId, slot, button, clickType, List.of(), null);
+        }
+
+        public record ChangedSlot(int slot, Stack item) {}
+    }
+
+    /** {@code ServerboundSetCreativeModeSlotPacket}: the creative client sets an inventory menu slot itself (-1: drops the stack). */
+    record SetCreativeModeSlot(int slot, Stack item) implements ServerboundPacket {}
 
     /** {@code ServerboundContainerClosePacket}. */
     record ContainerClose(int containerId) implements ServerboundPacket {}

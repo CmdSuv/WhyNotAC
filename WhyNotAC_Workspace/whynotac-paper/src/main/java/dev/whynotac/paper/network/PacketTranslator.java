@@ -7,6 +7,7 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.lang.invoke.MethodHandles;
@@ -64,7 +65,14 @@ import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket;
-import net.minecraft.network.protocol.game.CommonPlayerSpawnInfo;
+import net.minecraft.network.protocol.game.ClientboundContainerClosePacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundMountScreenOpenPacket;
+import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
+import net.minecraft.network.protocol.game.ClientboundSetCursorItemPacket;
+import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
 import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
@@ -80,9 +88,11 @@ import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.network.protocol.game.CommonPlayerSpawnInfo;
 import net.minecraft.network.protocol.handshake.ClientIntent;
 import net.minecraft.network.protocol.handshake.ClientIntentionPacket;
 import net.minecraft.server.MinecraftServer;
@@ -199,7 +209,7 @@ public final class PacketTranslator {
             "accept_teleportation", "chunk_batch_received", "client_tick_end", "container_click", "container_close", "interact",
             "keep_alive", "move_player_pos", "move_player_pos_rot", "move_player_rot", "move_player_status_only", "move_vehicle",
             "paddle_boat", "player_abilities", "player_action", "player_command", "player_input", "player_loaded", "pong",
-            "set_carried_item", "swing", "use_item", "use_item_on");
+            "set_carried_item", "swing", "use_item", "use_item_on", "set_creative_mode_slot");
 
     /** Packet type paths that {@link #outbound} turns into a dedicated model record (see {@link #SERVERBOUND_MODELLED}). */
     public static final Set<String> CLIENTBOUND_MODELLED = Set.of(
@@ -209,7 +219,9 @@ public final class PacketTranslator {
             "set_chunk_cache_center", "set_chunk_cache_radius", "ticking_state", "ticking_step", "player_info_update",
             "player_info_remove",
             "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
-            "rotate_head", "set_passengers", "move_vehicle", "set_entity_data");
+            "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
+            "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
+            "mount_screen_open", "container_close");
 
     /**
      * Packets about other entities that come by the hundred per tick: the edge decodes them (the client's
@@ -238,7 +250,11 @@ public final class PacketTranslator {
             ClientboundMoveEntityPacket.class, ClientboundEntityPositionSyncPacket.class, ClientboundRotateHeadPacket.class,
             ClientboundSetPassengersPacket.class, ClientboundMoveVehiclePacket.class, ClientboundSetEntityDataPacket.class,
             ClientboundTickingStatePacket.class, ClientboundTickingStepPacket.class, ClientboundPlayerInfoUpdatePacket.class,
-            ClientboundPlayerInfoRemovePacket.class);
+            ClientboundPlayerInfoRemovePacket.class, ClientboundContainerSetContentPacket.class,
+            ClientboundContainerSetSlotPacket.class, ClientboundSetCursorItemPacket.class,
+            ClientboundSetPlayerInventoryPacket.class, ClientboundSetHeldSlotPacket.class,
+            ClientboundOpenScreenPacket.class, ClientboundMountScreenOpenPacket.class,
+            ClientboundContainerClosePacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
     static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
@@ -302,8 +318,9 @@ public final class PacketTranslator {
             case ServerboundMoveVehiclePacket vehicle -> new ServerboundPacket.MoveVehicle(
                     vec(vehicle.position()), vehicle.yRot(), vehicle.xRot(), vehicle.onGround());
             case ServerboundPaddleBoatPacket paddle -> new ServerboundPacket.PaddleBoat(paddle.getLeft(), paddle.getRight());
-            case ServerboundContainerClickPacket click -> new ServerboundPacket.ContainerClick(
-                    click.containerId(), click.stateId(), click.slotNum(), click.buttonNum(), click.clickType().name());
+            case ServerboundContainerClickPacket click -> containerClick(click);
+            case ServerboundSetCreativeModeSlotPacket creative -> new ServerboundPacket.SetCreativeModeSlot(
+                    creative.slotNum(), stack(creative.itemStack()));
             case ServerboundContainerClosePacket close -> new ServerboundPacket.ContainerClose(close.getContainerId());
             case ServerboundPlayerLoadedPacket ignored -> new ServerboundPacket.PlayerLoaded();
             case ServerboundChunkBatchReceivedPacket(float desired) -> new ServerboundPacket.ChunkBatchReceived(desired);
@@ -313,6 +330,64 @@ public final class PacketTranslator {
             case ServerboundCustomPayloadPacket payload -> customPayload(payload.payload());
             default -> unmodeledInbound.computeIfAbsent(packet.getClass(), c -> new ServerboundPacket.Unmodeled(packet.type().id().toString()));
         };
+    }
+
+    /** The click with the slots the client changed itself and its carried stack, as it hashed them, in slot order. */
+    private static ServerboundPacket.ContainerClick containerClick(ServerboundContainerClickPacket click) {
+        int[] slots = click.changedSlots().keySet().toIntArray();
+        java.util.Arrays.sort(slots);
+        List<ServerboundPacket.ContainerClick.ChangedSlot> changed = new ArrayList<>(slots.length);
+        for (int slot : slots) {
+            changed.add(new ServerboundPacket.ContainerClick.ChangedSlot(slot, stack(click.changedSlots().get(slot))));
+        }
+        return new ServerboundPacket.ContainerClick(click.containerId(), click.stateId(), click.slotNum(), click.buttonNum(), click.clickType().name(),
+                changed, stack(click.carriedItem()));
+    }
+
+    /**
+     * An item stack as the client receives it: item, count, and its component patch (types sorted by key, so
+     * the game's object and the decoded bytes give the same list); the attack range when the patch sets one.
+     */
+    static Stack stack(net.minecraft.world.item.ItemStack stack) {
+        if (stack.isEmpty()) {
+            return Stack.EMPTY;
+        }
+        List<String> added = new ArrayList<>();
+        List<String> removed = new ArrayList<>();
+        Stack.AttackRange range = null;
+        for (Map.Entry<net.minecraft.core.component.DataComponentType<?>, java.util.Optional<?>> entry : stack.getComponentsPatch().entrySet()) {
+            String type = net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(entry.getKey()).toString();
+            if (entry.getValue().isEmpty()) {
+                removed.add(type);
+                continue;
+            }
+            added.add(type);
+            if (entry.getValue().get() instanceof net.minecraft.world.item.component.AttackRange r) {
+                range = new Stack.AttackRange(r.minRange(), r.maxRange(), r.minCreativeRange(), r.maxCreativeRange(), r.hitboxMargin(), r.mobFactor());
+            }
+        }
+        added.sort(null);
+        removed.sort(null);
+        return new Stack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), added, removed,
+                range, false);
+    }
+
+    /** A stack the client hashed: item, count and the patch's types; no component values. */
+    static Stack stack(net.minecraft.network.HashedStack hashed) {
+        if (!(hashed instanceof net.minecraft.network.HashedStack.ActualItem item)) {
+            return Stack.EMPTY;
+        }
+        List<String> added = new ArrayList<>();
+        for (net.minecraft.core.component.DataComponentType<?> type : item.components().addedComponents().keySet()) {
+            added.add(net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type).toString());
+        }
+        List<String> removed = new ArrayList<>();
+        for (net.minecraft.core.component.DataComponentType<?> type : item.components().removedComponents()) {
+            removed.add(net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type).toString());
+        }
+        added.sort(null);
+        removed.sort(null);
+        return new Stack(key(item.item()), item.count(), added, removed, null, true);
     }
 
     private static ServerboundPacket interact(ServerboundInteractPacket packet) {
@@ -460,6 +535,24 @@ public final class PacketTranslator {
             case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
             case ClientboundTickingStatePacket state -> new ClientboundPacket.TickingState(state.tickRate(), state.isFrozen());
             case ClientboundTickingStepPacket step -> new ClientboundPacket.TickingStep(step.tickSteps());
+            case ClientboundContainerSetSlotPacket slot -> new ClientboundPacket.ContainerSetSlot(
+                    slot.getContainerId(), slot.getStateId(), slot.getSlot(), stack(slot.getItem()));
+            case ClientboundContainerSetContentPacket content -> {
+                List<Stack> items = new ArrayList<>(content.items().size());
+                for (net.minecraft.world.item.ItemStack item : content.items()) {
+                    items.add(stack(item));
+                }
+                yield new ClientboundPacket.ContainerSetContent(content.containerId(), content.stateId(), items, stack(content.carriedItem()));
+            }
+            case ClientboundSetCursorItemPacket cursor -> new ClientboundPacket.SetCursorItem(stack(cursor.contents()));
+            case ClientboundSetPlayerInventoryPacket inventory -> new ClientboundPacket.SetPlayerInventory(
+                    inventory.slot(), stack(inventory.contents()));
+            case ClientboundSetHeldSlotPacket held -> new ClientboundPacket.SetHeldSlot(held.slot());
+            case ClientboundOpenScreenPacket open -> new ClientboundPacket.OpenScreen(open.getContainerId(),
+                    String.valueOf(net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(open.getType())));
+            case ClientboundMountScreenOpenPacket mount -> new ClientboundPacket.MountScreenOpen(
+                    mount.getContainerId(), mount.getInventoryColumns(), mount.getEntityId());
+            case ClientboundContainerClosePacket close -> new ClientboundPacket.ContainerClose(close.getContainerId());
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }

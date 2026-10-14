@@ -76,6 +76,9 @@ public final class RecordingFormat {
     public static final int SB_CLIENT_BRAND = 25;
     public static final int SB_CHANNEL_REGISTRATION = 26;
     public static final int SB_CUSTOM_PAYLOAD = 27;
+    /** ContainerClick with the predicted slots and carried stack (SB_CONTAINER_CLICK: timing only). */
+    public static final int SB_CONTAINER_CLICK_ITEMS = 28;
+    public static final int SB_SET_CREATIVE_MODE_SLOT = 29;
 
     // --- clientbound packet tags ---------------------------------------------------------------
     public static final int CB_PING = 1;
@@ -121,6 +124,14 @@ public final class RecordingFormat {
     public static final int CB_TICKING_STEP = 37;
     public static final int CB_PLAYER_INFO_UPDATE = 38;
     public static final int CB_PLAYER_INFO_REMOVE = 39;
+    public static final int CB_CONTAINER_SET_CONTENT = 40;
+    public static final int CB_CONTAINER_SET_SLOT = 41;
+    public static final int CB_SET_CURSOR_ITEM = 42;
+    public static final int CB_SET_PLAYER_INVENTORY = 43;
+    public static final int CB_SET_HELD_SLOT = 44;
+    public static final int CB_OPEN_SCREEN = 45;
+    public static final int CB_MOUNT_SCREEN_OPEN = 46;
+    public static final int CB_CONTAINER_CLOSE = 47;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

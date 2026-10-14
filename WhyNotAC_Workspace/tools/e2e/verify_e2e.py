@@ -70,6 +70,7 @@ def main():
             verify_cases(probe, log, sys.argv[6], check)
             verify_world(log, sys.argv[5], check)
             verify_entities(log, sys.argv[5], check)
+            verify_inventory(sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -297,6 +298,34 @@ def verify_entities(log, dump_path, check):
     check(all(kinds.get(k, 0) >= 1 for k in ("AddEntity", "RemoveEntities", "EntityPositionSync", "SetPassengers", "SetEntityData")),
           f"the recording holds the entity packets: {[(k, kinds.get(k, 0)) for k in ('AddEntity', 'RemoveEntities', 'MoveEntity', 'EntityPositionSync', 'RotateHead', 'SetPassengers', 'SetEntityData', 'PlayerInfoUpdate', 'TickingState')]}")
     check(kinds.get("TickingState", 0) >= 1 and kinds.get("PlayerInfoUpdate", 0) >= 1, "the ticking state and the player list are recorded")
+
+
+def verify_inventory(dump_path, check):
+    """The probe's inventory reached the recording as the client received it: items, counts, component patches."""
+    events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []
+    stacks = []
+    for e in events:
+        if e["type"] != "Outbound":
+            continue
+        p = e["packet"]
+        if p["type"] == "ContainerSetContent":
+            stacks += [(p["containerId"], i, s) for i, s in enumerate(p["items"])]
+        elif p["type"] == "ContainerSetSlot":
+            stacks.append((p["containerId"], p["slot"], p["item"]))
+        elif p["type"] == "SetPlayerInventory":
+            stacks.append(("inventory", p["slot"], p["item"]))
+    items = {s["item"] for _, _, s in stacks if s.get("item")}
+    check({"minecraft:diamond_sword", "minecraft:iron_spear", "minecraft:stick", "minecraft:shield"} <= items,
+          f"the given items reached the recording: {sorted(items)}")
+    sticks = [s for _, _, s in stacks if s.get("item") == "minecraft:stick"]
+    check(any(s["count"] == 2 and s["added"] == ["minecraft:attack_range"] and s["removed"] == ["minecraft:lore"]
+              and s["attackRange"] and s["attackRange"]["maxRange"]["f32"] == "4.5" and s["attackRange"]["hitboxMargin"]["f32"] == "0.25"
+              for s in sticks), f"the stick's patch and attack range are the client's: {sticks[:1]}")
+    spears = [s for _, _, s in stacks if s.get("item") == "minecraft:iron_spear"]
+    check(spears and all(s["attackRange"] is None and not s["added"] for s in spears),
+          "the spear's attack range is its prototype's: no patch")
+    shields = [(c, slot) for c, slot, s in stacks if s.get("item") == "minecraft:shield"]
+    check((0, 45) in shields or ("inventory", 40) in shields, f"the shield is in the off hand: {shields}")
 
 
 def verify_facts(probe, dump_path, check):
