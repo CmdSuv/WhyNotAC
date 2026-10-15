@@ -72,6 +72,7 @@ def main():
             verify_entities(log, sys.argv[5], check)
             verify_inventory(sys.argv[5], check)
             verify_inventory_replica(log, probe, sys.argv[5], check)
+            verify_self(log, check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -249,6 +250,21 @@ def verify_cases(probe, log, work_dir, check):
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
                   for d in dossiers),
           "/whynotac cases lists all three")
+
+
+def verify_self(log, check):
+    """The client's own player WhyNotAC rebuilt (eye, reach and scale attributes, game mode) is the server's."""
+    m = re.search(r"WhyNotAC self WhyNotProbe: (.*)", log)
+    check(m is not None, "/whynotac self answered")
+    if not m:
+        return
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
+    check(fields.get("matches") == "true" and fields.get("eye") == "known" and fields.get("positionEqual") == "true",
+          f"the eye is known and based on the server's own position of the player: {m.group(1)}")
+    check(fields.get("rangeContains") == "true" and fields.get("range") == "3.0000..3.0000" and fields.get("scaleContains") == "true",
+          f"entity_interaction_range and scale are the server's (range {fields.get('range')}, scale {fields.get('scale')})")
+    check(fields.get("modeConsistent") == "true" and fields.get("mayBeCreativeOrSpectator") == "false" and fields.get("serverMode") == "0",
+          "survival on both sides: the replica rules out creative and spectator")
 
 
 def verify_world(log, dump_path, check):

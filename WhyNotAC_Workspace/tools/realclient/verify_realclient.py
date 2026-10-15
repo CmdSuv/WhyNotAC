@@ -118,6 +118,12 @@ def main():
     rejected = {name: not aligned(c["yaw_counts"], mouse["horizontal"])[0] for name, c in result["negative_controls"].items()}
     check(all(rejected.values()), f"the same data rejects every wrong model (negative controls): {rejected}")
     verify_reach(events, work, check)
+    m = re.search(r"WhyNotAC self RealProbe: (.*)", log)
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
+    check(m is not None and fields.get("matches") == "true" and fields.get("eye") == "known" and fields.get("positionEqual") == "true"
+          and fields.get("rangeContains") == "true" and fields.get("scaleContains") == "true" and fields.get("modeConsistent") == "true",
+          f"the real client's own player, rebuilt from its packets, is the server's: eye on its position, reach and scale, mode "
+          f"({m.group(1) if m else 'no answer'})")
     cases_dir = os.path.join(work, "plugins", "WhyNotAC", "cases")
     cases = [f for f in os.listdir(cases_dir) if f.endswith(".json")] if os.path.isdir(cases_dir) else []
     check(not cases, f"no case was opened for the honest, unmodified client ({len(cases)} dossiers)")

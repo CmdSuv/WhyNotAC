@@ -128,6 +128,7 @@ sleep 1
 echo "whynotac world $NAME" > "$FIFO"
 echo "whynotac entities $NAME" > "$FIFO"
 echo "whynotac inventory $NAME" > "$FIFO"
+echo "whynotac self $NAME" > "$FIFO"
 sleep 3
 # Reach at its limits, with the real pick and attack: an invulnerable husk (no AI, so it stays) east of
 # the player, the player facing it (yaw -90), its eye level inside the husk's box, so the crosshair ray

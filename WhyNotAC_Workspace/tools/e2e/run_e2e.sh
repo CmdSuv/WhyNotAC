@@ -128,6 +128,7 @@ sleep 1
 echo "whynotac entities WhyNotProbe" > "$FIFO"
 sleep $(( PROBE_SECONDS - 15 ))
 echo "whynotac inventory WhyNotProbe" > "$FIFO"
+echo "whynotac self WhyNotProbe" > "$FIFO"
 echo "whynotac world WhyNotProbe" > "$FIFO"
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"

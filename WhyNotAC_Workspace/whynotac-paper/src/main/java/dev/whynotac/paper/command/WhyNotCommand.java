@@ -5,6 +5,7 @@ import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.InventoryVerifier;
+import dev.whynotac.paper.world.SelfVerifier;
 import dev.whynotac.paper.world.WorldVerifier;
 import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.packet.ServerboundPacket;
@@ -40,10 +41,11 @@ public final class WhyNotCommand implements BasicCommand {
     private final WorldVerifier world;
     private final EntityVerifier entities;
     private final InventoryVerifier inventory;
+    private final SelfVerifier self;
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
-            CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, org.bukkit.plugin.Plugin plugin) {
+            CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, SelfVerifier self, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
@@ -52,6 +54,7 @@ public final class WhyNotCommand implements BasicCommand {
         this.world = world;
         this.entities = entities;
         this.inventory = inventory;
+        this.self = self;
         this.plugin = plugin;
     }
 
@@ -146,6 +149,18 @@ public final class WhyNotCommand implements BasicCommand {
                     sender.sendMessage(Component.text("  " + note, NamedTextColor.GRAY));
                 }
             }, error -> sender.sendMessage(Component.text("WhyNotAC inventory " + target.getName() + ": " + error, NamedTextColor.RED)));
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("self")) {
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                sender.sendMessage(Component.text("No online player named " + args[1], NamedTextColor.RED));
+                return;
+            }
+            self.verify(target, result -> {
+                sender.sendMessage(Component.text(result.line(), result.clean() ? NamedTextColor.GREEN : NamedTextColor.RED));
+                for (String note : result.differences()) {
+                    sender.sendMessage(Component.text("  " + note, NamedTextColor.GRAY));
+                }
+            }, error -> sender.sendMessage(Component.text("WhyNotAC self " + target.getName() + ": " + error, NamedTextColor.RED)));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("stats")) {
             sender.sendMessage(Component.text("WhyNotAC stats " + stats.get(), NamedTextColor.GRAY));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
@@ -154,7 +169,7 @@ public final class WhyNotCommand implements BasicCommand {
                 sender.sendMessage(Component.text(" " + session + " ticks=" + session.clientTicks(), NamedTextColor.GRAY));
             }
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id>",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id>",
                     NamedTextColor.YELLOW));
         }
     }
@@ -215,10 +230,10 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "pipeline", "world", "entities", "inventory", "sessions", "stats", "cases", "case");
+            return List.of("inspect", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "cases", "case");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("pipeline") || args[0].equalsIgnoreCase("world")
-                || args[0].equalsIgnoreCase("entities") || args[0].equalsIgnoreCase("inventory"))) {
+                || args[0].equalsIgnoreCase("entities") || args[0].equalsIgnoreCase("inventory") || args[0].equalsIgnoreCase("self"))) {
             return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
         }
         return List.of();

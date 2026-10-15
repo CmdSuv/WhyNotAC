@@ -385,15 +385,10 @@ public final class ClientSelf {
      * a vehicle, or another camera.
      */
     public Eye eye() {
-        long end = windowEnd();
-        if (!sent || vehicle.mayBeOtherThan(certain, end, NONE) || camera.mayBeOtherThan(certain, end, 1)) {
+        if (!eyeState().equals("known")) {
             return null;
         }
-        for (long r : resets) {
-            if (r >= sentCertain && r < end) {
-                return null;
-            }
-        }
+        long end = windowEnd();
         double[] s = scale.hull(certain, end);
         float low = (float) s[0];
         float high = (float) s[1];
@@ -401,6 +396,40 @@ public final class ClientSelf {
         double eyeLow = Math.min(EYE_SLEEPING, EYE_LOW_POSE * low);
         double eyeHigh = Math.max(EYE_DYING, EYE_STANDING * high);
         return new Eye(sentX, sentZ, sentY + eyeLow, sentY + eyeHigh, SEND_THRESHOLD);
+    }
+
+    /**
+     * Why {@link #eye()} is null, or {@code known}: {@code no position} (none sent since a new player),
+     * {@code vehicle}, {@code camera} (another entity's), {@code moved} (something may have moved the player
+     * after the position it sent).
+     */
+    public String eyeState() {
+        long end = windowEnd();
+        if (!sent) {
+            return "no position";
+        }
+        if (vehicle.mayBeOtherThan(certain, end, NONE)) {
+            return "vehicle";
+        }
+        if (camera.mayBeOtherThan(certain, end, 1)) {
+            return "camera";
+        }
+        for (long r : resets) {
+            if (r >= sentCertain && r < end) {
+                return "moved";
+            }
+        }
+        return "known";
+    }
+
+    /** {@code [low, high]} of the {@code entity_interaction_range} the client may have now. */
+    public double[] interactionRangeBounds() {
+        return interactionRange.hull(certain, windowEnd());
+    }
+
+    /** {@code [low, high]} of the scales the player's cached dimensions may have now. */
+    public double[] scaleBounds() {
+        return scale.hull(certain, windowEnd());
     }
 
     /** The sequence of the position {@link #eye()} is based on. */

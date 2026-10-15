@@ -17,11 +17,29 @@ import java.util.Set;
  * attack-reach check does, one JSON line per attack: whether it claims (out of reach), finds it in reach
  * (with the distance and the farthest reach allowed), or makes no claim (and why).
  *
- * <p>usage: java -cp WhyNotAC.jar ReachAudit.java RECORDING
+ * <p>usage: java -cp WhyNotAC.jar ReachAudit.java RECORDING... (each with fresh replicas; a directory: every
+ * recording under it)
  */
 public class ReachAudit {
 
     public static void main(String[] args) throws Exception {
+        List<Path> recordings = new ArrayList<>();
+        for (String arg : args) {
+            Path path = Path.of(arg);
+            if (java.nio.file.Files.isDirectory(path)) {
+                try (var files = java.nio.file.Files.walk(path)) {
+                    files.filter(f -> f.toString().endsWith(".wnrec")).sorted().forEach(recordings::add);
+                }
+            } else {
+                recordings.add(path);
+            }
+        }
+        for (Path recording : recordings) {
+            audit(recording);
+        }
+    }
+
+    private static void audit(Path recording) throws Exception {
         Replicas replicas = Replicas.vanilla();
         List<TimelineListener> chain = new ArrayList<>(replicas.listeners());
         chain.add((session, event) -> {
@@ -35,7 +53,7 @@ public class ReachAudit {
                         + ",\"interactionRange\":" + number(a.interactionRange()) + ",\"states\":" + a.states() + "}");
             }
         });
-        Replayer.Result result = Replayer.replay(RecordingReader.open(Path.of(args[0])), chain);
+        Replayer.Result result = Replayer.replay(RecordingReader.open(recording), chain);
         if (!result.listenerErrors().isEmpty()) {
             throw new IllegalStateException("listener errors: " + result.listenerErrors());
         }

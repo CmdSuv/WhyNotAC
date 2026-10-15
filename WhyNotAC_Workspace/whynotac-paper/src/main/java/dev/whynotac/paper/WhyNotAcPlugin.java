@@ -10,6 +10,7 @@ import dev.whynotac.paper.diagnostics.TickCost;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.InventoryVerifier;
+import dev.whynotac.paper.world.SelfVerifier;
 import dev.whynotac.paper.world.WorldVerifier;
 import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -17,6 +18,7 @@ import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
 import dev.whynotac.world.ClientEntitiesTracker;
 import dev.whynotac.world.ClientInventoryTracker;
+import dev.whynotac.world.ClientSelfTracker;
 import dev.whynotac.world.Replicas;
 import dev.whynotac.world.ItemPrototypes;
 import dev.whynotac.world.ClientWorldTracker;
@@ -53,6 +55,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
     private ClientInventoryTracker inventoryTracker;
+    private ClientSelfTracker selfTracker;
     private Alerts alerts;
     private final AtomicLong listenerErrors = new AtomicLong();
     private final TickCost transactionLoop = new TickCost();
@@ -94,6 +97,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         worldTracker = replicas.world();
         entitiesTracker = replicas.entities();
         inventoryTracker = replicas.inventory();
+        selfTracker = replicas.self();
         Checks.all(verdict, replicas).forEach(registry::addListener);
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
@@ -131,7 +135,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
-                new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), this);
+                new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, this), this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
