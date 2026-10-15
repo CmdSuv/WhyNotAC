@@ -46,6 +46,7 @@ public class RealClientCheck {
         long lastNanos = 0;
         long steadyTicks = 0;
         long steadyFirst = Long.MIN_VALUE;
+        java.util.Set<Integer> teleports = new java.util.HashSet<>();
         RecordingReader reader = RecordingReader.open(Path.of(args[0]));
         {
             for (TimelineEvent event : reader) {
@@ -78,7 +79,11 @@ public class RealClientCheck {
                     }
                     case ServerboundPacket.MovePlayer move -> {
                         inTick |= inPlay && !teleportReply; // a teleport reply is frame-start work, not a tick
-                        if (move.hasRotation() && !teleportReply) {
+                        if (move.hasRotation()) {
+                            // A teleport reply carries the rotation the server set: the mouse's steps start again from it.
+                            if (teleportReply) {
+                                teleports.add(rotations.size());
+                            }
                             rotations.add(move);
                         }
                     }
@@ -87,13 +92,13 @@ public class RealClientCheck {
                 }
             }
         }
-        Lattice real = lattice(rotations, multiplier, 0);
+        Lattice real = lattice(rotations, teleports, multiplier, 0);
         Map<String, Lattice> controls = new LinkedHashMap<>();
-        controls.put("multiplier/2", lattice(rotations, multiplier / 2, 0));
-        controls.put("multiplier/3", lattice(rotations, multiplier / 3, 0));
-        controls.put("multiplier*2", lattice(rotations, multiplier * 2, 0));
-        controls.put("multiplier=1", lattice(rotations, 1.0, 0));
-        controls.put("yaw+1ulp", lattice(rotations, multiplier, 1));
+        controls.put("multiplier/2", lattice(rotations, teleports, multiplier / 2, 0));
+        controls.put("multiplier/3", lattice(rotations, teleports, multiplier / 3, 0));
+        controls.put("multiplier*2", lattice(rotations, teleports, multiplier * 2, 0));
+        controls.put("multiplier=1", lattice(rotations, teleports, 1.0, 0));
+        controls.put("yaw+1ulp", lattice(rotations, teleports, multiplier, 1));
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("client_ticks", ticks);
         out.put("ticks_per_second", ticks > 1 ? (ticks - 1) / ((lastNanos - firstNanos) / 1e9) : 0.0);
@@ -134,9 +139,12 @@ public class RealClientCheck {
     }
 
     /** Explains every rotation step with the model; {@code yawUlpShift} perturbs the observed yaws (a control). */
-    static Lattice lattice(List<ServerboundPacket.MovePlayer> rotations, double multiplier, int yawUlpShift) {
+    static Lattice lattice(List<ServerboundPacket.MovePlayer> rotations, java.util.Set<Integer> teleports, double multiplier, int yawUlpShift) {
         Lattice l = new Lattice();
         for (int k = 1; k < rotations.size(); k++) {
+            if (teleports.contains(k)) {
+                continue; // the server's rotation, not a mouse step
+            }
             float from = shift(rotations.get(k - 1).yaw(), yawUlpShift);
             float to = shift(rotations.get(k).yaw(), yawUlpShift * 2);
             if (from != to) {

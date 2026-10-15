@@ -38,6 +38,28 @@ def _aligned(observed, commanded, skipped):
     return True, f"{len(observed)} steps == {len(commanded)} commanded motions ({merged} merged, {skipped} leading consumed by ignoreFirstMove)"
 
 
+def verify_reach(events, work, check):
+    """The real client's attacks at the limits of its reach: the check assessed each one (no abstaining) and found it in reach."""
+    audit = [json.loads(line) for line in open(os.path.join(work, "reach-audit.jsonl")) if line.strip()] \
+        if os.path.exists(os.path.join(work, "reach-audit.jsonl")) else []
+    husks = [e["packet"]["entityId"] for e in events if e["type"] == "Outbound" and e["packet"].get("type") == "AddEntity"
+             and e["packet"].get("typeId") == "minecraft:husk" and float(e["packet"]["x"]["f64"]) == 10.5]
+    target = husks[-1] if husks else None
+    staged = [a for a in audit if a["target"] == target]
+    check(audit and all(a["outcome"] != "OUT_OF_REACH" for a in audit),
+          f"no attack of the real client is out of reach ({len(audit)} attacks: {sorted(set(a['outcome'] + ':' + a['reason'] for a in audit))})")
+    check(len(staged) == 2, f"the client attacked the staged husk twice (4.70 with the stick, 2.98 with the sword) and not from 3.05: "
+          f"{[(a['check'], a['distance']) for a in staged]}")
+    if len(staged) == 2:
+        stick, sword = staged
+        check(stick["outcome"] == "IN_REACH" and stick["check"] == "4.5+0.25" and abs(stick["distance"] - 4.70) < 0.01
+              and abs(stick["allowed"] - 4.75) < 1e-6,
+              f"the stick's attack was assessed, in reach of its own range: {stick['distance']:.4f} <= {stick['allowed']:.4f}")
+        check(sword["outcome"] == "IN_REACH" and sword["check"] == "none" and abs(sword["distance"] - 2.98) < 0.01
+              and abs(sword["allowed"] - 3.0) < 1e-6,
+              f"the sword's attack was assessed, strictly within the interaction range: {sword['distance']:.4f} < {sword['allowed']:.4f}")
+
+
 def main():
     work = sys.argv[1]
     failures = []
@@ -68,7 +90,7 @@ def main():
     swings = [p for p in inbound if p["type"] == "Swing"]
     check(len(swings) >= 5, f"left clicks became swings ({len(swings)})")
     slots = [p["slot"] for p in inbound if p["type"] == "SetCarriedItem"]
-    check(slots[-4:] == [1, 2, 0, 4], f"hotbar keys 2, 3, 1, 5 selected slots 1, 2, 0, 4: {slots}")
+    check(slots[-5:] == [1, 2, 0, 4, 0], f"hotbar keys 2, 3, 1, 5 (the drive) and 1 (the reach stage) selected slots 1, 2, 0, 4, 0: {slots}")
     clicks = [p for p in inbound if p["type"] == "ContainerClick"]
     check(len(clicks) == 2 and [c["slot"] for c in clicks] == [37, 40] and all(c["containerId"] == 0 for c in clicks)
           and clicks[0]["carried"].get("item") == "minecraft:stick" and clicks[0]["carried"].get("rangeHash") is not None,
@@ -95,6 +117,7 @@ def main():
     check(pitch_ok, f"every pitch step too: {pitch_detail}")
     rejected = {name: not aligned(c["yaw_counts"], mouse["horizontal"])[0] for name, c in result["negative_controls"].items()}
     check(all(rejected.values()), f"the same data rejects every wrong model (negative controls): {rejected}")
+    verify_reach(events, work, check)
     cases_dir = os.path.join(work, "plugins", "WhyNotAC", "cases")
     cases = [f for f in os.listdir(cases_dir) if f.endswith(".json")] if os.path.isdir(cases_dir) else []
     check(not cases, f"no case was opened for the honest, unmodified client ({len(cases)} dossiers)")

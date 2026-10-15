@@ -129,6 +129,18 @@ echo "whynotac world $NAME" > "$FIFO"
 echo "whynotac entities $NAME" > "$FIFO"
 echo "whynotac inventory $NAME" > "$FIFO"
 sleep 3
+# Reach at its limits, with the real pick and attack: an invulnerable husk (no AI, so it stays) east of
+# the player, the player facing it (yaw -90), its eye level inside the husk's box, so the crosshair ray
+# meets the box's west face (x 10.2) exactly at the horizontal distance. The stick (selected by the
+# drive) reaches 4.5 + 0.25: it attacks from 4.70. The sword (hotbar 0) picks strictly within 3: it
+# attacks from 2.98 and cannot from 3.05 (the client sends nothing).
+echo "summon minecraft:husk 10.5 -60 0.5 {NoAI:1b,PersistenceRequired:1b,Invulnerable:1b,Silent:1b,Tags:[\"wnr\"]}" > "$FIFO"
+sleep 1
+reach() { echo "tp $NAME $1 -60 0.5 -90 0" > "$FIFO"; sleep 1.5; python3 -I "$HERE/reach.py" "$DISPLAY_NUM" click; sleep 1.2; }
+reach 5.5
+python3 -I "$HERE/reach.py" "$DISPLAY_NUM" key 1; sleep 0.6
+reach 7.22
+reach 7.15
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2
@@ -142,6 +154,8 @@ echo "--- recording: ${RECORDING:-<none>}"
 JARS=$(find "$ROOT/whynotac-math/build/libs" "$ROOT/whynotac-protocol/build/libs" "$ROOT/whynotac-recording/build/libs" -name '*.jar' ! -name '*-sources.jar' | paste -sd:)
 java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/dump.jsonl"
 java -cp "$JARS" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
+# Every attack, assessed as the attack-reach check does (in reach, out of reach, or no claim and why).
+java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/ReachAudit.java" "$RECORDING" > "$WORK_DIR/reach-audit.jsonl"
 cat "$WORK_DIR/check.json"
 echo "--- verification"
 STATUS=0

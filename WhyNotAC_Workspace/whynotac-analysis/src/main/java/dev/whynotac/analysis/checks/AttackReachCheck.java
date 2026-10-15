@@ -83,15 +83,34 @@ public final class AttackReachCheck implements TimelineListener {
         }
     }
 
-    /** What {@link #judge} found: null when it makes no claim. */
-    record Finding(int target, String type, double distance, double allowed, AttackReach.Eye eye, Set<ClientInventory.Reach> pick,
-            Set<ClientInventory.Reach> check, double interactionRange, int states) {}
+    /** What {@link #assess} concluded about one attack. */
+    public enum Outcome {
+        /** Out of reach for every possibility: a finding. */
+        OUT_OF_REACH,
+        /** Some possibility explains it. */
+        IN_REACH,
+        /** A replica cannot bound its part: no claim either way ({@link Assessment#reason} says which). */
+        NO_CLAIM
+    }
+
+    /**
+     * One attack, assessed. {@code distance}: the smallest distance from any eye position to the target's
+     * (inflated) box over its states; {@code allowed}: the farthest any pair of stacks allows (both NaN
+     * without a claim).
+     */
+    public record Assessment(Outcome outcome, String reason, int target, String type, double distance, double allowed, AttackReach.Eye eye,
+            Set<ClientInventory.Reach> pick, Set<ClientInventory.Reach> check, double interactionRange, int states) {
+
+        static Assessment noClaim(int target, String reason) {
+            return new Assessment(Outcome.NO_CLAIM, reason, target, null, Double.NaN, Double.NaN, null, Set.of(), Set.of(), Double.NaN, 0);
+        }
+    }
 
     private void onAttack(PlayerSession session, State state, TimelineEvent.Inbound in, ServerboundPacket.InteractEntity interact) {
         ClientSelf self = replicas.self().self(session);
-        Finding finding = judge(self, replicas.inventory().inventory(session), replicas.entities().entities(session),
+        Assessment finding = assess(self, replicas.inventory().inventory(session), replicas.entities().entities(session),
                 replicas.world().world(session), interact.entityId());
-        if (finding == null) {
+        if (finding.outcome() != Outcome.OUT_OF_REACH) {
             return;
         }
         state.outOfReachSinceReport++;
@@ -123,41 +142,48 @@ public final class AttackReachCheck implements TimelineListener {
         state.outOfReachSinceReport = 0;
     }
 
-    /** The finding for an attack on {@code target} now, or null when the replicas cannot prove it out of reach. */
-    static Finding judge(ClientSelf self, ClientInventory inventory, ClientEntities entities, ClientWorld world, int target) {
-        if (target == self.selfId() || self.mayBeCreativeOrSpectator()) {
-            return null;
+    /** An attack on {@code target} now, as the replicas see it (also for audits over a recording). */
+    public static Assessment assess(ClientSelf self, ClientInventory inventory, ClientEntities entities, ClientWorld world, int target) {
+        if (target == self.selfId()) {
+            return Assessment.noClaim(target, "self");
+        }
+        if (self.mayBeCreativeOrSpectator()) {
+            return Assessment.noClaim(target, "creative or spectator");
         }
         ClientSelf.Eye own = self.eye();
         if (own == null) {
-            return null;
+            return Assessment.noClaim(target, "eye unknown");
         }
         AttackReach.Eye eye = new AttackReach.Eye(own.x(), own.z(), own.y0(), own.y1(), own.radius());
         Set<ClientInventory.Reach> pick = inventory.pickReach();
         Set<ClientInventory.Reach> check = inventory.mainHandReach();
         if (pick.isEmpty() || check.isEmpty() || pick.contains(ClientInventory.Reach.UNKNOWN) || check.contains(ClientInventory.Reach.UNKNOWN)) {
-            return null;
+            return Assessment.noClaim(target, "reach unknown");
         }
         double range = self.maxInteractionRange();
         // the target, in every state the client may hold
         List<ClientEntities.PossibleState> states = new ArrayList<>();
         entities.forEachPossibleState(target, states::add);
         if (states.isEmpty()) {
-            return null;
+            return Assessment.noClaim(target, "target unknown");
         }
         String type = null;
         double distance = Double.POSITIVE_INFINITY;
+        boolean out = true;
         for (ClientEntities.PossibleState s : states) {
             if (!s.present() || !s.known() || !s.positionKnown() || s.size() == null || s.pickable() == 0) {
-                return null;
+                return Assessment.noClaim(target, !s.present() || !s.known() ? "target may be absent or unknown"
+                        : !s.positionKnown() ? "target position unknown" : s.size() == null ? "target size unknown" : "target not pickable");
             }
             EntitySizes.Box b = s.size().box(s.x(), s.y(), s.z());
             AttackReach.Box box = new AttackReach.Box(b.minX(), b.minY(), b.minZ(), b.maxX(), b.maxY(), b.maxZ()).inflate(s.positionRadius());
-            if (!AttackReach.outOfReach(eye, box, s.pickRadius(), pick, check, range, false)) {
-                return null;
-            }
+            out &= AttackReach.outOfReach(eye, box, s.pickRadius(), pick, check, range, false);
             distance = Math.min(distance, AttackReach.distance(eye, box.inflate(s.pickRadius())));
             type = s.type();
+        }
+        double allowed = AttackReach.allowed(pick, check, range, false);
+        if (!out) {
+            return new Assessment(Outcome.IN_REACH, "in reach", target, type, distance, allowed, eye, pick, check, range, states.size());
         }
         // nothing pushed the player after the position it sent
         double feet = self.sentPosition().y();
@@ -170,11 +196,13 @@ public final class AttackReachCheck implements TimelineListener {
         int minY = (int) Math.floor(feet - own.radius()) - MOVER_BLOCKS_MARGIN;
         int maxY = (int) Math.floor(feet + 1.8 * Math.max(1.0, scale) + own.radius()) + MOVER_BLOCKS_MARGIN;
         long since = self.eyeCertain();
-        if (world.mayMoveEntitiesIn(minX, minY, minZ, maxX, maxY, maxZ, since)
-                || entities.mayHaveNear(SHULKER, own.x(), feet, own.z(), SHULKER_RADIUS + half, since)) {
-            return null;
+        if (world.mayMoveEntitiesIn(minX, minY, minZ, maxX, maxY, maxZ, since)) {
+            return Assessment.noClaim(target, "a piston or shulker box may have pushed the player");
         }
-        return new Finding(target, type, distance, AttackReach.allowed(pick, check, range, false), eye, pick, check, range, states.size());
+        if (entities.mayHaveNear(SHULKER, own.x(), feet, own.z(), SHULKER_RADIUS + half, since)) {
+            return Assessment.noClaim(target, "a shulker may have pushed the player");
+        }
+        return new Assessment(Outcome.OUT_OF_REACH, "out of reach", target, type, distance, allowed, eye, pick, check, range, states.size());
     }
 
     private static String format(double value) {
