@@ -48,6 +48,10 @@ PLAY_S_ACCEPT_TELEPORT, PLAY_S_CHUNK_BATCH_RECEIVED, PLAY_S_TICK_END, PLAY_S_KEE
 PLAY_S_MOVE_POS_ROT, PLAY_S_MOVE_ROT, PLAY_S_INPUT, PLAY_S_LOADED, PLAY_S_PONG = 0x1E, 0x1F, 0x2A, 0x2B, 0x2C
 PLAY_S_MOVE_POS = 0x1D
 PLAY_C_SET_ENTITY_MOTION = 0x63
+PLAY_C_CONTAINER_SET_CONTENT, PLAY_C_CONTAINER_SET_SLOT = 0x12, 0x14
+PLAY_S_CONTAINER_CLICK, PLAY_S_SET_CARRIED_ITEM = 0x11, 0x34
+# item registry ids (1.21.11, reports/registries.json)
+ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
 
 
 def f32(x):
@@ -141,6 +145,8 @@ class Client:
         self.duplicated_ids = []
         self.trace = []  # ["ping", id] and ["motion", x, y, z] in arrival order
         self.loaded = threading.Event()
+        self.state_id = 0  # the inventory menu's, as the server last sent it
+        self.slots = {}    # inventory menu slot -> (count, item id), from the slot packets
 
     # --- framing -------------------------------------------------------------------------------
     def send(self, packet_id, payload=b""):
@@ -251,6 +257,21 @@ class Client:
                     self.duplicate_next = False
                     self.duplicated_ids.append(ping_id)
                     self.send(PLAY_S_PONG, struct.pack(">i", ping_id))  # violation 2: answer it twice
+            elif packet_id == PLAY_C_CONTAINER_SET_SLOT:
+                container, state_id, slot = r.varint(), r.varint(), r.unpack("h")
+                count = r.varint()
+                if container == 0:
+                    self.state_id = state_id
+                    self.slots[slot] = (count, r.varint() if count > 0 else 0)
+            elif packet_id == PLAY_C_CONTAINER_SET_CONTENT:
+                container, state_id = r.varint(), r.varint()
+                if container == 0:
+                    self.state_id = state_id
+                    for slot in range(r.varint()):
+                        count = r.varint()
+                        if count > 0:
+                            break  # a stack's components are not decoded here: the rest stays as it was
+                        self.slots[slot] = (0, 0)
             elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
                 self.send(PLAY_S_CHUNK_BATCH_RECEIVED, struct.pack(">f", 9.0))
             elif packet_id == PLAY_C_DISCONNECT:
@@ -283,6 +304,23 @@ def server_list_ping(host, port):
 CLOCK_BURST = 40
 
 
+def hashed_stack(stack):
+    """HashedStack.STREAM_CODEC: optional (item id, count, added components {type: hash}, removed types); none here have a patch."""
+    if stack is None:
+        return b"\x00"
+    item, count = stack
+    return b"\x01" + varint(item) + varint(count) + varint(0) + varint(0)
+
+
+def click(container, state_id, slot, changed, carried):
+    """ServerboundContainerClickPacket: a PICKUP (left) click with the client's predicted changed slots and carried stack."""
+    body = varint(container) + varint(state_id) + struct.pack(">hb", slot, 0) + varint(0)
+    body += varint(len(changed))
+    for changed_slot, stack in sorted(changed.items()):
+        body += struct.pack(">h", changed_slot) + hashed_stack(stack)
+    return body + hashed_stack(carried)
+
+
 def main():
     host, port, name, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3], float(sys.argv[4])
     status_ok = server_list_ping(host, port)
@@ -300,6 +338,7 @@ def main():
     tick, sent_input = 0, None
     extra_tick_ends = 0
     inputs_sent = []
+    inventory_step = 0
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         forward = (tick // 40) % 2 == 0  # toggle W every 2 seconds
@@ -319,6 +358,17 @@ def main():
             # Violation 3: a second movement packet in the same client tick (what mace-damage and click-teleport
             # hacks do). The vanilla client never sends one outside a reply: WhyNotAC's tick-framing check must open a case.
             client.send(PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))  # position only: the rotation trace stays the probe's own
+        # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from
+        # hotbar 0 to hotbar 4 with two clicks, each listing the slots it changed as the vanilla client hashes them.
+        if inventory_step == 0 and client.slots.get(36, (0, 0))[1] == ITEM_DIAMOND_SWORD and client.slots.get(38, (0, 0))[1] == ITEM_STICK:
+            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 2))
+            inventory_step = 1
+        elif inventory_step == 1:
+            client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 36, {36: None}, (ITEM_DIAMOND_SWORD, 1)))
+            inventory_step = 2
+        elif inventory_step == 2:
+            client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 40, {40: (ITEM_DIAMOND_SWORD, 1)}, None))
+            inventory_step = 3
         client.send(PLAY_S_TICK_END)
         if tick == 240:
             # Violation 4: a burst of extra ClientTickEnd (a timer, or hiding extra movement packets from the tick
@@ -350,6 +400,7 @@ def main():
         "clock_violation_tick": 240 if tick > 240 else None,
         "clock_burst": CLOCK_BURST,
         "tick_ends_sent": tick + extra_tick_ends,
+        "inventory_steps": inventory_step,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,

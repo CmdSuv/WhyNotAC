@@ -348,7 +348,7 @@ public final class PacketTranslator {
      * An item stack as the client receives it: item, count, and its component patch (types sorted by key, so
      * the game's object and the decoded bytes give the same list); the attack range when the patch sets one.
      */
-    static Stack stack(net.minecraft.world.item.ItemStack stack) {
+    public static Stack stack(net.minecraft.world.item.ItemStack stack) {
         if (stack.isEmpty()) {
             return Stack.EMPTY;
         }

@@ -71,6 +71,7 @@ def main():
             verify_world(log, sys.argv[5], check)
             verify_entities(log, sys.argv[5], check)
             verify_inventory(sys.argv[5], check)
+            verify_inventory_replica(log, probe, sys.argv[5], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -298,6 +299,29 @@ def verify_entities(log, dump_path, check):
     check(all(kinds.get(k, 0) >= 1 for k in ("AddEntity", "RemoveEntities", "EntityPositionSync", "SetPassengers", "SetEntityData")),
           f"the recording holds the entity packets: {[(k, kinds.get(k, 0)) for k in ('AddEntity', 'RemoveEntities', 'MoveEntity', 'EntityPositionSync', 'RotateHead', 'SetPassengers', 'SetEntityData', 'PlayerInfoUpdate', 'TickingState')]}")
     check(kinds.get("TickingState", 0) >= 1 and kinds.get("PlayerInfoUpdate", 0) >= 1, "the ticking state and the player list are recorded")
+
+
+def verify_inventory_replica(log, probe, dump_path, check):
+    """The hands WhyNotAC rebuilt from what the client received and sent are the server's: slots, selection, menu, reach."""
+    check(probe.get("inventory_steps") == 3, f"the probe selected the stick and moved the sword with two clicks ({probe.get('inventory_steps')} steps)")
+    m = re.search(r"WhyNotAC inventory WhyNotProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
+    check(m is not None, "/whynotac inventory answered")
+    if not m:
+        return
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
+    n = lambda k: int(fields.get(k, "-1"))
+    check(fields.get("matches") == "true" and n("slotsKnown") == 10 and n("slotsEqual") == 10 and n("slotsUnknown") == 0,
+          f"every hotbar slot and the off hand equal the server's, the clicked ones included ({n('slotsEqual')}/{n('slotsKnown')} equal, {n('slotsUnknown')} unknown)")
+    check(fields.get("selectedKnown") == "true" and fields.get("menuKnown") == "true", "the selected slot and the open menu are known and the server's")
+    check(fields.get("reachKnown") == "true" and fields.get("reachContainsServer") == "true" and fields.get("mainHand") == "4.5+0.25",
+          f"the main hand's reach is the stick's own attack range: {fields.get('mainHand')}")
+    check(n("overflows") == 0, "no candidate overflow")
+    events = [json.loads(line) for line in open(dump_path)] if os.path.exists(dump_path) else []
+    inbound = [e["packet"] for e in events if e["type"] == "Inbound"]
+    clicks = [p for p in inbound if p["type"] == "ContainerClick"]
+    check(len(clicks) == 2 and clicks[0]["changed"] and clicks[0]["carried"] and clicks[0]["carried"].get("hashed") is True,
+          f"the clicks are recorded with their changed slots and carried stack: {clicks[:2]}")
+    check(any(p["type"] == "SetCarriedItem" and p["slot"] == 2 for p in inbound), "the selection is recorded")
 
 
 def verify_inventory(dump_path, check):

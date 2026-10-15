@@ -125,6 +125,7 @@ sleep 1; echo "execute as @e[tag=wnz,limit=1] at @s run tp @s ~0.0371 ~ ~-0.0518
 sleep 1
 echo "whynotac entities WhyNotProbe" > "$FIFO"
 sleep $(( PROBE_SECONDS - 15 ))
+echo "whynotac inventory WhyNotProbe" > "$FIFO"
 echo "whynotac world WhyNotProbe" > "$FIFO"
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"

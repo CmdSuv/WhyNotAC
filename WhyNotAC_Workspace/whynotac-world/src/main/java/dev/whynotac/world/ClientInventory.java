@@ -74,9 +74,11 @@ public final class ClientInventory {
      * What a use may leave in the hand: the stack itself ({@code KEEP}); the stack, or none or a stack
      * without {@code attack_range} instead ({@code KEEP_OR_NONE}: used up, dropped, turned into a filled
      * bucket or a bowl); or anything ({@code UNKNOWN}: a swap with a slot not followed, a remainder from
-     * the stack's own patch).
+     * the stack's own patch). {@code KEEP_OR_NONE_ADD} is {@code KEEP_OR_NONE} for the hand while a stack
+     * not followed (the armor a stacked equippable replaces) goes into the inventory: into the first
+     * empty slot unless it merges with a stack of its own kind.
      */
-    public enum Outcome { KEEP, KEEP_OR_NONE, UNKNOWN }
+    public enum Outcome { KEEP, KEEP_OR_NONE, KEEP_OR_NONE_ADD, UNKNOWN }
 
     /** The kind of client action that used the stack. */
     public enum Use { ITEM, ITEM_ON_BLOCK, ENTITY }
@@ -449,6 +451,15 @@ public final class ClientInventory {
         switch (uses.outcome(stack, use)) {
             case KEEP -> { }
             case KEEP_OR_NONE -> n.mayBeNone[slot] = true;
+            case KEEP_OR_NONE_ADD -> {
+                n.mayBeNone[slot] = true;
+                // Inventory.add: a stack of its own kind grows (same reach), else the first empty slot takes it
+                for (int k = 0; k < HOTBAR; k++) {
+                    if (n.hotbar[k] != null && n.hotbar[k].isEmpty()) {
+                        n.set(k, null);
+                    }
+                }
+            }
             case UNKNOWN -> n.set(slot, null);
         }
     }
@@ -478,6 +489,11 @@ public final class ClientInventory {
 
     /** The reach of one stack: empty, a patch that sets or clears {@code attack_range}, else the item's prototype. */
     public Reach reach(Stack stack) {
+        return reach(prototypes, stack);
+    }
+
+    /** {@link #reach(Stack)} with these prototypes. */
+    public static Reach reach(ItemPrototypes prototypes, Stack stack) {
         if (stack == null) {
             return Reach.UNKNOWN;
         }

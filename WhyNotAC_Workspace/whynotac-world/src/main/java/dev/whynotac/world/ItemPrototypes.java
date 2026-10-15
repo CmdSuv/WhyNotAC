@@ -10,16 +10,20 @@ import java.util.Map;
 
 /**
  * What every 1.21.11 item has by default (its prototype components) that a stack's patch can override:
- * its attack range ({@code minecraft:attack_range}, what spears reach with) and what it turns into when
- * used up ({@code minecraft:use_remainder}). The table is the game's own: {@code ItemPrototypesDataTest}
+ * its attack range ({@code minecraft:attack_range}, what spears reach with), what it turns into when
+ * used up ({@code minecraft:use_remainder}) and the equipment slot a use swaps it with
+ * ({@code minecraft:equippable} when swappable). The table is the game's own: {@code ItemPrototypesDataTest}
  * rebuilds it from the game's item registry.
  */
 public final class ItemPrototypes {
 
     private static final String TABLE = "item-prototypes.tsv";
 
-    /** One item: its default attack range (null: none) and the item its use leaves (null: none). */
-    public record Prototype(String key, Stack.AttackRange attackRange, String useRemainder) {}
+    /**
+     * One item: its default attack range (null: none), the item its use leaves (null: none), and the
+     * equipment slot a use swaps it with (a swappable {@code minecraft:equippable}; null: none).
+     */
+    public record Prototype(String key, Stack.AttackRange attackRange, String useRemainder, String swapSlot) {}
 
     private static volatile ItemPrototypes vanilla;
 
@@ -43,7 +47,7 @@ public final class ItemPrototypes {
                         range = new Stack.AttackRange(Float.parseFloat(f[0]), Float.parseFloat(f[1]), Float.parseFloat(f[2]), Float.parseFloat(f[3]),
                                 Float.parseFloat(f[4]), Float.parseFloat(f[5]));
                     }
-                    items.put(cells[0], new Prototype(cells[0], range, cells[2].equals("-") ? null : cells[2]));
+                    items.put(cells[0], new Prototype(cells[0], range, cells[2].equals("-") ? null : cells[2], cells[3].equals("-") ? null : cells[3]));
                 }
             }
             vanilla = table = new ItemPrototypes(Map.copyOf(items));
@@ -60,7 +64,10 @@ public final class ItemPrototypes {
         return items.size();
     }
 
-    /** The shipped table: {@code key attackRange(min:max:minCreative:maxCreative:margin:mobFactor | -) useRemainder(item | -)}. */
+    /**
+     * The shipped table: {@code key attackRange(min:max:minCreative:maxCreative:margin:mobFactor | -) useRemainder(item | -)
+     * swapSlot(slot | -)}.
+     */
     public static String vanillaTable() {
         try (InputStream in = ItemPrototypes.class.getResourceAsStream(TABLE)) {
             return in == null ? "" : new String(in.readAllBytes(), StandardCharsets.UTF_8);

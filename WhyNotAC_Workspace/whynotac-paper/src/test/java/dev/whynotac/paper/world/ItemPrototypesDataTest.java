@@ -41,7 +41,11 @@ class ItemPrototypesDataTest {
                 assertEquals(true, remainder.convertInto().getComponentsPatch().isEmpty(), BuiltInRegistries.ITEM.getKey(item) + "'s remainder has a patch");
             }
             String into = remainder == null ? "-" : BuiltInRegistries.ITEM.getKey(remainder.convertInto().getItem()).toString();
-            lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into);
+            net.minecraft.world.item.equipment.Equippable equippable = item.components().get(DataComponents.EQUIPPABLE);
+            // Item.use swaps a swappable equippable a player may wear with the player's slot (Equippable.swapWithEquipmentSlot)
+            String swap = equippable == null || !equippable.swappable() || !equippable.canBeEquippedBy(net.minecraft.world.entity.EntityType.PLAYER) ? "-"
+                    : equippable.slot().getSerializedName();
+            lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap);
         }
         lines.sort(null);
         String table = String.join("\n", lines) + "\n";
