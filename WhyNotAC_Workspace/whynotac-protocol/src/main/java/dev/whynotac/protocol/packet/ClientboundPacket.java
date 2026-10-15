@@ -46,11 +46,20 @@ public sealed interface ClientboundPacket {
     /**
      * {@code ClientboundRespawnPacket}: dimension change or respawn; the client resets movement state.
      * It only replaces its world when the dimension key changes. {@code gameMode} is the client's new game
-     * type id. {@code dimension} is null and {@code gameMode} -1 in older recordings.
+     * type id. {@code dataToKeep}: bit 1 keeps the attribute modifiers, bit 2 the entity data
+     * ({@code ClientboundRespawnPacket.KEEP_ATTRIBUTE_MODIFIERS}, {@code KEEP_ENTITY_DATA}). {@code dimension}
+     * is null and {@code gameMode} and {@code dataToKeep} -1 in older recordings.
      */
-    record Respawn(Dimension dimension, int gameMode) implements ClientboundPacket {
+    record Respawn(Dimension dimension, int gameMode, int dataToKeep) implements ClientboundPacket {
+        public static final int KEEP_ATTRIBUTE_MODIFIERS = 1;
+        public static final int KEEP_ENTITY_DATA = 2;
+
         public Respawn(Dimension dimension) {
-            this(dimension, -1);
+            this(dimension, -1, -1);
+        }
+
+        public Respawn(Dimension dimension, int gameMode) {
+            this(dimension, gameMode, -1);
         }
     }
 

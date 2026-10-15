@@ -165,7 +165,7 @@ public final class Generators {
             case "Ping" -> new ClientboundPacket.Ping(anyInt());
             case "KeepAlive" -> new ClientboundPacket.KeepAlive(anyLong());
             case "Login" -> new ClientboundPacket.Login(anyInt(), anyInt(), random.nextBoolean() ? dimension() : null, random.nextInt(5) - 1);
-            case "Respawn" -> new ClientboundPacket.Respawn(random.nextBoolean() ? dimension() : null, random.nextInt(5) - 1);
+            case "Respawn" -> new ClientboundPacket.Respawn(random.nextBoolean() ? dimension() : null, random.nextInt(5) - 1, random.nextInt(5) - 1);
             case "LevelChunk" -> new ClientboundPacket.LevelChunk(anyInt(), anyInt(), random.nextBoolean() ? bytes(random.nextInt(5000)) : null);
             case "ForgetLevelChunk" -> new ClientboundPacket.ForgetLevelChunk(anyInt(), anyInt());
             case "BlockUpdate" -> new ClientboundPacket.BlockUpdate(new BlockPosition(anyInt(), anyInt(), anyInt()), anyInt());

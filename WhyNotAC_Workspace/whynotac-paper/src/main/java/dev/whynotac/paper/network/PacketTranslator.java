@@ -549,7 +549,9 @@ public final class PacketTranslator {
             case ClientboundLoginPacket login -> new ClientboundPacket.Login(
                     login.playerId(), login.chunkRadius(), dimension(login.commonPlayerSpawnInfo()), login.commonPlayerSpawnInfo().gameType().getId());
             case ClientboundRespawnPacket respawn -> new ClientboundPacket.Respawn(
-                    dimension(respawn.commonPlayerSpawnInfo()), respawn.commonPlayerSpawnInfo().gameType().getId());
+                    dimension(respawn.commonPlayerSpawnInfo()), respawn.commonPlayerSpawnInfo().gameType().getId(),
+                    (respawn.shouldKeep(ClientboundRespawnPacket.KEEP_ATTRIBUTE_MODIFIERS) ? 1 : 0)
+                            | (respawn.shouldKeep(ClientboundRespawnPacket.KEEP_ENTITY_DATA) ? 2 : 0));
             case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
             case ClientboundTickingStatePacket state -> new ClientboundPacket.TickingState(state.tickRate(), state.isFrozen());
             case ClientboundTickingStepPacket step -> new ClientboundPacket.TickingStep(step.tickSteps());

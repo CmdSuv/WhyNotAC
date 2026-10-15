@@ -137,6 +137,8 @@ public final class RecordingFormat {
     /** Respawn with the dimension and the game mode. */
     public static final int CB_RESPAWN_MODE = 49;
     public static final int CB_ENTITY_EVENT = 50;
+    /** Respawn with the dimension, the game mode and what the client keeps. */
+    public static final int CB_RESPAWN_KEEP = 51;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer
