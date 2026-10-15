@@ -139,6 +139,9 @@ while [ "$WARMED" -lt "$MAX_WARMUP" ] && [ "$SETTLED" -lt 2 ]; do
   if [ -n "$AVG5" ] && awk -v a="$AVG5" -v t="$SETTLE_MSPT" 'BEGIN { exit !(a < t) }'; then SETTLED=$((SETTLED + 1)); else SETTLED=0; fi
 done
 echo "warm-up: ${WARMED}s, settled=$SETTLED (last 5 s MSPT ${AVG5:-?})"
+# A cow where each bot stands (no AI, invulnerable: it stays and takes nothing): the bots attack it when near.
+echo "execute as @a at @s run summon minecraft:cow ~ ~ ~ {NoAI:1b,Invulnerable:1b,Silent:1b,PersistenceRequired:1b}" > "$FIFO"
+sleep 2
 echo "$WARMED $SETTLED" > "$OUT-warmup.txt"
 
 cpu_ticks() { awk '{print $14 + $15}' "/proc/$JAVA_PID/stat"; }
@@ -163,6 +166,11 @@ trap - EXIT
 kill "$HOLDER" 2>/dev/null || true
 rm -f "$FIFO"
 
+# Every attack the bots made, assessed over the recordings as the attack-reach check does.
+rm -f "$OUT-reach.jsonl"
+if [ "${VARIANT%%-*}" = whynotac ] && [ -d "$WORK_DIR/plugins/WhyNotAC/recordings" ]; then
+  java -Xmx1G -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$ROOT/tools/realclient/ReachAudit.java" "$WORK_DIR/plugins/WhyNotAC/recordings" > "$OUT-reach.jsonl" || true
+fi
 # JFR's per-thread load is relative to the CPUs the server may use, not to the machine.
 java -Xmx1G "$HERE/JfrAttribution.java" "$OUT.jfr" "$(taskset -c "$SERVER_CPUS" nproc)" > "$OUT-jfr.json"
 python3 -I "$HERE/summarize_load.py" "$VARIANT" "$LAYOUT" "$BOTS" "$MEASURE" "$CPU_START" "$CPU_END" "$T_START" "$T_END" "$(getconf CLK_TCK)" \

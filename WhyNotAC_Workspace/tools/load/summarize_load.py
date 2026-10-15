@@ -64,6 +64,20 @@ def main():
     cases = [json.load(open(os.path.join(cases_dir, f))) for f in sorted(os.listdir(cases_dir)) if f.endswith(".json")] \
         if os.path.isdir(cases_dir) else []
     moved_wrongly = sum(1 for line in log if "moved wrongly" in line or "moved too quickly" in line)
+    # Every attack the bots made, assessed over the recordings (run_load.sh): an out-of-reach one is a false positive.
+    reach_path = out_prefix + "-reach.jsonl"
+    audit = [json.loads(line) for line in open(reach_path) if line.strip()] if os.path.exists(reach_path) else []
+    outcomes = {}
+    for a in audit:
+        key = a["outcome"] if a["outcome"] != "NO_CLAIM" else "NO_CLAIM: " + a["reason"]
+        outcomes[key] = outcomes.get(key, 0) + 1
+    in_reach = [a for a in audit if a["outcome"] == "IN_REACH"]
+    attack_reach = {
+        "attacksAssessed": len(audit),
+        "outcomes": outcomes,
+        "outOfReach": sum(1 for a in audit if a["outcome"] == "OUT_OF_REACH"),
+        "smallestMarginInReach": round(min(a["allowed"] - a["distance"] for a in in_reach), 6) if in_reach else None,
+    } if os.path.exists(reach_path) else None
 
     print(json.dumps({
         "variant": variant, "layout": layout, "bots": int(bots), "measureSeconds": round(seconds, 2),
@@ -74,6 +88,7 @@ def main():
         "whynotacStatsAfterAllLeft": stats[-1] if len(stats) > 1 else None,
         "botSide": bot_summary,
         "serverMovementCorrections": moved_wrongly,
+        "attackReach": attack_reach,
         "casesOpened": len(cases),
         "caseSummaries": [c.get("playerName", "?") + " " + c.get("check", "?") + ": " + c.get("summary", "") for c in cases][:10],
     }, indent=1))
