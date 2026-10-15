@@ -1,6 +1,5 @@
 package dev.whynotac.recording.write;
 
-import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -113,32 +112,6 @@ public final class RecordingListener implements TimelineListener {
 
     /** The event as it is recorded: every UUID it carries replaced by its pseudonym. */
     public TimelineEvent anonymise(TimelineEvent event) {
-        return switch (event) {
-            case TimelineEvent.Bound bound -> anonymise(bound);
-            case TimelineEvent.Outbound out when carriesUuids(out.packet()) -> new TimelineEvent.Outbound(out.sequence(), out.nanoTime(), anonymise(out.packet()));
-            case TimelineEvent.OutboundDivergence d when carriesUuids(d.packet()) ->
-                    new TimelineEvent.OutboundDivergence(d.sequence(), d.nanoTime(), d.kind(), anonymise(d.packet()));
-            default -> event;
-        };
-    }
-
-    private static boolean carriesUuids(ClientboundPacket packet) {
-        return packet instanceof ClientboundPacket.PlayerInfoUpdate || packet instanceof ClientboundPacket.PlayerInfoRemove
-                || packet instanceof ClientboundPacket.AddEntity;
-    }
-
-    private ClientboundPacket anonymise(ClientboundPacket packet) {
-        return switch (packet) {
-            case ClientboundPacket.PlayerInfoUpdate u -> new ClientboundPacket.PlayerInfoUpdate(u.addPlayers(), u.updateGameMode(),
-                    u.entries().stream().map(e -> new ClientboundPacket.PlayerInfoUpdate.Entry(pseudonym(e.profileId()), e.gameMode())).toList());
-            case ClientboundPacket.PlayerInfoRemove r -> new ClientboundPacket.PlayerInfoRemove(r.profileIds().stream().map(this::pseudonym).toList());
-            case ClientboundPacket.AddEntity a -> new ClientboundPacket.AddEntity(a.entityId(), pseudonym(a.uuid()), a.type(), a.x(), a.y(), a.z(),
-                    a.clientMotion(), a.serverMotion(), a.xRot(), a.yRot(), a.yHeadRot(), a.data());
-            default -> packet;
-        };
-    }
-
-    private UUID pseudonym(UUID id) {
-        return id == null ? null : pseudonymizer.pseudonym(id);
+        return event instanceof TimelineEvent.Bound bound ? anonymise(bound) : RecordingUuids.map(event, pseudonymizer::pseudonym);
     }
 }

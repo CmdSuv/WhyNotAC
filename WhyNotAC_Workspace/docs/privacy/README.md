@@ -8,7 +8,11 @@ player's recordings. The plugin jar is also the tool for this.
 
 A recording is about one player (its header names that player's pseudonym, which `find` and `forget`
 match). Other players appear in it only by pseudonym, as entries of the recorded player's player list
-and as entities near them.
+and as entities near them. `find` lists those recordings too, under `mentioned_in`, with the number of
+occurrences. `forget --yes` deletes the player's own recordings and rewrites each finished recording
+that mentions them: their pseudonym is replaced by a fresh random UUID, the same one throughout that
+file, so the recording still replays exactly as before but no longer links to the player. The
+rewritten file is read back and checked before it replaces the original.
 
 | Talep / Request | Komut / Command |
 |---|---|
@@ -33,7 +37,9 @@ command in game) before you hand out a copy.
 ## Rules
 
 - **Run `forget` while the player is offline.** A session that is still running keeps writing its
-  `.wnrec.part` file. Kick the player first, or wait until they have left.
+  `.wnrec.part` file. Kick the player first, or wait until they have left. Another player's session
+  that is still running can mention them too: `forget --yes` cannot rewrite a `.wnrec.part` file and
+  lists it under `unreadable_for_manual_review`. Run `forget --yes` again once that session has ended.
 - **Exit code 2** means some files could not be read, for example a crash left a damaged header.
   They are listed under `unreadable_for_manual_review`. Their body can still hold the pseudonym,
   so check them with `inspect`/`dump`, or delete them.

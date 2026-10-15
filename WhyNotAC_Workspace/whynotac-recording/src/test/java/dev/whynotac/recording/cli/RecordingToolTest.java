@@ -3,17 +3,28 @@ package dev.whynotac.recording.cli;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PlayerSession;
+import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.recording.MemorySink;
+import dev.whynotac.recording.read.RecordingReader;
+import dev.whynotac.recording.write.Pseudonymizer;
+import dev.whynotac.recording.write.RecordingListener;
+import dev.whynotac.recording.write.RecordingStore;
 import dev.whynotac.recording.write.RecordingWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.logging.Logger;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -61,19 +72,19 @@ class RecordingToolTest {
 
     @Test
     void findAndForgetActOnExactlyOnePlayersRecordings() throws Exception {
-        byte[] secret = dev.whynotac.recording.write.Pseudonymizer.newSecret();
+        byte[] secret = Pseudonymizer.newSecret();
         Path secretFile = Files.write(dir.resolve("recording-secret.key"), secret);
         Path recordings = dir.resolve("recordings");
-        dev.whynotac.recording.write.RecordingStore store = new dev.whynotac.recording.write.RecordingStore(recordings,
-                dev.whynotac.recording.write.RecordingStore.Settings.defaults(), java.util.logging.Logger.getLogger("test"));
-        dev.whynotac.protocol.session.SessionRegistry registry = new dev.whynotac.protocol.session.SessionRegistry(Runnable::run, 1024,
+        RecordingStore store = new RecordingStore(recordings,
+                RecordingStore.Settings.defaults(), Logger.getLogger("test"));
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 1024,
                 (s, e, t) -> { throw new AssertionError(t); });
-        registry.addListener(new dev.whynotac.recording.write.RecordingListener(store, new dev.whynotac.recording.write.Pseudonymizer(secret),
+        registry.addListener(new RecordingListener(store, new Pseudonymizer(secret),
                 774, "1.21.11", "test"));
-        java.util.UUID alice = java.util.UUID.randomUUID();
-        java.util.UUID bob = java.util.UUID.randomUUID();
-        for (java.util.UUID player : List.of(alice, bob, alice)) {
-            dev.whynotac.protocol.session.PlayerSession session = registry.open("x");
+        UUID alice = UUID.randomUUID();
+        UUID bob = UUID.randomUUID();
+        for (UUID player : List.of(alice, bob, alice)) {
+            PlayerSession session = registry.open("x");
             session.bind(player, "p", 1, 0);
             session.onInbound(new ServerboundPacket.ClientTickEnd(), 1);
             session.disconnect(2);
@@ -91,9 +102,60 @@ class RecordingToolTest {
         assertEquals(1, count(run(0, "find", recordings.toString(), secretFile.toString(), bob.toString()), "\"file\":"));
 
         // Another server's secret links nothing.
-        Path otherSecret = Files.write(dir.resolve("other.key"), dev.whynotac.recording.write.Pseudonymizer.newSecret());
+        Path otherSecret = Files.write(dir.resolve("other.key"), Pseudonymizer.newSecret());
         assertEquals(0, count(run(0, "find", recordings.toString(), otherSecret.toString(), bob.toString()), "\"file\":"));
         run(1, "forget", recordings.toString(), secretFile.toString(), "not-a-uuid");
+    }
+
+    @Test
+    void findListsAndForgetScrubsAPlayerInOthersRecordings() throws Exception {
+        byte[] secret = Pseudonymizer.newSecret();
+        Path secretFile = Files.write(dir.resolve("recording-secret.key"), secret);
+        Path recordings = dir.resolve("recordings");
+        RecordingStore store = new RecordingStore(recordings,
+                RecordingStore.Settings.defaults(), Logger.getLogger("test"));
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 1024,
+                (s, e, t) -> { throw new AssertionError(t); });
+        registry.addListener(new RecordingListener(store, new Pseudonymizer(secret),
+                774, "1.21.11", "test"));
+        UUID alice = UUID.randomUUID();
+        UUID bob = UUID.randomUUID();
+        // Bob's session sees Alice: in its player list and as an entity.
+        PlayerSession bobs = registry.open("x");
+        bobs.bind(bob, "bob", 1, 0);
+        bobs.onOutbound(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(bob, 0),
+                new ClientboundPacket.PlayerInfoUpdate.Entry(alice, 0))), 1);
+        bobs.onOutbound(ClientboundPacket.AddEntity.received(2, alice, "minecraft:player", 0, 64, 0, Vec3d.ZERO,
+                (byte) 0, (byte) 0, (byte) 0, 0), 2);
+        bobs.onOutbound(new ClientboundPacket.PlayerInfoRemove(List.of(alice)), 3);
+        bobs.disconnect(4);
+        PlayerSession alices = registry.open("y");
+        alices.bind(alice, "alice", 2, 0);
+        alices.disconnect(1);
+        store.close();
+        Pseudonymizer pseudonyms = new Pseudonymizer(secret);
+
+        String found = run(0, "find", recordings.toString(), secretFile.toString(), alice.toString());
+        assertTrue(found.contains("\"mentioned_in\":[{") && found.contains("\"occurrences\":3"), found);
+        String forgotten = run(0, "forget", recordings.toString(), secretFile.toString(), alice.toString(), "--yes");
+        assertTrue(forgotten.contains("\"deleted\":1") && forgotten.contains("\"scrubbed\":1"), forgotten);
+        assertTrue(run(0, "find", recordings.toString(), secretFile.toString(), alice.toString()).contains("\"mentioned_in\":[]"));
+
+        // Bob's recording replays as before, with Alice under one fresh UUID that links to nothing.
+        Path bobsFile;
+        try (Stream<Path> walk = Files.walk(recordings)) {
+            bobsFile = walk.filter(f -> f.toString().endsWith(".wnrec")).findFirst().orElseThrow();
+        }
+        List<TimelineEvent> events = new ArrayList<>();
+        RecordingReader.open(bobsFile).forEach(events::add);
+        assertEquals(5, events.size(), "Bound, the list, the entity, the removal, the disconnect");
+        ClientboundPacket.PlayerInfoUpdate list = (ClientboundPacket.PlayerInfoUpdate) ((TimelineEvent.Outbound) events.get(1)).packet();
+        UUID replaced = list.entries().get(1).profileId();
+        assertEquals(pseudonyms.pseudonym(bob), list.entries().get(0).profileId(), "Bob's own entry stays");
+        assertTrue(!replaced.equals(pseudonyms.pseudonym(alice)) && !replaced.equals(alice));
+        assertEquals(replaced, ((ClientboundPacket.AddEntity) ((TimelineEvent.Outbound) events.get(2)).packet()).uuid());
+        assertEquals(List.of(replaced), ((ClientboundPacket.PlayerInfoRemove) ((TimelineEvent.Outbound) events.get(3)).packet()).profileIds());
+        assertEquals(1, count(run(0, "find", recordings.toString(), secretFile.toString(), bob.toString()), "\"file\":"));
     }
 
     private static int count(String haystack, String needle) {
@@ -105,7 +167,7 @@ class RecordingToolTest {
     }
 
     private static long countRecordings(Path dir) throws java.io.IOException {
-        try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {
+        try (Stream<Path> walk = Files.walk(dir)) {
             return walk.filter(p -> p.toString().endsWith(".wnrec")).count();
         }
     }

@@ -52,6 +52,8 @@ saklanabilir: [süre].
 [kimseyle paylaşılmaz / şu taraflarla paylaşılır: ...].
 
 **Haklarınız.** Kayıtlarınıza erişim, kopyasını alma ve silinmesini isteme haklarına sahipsiniz.
+Silme talebinde, başka oyuncuların kayıtlarında geçen takma adınız da sizinle hiçbir bağı kalmayacak
+şekilde değiştirilir.
 Talebinizi Minecraft kullanıcı adınızla birlikte [İLETİŞİM ADRESİ] adresine iletin. Talepler
 [30] gün içinde yanıtlanır.
 
@@ -98,8 +100,9 @@ Recordings needed for a pending punishment or appeal may be kept until it is res
 **Transfers.** Recordings are stored at [SERVER LOCATION / HOSTING PROVIDER] and are
 [not shared with anyone / shared with: ...].
 
-**Your rights.** You can ask to access, receive a copy of, or delete your recordings. Send your
-request together with your Minecraft username to [CONTACT ADDRESS]. Requests are answered within
-[30] days.
+**Your rights.** You can ask to access, receive a copy of, or delete your recordings. On erasure,
+your pseudonym is also replaced wherever it appears in other players' recordings, so that nothing
+links them to you any more. Send your request together with your Minecraft username to
+[CONTACT ADDRESS]. Requests are answered within [30] days.
 
 **Controller.** [NAME / LEGAL ENTITY, ADDRESS, CONTACT]

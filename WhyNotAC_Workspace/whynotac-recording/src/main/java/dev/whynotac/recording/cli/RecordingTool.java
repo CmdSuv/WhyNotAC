@@ -8,6 +8,7 @@ import dev.whynotac.recording.format.RecordingFormat;
 import dev.whynotac.recording.format.RecordingHeader;
 import dev.whynotac.recording.read.RecordingReader;
 import dev.whynotac.recording.write.Pseudonymizer;
+import dev.whynotac.recording.write.RecordingScrubber;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -162,8 +163,10 @@ public final class RecordingTool {
         }
         UUID subject = pseudonymizer.pseudonym(player);
         List<Object> matches = new ArrayList<>();
+        List<Object> mentions = new ArrayList<>();
         List<String> unreadable = new ArrayList<>();
         long deleted = 0;
+        long scrubbed = 0;
         try (Stream<Path> walk = Files.walk(directory, 3)) {
             for (Path file : (Iterable<Path>) walk.filter(Files::isRegularFile).sorted()::iterator) {
                 String fileName = file.getFileName().toString();
@@ -178,6 +181,39 @@ public final class RecordingTool {
                     continue;
                 }
                 if (!header.subject().equals(subject)) {
+                    // Another player's recording: the player may appear in it by pseudonym (its player list, entities near it).
+                    long count;
+                    try {
+                        count = RecordingScrubber.mentions(file, subject);
+                    } catch (IOException | RuntimeException e) {
+                        unreadable.add(file.toString());
+                        continue;
+                    }
+                    if (count == 0) {
+                        continue;
+                    }
+                    Map<String, Object> mention = new LinkedHashMap<>();
+                    mention.put("file", file.toString());
+                    mention.put("occurrences", count);
+                    boolean finished = fileName.endsWith(RecordingFormat.FILE_SUFFIX);
+                    mention.put("complete_file", finished);
+                    if (delete) {
+                        if (finished) {
+                            try {
+                                RecordingScrubber.scrub(file, subject);
+                                mention.put("scrubbed", true);
+                                scrubbed++;
+                            } catch (IOException | RuntimeException e) {
+                                mention.put("scrubbed", false);
+                                unreadable.add(file.toString());
+                            }
+                        } else {
+                            // still being written: run forget again once that session has ended
+                            mention.put("scrubbed", false);
+                            unreadable.add(file.toString());
+                        }
+                    }
+                    mentions.add(mention);
                     continue;
                 }
                 Map<String, Object> entry = new LinkedHashMap<>();
@@ -200,7 +236,9 @@ public final class RecordingTool {
         result.put("action", args[0]);
         result.put("pseudonym", subject);
         result.put("recordings", matches);
+        result.put("mentioned_in", mentions);
         result.put("deleted", deleted);
+        result.put("scrubbed", scrubbed);
         result.put("dry_run", args[0].equals("forget") && !delete);
         result.put("unreadable_for_manual_review", unreadable);
         out.println(Json.value(result));
