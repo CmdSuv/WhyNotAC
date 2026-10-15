@@ -81,6 +81,14 @@ public final class ClientWorld {
     private final ArrayDeque<long[]> pendingBlockAcks = new ArrayDeque<>();
     private int confirmedBlockAck = Integer.MIN_VALUE;
 
+    // --- blocks that move entities on the client -----------------------------------------------------------
+    /** Per state: a block whose client-side block entity or event moves entities ({@link #MOVER_BLOCKS}, shulker boxes). */
+    private final boolean[] movers;
+    /** Changes to or from such a block, and replaced chunks: {sequence, minX, minY, minZ, maxX, maxY, maxZ}, ascending. */
+    private final ArrayDeque<long[]> moverChanges = new ArrayDeque<>();
+    /** Changes before and at this sequence were dropped. */
+    private long moverChangesDropped = Long.MIN_VALUE;
+
     private long chunksLoaded;
     private long chunksIgnored;
     private long chunksUnreadable;
@@ -96,6 +104,36 @@ public final class ClientWorld {
         this.states = states;
         this.voidAir = states.firstStateOf("minecraft:void_air");
         this.pool = pool;
+        this.movers = movers(states);
+    }
+
+    /**
+     * Blocks that move entities on the client after they ticked: a piston's moving block
+     * ({@code PistonMovingBlockEntity.moveCollidedEntities}, also honey), the pistons that start one through a
+     * block event, their heads, and shulker boxes opening ({@code ShulkerBoxBlockEntity.moveCollidedEntities}).
+     */
+    static final java.util.Set<String> MOVER_BLOCKS = java.util.Set.of("minecraft:moving_piston", "minecraft:piston",
+            "minecraft:sticky_piston", "minecraft:piston_head");
+    private static final int MAX_MOVER_CHANGES = 4096;
+
+    private static boolean[] movers(BlockStates states) {
+        boolean[] movers = new boolean[states.size()];
+        for (int state = 0; state < movers.length; state++) {
+            String block = states.block(state);
+            movers[state] = block != null && (MOVER_BLOCKS.contains(block) || block.endsWith("shulker_box"));
+        }
+        return movers;
+    }
+
+    private boolean mover(int state) {
+        return state >= 0 && state < movers.length && movers[state];
+    }
+
+    private void moverChange(long sequence, long minX, long minY, long minZ, long maxX, long maxY, long maxZ) {
+        moverChanges.add(new long[] {sequence, minX, minY, minZ, maxX, maxY, maxZ});
+        if (moverChanges.size() > MAX_MOVER_CHANGES) {
+            moverChangesDropped = Math.max(moverChangesDropped, moverChanges.pollFirst()[0]);
+        }
     }
 
     // --- timeline ---------------------------------------------------------------------------------------
@@ -295,6 +333,9 @@ public final class ClientWorld {
         Column replaced = storage.replace(column);
         if (replaced != null) {
             drop(replaced);
+            // whatever moved in the old chunk stops when the client processes this one
+            moverChange(sequence, (long) chunk.x() << 4, minY, (long) chunk.z() << 4, ((long) chunk.x() << 4) + 15, minY + sections * 16L - 1,
+                    ((long) chunk.z() << 4) + 15);
         }
         pend(sequence, Pending.CHUNK, chunkKey(chunk.x(), chunk.z()));
     }
@@ -316,6 +357,15 @@ public final class ClientWorld {
             return; // the client ignores a block in a chunk it does not hold
         }
         blockUpdates += indices.length;
+        for (int i = 0; i < indices.length; i++) {
+            int before = column.sections != null ? column.sections[sectionIndex].get(indices[i]) : Section.INVALID;
+            if (mover(before) || mover(values[i])) {
+                long x = sectionX << 4 | indices[i] & 15;
+                long y = sectionY << 4 | indices[i] >>> 8;
+                long z = sectionZ << 4 | indices[i] >>> 4 & 15;
+                moverChange(sequence, x, y, z, x, y, z);
+            }
+        }
         if (column.sections != null) {
             // A new section, shared again: every player near the change applies it to the same section.
             Section old = column.sections[sectionIndex];
@@ -412,6 +462,38 @@ public final class ClientWorld {
         }
         long key = blockKey(x, y, z);
         return !unsettledBlocks.containsKey(key) && !predictions.containsKey(key);
+    }
+
+    /**
+     * Whether a block that moves entities on the client may be in the box (block coordinates, inclusive):
+     * one is there once the client processed everything sent so far, or a block there is not known, or one
+     * changed to or from such a block (or its chunk was replaced) at or after {@code since}, so the client
+     * may have had it then.
+     */
+    public boolean mayMoveEntitiesIn(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, long since) {
+        if (storage == null || since <= moverChangesDropped) {
+            return true;
+        }
+        for (java.util.Iterator<long[]> it = moverChanges.descendingIterator(); it.hasNext(); ) {
+            long[] c = it.next();
+            if (c[0] < since) {
+                break;
+            }
+            if (c[1] <= maxX && c[4] >= minX && c[2] <= maxY && c[5] >= minY && c[3] <= maxZ && c[6] >= minZ) {
+                return true;
+            }
+        }
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    int state = blockState(x, y, z);
+                    if (state == UNKNOWN || mover(state)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /** True while an item use the client may have predicted a block change for is not confirmed. */

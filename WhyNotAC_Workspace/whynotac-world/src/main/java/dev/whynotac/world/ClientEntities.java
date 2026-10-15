@@ -106,6 +106,16 @@ public final class ClientEntities {
     private final Map<Integer, Track> tracks = new HashMap<>();
     private final Set<Track> pendingTracks = new LinkedHashSet<>();
 
+    /**
+     * Types whose removals are remembered for {@link #mayHaveNear}: shulkers move entities on the client
+     * ({@code Shulker.onPeekAmountChange}), also in the tick before their removal was processed.
+     */
+    static final Set<String> REMEMBERED_REMOVALS = Set.of("minecraft:shulker");
+    private static final int MAX_REMOVALS = 256;
+    /** {sequence, type, base position or null}, ascending. */
+    private final ArrayDeque<Object[]> removals = new ArrayDeque<>();
+    private long removalsDropped = Long.MIN_VALUE;
+
     private long ticks;
     private long branches;
     private long merges;
@@ -362,6 +372,12 @@ public final class ClientEntities {
     /** The entity leaves the client's level: its passengers stop riding it, it stops riding its vehicle. */
     private void removeHead(long seq, Head head) {
         heads.remove(head.id);
+        if (REMEMBERED_REMOVALS.contains(head.type)) {
+            removals.add(new Object[] {seq, head.type, head.baseKnown ? new Vec3d(head.bx, head.by, head.bz) : null});
+            if (removals.size() > MAX_REMOVALS) {
+                removalsDropped = Math.max(removalsDropped, (long) removals.pollFirst()[0]);
+            }
+        }
         for (int passenger : head.passengers) {
             Head p = head(passenger);
             if (p != null) {
@@ -1207,6 +1223,7 @@ public final class ClientEntities {
         }
         for (int i = from; i < out.size(); i++) {
             State t = out.get(i);
+            t.shownScale = t.scale; // LivingEntity.tick ends with refreshDirtyAttributes: the box follows the scale
             if (t.headSteps > 0) {
                 // LivingEntity.lerpHeadRotationStep: yHeadRot = (float) rotLerp(1.0 / steps, yHeadRot, target).
                 double step = 1.0 / t.headSteps;
@@ -1442,6 +1459,56 @@ public final class ClientEntities {
                 action.accept(s.view());
             }
         }
+    }
+
+    /**
+     * Whether the client may hold an entity of {@code type} whose position is within {@code radius} of the
+     * point on every axis now: one there in some possible state, one of the type whose position is not known,
+     * an entity whose type is not known, or entities WhyNotAC lost track of; or, for a type in
+     * {@link #REMEMBERED_REMOVALS}, may have held one there until a removal sent at or after {@code since}.
+     */
+    public boolean mayHaveNear(String type, double x, double y, double z, double radius, long since) {
+        if (!complete) {
+            return true;
+        }
+        if (REMEMBERED_REMOVALS.contains(type)) {
+            if (since <= removalsDropped) {
+                return true;
+            }
+            for (java.util.Iterator<Object[]> it = removals.descendingIterator(); it.hasNext(); ) {
+                Object[] r = it.next();
+                if ((long) r[0] < since) {
+                    break;
+                }
+                Vec3d p = (Vec3d) r[2];
+                if (type.equals(r[1]) && (p == null || Math.abs(p.x() - x) <= radius && Math.abs(p.y() - y) <= radius && Math.abs(p.z() - z) <= radius)) {
+                    return true;
+                }
+            }
+        }
+        boolean[] near = {false};
+        for (Track track : tracks.values()) {
+            Head head = heads.get(track.id);
+            forEachPossibleState(track.id, st -> {
+                if (near[0] || st.known() && !st.present()) {
+                    return;
+                }
+                String t = st.known() ? st.type() : head != null ? head.type : null;
+                if (t != null && !t.equals(type)) {
+                    return;
+                }
+                if (!st.known() || !st.positionKnown()) {
+                    near[0] = true;
+                } else {
+                    double r = radius + st.positionRadius();
+                    near[0] = Math.abs(st.x() - x) <= r && Math.abs(st.y() - y) <= r && Math.abs(st.z() - z) <= r;
+                }
+            });
+            if (near[0]) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether the client has this entity now. */
@@ -1744,6 +1811,11 @@ public final class ClientEntities {
         // the size: isBaby(), the scale attribute's value (NaN: not known exactly) and the type's size data (EntitySizes.Entry.data)
         boolean baby;
         double scale = 1.0;
+        /**
+         * The scale of the cached dimensions: the box follows a new scale value only at the end of the
+         * entity's next tick ({@code LivingEntity.refreshDirtyAttributes}), or at a pose or size data change.
+         */
+        double shownScale = 1.0;
         int data0;
         int data1;
         /** A player's: 1 a spectator in the client's player list, 0 not, -1 not known. */
@@ -1848,6 +1920,7 @@ public final class ClientEntities {
             c.vehicle = vehicle;
             c.baby = baby;
             c.scale = scale;
+            c.shownScale = shownScale;
             c.data0 = data0;
             c.data1 = data1;
             c.spectator = spectator;
@@ -1886,6 +1959,7 @@ public final class ClientEntities {
             }
             if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || minY != o.minY || lostPosition != o.lostPosition
                     || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
+                    || Double.compare(shownScale, o.shownScale) != 0
                     || data0 != o.data0 || data1 != o.data1 || spectator != o.spectator) {
                 return false;
             }
@@ -1936,6 +2010,10 @@ public final class ClientEntities {
             boolean positionKnown = known && present && !lostPosition;
             EntitySizes sizes = EntitySizes.vanilla();
             EntitySizes.Size size = known && present ? sizes.size(type, pose, baby, scale, data0, data1) : null;
+            if (size != null && Double.compare(shownScale, scale) != 0 && !size.equals(sizes.size(type, pose, baby, shownScale, data0, data1))) {
+                // the box may still be at the old scale (or at the new one, after a pose or size data change)
+                size = null;
+            }
             int pickable = !known ? NONE : !present ? 0 : sizes.pickable(type, data0, spectator);
             EntitySizes.Entry entry = known && present ? sizes.entry(type) : null;
             return new PossibleState(present, known, positionKnown, type, player, x, y, z, rPos, yRot, xRot, rRot, yHeadRot, rHead, pose, flags,

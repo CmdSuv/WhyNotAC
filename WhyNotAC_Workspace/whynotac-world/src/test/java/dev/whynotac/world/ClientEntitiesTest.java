@@ -454,20 +454,29 @@ class ClientEntitiesTest {
         out(add(5, "minecraft:husk", 0.5, 64.0, 0.5));
         out(scale(5, 1.5));
         sync();
+        assertNull(onlySize(5), "the box follows the new scale only at the end of the entity's next tick");
+        tick();
         assertEquals(adult.scale(1.5F), onlySize(5));
         // One modifier per operation: AttributeInstance.calculateValue in its fixed operation order.
         out(scale(5, 1.0, modifier(0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL),
                 modifier(0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE),
                 modifier(0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_BASE)));
         sync();
+        tick();
         assertEquals(adult.scale((float) ((1.5 + 1.5 * 0.5) * 1.5)), onlySize(5));
         // Two of one operation: the client sums them in its hash map's order, which is not followed.
         out(scale(5, 1.0, modifier(0.1, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE),
                 modifier(0.2, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE)));
         sync();
+        tick();
         assertNull(onlySize(5));
         // The attribute's range: at most 16.
         out(scale(5, 40.0));
+        sync();
+        tick();
+        assertEquals(adult.scale(16.0F), onlySize(5));
+        // The same value again changes nothing: no wait.
+        out(scale(5, 16.0));
         sync();
         assertEquals(adult.scale(16.0F), onlySize(5));
     }
