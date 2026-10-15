@@ -629,6 +629,10 @@ public final class EventCodec {
                     body.writeZigZag(e.entityId());
                     body.writeZigZag(e.event());
                 }
+                case ClientboundPacket.SetCamera c -> {
+                    body.writeVarInt(CB_SET_CAMERA);
+                    body.writeZigZag(c.entityId());
+                }
                 case ClientboundPacket.SetHeldSlot h -> {
                     body.writeVarInt(CB_SET_HELD_SLOT);
                     body.writeZigZag(h.slot());
@@ -1159,6 +1163,7 @@ public final class EventCodec {
                 case CB_SET_PLAYER_INVENTORY -> new ClientboundPacket.SetPlayerInventory(zint(in), readStack(in));
                 case CB_SET_HELD_SLOT -> new ClientboundPacket.SetHeldSlot(zint(in));
                 case CB_ENTITY_EVENT -> new ClientboundPacket.EntityEvent(zint(in), zint(in));
+                case CB_SET_CAMERA -> new ClientboundPacket.SetCamera(zint(in));
                 case CB_OPEN_SCREEN -> new ClientboundPacket.OpenScreen(zint(in), string(in));
                 case CB_MOUNT_SCREEN_OPEN -> new ClientboundPacket.MountScreenOpen(zint(in), zint(in), zint(in));
                 case CB_CONTAINER_CLOSE -> new ClientboundPacket.ContainerClose(zint(in));

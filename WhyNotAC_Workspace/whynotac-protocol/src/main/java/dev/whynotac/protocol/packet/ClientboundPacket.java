@@ -423,6 +423,12 @@ public sealed interface ClientboundPacket {
         public static final int FINISH_USING_ITEM = 9;
     }
 
+    /**
+     * {@code ClientboundSetCameraPacket}: the client looks through this entity ({@code Minecraft.setCameraEntity}),
+     * if it has one with the id; otherwise nothing changes. The crosshair pick then starts at that entity's eye.
+     */
+    record SetCamera(int entityId) implements ClientboundPacket {}
+
     record Unmodeled(String type) implements ClientboundPacket {}
 
     /**

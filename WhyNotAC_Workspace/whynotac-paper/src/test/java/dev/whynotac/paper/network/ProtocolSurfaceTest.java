@@ -73,7 +73,7 @@ class ProtocolSurfaceTest {
      */
     private static final Set<String> CLIENTBOUND_PHYSICS_PENDING = Set.of(
             "set_entity_link", "move_minecart_along_track", "projectile_power", "block_event", "initialize_border", "set_border_center", "set_border_lerp_size",
-            "set_border_size", "cooldown", "set_equipment", "set_camera", "set_health", "player_combat_kill", "player_look_at",
+            "set_border_size", "cooldown", "set_equipment", "set_health", "player_combat_kill", "player_look_at",
             "damage_event", "hurt_animation", "start_configuration");
 
     private static final Set<String> CLIENTBOUND_IGNORED = Set.of(

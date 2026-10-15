@@ -73,6 +73,7 @@ import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundSetCursorItemPacket;
 import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
+import net.minecraft.network.protocol.game.ClientboundSetCameraPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
@@ -131,6 +132,7 @@ public final class PacketTranslator {
     private static final VarHandle MOVE_ENTITY_X_ROT;
     private static final VarHandle ROTATE_HEAD_ID;
     private static final VarHandle ENTITY_EVENT_ID;
+    private static final VarHandle SET_CAMERA_ID;
     private static final VarHandle ROTATE_HEAD_Y_HEAD_ROT;
 
     private static final VarHandle SECTION_POS;
@@ -158,6 +160,8 @@ public final class PacketTranslator {
             ROTATE_HEAD_ID = head.findVarHandle(ClientboundRotateHeadPacket.class, "entityId", int.class);
             ENTITY_EVENT_ID = MethodHandles.privateLookupIn(ClientboundEntityEventPacket.class, MethodHandles.lookup())
                     .findVarHandle(ClientboundEntityEventPacket.class, "entityId", int.class);
+            SET_CAMERA_ID = MethodHandles.privateLookupIn(ClientboundSetCameraPacket.class, MethodHandles.lookup())
+                    .findVarHandle(ClientboundSetCameraPacket.class, "cameraId", int.class);
             ROTATE_HEAD_Y_HEAD_ROT = head.findVarHandle(ClientboundRotateHeadPacket.class, "yHeadRot", byte.class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
@@ -225,7 +229,7 @@ public final class PacketTranslator {
             "add_entity", "remove_entities", "move_entity_pos", "move_entity_pos_rot", "move_entity_rot", "entity_position_sync",
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
             "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
-            "mount_screen_open", "container_close", "entity_event");
+            "mount_screen_open", "container_close", "entity_event", "set_camera");
 
     /**
      * Packets about other entities that come by the hundred per tick: the edge decodes them (the client's
@@ -258,7 +262,7 @@ public final class PacketTranslator {
             ClientboundContainerSetSlotPacket.class, ClientboundSetCursorItemPacket.class,
             ClientboundSetPlayerInventoryPacket.class, ClientboundSetHeldSlotPacket.class,
             ClientboundOpenScreenPacket.class, ClientboundMountScreenOpenPacket.class,
-            ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class);
+            ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class, ClientboundSetCameraPacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
     static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
@@ -569,6 +573,7 @@ public final class PacketTranslator {
                     inventory.slot(), stack(inventory.contents()));
             case ClientboundSetHeldSlotPacket held -> new ClientboundPacket.SetHeldSlot(held.slot());
             case ClientboundEntityEventPacket event -> new ClientboundPacket.EntityEvent((int) ENTITY_EVENT_ID.get(event), event.getEventId());
+            case ClientboundSetCameraPacket camera -> new ClientboundPacket.SetCamera((int) SET_CAMERA_ID.get(camera));
             case ClientboundOpenScreenPacket open -> new ClientboundPacket.OpenScreen(open.getContainerId(),
                     String.valueOf(net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(open.getType())));
             case ClientboundMountScreenOpenPacket mount -> new ClientboundPacket.MountScreenOpen(

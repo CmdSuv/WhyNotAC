@@ -67,6 +67,8 @@ public final class TransactionPolicy {
             case ClientboundPacket.ContainerClose ignored -> false;
             // The player's own: finishing an item use stops using it (the slowdown ends).
             case ClientboundPacket.EntityEvent event -> targetsSelf(event.entityId(), selfEntityId);
+            // Another entity's camera stops the player's own movement input (LocalPlayer.isControlledCamera).
+            case ClientboundPacket.SetCamera ignored -> true;
             // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).
             case ClientboundPacket.SetPassengers ignored -> true;
             case ClientboundPacket.MoveVehicle ignored -> true; // moves the vehicle the player controls

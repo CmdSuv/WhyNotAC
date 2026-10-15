@@ -214,4 +214,14 @@ class InventoryPacketViewsTest {
                 net.minecraft.network.protocol.game.ClientboundEntityEventPacket.STREAM_CODEC.decode(buf);
         assertEquals(new ClientboundPacket.EntityEvent(1234, ClientboundPacket.EntityEvent.FINISH_USING_ITEM), translator.outbound(packet, true));
     }
+
+    /** The camera packet's entity id, read from the client's decoded packet. */
+    @Test
+    void aCameraKeepsItsEntity() {
+        RegistryFriendlyByteBuf buf = bytes();
+        buf.writeVarInt(4321);
+        net.minecraft.network.protocol.game.ClientboundSetCameraPacket packet =
+                net.minecraft.network.protocol.game.ClientboundSetCameraPacket.STREAM_CODEC.decode(buf);
+        assertEquals(new ClientboundPacket.SetCamera(4321), translator.outbound(packet, true));
+    }
 }
