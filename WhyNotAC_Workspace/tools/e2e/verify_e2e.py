@@ -211,8 +211,12 @@ def verify_cases(probe, log, work_dir, check):
     by_check = {}
     for d in dossiers:
         by_check.setdefault(d["check"], []).append(d)
-    check(len(dossiers) == 2 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1,
-          f"exactly two cases opened, one per violation: {sorted((d['check'], d['summary']) for d in dossiers)}")
+    attacks = {a["type"]: a for a in probe.get("attacks", [])}
+    check(set(attacks) == {"husk", "sheep"} and attacks["husk"]["distance"] < 2.9 and attacks["sheep"]["distance"] > 6.5,
+          f"the probe attacked a husk next to it and a sheep 7 blocks away: {probe.get('attacks')}")
+    check(len(dossiers) == 3 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+          and len(by_check.get("attack-reach", [])) == 1,
+          f"exactly three cases opened, one per violation (none for the attack in reach): {sorted((d['check'], d['summary']) for d in dossiers)}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
         check(framing["evidenceClass"] == "P-M" and framing["details"].get("movePackets") == "2"
@@ -223,21 +227,28 @@ def verify_cases(probe, log, work_dir, check):
         ticks, allowed = int(clock["details"].get("ticks", "0")), int(clock["details"].get("allowedTicks", "0"))
         check(clock["evidenceClass"] == "P-M" and ticks > allowed and "1%" in clock["details"].get("assumption", ""),
               f"the client-clock case is the proof (P-M, {ticks} ticks > {allowed} allowed, its assumption stated): {clock['summary']}")
+    reach = by_check.get("attack-reach", [None])[0]
+    if reach:
+        dd = reach["details"]
+        check(reach["evidenceClass"] == "P-A" and dd.get("targetType") == "minecraft:sheep"
+              and dd.get("target") == str(attacks.get("sheep", {}).get("target")) and float(dd.get("distance", "0")) > float(dd.get("allowed", "99")),
+              f"the attack-reach case is the sheep, beyond every reach the client may have had (P-A): {reach['summary']}")
     for d in dossiers:
         check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
               f"the {d['check']} case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")
         check(d["lifecycle"] == "SHADOW" and d["permittedActions"] == ["ALERT", "REVIEW"],
               f"a shadow check may only alert and be reviewed (docs/POLICY.md): {d['check']} {d['lifecycle']} {d['permittedActions']}")
         check(d["recording"] is not None and d["admissible"] is True, f"the {d['check']} dossier points at the session's recording")
-        check(re.search(r"\[WhyNotAC\] \[shadow\] WhyNotProbe " + re.escape(d["check"]) + r" \(P-M\)", log) is not None,
+        check(re.search(r"\[WhyNotAC\] \[shadow\] WhyNotProbe " + re.escape(d["check"]) + r" \(" + re.escape(d["evidenceClass"]) + r"\)", log) is not None,
               f"a shadow alert for {d['check']} went to the console (and to whynotac.alerts.shadow)")
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
-    check(len(verified) == len(dossiers) == 2 and all(v["verified"] is True and v["evidenceInRecording"] == 1 for v in verified),
+    check(len(verified) == len(dossiers) == 3 and all(v["verified"] is True and v["evidenceInRecording"] == 1 for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
-    check(re.search(r"WhyNotAC cases \(newest first\): 2", log) is not None
-          and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + r" P-M SHADOW", log) for d in dossiers),
-          "/whynotac cases lists both")
+    check(re.search(r"WhyNotAC cases \(newest first\): 3", log) is not None
+          and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
+                  for d in dossiers),
+          "/whynotac cases lists all three")
 
 
 def verify_world(log, dump_path, check):

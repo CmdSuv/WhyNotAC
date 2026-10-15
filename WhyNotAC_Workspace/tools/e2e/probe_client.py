@@ -12,6 +12,9 @@ can be verified live:
   * one transaction is never answered while the next one is  -> SKIPPED_TRANSACTION
   * one transaction is answered twice                         -> DUPLICATE_TRANSACTION
   * two movement packets in one client tick (tick 200)        -> a tick-framing case (P-M, shadow)
+  * an attack on a sheep 7 blocks away (tick 330)             -> an attack-reach case (P-A, shadow)
+
+It also attacks the nearest husk (tick 300), well within reach, which must open nothing.
 
 It also keeps a trace of every transaction ping and every velocity packet addressed to itself, in
 arrival order, with velocities decoded exactly as the client's LpVec3 codec does: the ground truth the
@@ -50,8 +53,11 @@ PLAY_S_MOVE_POS = 0x1D
 PLAY_C_SET_ENTITY_MOTION = 0x63
 PLAY_C_CONTAINER_SET_CONTENT, PLAY_C_CONTAINER_SET_SLOT = 0x12, 0x14
 PLAY_S_CONTAINER_CLICK, PLAY_S_SET_CARRIED_ITEM = 0x11, 0x34
+PLAY_C_ADD_ENTITY, PLAY_S_INTERACT, PLAY_S_SWING = 0x01, 0x19, 0x3C
 # item registry ids (1.21.11, reports/registries.json)
 ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
+# entity type registry ids
+ENTITY_HUSK, ENTITY_SHEEP = 67, 111
 
 
 def f32(x):
@@ -147,6 +153,7 @@ class Client:
         self.loaded = threading.Event()
         self.state_id = 0  # the inventory menu's, as the server last sent it
         self.slots = {}    # inventory menu slot -> (count, item id), from the slot packets
+        self.entities = {}  # entity id -> (type id, x, y, z) as added
 
     # --- framing -------------------------------------------------------------------------------
     def send(self, packet_id, payload=b""):
@@ -272,6 +279,12 @@ class Client:
                         if count > 0:
                             break  # a stack's components are not decoded here: the rest stays as it was
                         self.slots[slot] = (0, 0)
+            elif packet_id == PLAY_C_ADD_ENTITY:
+                entity_id = r.varint()
+                r.unpack("16s")  # uuid
+                entity_type = r.varint()
+                ex, ey, ez = r.unpack("ddd")
+                self.entities[entity_id] = (entity_type, ex, ey, ez)
             elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
                 self.send(PLAY_S_CHUNK_BATCH_RECEIVED, struct.pack(">f", 9.0))
             elif packet_id == PLAY_C_DISCONNECT:
@@ -321,6 +334,19 @@ def click(container, state_id, slot, changed, carried):
     return body + hashed_stack(carried)
 
 
+def nearest(client, entity_type):
+    """The added entity of this type nearest to the probe (where it was added), as (id, horizontal distance)."""
+    x, _, z = client.position[:3]
+    found = [(((e[1] - x) ** 2 + (e[3] - z) ** 2) ** 0.5, i) for i, e in list(client.entities.items()) if e[0] == entity_type]
+    return (min(found)[1], min(found)[0]) if found else (None, None)
+
+
+def attack(client, entity_id):
+    """As MultiPlayerGameMode.attack then startAttack's swing: ServerboundInteractPacket ATTACK, then the main hand's swing."""
+    client.send(PLAY_S_INTERACT, varint(entity_id) + varint(1) + b"\x00")
+    client.send(PLAY_S_SWING, varint(0))
+
+
 def main():
     host, port, name, seconds = sys.argv[1], int(sys.argv[2]), sys.argv[3], float(sys.argv[4])
     status_ok = server_list_ping(host, port)
@@ -339,6 +365,7 @@ def main():
     extra_tick_ends = 0
     inputs_sent = []
     inventory_step = 0
+    attacks = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         forward = (tick // 40) % 2 == 0  # toggle W every 2 seconds
@@ -369,6 +396,12 @@ def main():
         elif inventory_step == 2:
             client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 40, {40: (ITEM_DIAMOND_SWORD, 1)}, None))
             inventory_step = 3
+        if tick in (300, 330):
+            # An attack in reach (the husk next to the probe), then violation 5: a sheep 7 blocks away.
+            target, distance = nearest(client, ENTITY_HUSK if tick == 300 else ENTITY_SHEEP)
+            if target is not None:
+                attack(client, target)
+                attacks.append({"tick": tick, "target": target, "type": "husk" if tick == 300 else "sheep", "distance": distance})
         client.send(PLAY_S_TICK_END)
         if tick == 240:
             # Violation 4: a burst of extra ClientTickEnd (a timer, or hiding extra movement packets from the tick
@@ -401,6 +434,7 @@ def main():
         "clock_burst": CLOCK_BURST,
         "tick_ends_sent": tick + extra_tick_ends,
         "inventory_steps": inventory_step,
+        "attacks": attacks,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,
