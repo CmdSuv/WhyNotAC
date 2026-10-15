@@ -48,6 +48,7 @@ public final class ClientInventory {
     /** Beyond this many candidates the replica gives up and knows nothing until the server resends. */
     static final int MAX_CANDIDATES = 64;
     static final String ALLAY = "minecraft:allay";
+    static final String SELECT_TRADE = "minecraft:select_trade";
     static final int MAX_ALLAYS = 4096;
     /** Attack ranges remembered by hash; past this many, new ones stay unresolved (unknown). */
     static final int MAX_RANGES = 4096;
@@ -218,6 +219,8 @@ public final class ClientInventory {
                     new Event.Used(interact.hand(), Use.ENTITY, interact.hand() == Hand.MAIN_HAND && (allaysUnknown || allays.contains(interact.entityId())));
             case ServerboundPacket.ContainerClose ignored -> Event.CLOSE;
             case ServerboundPacket.ClientTickEnd ignored -> Event.TICK_END;
+            // MerchantScreen.postButtonClick: MerchantMenu.tryMoveItems runs locally before the packet is sent
+            case ServerboundPacket.Unmodeled unmodeled when SELECT_TRADE.equals(unmodeled.type()) -> Event.TRADE;
             case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.DROP_ITEM
                     || action.action() == ServerboundPacket.PlayerAction.Action.DROP_ALL_ITEMS -> Event.DROP;
             // releaseUsingItem: Item.releaseUsing, then a remainder if that emptied the stack (either hand may be the used one)
@@ -484,6 +487,14 @@ public final class ClientInventory {
                     case Event.KIND_FORGET -> n.forgetHands();
                     case Event.KIND_TICK_END -> n.tickSelected = n.selected == UNKNOWN ? ALL_SLOTS : 1 << n.selected;
                     case Event.KIND_RELEASE -> usedHandsAfter(n, Use.ITEM);
+                    case Event.KIND_TRADE -> {
+                        // tryMoveItems: the payment slots' stacks (any the player put there) go back into the player's
+                        // slots (merging, else into empty ones), then the offer's costs are taken out of them; no slot is sent
+                        n.emptySlotsUnknown();
+                        for (int k = 0; k < HOTBAR; k++) {
+                            n.mayBeNone[k] |= n.hotbar[k] != null;
+                        }
+                    }
                     case Event.KIND_DROP -> {
                         // LocalPlayer.drop: the selected stack loses one or all, and nothing says which slot that is:
                         // the drop key is handled after the hotbar keys of the same tick, whose selection is only sent
@@ -728,6 +739,7 @@ public final class ClientInventory {
         int KIND_TICK_END = 2;
         int KIND_DROP = 3;
         int KIND_RELEASE = 4;
+        int KIND_TRADE = 5;
         Simple CLOSE = new Simple(KIND_CLOSE);
         /** The client did something to its inventory this replica cannot read. */
         Simple FORGET = new Simple(KIND_FORGET);
@@ -736,6 +748,8 @@ public final class ClientInventory {
         Simple DROP = new Simple(KIND_DROP);
         /** The use key released: the item in use is released. */
         Simple RELEASE = new Simple(KIND_RELEASE);
+        /** A trade selected in the merchant screen: items moved between the payment slots and the player's. */
+        Simple TRADE = new Simple(KIND_TRADE);
 
         record Click(ServerboundPacket.ContainerClick click) implements Event {}
 

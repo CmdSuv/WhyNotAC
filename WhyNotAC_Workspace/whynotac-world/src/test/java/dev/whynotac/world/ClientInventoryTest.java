@@ -404,6 +404,19 @@ class ClientInventoryTest {
     }
 
     @Test
+    void selectingATradeMovesStacksWithoutAClick() {
+        out(new ClientboundPacket.OpenScreen(5, "minecraft:merchant"));
+        out(new ClientboundPacket.SetPlayerInventory(2, LONG_STICK));
+        sync();
+        in(new ServerboundPacket.Unmodeled("minecraft:select_trade"));
+        ClientInventory.View view = only();
+        assertNull(view.hotbar().get(3)); // an empty slot may take back a payment stack
+        assertEquals(SWORD, view.hotbar().get(0));
+        in(new ServerboundPacket.SetCarriedItem(2));
+        assertEquals(Set.of(new ClientInventory.Reach(LONG, true), ClientInventory.Reach.NONE), inventory.mainHandReach());
+    }
+
+    @Test
     void aGapForgetsEverything() {
         inventory.onEvent(new TimelineEvent.Gap(sequence++, sequence, 3));
         ClientInventory.View view = only();
