@@ -15,13 +15,11 @@ import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
-import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientEntitiesTracker;
 import dev.whynotac.world.ClientInventoryTracker;
+import dev.whynotac.world.Replicas;
 import dev.whynotac.world.ItemPrototypes;
-import dev.whynotac.world.MenuLayouts;
 import dev.whynotac.world.ClientWorldTracker;
-import dev.whynotac.world.EntityTypes;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
 import java.util.List;
@@ -91,13 +89,12 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         verdict.addListener(cases);
         verdict.addListener(alerts);
         // The client's world, before every check that reads it (listeners see an event in registration order).
-        worldTracker = new ClientWorldTracker(BlockStates.vanilla());
-        registry.addListener(worldTracker);
-        entitiesTracker = new ClientEntitiesTracker(EntityTypes.vanilla());
-        registry.addListener(entitiesTracker);
-        inventoryTracker = new ClientInventoryTracker(ItemPrototypes.vanilla(), MenuLayouts.vanilla());
-        registry.addListener(inventoryTracker);
-        Checks.all(verdict).forEach(registry::addListener);
+        Replicas replicas = Replicas.vanilla();
+        replicas.listeners().forEach(registry::addListener);
+        worldTracker = replicas.world();
+        entitiesTracker = replicas.entities();
+        inventoryTracker = replicas.inventory();
+        Checks.all(verdict, replicas).forEach(registry::addListener);
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
         }
