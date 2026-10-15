@@ -13,7 +13,10 @@ import dev.whynotac.protocol.packet.Stack;
  * a remainder from the stack's own patch ({@code UseRemainder.convertIntoRemainder} copies it), and an
  * equippable's swap with the player's armor ({@code Equippable.swapWithEquipmentSlot}, reached from
  * {@code Item.use}): a single item takes the armor's place, a stacked one sends the armor to the
- * inventory.
+ * inventory. Entity interactions on the client only shrink the stack, fill a bucket (a fish bucket's
+ * components come from the entity, none is an attack range) or leave a remainder; the armor stand's and
+ * the item frame's swaps are the server's. The one that brings in a stack from elsewhere, the allay's
+ * item taken back with an empty main hand, is {@link ClientInventory}'s (it needs the target).
  */
 public final class VanillaUseEffects implements ClientInventory.UseEffects {
 
@@ -30,9 +33,6 @@ public final class VanillaUseEffects implements ClientInventory.UseEffects {
     public ClientInventory.Outcome outcome(Stack stack, ClientInventory.Use use) {
         ItemPrototypes.Prototype prototype = prototypes.get(stack.item());
         if (prototype == null || stack.added().contains(USE_REMAINDER)) {
-            return ClientInventory.Outcome.UNKNOWN;
-        }
-        if (use == ClientInventory.Use.ENTITY) {
             return ClientInventory.Outcome.UNKNOWN;
         }
         boolean swaps = stack.added().contains(EQUIPPABLE) || prototype.swapSlot() != null && !stack.removed().contains(EQUIPPABLE);

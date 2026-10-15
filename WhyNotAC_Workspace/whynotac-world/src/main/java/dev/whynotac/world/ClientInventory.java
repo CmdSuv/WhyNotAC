@@ -47,6 +47,8 @@ public final class ClientInventory {
     static final int SWAP_OFFHAND_BUTTON = 40;
     /** Beyond this many candidates the replica gives up and knows nothing until the server resends. */
     static final int MAX_CANDIDATES = 64;
+    static final String ALLAY = "minecraft:allay";
+    static final int MAX_ALLAYS = 4096;
     /** Attack ranges remembered by hash; past this many, new ones stay unresolved (unknown). */
     static final int MAX_RANGES = 4096;
     private static final int MAX_TRACKED_PINGS = 4096;
@@ -95,6 +97,9 @@ public final class ClientInventory {
     /** Every attack range a full stack showed, by the client's hash of it: what a hashed stack's range is. */
     private final java.util.Map<Integer, Stack.AttackRange> rangesByHash = new java.util.HashMap<>();
     private List<State> candidates;
+    /** Entity ids the server announced as allays (ids are never reused); {@code allaysUnknown}: some may be missing. */
+    private final Set<Integer> allays = new java.util.HashSet<>();
+    private boolean allaysUnknown;
     private boolean loggedIn;
     private long overflows;
 
@@ -113,7 +118,10 @@ public final class ClientInventory {
             case TimelineEvent.Outbound out -> onOutbound(out.sequence(), out.packet());
             case TimelineEvent.Inbound in -> onInbound(in.packet());
             case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.transactionId());
-            case TimelineEvent.Gap gap -> lose();
+            case TimelineEvent.Gap gap -> {
+                lose();
+                allaysUnknown = true;
+            }
             case TimelineEvent.Disconnected ignored -> {
                 lose();
                 pings.clear();
@@ -149,7 +157,21 @@ public final class ClientInventory {
             case ClientboundPacket.PlayerAbilities abilities -> new Op.Creative(abilities.instabuild() ? YES : NO);
             case ClientboundPacket.GameEvent event when event.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE ->
                     new Op.Creative(Math.round(event.param()) == CREATIVE ? YES : NO);
+            case ClientboundPacket.AddEntity add -> {
+                if (ALLAY.equals(add.type())) {
+                    if (allays.size() < MAX_ALLAYS) {
+                        allays.add(add.entityId());
+                    } else {
+                        allaysUnknown = true;
+                    }
+                }
+                yield null;
+            }
             case ClientboundPacket.Untranslatable untranslatable -> switch (untranslatable.type()) {
+                case "minecraft:add_entity" -> {
+                    allaysUnknown = true;
+                    yield null;
+                }
                 case "minecraft:container_set_content", "minecraft:container_set_slot", "minecraft:set_player_inventory",
                         "minecraft:set_held_slot", "minecraft:open_screen", "minecraft:mount_screen_open", "minecraft:container_close",
                         "minecraft:login", "minecraft:respawn" -> Op.FORGET;
@@ -184,10 +206,10 @@ public final class ClientInventory {
                 learn(creative.item());
                 yield new Event.CreativeSlot(creative.slot(), creative.item());
             }
-            case ServerboundPacket.UseItem use -> new Event.Used(use.hand(), Use.ITEM);
-            case ServerboundPacket.UseItemOn use -> new Event.Used(use.hand(), Use.ITEM_ON_BLOCK);
+            case ServerboundPacket.UseItem use -> new Event.Used(use.hand(), Use.ITEM, false);
+            case ServerboundPacket.UseItemOn use -> new Event.Used(use.hand(), Use.ITEM_ON_BLOCK, false);
             case ServerboundPacket.InteractEntity interact when interact.kind() != ServerboundPacket.InteractEntity.Kind.ATTACK && interact.hand() != null ->
-                    new Event.Used(interact.hand(), Use.ENTITY);
+                    new Event.Used(interact.hand(), Use.ENTITY, interact.hand() == Hand.MAIN_HAND && (allaysUnknown || allays.contains(interact.entityId())));
             case ServerboundPacket.ContainerClose ignored -> Event.CLOSE;
             case ServerboundPacket.ClientTickEnd ignored -> Event.TICK_END;
             case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.DROP_ITEM
@@ -432,6 +454,11 @@ public final class ClientInventory {
             }
             case Event.CreativeSlot creative -> write(n, layouts.inventory(), creative.slot(), creative.item());
             case Event.Used used -> {
+                if (used.mayGive() && n.mainHandMayBeEmpty()) {
+                    // Allay.mobInteract: with an empty main hand the player takes the allay's item (any stack) with
+                    // Inventory.add, into a stack of its own kind or the first empty slot; no slot is reported.
+                    n.emptySlotsUnknown();
+                }
                 if (used.hand() == Hand.OFF_HAND) {
                     afterUse(n, OFFHAND, used.use());
                 } else if (n.selected == UNKNOWN) {
@@ -473,12 +500,7 @@ public final class ClientInventory {
             case KEEP_OR_NONE -> n.mayBeNone[slot] = true;
             case KEEP_OR_NONE_ADD -> {
                 n.mayBeNone[slot] = true;
-                // Inventory.add: a stack of its own kind grows (same reach), else the first empty slot takes it
-                for (int k = 0; k < HOTBAR; k++) {
-                    if (n.hotbar[k] != null && n.hotbar[k].isEmpty()) {
-                        n.set(k, null);
-                    }
-                }
+                n.emptySlotsUnknown();
             }
             case UNKNOWN -> n.set(slot, null);
         }
@@ -695,7 +717,8 @@ public final class ClientInventory {
 
         record CreativeSlot(int slot, Stack item) implements Event {}
 
-        record Used(Hand hand, Use use) implements Event {}
+        /** {@code mayGive}: an entity interaction with the main hand, maybe with an allay. */
+        record Used(Hand hand, Use use, boolean mayGive) implements Event {}
 
         record Simple(int kind) implements Event {}
     }
@@ -756,6 +779,24 @@ public final class ClientInventory {
                 hotbar[slot] = stack;
             }
             mayBeNone[slot] = false;
+        }
+
+        /** Inventory.add of a stack not followed: a stack of its own kind grows (same reach), else the first empty slot takes it. */
+        void emptySlotsUnknown() {
+            for (int k = 0; k < HOTBAR; k++) {
+                if (hotbar[k] != null && (hotbar[k].isEmpty() || mayBeNone[k])) {
+                    set(k, null);
+                }
+            }
+        }
+
+        boolean mainHandMayBeEmpty() {
+            for (int k = 0; k < HOTBAR; k++) {
+                if ((selected == UNKNOWN || selected == k) && (hotbar[k] == null || hotbar[k].isEmpty() || mayBeNone[k])) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         void select(int slot) {

@@ -363,6 +363,23 @@ class ClientInventoryTest {
     }
 
     @Test
+    void anAllayMayGiveItsItemToAnEmptyMainHand() {
+        in(new ServerboundPacket.SetCarriedItem(3)); // an empty slot
+        out(ClientboundPacket.AddEntity.received(50, new java.util.UUID(0, 50), "minecraft:allay", 0, 0, 0, dev.whynotac.math.vector.Vec3d.ZERO,
+                (byte) 0, (byte) 0, (byte) 0, 0));
+        out(ClientboundPacket.AddEntity.received(51, new java.util.UUID(0, 51), "minecraft:villager", 0, 0, 0, dev.whynotac.math.vector.Vec3d.ZERO,
+                (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        in(new ServerboundPacket.InteractEntity(51, ServerboundPacket.InteractEntity.Kind.INTERACT, Hand.MAIN_HAND, null, false));
+        assertEquals(Stack.EMPTY, only().hotbar().get(3));
+        in(new ServerboundPacket.InteractEntity(50, ServerboundPacket.InteractEntity.Kind.INTERACT, Hand.MAIN_HAND, null, false));
+        // the allay's item lands in the first empty slot (or merges): every empty slot is unknown
+        assertNull(only().hotbar().get(3));
+        assertEquals(SWORD, only().hotbar().get(0));
+        assertEquals(Set.of(ClientInventory.Reach.UNKNOWN), inventory.mainHandReach());
+    }
+
+    @Test
     void aGapForgetsEverything() {
         inventory.onEvent(new TimelineEvent.Gap(sequence++, sequence, 3));
         ClientInventory.View view = only();
