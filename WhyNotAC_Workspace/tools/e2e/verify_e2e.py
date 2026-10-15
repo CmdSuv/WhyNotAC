@@ -65,6 +65,7 @@ def main():
         verify_recording(probe, sys.argv[3], sys.argv[4], sys.argv[5], check)
         if sys.argv[3]:
             verify_subject_requests(sys.argv[6], sys.argv[3], sys.argv[5], check)
+            verify_console_privacy(log, sys.argv[6], sys.argv[3], check)
             verify_edge(probe, log, sys.argv[5], check)
             verify_facts(probe, sys.argv[5], check)
             verify_cases(probe, log, sys.argv[6], check)
@@ -134,6 +135,28 @@ def verify_subject_requests(work_dir, recording, dump_path, check):
     forgotten = json.load(open(os.path.join(work_dir, "e2e-forget.json")))
     left = [f for _, _, fs in os.walk(os.path.join(work_dir, "forget-copy")) for f in fs if ".wnrec" in f]
     check(forgotten["deleted"] == 1 and forgotten["dry_run"] is False and left == [], f"forget --yes deleted the recording (left: {left})")
+
+
+def verify_console_privacy(log, work_dir, recording, check):
+    """/whynotac privacy on the live server: the player's recording and cases are found, then deleted."""
+    log = re.sub(r"\x1b\[[0-9;]*m", "", log)
+    player = str(uuid.UUID(bytes=hashlib.md5(b"OfflinePlayer:WhyNotProbe").digest(), version=3))
+    results = re.findall(r"WhyNotAC privacy (find|forget) (\S+)(.*)\n.*?INFO\]: recordings: (.*)\n.*?INFO\]: cases: (\d+) (.*)", log)
+    check([(a, u) for a, u, *_ in results] == [("find", player), ("forget", player), ("find", player)],
+          f"the console ran find, forget and find for the player: {[(a, u) for a, u, *_ in results]}")
+    if len(results) != 3:
+        return
+    dossiers = [f for f in os.listdir(os.path.join(work_dir, "plugins", "WhyNotAC", "cases")) if f.endswith(".json")]
+    (_, _, flag1, rec1, n1, rest1), (_, _, flag2, rec2, n2, rest2), (_, _, flag3, rec3, n3, rest3) = results
+    first, forgotten, after = json.loads(rec1), json.loads(rec2), json.loads(rec3)
+    check(flag1 == "" and [os.path.basename(r["file"]) for r in first["recordings"]] == [os.path.basename(recording)]
+          and int(n1) == len(dossiers) > 0 and "deleted" not in rest1,
+          f"find lists the recording and all {len(dossiers)} cases (dossiers): {n1} {rest1}")
+    check(flag2 == "" and forgotten["deleted"] == 1 and f"deleted rows {len(dossiers)}, deleted dossiers {len(dossiers)}" in rest2,
+          f"forget --yes deleted the recording, the case rows and the dossiers: {rest2}")
+    check(after["recordings"] == [] and after["mentioned_in"] == [] and int(n3) == 0, "afterwards nothing is found")
+    leaks = [line for line in log.splitlines() if ("WhyNotAC" in line or "PlayerSession[" in line) and "127.0.0.1" in line]
+    check(leaks == [], f"no WhyNotAC log line holds the client's address: {leaks[:3]}")
 
 
 def f64(value):

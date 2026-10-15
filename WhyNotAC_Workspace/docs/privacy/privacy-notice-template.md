@@ -29,7 +29,8 @@ gönderdiği ve sunucunun size gönderdiği oyun paketlerinin bir kısmı kayded
   mesaj kanallarının adları (içerikleri değil), görüş mesafesi ve ana el (sağ/sol)
 
 **Kaydedilmeyenler**
-- IP adresiniz, kullanıcı adınız, sohbet mesajlarınız, komutlarınız ve dil ayarınız
+- IP adresiniz, sohbet mesajlarınız, komutlarınız ve dil ayarınız
+- Kayıtlarda kullanıcı adınız (vakalar için aşağıya bakın)
 - Bilgisayarınızdaki dosyalar, işlemler veya modlar: WhyNotAC yalnızca sunucu tarafında çalışır,
   cihazınızı taramaz
 
@@ -37,6 +38,11 @@ gönderdiği ve sunucunun size gönderdiği oyun paketlerinin bir kısmı kayded
 anahtarla üretilmiş bir takma ad (HMAC-SHA256) bulunur. Anahtar olmadan bir kayıt size
 bağlanamaz. Başka bir oyuncunun kaydında, onun oyuncu listesinde ya da yakınındaki bir varlık olarak,
 yalnızca aynı takma adınızla geçebilirsiniz.
+
+**Vakalar.** Bir kontrol bir bulgu kaydederse, yetkililerin incelemesi için bir vaka açılır. Vaka;
+kullanıcı adınızı, UUID'nizi, bulguyu ve bulgunun bulunduğu kaydın dosya adını içerir. Yetkililere
+giden uyarılar da kullanıcı adınızı içerir ve sunucu günlüğüne yazılır. Vakalar en fazla [90] gün,
+sunucu günlükleri [SÜRE] saklanır.
 
 **Amaç.** Hilelerin tespiti ve hile karşıtı sistemin doğrulanması. Özellikle dürüst oyuncuların
 yanlışlıkla cezalandırılmasının önlenmesi.
@@ -81,13 +87,20 @@ between your client and the server is recorded.
   plugin-message channels it registers (not their content), view distance and main hand
 
 **What is not recorded**
-- Your IP address, username, chat messages, commands or language setting
+- Your IP address, chat messages, commands or language setting
+- Your username, in recordings (for cases, see below)
 - Files, processes or mods on your computer: WhyNotAC runs only on the server and never scans
   your device
 
 **Pseudonymisation.** Recordings do not contain your Minecraft UUID. They contain a pseudonym
 (HMAC-SHA256) derived with a secret key kept only on this server. Without that key, a recording
-cannot be linked to you.
+cannot be linked to you. In another player's recording you can appear only under the same
+pseudonym, in their player list or as an entity near them.
+
+**Cases.** When a check records a finding, a case is opened for staff review. A case contains your
+username, your UUID, the finding and the file name of the recording that holds it. Alerts to staff
+also contain your username and are written to the server log. Cases are kept for at most [90]
+days, server logs for [PERIOD].
 
 **Purpose.** Detecting cheats and validating the anti-cheat. In particular, preventing honest
 players from being punished by mistake.

@@ -50,6 +50,8 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 - [Kararlar](docs/DECISIONS.md): proje sahibinin kararları (tek koşulsuz kural: dünyanın en iyisi)
 - [Kanıt ve eylem politikası](docs/POLICY.md): hangi kanıt hangi eylemi tetikleyebilir (normatif)
 - [Mimari ve ilkeler](docs/ARCHITECTURE.md): katmanlar, thread modeli, transaction sandviçi, sıfır yanlış-ban sözleşmesi
+- [Yol haritası](docs/ROADMAP.md): bugünkü durum, sıradaki fazlar ve kapıları, sahibin kararını bekleyenler
+- [Gizlilik ve veri sahibi talepleri](docs/privacy/README.md): neyin saklandığı, `/whynotac privacy find|forget`
 - [Doğrulanmış vanilla 1.21.11 referansı](docs/reference/vanilla-1.21.11.md): decompile edilmiş kaynaktan okunan her sabit
 - Planlı katmanlar: [physics](whynotac-physics/README.md) · [analysis](whynotac-analysis/README.md) ·
   [ai](whynotac-ai/README.md) · [verdict](whynotac-verdict/README.md) · [storage](whynotac-storage/README.md)
@@ -70,9 +72,9 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 375 test
+./gradlew build                       # tüm modüller + 377 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (106 kontrol)
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e  # aynı test, ViaVersion 5.12.0 + PacketEvents 2.14.0 yanında
 tools/realclient/run_realclient.sh /tmp/wnac-rc  # resmi client, Xvfb + XTest (bkz. tools/realclient/README.md)

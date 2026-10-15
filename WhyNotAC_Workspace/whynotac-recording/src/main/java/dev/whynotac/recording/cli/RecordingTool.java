@@ -30,8 +30,10 @@ import java.util.stream.Stream;
  *   java -jar WhyNotAC.jar forget  &lt;recordings-dir&gt; &lt;secret-key&gt; &lt;player-uuid&gt; [--yes] delete them
  * </pre>
  * {@code find}/{@code forget} turn the real UUID into the pseudonym with the server's secret and
- * compare it with each file's header only; no recording content is decoded. Without {@code --yes},
- * {@code forget} only lists what it would delete. Run it while the player is offline.
+ * compare it with each file's header: those are the player's recordings. Other players' recordings are
+ * read for the pseudonym too (their player list, the entities near them): {@code forget --yes}
+ * deletes the player's recordings and rewrites the others without it ({@code RecordingScrubber}).
+ * Without {@code --yes}, {@code forget} only lists what it would do. Run it while the player is offline.
  *
  * <p>Exit codes: {@code inspect}/{@code dump} 0 if the recording is complete, 2 if it was read but is
  * incomplete or damaged; {@code find}/{@code forget} 0 on success, 2 if some files could not be read
@@ -45,7 +47,8 @@ public final class RecordingTool {
         System.exit(run(args, System.out, System.err));
     }
 
-    static int run(String[] args, PrintStream out, PrintStream err) {
+    /** Runs one command (the arguments of {@link #main}) and returns its exit code; the plugin's console command uses it too. */
+    public static int run(String[] args, PrintStream out, PrintStream err) {
         if (args.length >= 4 && (args[0].equals("find") || args[0].equals("forget"))) {
             return subjectRequest(args, out, err);
         }

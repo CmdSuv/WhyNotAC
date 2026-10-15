@@ -325,6 +325,6 @@ public final class PlayerSession {
     @Override
     public String toString() {
         Identity id = identity;
-        return "PlayerSession[" + connectionId + (id == null ? ", unbound" : ", " + id.name()) + ", " + remoteAddress + "]";
+        return "PlayerSession[" + connectionId + (id == null ? ", unbound" : ", " + id.name()) + "]"; // no address: this goes into logs
     }
 }

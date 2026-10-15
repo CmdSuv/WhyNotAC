@@ -14,15 +14,36 @@ that mentions them: their pseudonym is replaced by a fresh random UUID, the same
 file, so the recording still replays exactly as before but no longer links to the player. The
 rewritten file is read back and checked before it replaces the original.
 
+## What WhyNotAC stores
+
+| Where | What | Who it names | Kept |
+|---|---|---|---|
+| `plugins/WhyNotAC/recordings/<date>/*.wnrec` | Session recordings (only with `recording.enabled`) | Pseudonyms only | `recording.max-age-days` (14) |
+| `plugins/WhyNotAC/cases.db`, `plugins/WhyNotAC/cases/<id>.json` | Cases: one per finding of a check, for staff review. A dossier names the recording that holds the finding | The player's name and UUID | `cases.retention-days` (90) |
+| The server log (`logs/`) | Staff alert lines (player name, check, finding, case id). Warnings name a connection number and the player's name, never an IP address | The player's name | Your log retention (see below) |
+
+Retention is enforced at startup and then every hour.
+
+## Requests
+
+Run them on the **server console** while the server is running. Each one covers everything above
+except the server log: the player's recordings, the mentions in other players' recordings, the case
+rows and the dossiers. Players cannot run these commands, not even operators.
+
 | Talep / Request | Komut / Command |
 |---|---|
-| Hangi kayıtlar var? / Which recordings exist? | `java -jar WhyNotAC.jar find <recordings-dir> <secret-key> <uuid>` |
-| Kopya / Copy (access, portability) | `java -jar WhyNotAC.jar dump <file.wnrec> > copy.jsonl` for each file listed by `find` |
-| Silme / Erasure | `java -jar WhyNotAC.jar forget <recordings-dir> <secret-key> <uuid>` (dry run), then the same command with `--yes` |
+| Ne var? / What is stored? | `whynotac privacy find <uuid>` |
+| Kopya / Copy (access, portability) | `java -jar WhyNotAC.jar dump <file.wnrec> > copy.jsonl` for each recording listed by `find`; the dossiers listed by `find` are JSON already |
+| Silme / Erasure | `whynotac privacy forget <uuid>` (dry run), then `whynotac privacy forget <uuid> --yes` |
 
-`<recordings-dir>` is `plugins/WhyNotAC/recordings` and `<secret-key>` is
-`plugins/WhyNotAC/recording-secret.key`. The output is JSON. It lists every matching file with its
-size, start time (UTC), and whether the session had finished.
+The `recordings:` line is JSON. It lists every matching recording with its size, start time (UTC),
+and whether the session had finished, then the other players' recordings that mention the player.
+The `cases:` line lists the case ids and dossier files.
+
+The jar also works without the server, for recordings only (the cases database needs the server's
+SQLite driver): `java -jar WhyNotAC.jar find|forget <recordings-dir> <secret-key> <uuid> [--yes]`,
+where `<recordings-dir>` is `plugins/WhyNotAC/recordings` and `<secret-key>` is
+`plugins/WhyNotAC/recording-secret.key`.
 
 ## Finding the UUID
 
@@ -37,12 +58,17 @@ command in game) before you hand out a copy.
 ## Rules
 
 - **Run `forget` while the player is offline.** A session that is still running keeps writing its
-  `.wnrec.part` file. Kick the player first, or wait until they have left. Another player's session
+  `.wnrec.part` file, so the console command refuses while the player is online. Kick the player
+  first, or wait until they have left. Another player's session
   that is still running can mention them too: `forget --yes` cannot rewrite a `.wnrec.part` file and
   lists it under `unreadable_for_manual_review`. Run `forget --yes` again once that session has ended.
-- **Exit code 2** means some files could not be read, for example a crash left a damaged header.
-  They are listed under `unreadable_for_manual_review`. Their body can still hold the pseudonym,
+- **Incomplete results.** Some files could not be read, for example a crash left a damaged header
+  (the jar exits with code 2; the console says "incomplete"). They are listed under
+  `unreadable_for_manual_review` or "for manual review". Their body can still hold the pseudonym,
   so check them with `inspect`/`dump`, or delete them.
+- **The server log** is not covered: alert lines name players. Paper keeps old logs in `logs/`
+  without a limit. Delete old logs on a schedule that matches your privacy notice, or search them
+  for the player's name when you handle a request.
 - **Backups** are outside the tool's reach. Delete the same files from your backups, or document
   that backups expire within the retention period.
 - **Retention** is enforced automatically (`recording.max-age-days`, default 14). Keep the

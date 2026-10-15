@@ -36,7 +36,7 @@ public final class Alerts implements ShadowVerdict.CaseListener {
             return;
         }
         PlayerSession.Identity player = c.session().identity();
-        String name = player == null ? c.session().remoteAddress() : player.name();
+        String name = player == null ? "connection #" + c.session().connectionId() : player.name();
         String key = name + "/" + c.evidence().check();
         long now = c.createdEpochMillis();
         long[] last = lastAlert.computeIfAbsent(key, k -> new long[] {Long.MIN_VALUE / 2, 0});

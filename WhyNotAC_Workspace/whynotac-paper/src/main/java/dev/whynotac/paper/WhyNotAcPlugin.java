@@ -8,6 +8,7 @@ import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.TickCost;
 import dev.whynotac.paper.network.PacketInterceptor;
+import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.InventoryVerifier;
 import dev.whynotac.paper.world.SelfVerifier;
@@ -87,7 +88,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         cases = new CaseStore(getDataPath().resolve("cases.db"), getDataPath().resolve("cases"),
                 session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session),
                 getPluginMeta().getVersion(), getLogger());
-        cases.retain(Math.max(1, getConfig().getInt("cases.retention-days", 90)));
+        int caseRetentionDays = Math.max(1, getConfig().getInt("cases.retention-days", 90));
+        cases.retain(caseRetentionDays);
+        Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> cases.retain(caseRetentionDays), 20L * 3600, 20L * 3600);
         alerts = new Alerts(this);
         verdict.addListener(cases);
         verdict.addListener(alerts);
@@ -135,7 +138,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
-                new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, this), this);
+                new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, this),
+                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, this), this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");

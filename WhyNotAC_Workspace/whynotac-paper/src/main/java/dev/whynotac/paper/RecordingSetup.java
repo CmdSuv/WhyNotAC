@@ -19,7 +19,7 @@ import org.bukkit.configuration.ConfigurationSection;
 /** Builds the recorder from {@code config.yml}; nothing is created when recording is disabled. */
 final class RecordingSetup {
 
-    private static final String SECRET_FILE = "recording-secret.key";
+    static final String SECRET_FILE = "recording-secret.key";
 
     private RecordingSetup() {}
 

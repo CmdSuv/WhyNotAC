@@ -3,6 +3,7 @@ package dev.whynotac.paper.command;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.network.PacketInterceptor;
+import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.InventoryVerifier;
 import dev.whynotac.paper.world.SelfVerifier;
@@ -42,10 +43,12 @@ public final class WhyNotCommand implements BasicCommand {
     private final EntityVerifier entities;
     private final InventoryVerifier inventory;
     private final SelfVerifier self;
+    private final SubjectRequests privacy;
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
-            CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, SelfVerifier self, org.bukkit.plugin.Plugin plugin) {
+            CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, SelfVerifier self, SubjectRequests privacy,
+            org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
@@ -55,6 +58,7 @@ public final class WhyNotCommand implements BasicCommand {
         this.entities = entities;
         this.inventory = inventory;
         this.self = self;
+        this.privacy = privacy;
         this.plugin = plugin;
     }
 
@@ -161,6 +165,8 @@ public final class WhyNotCommand implements BasicCommand {
                     sender.sendMessage(Component.text("  " + note, NamedTextColor.GRAY));
                 }
             }, error -> sender.sendMessage(Component.text("WhyNotAC self " + target.getName() + ": " + error, NamedTextColor.RED)));
+        } else if (args.length >= 1 && args[0].equalsIgnoreCase("privacy")) {
+            privacy.handle(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("stats")) {
             sender.sendMessage(Component.text("WhyNotAC stats " + stats.get(), NamedTextColor.GRAY));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
@@ -169,7 +175,7 @@ public final class WhyNotCommand implements BasicCommand {
                 sender.sendMessage(Component.text(" " + session + " ticks=" + session.clientTicks(), NamedTextColor.GRAY));
             }
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id>",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id> | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
         }
     }
@@ -184,7 +190,7 @@ public final class WhyNotCommand implements BasicCommand {
         LatencySnapshot latency = session.latency(System.nanoTime());
         PlayerSession.Counters counters = session.counters();
         List<String> lines = new ArrayList<>();
-        lines.add("== WhyNotAC: " + target.getName() + " (" + session.remoteAddress() + ", connection #" + session.connectionId() + ")");
+        lines.add("== WhyNotAC: " + target.getName() + " (connection #" + session.connectionId() + ")");
         lines.add(String.format(Locale.ROOT, "RTT last %.3f ms | smoothed %.3f | jitter %.3f | min %.3f | max %.3f",
                 latency.lastRttMillis(), latency.smoothedRttMillis(), latency.jitterMillis(), latency.minRttMillis(), latency.maxRttMillis()));
         lines.add("Transactions sent " + latency.sent() + " acked " + latency.acknowledged() + " pending " + latency.pending()

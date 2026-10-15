@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -37,6 +38,9 @@ import java.util.stream.Collectors;
  *
  * <p>Everything happens on one writer thread with a bounded queue: the analysis thread hands a case
  * over and returns at once; a full queue drops the case (counted, logged), never blocks.
+ *
+ * <p>A case names its player (name and UUID): staff review it. {@link #subject} finds and deletes one
+ * player's cases for a data-subject request, {@link #retain} deletes old ones.
  */
 public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseable {
 
@@ -44,6 +48,9 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
     public record StoredCase(String id, long createdEpochMillis, String check, int checkVersion, String evidenceClass, String lifecycle,
             String playerName, String playerId, String identity, long fromSequence, long toSequence, String summary,
             String fingerprint, String recording, String dossier) {}
+
+    /** One player's cases: the case ids and dossier files found, and what was deleted. */
+    public record Subject(List<String> cases, List<String> dossiers, long deletedRows, long deletedDossiers, List<String> failures) {}
 
     static final int MAX_QUEUED = 10_000;
 
@@ -58,6 +65,7 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
         return thread;
     });
     private final AtomicInteger queued = new AtomicInteger();
+    int retentionBatch = 10_000; // rows per retention round; tests use a small one
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong stored = new AtomicLong();
     private Connection connection; // writer thread only
@@ -97,6 +105,11 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
                 queued.decrementAndGet();
             }
         });
+    }
+
+    /** Stores a case row and its dossier as {@link #opened} does (tests). */
+    void add(StoredCase row, String dossier) {
+        writer.execute(() -> write(row, dossier));
     }
 
     private void write(StoredCase row, String dossier) {
@@ -148,29 +161,132 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
         });
     }
 
-    /** Deletes cases (rows and dossiers) older than {@code days}: privacy retention. */
+    /**
+     * Deletes cases (rows and dossiers) older than {@code days}: privacy retention. Rows go in batches until
+     * none is left; dossier files older than the cutoff go too, also those without a row (written while
+     * the database was unavailable).
+     */
     public void retain(int days) {
         writer.execute(() -> {
-            Connection db = connection();
-            if (db == null) {
-                return;
-            }
             long cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days);
-            List<StoredCase> old = query("SELECT * FROM cases WHERE created_at < ? LIMIT 100000", -1, Long.toString(cutoff));
-            for (StoredCase c : old) {
+            Connection db = connection();
+            if (db != null) {
+                List<StoredCase> old;
+                do {
+                    old = query("SELECT * FROM cases WHERE created_at < ? ORDER BY created_at LIMIT " + retentionBatch, -1, Long.toString(cutoff));
+                    for (StoredCase c : old) {
+                        deleteDossier(Path.of(c.dossier()), null);
+                    }
+                } while (deleteRows(db, old) && old.size() == retentionBatch);
+            }
+            for (Path file : dossierFiles()) {
                 try {
-                    Files.deleteIfExists(Path.of(c.dossier()));
+                    if (Files.getLastModifiedTime(file).toMillis() < cutoff) {
+                        deleteDossier(file, null);
+                    }
                 } catch (IOException e) {
-                    logger.log(Level.WARNING, "WhyNotAC could not delete dossier " + c.dossier(), e);
+                    logger.log(Level.WARNING, "WhyNotAC could not check dossier " + file, e);
                 }
             }
-            try (PreparedStatement delete = db.prepareStatement("DELETE FROM cases WHERE created_at < ?")) {
-                delete.setLong(1, cutoff);
-                delete.executeUpdate();
-            } catch (SQLException e) {
-                logger.log(Level.WARNING, "WhyNotAC case retention failed", e);
-            }
         });
+    }
+
+    /**
+     * A data-subject request: the cases of the player {@code playerId}, found by their rows and by the
+     * {@code playerId} of every dossier file (a dossier is written even when its row is not); with
+     * {@code delete}, rows and dossiers are deleted. {@code callback} runs on the writer thread.
+     */
+    public void subject(UUID playerId, boolean delete, Consumer<Subject> callback) {
+        writer.execute(() -> {
+            String id = playerId.toString();
+            java.util.Set<String> ids = new java.util.TreeSet<>();
+            java.util.Set<Path> files = new java.util.TreeSet<>();
+            List<String> failures = new ArrayList<>();
+            Connection db = connection();
+            List<StoredCase> rows = db == null ? List.of() : query("SELECT * FROM cases WHERE player_id = ?", -1, id);
+            for (StoredCase c : rows) {
+                ids.add(c.id());
+                if (Files.exists(Path.of(c.dossier()))) {
+                    files.add(Path.of(c.dossier()));
+                }
+            }
+            String field = "\"playerId\": \"" + id + "\"";
+            for (Path file : dossierFiles()) {
+                try {
+                    if (Files.readString(file, StandardCharsets.UTF_8).contains(field)) {
+                        files.add(file);
+                        String name = file.getFileName().toString();
+                        ids.add(name.substring(0, name.length() - ".json".length()));
+                    }
+                } catch (IOException e) {
+                    failures.add(file.toString());
+                }
+            }
+            long deletedRows = 0;
+            long deletedDossiers = 0;
+            if (delete) {
+                for (Path file : files) {
+                    if (deleteDossier(file, failures)) {
+                        deletedDossiers++;
+                    }
+                }
+                if (db != null) {
+                    try (PreparedStatement statement = db.prepareStatement("DELETE FROM cases WHERE player_id = ?")) {
+                        statement.setString(1, id);
+                        deletedRows = statement.executeUpdate();
+                    } catch (SQLException e) {
+                        logger.log(Level.WARNING, "WhyNotAC could not delete the cases of a player", e);
+                        failures.add(database.toString());
+                    }
+                }
+            }
+            if (db == null && Files.exists(database)) {
+                failures.add(database.toString());
+            }
+            callback.accept(new Subject(List.copyOf(ids), files.stream().map(Path::toString).toList(), deletedRows, deletedDossiers,
+                    List.copyOf(failures)));
+        });
+    }
+
+    private boolean deleteRows(Connection db, List<StoredCase> rows) {
+        if (rows.isEmpty()) {
+            return false;
+        }
+        try (PreparedStatement delete = db.prepareStatement("DELETE FROM cases WHERE id = ?")) {
+            for (StoredCase c : rows) {
+                delete.setString(1, c.id());
+                delete.addBatch();
+            }
+            delete.executeBatch();
+            return true;
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "WhyNotAC case retention failed", e);
+            return false;
+        }
+    }
+
+    private boolean deleteDossier(Path file, List<String> failures) {
+        try {
+            return Files.deleteIfExists(file);
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "WhyNotAC could not delete dossier " + file, e);
+            if (failures != null) {
+                failures.add(file.toString());
+            }
+            return false;
+        }
+    }
+
+    private List<Path> dossierFiles() {
+        if (!Files.isDirectory(dossiers)) {
+            return List.of();
+        }
+        try (java.util.stream.Stream<Path> list = Files.list(dossiers)) {
+            return list.filter(f -> f.getFileName().toString().endsWith(".json") && Files.isRegularFile(f)).sorted().toList();
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "WhyNotAC could not list the dossiers in " + dossiers, e);
+            return List.of();
+        }
     }
 
     public long storedCount() {

@@ -138,11 +138,25 @@ sleep 2   # let the server see the disconnect and finalise the recording
 # After the probe: its violation (tick 200) may come later than the commands above on a slow machine.
 echo "whynotac cases" > "$FIFO"
 sleep 1
+# A data-subject request on the live server's console (docs/privacy/README.md): find, forget, find again.
+# The recordings and dossiers are put back after the stop, so the checks below still have them.
+wait_log() { for _ in $(seq 1 30); do [ "$(grep -c -- "$1" "$WORK_DIR/e2e-server.log")" -ge "$2" ] && return 0; sleep 1; done; echo "timed out waiting for: $1"; }
+PROBE_OFFLINE_UUID=$(python3 -I -c 'import hashlib, uuid; print(uuid.UUID(bytes=hashlib.md5(b"OfflinePlayer:WhyNotProbe").digest(), version=3))')
+echo "whynotac privacy find $PROBE_OFFLINE_UUID" > "$FIFO"
+wait_log "WhyNotAC privacy find" 1
+rm -rf "$WORK_DIR/kept" && mkdir "$WORK_DIR/kept"
+cp -r "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/kept/" 2>/dev/null || true
+echo "whynotac privacy forget $PROBE_OFFLINE_UUID --yes" > "$FIFO"
+wait_log "WhyNotAC privacy forget" 1
+echo "whynotac privacy find $PROBE_OFFLINE_UUID" > "$FIFO"
+wait_log "WhyNotAC privacy find" 2
 echo "stop" > "$FIFO"
 wait "$SERVER" || true
 trap - EXIT
 kill "$HOLDER" 2>/dev/null || true
 rm -f "$FIFO"
+rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases"
+cp -r "$WORK_DIR/kept/." "$WORK_DIR/plugins/WhyNotAC/"
 
 RECORDING=$(find "$WORK_DIR/plugins/WhyNotAC/recordings" -name '*.wnrec' | head -1)
 echo "--- recording: ${RECORDING:-<none>}"
@@ -167,6 +181,6 @@ for dossier in "$WORK_DIR"/plugins/WhyNotAC/cases/*.json; do
 done
 
 echo "--- server view (whynotac inspect)"
-grep -E '\[WhyNotAC\]|\[wnprobe\]|== WhyNotAC|RTT last|Transactions sent|View |Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ ' "$WORK_DIR/e2e-server.log" | sed -E 's/\x1b\[[0-9;]*m//g'
+sed -E 's/\x1b\[[0-9;]*m//g' "$WORK_DIR/e2e-server.log" | grep -E '\[WhyNotAC\]|\[wnprobe\]|== WhyNotAC|WhyNotAC privacy|INFO\]: (recordings|cases): |RTT last|Transactions sent|View |Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ '
 echo "--- verification"
 python3 -I "$HERE/verify_e2e.py" "$WORK_DIR/e2e-server.log" "$WORK_DIR/e2e-probe.json" "${RECORDING:-}" "$WORK_DIR/e2e-inspect.json" "$WORK_DIR/e2e-dump.jsonl" "$WORK_DIR"
