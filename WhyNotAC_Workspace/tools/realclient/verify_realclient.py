@@ -68,7 +68,11 @@ def main():
     swings = [p for p in inbound if p["type"] == "Swing"]
     check(len(swings) >= 5, f"left clicks became swings ({len(swings)})")
     slots = [p["slot"] for p in inbound if p["type"] == "SetCarriedItem"]
-    check(slots[-3:] == [1, 2, 0], f"hotbar keys 2, 3, 1 selected slots 1, 2, 0: {slots}")
+    check(slots[-4:] == [1, 2, 0, 4], f"hotbar keys 2, 3, 1, 5 selected slots 1, 2, 0, 4: {slots}")
+    clicks = [p for p in inbound if p["type"] == "ContainerClick"]
+    check(len(clicks) == 2 and [c["slot"] for c in clicks] == [37, 40] and all(c["containerId"] == 0 for c in clicks)
+          and clicks[0]["carried"].get("item") == "minecraft:stick" and clicks[0]["carried"].get("rangeHash") is not None,
+          f"two real clicks in the inventory screen moved the stick, its range hashed by the client: {clicks}")
     positions = [p for p in inbound if p["type"] == "MovePlayer" and p["hasPosition"]]
     xs = [float(p["x"]["f64"]) for p in positions]
     ys = [float(p["y"]["f64"]) for p in positions]
@@ -114,6 +118,14 @@ def main():
           f"every size the replica claims for the real client's entities is the server's own, a baby's, a slime's and an interaction's too ({n('sizeEqual')} equal, {n('sizeEqualNonDefault')} not the default, {n('sizeDifferent')} different)")
     check(m is not None and n("pickDifferent") == 0 and n("pickEqual") >= 5,
           f"whether the real client can pick each entity is the server's own ({n('pickEqual')} equal, {n('pickDifferent')} different, {n('pickUnknown')} unknown)")
+    # The hands WhyNotAC rebuilt from what the real client received and sent are the server's.
+    m = re.search(r"WhyNotAC inventory RealProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
+    fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
+    check(m is not None and fields.get("matches") == "true" and n("slotsKnown") == 10 and n("slotsEqual") == 10 and n("slotsUnknown") == 0
+          and fields.get("selectedKnown") == "true",
+          f"the real client's hotbar, off hand and selection, rebuilt from its packets and clicks, are the server's ({m.group(1) if m else 'no answer'})")
+    check(m is not None and fields.get("reachKnown") == "true" and fields.get("mainHand") == "4.5+0.25",
+          f"the moved stick's attack range is resolved from the client's own hash of it: mainHand={fields.get('mainHand')}")
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 

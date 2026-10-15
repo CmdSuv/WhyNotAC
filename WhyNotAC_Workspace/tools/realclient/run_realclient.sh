@@ -117,10 +117,17 @@ echo "execute at $NAME run summon minecraft:armor_stand ~3 ~ ~-3" > "$FIFO"
 echo "execute at $NAME run summon minecraft:slime ~5 ~ ~0.5 {NoAI:1b,PersistenceRequired:1b,Size:2}" > "$FIFO"
 echo "execute at $NAME run summon minecraft:interaction ~-5 ~ ~0.5 {width:1.75f,height:0.5f}" > "$FIFO"
 sleep 1; echo "execute at $NAME run tp @e[tag=wnz,limit=1] ~2.3172 ~ ~3.7071 45 10" > "$FIFO"
+# Items: a sword (hotbar 0), a stick with an attack range of its own (hotbar 1; the driver moves it to hotbar 4
+# with real clicks, which carry the client's own hash of the range) and a shield in the off hand.
+echo "give $NAME minecraft:diamond_sword" > "$FIFO"
+echo "give $NAME minecraft:stick[minecraft:attack_range={max_reach:4.5f,hitbox_margin:0.25f}]" > "$FIFO"
+echo "item replace entity $NAME weapon.offhand with minecraft:shield" > "$FIFO"
+sleep 1
 (cd "$HERE" && python3 -I drive.py "$DISPLAY_NUM") > "$WORK_DIR/drive.json"
 # The world WhyNotAC rebuilt from the client's packets, compared with the server's (verify_realclient.py reads the line).
 echo "whynotac world $NAME" > "$FIFO"
 echo "whynotac entities $NAME" > "$FIFO"
+echo "whynotac inventory $NAME" > "$FIFO"
 sleep 3
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=

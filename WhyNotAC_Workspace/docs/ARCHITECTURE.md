@@ -261,6 +261,28 @@ Kutunun boyutu türe, poza, bebek bayrağına, ölçek özelliğine ve bazı tü
   iddia edilmez.
 - **Doğrulama:** `/whynotac entities` boyutları ve seçilebilirliği sunucunun kendi hesabıyla karşılaştırır.
 
+## Client'ın elindeki eşya (Faz 2b-7)
+
+Saldırı menzili client'ın elindeki eşyaya bağlıdır: `minecraft:attack_range` bileşeni olan bir eşya kendi
+menziliyle vurur. İsabet tikin başında `getActiveItem()` ile, kontrol saldırı anında ana elle yapılır.
+- **Replika (`ClientInventory`):** hotbar, yedek el, seçili slot ve açık menü, client sırasıyla.
+  - Sunucunun paketleri flush parantezlerinin yerleştirdiği yerde, client'ın tıklamaları, seçimleri,
+    yaratıcı düzenlemeleri, bırakmaları ve eşya kullanımları gönderdiği yerde etkili olur.
+  - İşleyiciler `ClientPacketListener`'ınkiler: konteyner 0 her zaman envanter menüsü, binek menüsü
+    yalnızca client'ta at ya da nautilus varsa açılır, yeniden doğma yeni ve boş bir oyuncudur.
+- **Menü düzenleri (`MenuLayouts`):** her menü türünün hangi slotunun oyuncunun hotbar'ı olduğu, oyunun menü
+  sınıflarından üretilir (`MenuLayoutsDataTest`).
+- **Eşya kullanımı (`VanillaUseEffects`):** client tarafında envanteri değiştiren her blok, varlık ve eşya
+  etkileşimi sınıflandırıldı.
+  - Çoğu yalnızca küçültür ya da menzili olmayan bir yığına dönüştürür; o slotun menzil kümesine "yok"
+    eklenir.
+  - Zırh takası, yamadan gelen kalıntı ve allay'in geri verdiği eşya slotu bilinmez kılar.
+- **Hash çözümleme:** tıklamadaki hashlenmiş yığının menzili, sunucunun gönderdiği tam yığınlardan aynı
+  hash'le çözülür. Hash client'ın kendi hesabıdır (CRC32C).
+- **Sorgular:** şimdiki ana elin menzil kümesi, isabet anındaki ana elin kümesi (son tik sonundan beri seçilen
+  her slot) ve yedek elin kümesi.
+- **Doğrulama:** `/whynotac inventory` replikayı sunucunun envanteriyle turlarla karşılaştırır.
+
 ## Modüller
 
 | Modül | Durum | Sorumluluk |

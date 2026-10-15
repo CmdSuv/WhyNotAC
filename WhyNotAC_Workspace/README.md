@@ -32,7 +32,12 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > oyunun kendi `getDimensions`'ıyla 100.000'den fazla durumda karşılaştırıldı. Sunucunun kendi hesabıyla
 > E2E'de 16 boyut ve 16 seçilebilirlik, gerçek client'ta 12 boyut ve 12 seçilebilirlik eşit, hiç fark yok
 > ([rapor](docs/phases/PHASE-2B-6-REPORT.md)).
-> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md)
+> **Faz 2b-7:** client'ın elindeki eşya ve menzili. Hotbar, yedek el, seçili slot ve açık menü client
+> sırasıyla izleniyor; menü düzenleri oyunun menü sınıflarından üretiliyor. Client tarafında envanteri
+> değiştiren her blok, varlık ve eşya etkileşimi sınıflandırıldı. Tıklamaların hash'leri, sunucunun gönderdiği
+> menzil değerlerine çözülüyor. E2E'de ve gerçek client'ta gerçek tıklamalarla 10/10 slot sunucuyla eşit; taşınan
+> özel menzilli çubuğun menzili client'ın kendi hash'inden çözüldü ([rapor](docs/phases/PHASE-2B-7-REPORT.md)).
+> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md)
 
 ## Belgeler
 - [Kararlar](docs/DECISIONS.md): proje sahibinin kararları (tek koşulsuz kural: dünyanın en iyisi)
@@ -58,9 +63,9 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 293 test
+./gradlew build                       # tüm modüller + 332 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (84 kontrol)
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (96 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e  # aynı test, ViaVersion 5.12.0 + PacketEvents 2.14.0 yanında
 tools/realclient/run_realclient.sh /tmp/wnac-rc  # resmi client, Xvfb + XTest (bkz. tools/realclient/README.md)

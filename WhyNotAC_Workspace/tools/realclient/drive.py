@@ -73,9 +73,23 @@ def main():
     log("hotbar")
     i.tap("e", 0.05)
     time.sleep(0.8)
+    # The inventory screen releases the cursor to the window's centre (MouseHandler.releaseMouse). At GUI
+    # scale 2 (854x480) the screen's top left is (125, 37) in GUI pixels and hotbar slot k's centre is at
+    # (141 + 18k, 187), so in window pixels (282 + 36k, 374), relative to the centre (427, 240).
+    i.move(282 + 36 * 1 - 427, 374 - 240)
+    time.sleep(0.3)
+    i.click(1, 0.05)  # pick the stick up from hotbar 1
+    time.sleep(0.4)
+    i.move(36 * 3, 0)
+    time.sleep(0.3)
+    i.click(1, 0.05)  # put it into hotbar 4
+    time.sleep(0.4)
     i.tap("Escape", 0.05)
     time.sleep(0.8)
-    log("inventory")
+    log("inventory", moved=[1, 4])
+    i.tap("5", 0.05)
+    time.sleep(0.5)
+    log("hotbar", slot=4)
     i.tap("F2", 0.1)
     time.sleep(1.0)
     print(json.dumps({"actions": actions}))

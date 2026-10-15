@@ -22,6 +22,7 @@ public final class VanillaUseEffects implements ClientInventory.UseEffects {
 
     static final String USE_REMAINDER = "minecraft:use_remainder";
     static final String EQUIPPABLE = "minecraft:equippable";
+    static final String COMPASS = "minecraft:compass";
 
     private final ItemPrototypes prototypes;
 
@@ -38,6 +39,11 @@ public final class VanillaUseEffects implements ClientInventory.UseEffects {
         boolean swaps = stack.added().contains(EQUIPPABLE) || prototype.swapSlot() != null && !stack.removed().contains(EQUIPPABLE);
         if (swaps && use == ClientInventory.Use.ITEM) {
             return stack.count() <= 1 ? ClientInventory.Outcome.UNKNOWN : ClientInventory.Outcome.KEEP_OR_NONE_ADD;
+        }
+        if (use == ClientInventory.Use.ITEM_ON_BLOCK && COMPASS.equals(stack.item()) && stack.added().contains(Stack.ATTACK_RANGE)) {
+            // CompassItem.useOn on a lodestone, stacked or in creative: Inventory.add of held.transmuteCopy(COMPASS, 1),
+            // which keeps the whole patch, its attack range too
+            return ClientInventory.Outcome.KEEP_OR_NONE_ADD;
         }
         if (prototype.useRemainder() != null && !stack.removed().contains(USE_REMAINDER)) {
             ItemPrototypes.Prototype into = prototypes.get(prototype.useRemainder());

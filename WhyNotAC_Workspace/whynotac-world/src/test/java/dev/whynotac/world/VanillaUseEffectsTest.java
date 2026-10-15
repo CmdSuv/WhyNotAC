@@ -48,4 +48,12 @@ class VanillaUseEffectsTest {
         }
         assertEquals(ClientInventory.Outcome.UNKNOWN, effects.outcome(stack("othermod:thing", 1, List.of(), List.of()), ClientInventory.Use.ITEM));
     }
+
+    @Test
+    void aCompassOnALodestoneCopiesItsPatchIntoTheInventory() {
+        assertEquals(ClientInventory.Outcome.KEEP_OR_NONE_ADD,
+                effects.outcome(stack("minecraft:compass", 2, List.of(Stack.ATTACK_RANGE), List.of()), ClientInventory.Use.ITEM_ON_BLOCK));
+        assertEquals(ClientInventory.Outcome.KEEP_OR_NONE,
+                effects.outcome(stack("minecraft:compass", 2, List.of(), List.of()), ClientInventory.Use.ITEM_ON_BLOCK));
+    }
 }
