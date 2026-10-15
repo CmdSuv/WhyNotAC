@@ -8,7 +8,7 @@ import dev.whynotac.world.Replicas;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * Every shipped check, by id: the plugin registers them all after the replicas they read, {@code verify}
@@ -16,28 +16,31 @@ import java.util.function.Function;
  */
 public final class Checks {
 
-    private static final Map<String, Function<EvidenceSink, TimelineListener>> FACTORIES = Map.of(
-            TickFramingCheck.ID, TickFramingCheck::new,
-            ClientClockCheck.ID, ClientClockCheck::new);
+    private static final Map<String, BiFunction<EvidenceSink, Replicas, TimelineListener>> FACTORIES = Map.of(
+            TickFramingCheck.ID, (sink, replicas) -> new TickFramingCheck(sink),
+            ClientClockCheck.ID, (sink, replicas) -> new ClientClockCheck(sink),
+            AttackReachCheck.ID, AttackReachCheck::new);
     private static final Map<String, Integer> VERSIONS = Map.of(
             TickFramingCheck.ID, TickFramingCheck.VERSION,
-            ClientClockCheck.ID, ClientClockCheck.VERSION);
+            ClientClockCheck.ID, ClientClockCheck.VERSION,
+            AttackReachCheck.ID, AttackReachCheck.VERSION);
 
     private Checks() {}
 
     /** Every check, in a fixed order, reporting to {@code sink}; register them after {@code replicas}' trackers. */
     public static List<TimelineListener> all(EvidenceSink sink, Replicas replicas) {
-        return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink));
+        return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink), new AttackReachCheck(sink, replicas));
     }
 
     /** The check with this id, behind a fresh set of the replicas it may read, or null. */
     public static TimelineListener create(String id, EvidenceSink sink) {
-        Function<EvidenceSink, TimelineListener> factory = FACTORIES.get(id);
+        BiFunction<EvidenceSink, Replicas, TimelineListener> factory = FACTORIES.get(id);
         if (factory == null) {
             return null;
         }
-        List<TimelineListener> chain = new ArrayList<>(Replicas.vanilla().listeners());
-        chain.add(factory.apply(sink));
+        Replicas replicas = Replicas.vanilla();
+        List<TimelineListener> chain = new ArrayList<>(replicas.listeners());
+        chain.add(factory.apply(sink, replicas));
         return new TimelineListener() {
             @Override
             public void onEvent(PlayerSession session, TimelineEvent event) {
