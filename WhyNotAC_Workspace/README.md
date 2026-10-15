@@ -37,7 +37,14 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > değiştiren her blok, varlık ve eşya etkileşimi sınıflandırıldı. Tıklamaların hash'leri, sunucunun gönderdiği
 > menzil değerlerine çözülüyor. E2E'de ve gerçek client'ta gerçek tıklamalarla 10/10 slot sunucuyla eşit; taşınan
 > özel menzilli çubuğun menzili client'ın kendi hash'inden çözüldü ([rapor](docs/phases/PHASE-2B-7-REPORT.md)).
-> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md)
+> **Faz 2b-8:** ilk P-A kontrolü, saldırı mesafesi (SHADOW). Client'ın kendi oyuncusu (göz, binek, kamera,
+> oyun modu, menzil ve ölçek öznitelikleri) client sırasıyla izleniyor. Bir saldırı ancak her olası göz
+> konumu, hedefin her durumu ve isabetteki ile kontroldeki eşyaların her çifti için erişim dışındaysa kanıt
+> olur; oyuncuyu bildirimsiz itebilecek bir şey varsa iddia yoktur. Gerçek client 4.70 blokta çubukla ve
+> 2.98 blokta kılıçla saldırdı; ikisi de değerlendirildi ve menzil içi bulundu. 3.05 blokta client saldırıyı
+> hiç göndermedi. E2E'de 7 bloktan saldırı vaka açtı, menzil içi saldırı açmadı. Kayıtlar artık her UUID'yi
+> takma adla tutuyor ([rapor](docs/phases/PHASE-2B-8-REPORT.md)).
+> Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md) · [Faz 2b-8](docs/phases/PHASE-2B-8-REPORT.md)
 
 ## Belgeler
 - [Kararlar](docs/DECISIONS.md): proje sahibinin kararları (tek koşulsuz kural: dünyanın en iyisi)
@@ -63,9 +70,9 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 332 test
+./gradlew build                       # tüm modüller + 374 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
-tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (96 kontrol)
+tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (106 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e  # aynı test, ViaVersion 5.12.0 + PacketEvents 2.14.0 yanında
 tools/realclient/run_realclient.sh /tmp/wnac-rc  # resmi client, Xvfb + XTest (bkz. tools/realclient/README.md)

@@ -283,6 +283,27 @@ menziliyle vurur. İsabet tikin başında `getActiveItem()` ile, kontrol saldır
   her slot) ve yedek elin kümesi.
 - **Doğrulama:** `/whynotac inventory` replikayı sunucunun envanteriyle turlarla karşılaştırır.
 
+## Kendi oyuncu ve saldırı mesafesi (Faz 2b-8)
+
+- **Replika (`ClientSelf`):** saldırının isabet ve kontrol adımlarının okuduğu her şey, client sırasıyla.
+  - Göz: son gönderilen konumun 2·10⁻⁴ yakını (`sendPosition` eşiği). Oyuncuyu yanıt göndermeden hareket
+    ettiren bir paket o gönderimden sonra işlenmiş olabiliyorsa göz bilinmez: binek değişimi, yeni
+    oyuncu, blok geri alması, kendi kimliğine ışınlama ya da senkron, okunamayan paket.
+  - Gözün yüksekliği: duruş zarfının tamamı (0.2'den 1.62·ölçek'e). Ölçek önbellektedir, bir tik sonra
+    yenilenir; o ana kadar eski değer de olası kalır.
+  - Binek, kamera (`set_camera`), oyuncu listesindeki kendi oyun modu (önbelleğe alınan girdi) ve
+    `MultiPlayerGameMode` modu, `entity_interaction_range` ve ölçek, her önekteki değer kümesiyle.
+- **Kontrol (`AttackReachCheck`, P-A, SHADOW):** saldırı, olası her göz konumu, hedefin her durumu ve
+  isabetteki ile kontroldeki eşyaların her çifti için erişim dışındaysa kanıttır (`AttackReach`).
+  - Hedefin kutusu `ClientEntities`'in her durumundan gelir. Bir varlığın kutusu yeni bir ölçeği ancak bir
+    sonraki tikinin sonunda alır; o ana kadar boyut bilinmez sayılır.
+  - Oyuncuyu kendi tikinden sonra itebilen şeylerin yanında iddia yoktur: piston blokları, shulker
+    kutuları (`ClientWorld.mayMoveEntitiesIn`) ve shulker'lar (`ClientEntities.mayHaveNear`).
+  - İddia yok: yaratıcı ve izleyici mod, bilinmeyen göz, bilinmeyen menzil, herhangi bir durumunda
+    bilinmeyen ya da seçilemeyen hedef.
+- **Denetim (`tools/realclient/ReachAudit.java`):** bir kayıttaki her saldırıyı kontrolle aynı şekilde
+  değerlendirir: menzil içi (mesafe ve izin verilen), menzil dışı ya da iddia yok (nedeniyle).
+
 ## Modüller
 
 | Modül | Durum | Sorumluluk |
@@ -293,9 +314,9 @@ menziliyle vurur. İsabet tikin başında `getActiveItem()` ile, kontrol saldır
 | `whynotac-conformance` | **Faz 1 ✔** | Gerçek oyun sınıflarına karşı diferansiyel testler |
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
-| `whynotac-world` | **Faz 2b-3 ✔ · 2b-5 ✔ · 2b-6 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği. Client'ın gördüğü varlıklar: client sırasıyla, tick tick, aday durumlar ve yarıçaplarla; boyutları ve seçilebilirlikleri oyunun kendi tablosundan |
+| `whynotac-world` | **Faz 2b-3 ✔ · 2b-5 ✔ · 2b-6 ✔ · 2b-7 ✔ · 2b-8 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği. Client'ın gördüğü varlıklar: client sırasıyla, tick tick, aday durumlar ve yarıçaplarla; boyutları ve seçilebilirlikleri oyunun kendi tablosundan. Client'ın elindeki eşya ve menzili, kendi oyuncusunun gözü, modu ve öznitelikleri |
 | `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
-| `whynotac-analysis` | **Slice 0 ✔** | Kontroller (tick framing, client saati), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
+| `whynotac-analysis` | **Slice 0 ✔ · 2b-8 ✔** | Kontroller (tick framing, client saati, saldırı mesafesi), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |
 | `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve ARMED karar (Slice 0'ın SHADOW kararı şimdilik `whynotac-analysis`'te) |
 | `whynotac-storage` | Faz 4 (planlı) | Profil ve kanıt kalıcılığı |
