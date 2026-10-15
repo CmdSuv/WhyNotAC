@@ -530,8 +530,9 @@ public final class PacketTranslator {
                     abilities.getFlyingSpeed(), abilities.getWalkingSpeed());
             case ClientboundGameEventPacket event -> new ClientboundPacket.GameEvent((int) GAME_EVENT_TYPE_ID.get(event.getEvent()), event.getParam());
             case ClientboundLoginPacket login -> new ClientboundPacket.Login(
-                    login.playerId(), login.chunkRadius(), dimension(login.commonPlayerSpawnInfo()));
-            case ClientboundRespawnPacket respawn -> new ClientboundPacket.Respawn(dimension(respawn.commonPlayerSpawnInfo()));
+                    login.playerId(), login.chunkRadius(), dimension(login.commonPlayerSpawnInfo()), login.commonPlayerSpawnInfo().gameType().getId());
+            case ClientboundRespawnPacket respawn -> new ClientboundPacket.Respawn(
+                    dimension(respawn.commonPlayerSpawnInfo()), respawn.commonPlayerSpawnInfo().gameType().getId());
             case ClientboundSetChunkCacheRadiusPacket radius -> new ClientboundPacket.ChunkCacheRadius(radius.getRadius());
             case ClientboundTickingStatePacket state -> new ClientboundPacket.TickingState(state.tickRate(), state.isFrozen());
             case ClientboundTickingStepPacket step -> new ClientboundPacket.TickingStep(step.tickSteps());

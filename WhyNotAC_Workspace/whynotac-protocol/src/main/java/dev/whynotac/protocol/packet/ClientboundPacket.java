@@ -33,16 +33,26 @@ public sealed interface ClientboundPacket {
     /**
      * {@code ClientboundLoginPacket}: the client's own entity id, the server's chunk radius (the client
      * sizes its chunk storage from it) and its dimension. A login always gives the client a new, empty
-     * world. {@code chunkRadius} is -1 and {@code dimension} null in recordings older than these fields.
+     * world. {@code gameMode} is the client's game type id (0 survival, 1 creative, 2 adventure, 3
+     * spectator). {@code chunkRadius} and {@code gameMode} are -1 and {@code dimension} null in
+     * recordings older than these fields.
      */
-    record Login(int entityId, int chunkRadius, Dimension dimension) implements ClientboundPacket {}
+    record Login(int entityId, int chunkRadius, Dimension dimension, int gameMode) implements ClientboundPacket {
+        public Login(int entityId, int chunkRadius, Dimension dimension) {
+            this(entityId, chunkRadius, dimension, -1);
+        }
+    }
 
     /**
      * {@code ClientboundRespawnPacket}: dimension change or respawn; the client resets movement state.
-     * It only replaces its world when the dimension key changes. {@code dimension} is null in older
-     * recordings.
+     * It only replaces its world when the dimension key changes. {@code gameMode} is the client's new game
+     * type id. {@code dimension} is null and {@code gameMode} -1 in older recordings.
      */
-    record Respawn(Dimension dimension) implements ClientboundPacket {}
+    record Respawn(Dimension dimension, int gameMode) implements ClientboundPacket {
+        public Respawn(Dimension dimension) {
+            this(dimension, -1);
+        }
+    }
 
     /**
      * {@code ClientboundLevelChunkWithLightPacket}: one chunk column. {@code body} is the packet exactly as

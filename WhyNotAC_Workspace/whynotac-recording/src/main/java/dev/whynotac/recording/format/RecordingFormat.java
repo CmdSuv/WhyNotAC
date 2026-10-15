@@ -132,6 +132,10 @@ public final class RecordingFormat {
     public static final int CB_OPEN_SCREEN = 45;
     public static final int CB_MOUNT_SCREEN_OPEN = 46;
     public static final int CB_CONTAINER_CLOSE = 47;
+    /** Login with the chunk radius, the dimension and the game mode. */
+    public static final int CB_LOGIN_MODE = 48;
+    /** Respawn with the dimension and the game mode. */
+    public static final int CB_RESPAWN_MODE = 49;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

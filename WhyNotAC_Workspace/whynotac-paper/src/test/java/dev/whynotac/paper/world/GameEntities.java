@@ -109,6 +109,12 @@ final class GameEntities {
         return builder;
     }
 
+    /** An object of {@code type} without a constructor. */
+    @SuppressWarnings("unchecked")
+    static <T> T allocateObject(Class<T> type) throws ReflectiveOperationException {
+        return (T) ALLOCATE.invoke(UNSAFE, type);
+    }
+
     /** The static accessor {@code name} of {@code owner}. */
     @SuppressWarnings("unchecked")
     static <T> EntityDataAccessor<T> accessor(Class<?> owner, String name) throws ReflectiveOperationException {

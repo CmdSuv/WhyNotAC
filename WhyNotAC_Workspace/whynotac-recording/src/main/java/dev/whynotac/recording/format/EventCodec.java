@@ -394,14 +394,16 @@ public final class EventCodec {
                     body.writeLong(k.id());
                 }
                 case ClientboundPacket.Login l -> {
-                    body.writeVarInt(CB_LOGIN_WORLD);
+                    body.writeVarInt(CB_LOGIN_MODE);
                     body.writeZigZag(l.entityId());
                     body.writeZigZag(l.chunkRadius());
                     dimension(l.dimension());
+                    body.writeZigZag(l.gameMode());
                 }
                 case ClientboundPacket.Respawn r -> {
-                    body.writeVarInt(CB_RESPAWN_WORLD);
+                    body.writeVarInt(CB_RESPAWN_MODE);
                     dimension(r.dimension());
+                    body.writeZigZag(r.gameMode());
                 }
                 case ClientboundPacket.LevelChunk c -> {
                     body.writeVarInt(CB_LEVEL_CHUNK);
@@ -984,6 +986,8 @@ public final class EventCodec {
                 case CB_RESPAWN -> new ClientboundPacket.Respawn(null);
                 case CB_LOGIN_WORLD -> new ClientboundPacket.Login(zint(in), zint(in), dimension(in));
                 case CB_RESPAWN_WORLD -> new ClientboundPacket.Respawn(dimension(in));
+                case CB_LOGIN_MODE -> new ClientboundPacket.Login(zint(in), zint(in), dimension(in), zint(in));
+                case CB_RESPAWN_MODE -> new ClientboundPacket.Respawn(dimension(in), zint(in));
                 case CB_LEVEL_CHUNK -> {
                     int x = zint(in);
                     int z = zint(in);
