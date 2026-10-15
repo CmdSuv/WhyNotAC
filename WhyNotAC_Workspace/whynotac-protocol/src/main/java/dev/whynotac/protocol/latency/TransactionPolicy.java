@@ -65,6 +65,8 @@ public final class TransactionPolicy {
             case ClientboundPacket.OpenScreen ignored -> false;
             case ClientboundPacket.MountScreenOpen ignored -> false;
             case ClientboundPacket.ContainerClose ignored -> false;
+            // The player's own: finishing an item use stops using it (the slowdown ends).
+            case ClientboundPacket.EntityEvent event -> targetsSelf(event.entityId(), selfEntityId);
             // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).
             case ClientboundPacket.SetPassengers ignored -> true;
             case ClientboundPacket.MoveVehicle ignored -> true; // moves the vehicle the player controls

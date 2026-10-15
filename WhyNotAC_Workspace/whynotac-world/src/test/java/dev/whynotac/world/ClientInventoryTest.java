@@ -380,6 +380,30 @@ class ClientInventoryTest {
     }
 
     @Test
+    void finishingTheItemInUseMayLeaveNoneInEitherHand() {
+        out(new ClientboundPacket.SetPlayerInventory(2, LONG_STICK));
+        out(new ClientboundPacket.SetPlayerInventory(40, LONG_STICK));
+        sync();
+        outcome = ClientInventory.Outcome.KEEP_OR_NONE;
+        out(new ClientboundPacket.EntityEvent(99, ClientboundPacket.EntityEvent.FINISH_USING_ITEM)); // another entity's
+        sync();
+        assertEquals(Set.of(new ClientInventory.Reach(LONG, true)), inventory.mainHandReach());
+        out(new ClientboundPacket.EntityEvent(1, ClientboundPacket.EntityEvent.FINISH_USING_ITEM)); // the player's own
+        sync();
+        assertEquals(Set.of(new ClientInventory.Reach(LONG, true), ClientInventory.Reach.NONE), inventory.mainHandReach());
+        assertEquals(Set.of(new ClientInventory.Reach(LONG, true), ClientInventory.Reach.NONE), inventory.offhandReach());
+    }
+
+    @Test
+    void releasingTheItemInUseMayLeaveNone() {
+        out(new ClientboundPacket.SetPlayerInventory(2, LONG_STICK));
+        sync();
+        outcome = ClientInventory.Outcome.KEEP_OR_NONE;
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, null, null, 0));
+        assertEquals(Set.of(new ClientInventory.Reach(LONG, true), ClientInventory.Reach.NONE), inventory.mainHandReach());
+    }
+
+    @Test
     void aGapForgetsEverything() {
         inventory.onEvent(new TimelineEvent.Gap(sequence++, sequence, 3));
         ClientInventory.View view = only();

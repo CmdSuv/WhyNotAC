@@ -405,6 +405,15 @@ public sealed interface ClientboundPacket {
     /** {@code ClientboundContainerClosePacket}: the client goes back to its inventory menu. */
     record ContainerClose(int containerId) implements ClientboundPacket {}
 
+    /**
+     * {@code ClientboundEntityEventPacket}: an entity event by its id ({@code EntityEvent}). For the
+     * player's own entity, event 9 finishes the item it is using ({@code Player.handleEntityEvent} calls
+     * {@code completeUsingItem}): the stack is consumed and may turn into its remainder on the client.
+     */
+    record EntityEvent(int entityId, int event) implements ClientboundPacket {
+        public static final int FINISH_USING_ITEM = 9;
+    }
+
     record Unmodeled(String type) implements ClientboundPacket {}
 
     /**

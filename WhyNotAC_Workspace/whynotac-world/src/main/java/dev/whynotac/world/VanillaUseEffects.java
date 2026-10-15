@@ -23,6 +23,7 @@ public final class VanillaUseEffects implements ClientInventory.UseEffects {
     static final String USE_REMAINDER = "minecraft:use_remainder";
     static final String EQUIPPABLE = "minecraft:equippable";
     static final String COMPASS = "minecraft:compass";
+    static final String CONSUMABLE = "minecraft:consumable";
 
     private final ItemPrototypes prototypes;
 
@@ -35,6 +36,10 @@ public final class VanillaUseEffects implements ClientInventory.UseEffects {
         ItemPrototypes.Prototype prototype = prototypes.get(stack.item());
         if (prototype == null || stack.added().contains(USE_REMAINDER)) {
             return ClientInventory.Outcome.UNKNOWN;
+        }
+        if (prototype.stable() && use != ClientInventory.Use.ENTITY && !stack.added().contains(EQUIPPABLE) && !stack.added().contains(CONSUMABLE)) {
+            // nothing in its class's use methods changes the stack on the client, and no patched component makes it consumable or swap
+            return ClientInventory.Outcome.KEEP;
         }
         boolean swaps = stack.added().contains(EQUIPPABLE) || prototype.swapSlot() != null && !stack.removed().contains(EQUIPPABLE);
         if (swaps && use == ClientInventory.Use.ITEM) {

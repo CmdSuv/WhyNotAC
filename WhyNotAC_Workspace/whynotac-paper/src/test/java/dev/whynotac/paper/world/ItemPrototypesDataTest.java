@@ -28,6 +28,34 @@ class ItemPrototypesDataTest {
         Bootstrap.bootStrap();
     }
 
+    /** The methods through which a use changes the held stack on the client side (MultiPlayerGameMode.useItem, useItemOn, interact, releaseUsingItem, completeUsingItem). */
+    private static final List<String> USE_METHODS = List.of("use", "useOn", "interactLivingEntity", "finishUsingItem", "releaseUsing", "onUseTick");
+
+    /**
+     * Item classes whose overrides of those methods change nothing in the player's inventory on the client
+     * (decompiled 1.21.11, every path read: the changes are inside isClientSide / ServerLevel guards, or are
+     * durability, which is ServerLevel-only, or only start using the item).
+     */
+    private static final java.util.Set<String> CLIENT_STABLE_CLASSES = java.util.Set.of("AxeItem", "HoeItem", "ShovelItem", "ShearsItem", "TridentItem",
+            "BowItem", "CrossbowItem", "FishingRodItem", "SpyglassItem", "InstrumentItem", "BrushItem", "FlintAndSteelItem", "MapItem",
+            "FoodOnAStickItem", "DebugStickItem", "WrittenBookItem", "WritableBookItem", "LeadItem", "NameTagItem", "DyeItem", "SpawnEggItem",
+            "BoatItem", "FireworkRocketItem", "EmptyMapItem", "EnderEyeItem");
+
+    /** True if no class between the item's and Item declares one of the use methods, other than the client-stable ones. */
+    private static boolean stable(Item item) {
+        for (Class<?> k = item.getClass(); k != Item.class; k = k.getSuperclass()) {
+            if (CLIENT_STABLE_CLASSES.contains(k.getSimpleName())) {
+                continue;
+            }
+            for (java.lang.reflect.Method m : k.getDeclaredMethods()) {
+                if (USE_METHODS.contains(m.getName())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     @Test
     void theShippedPrototypesAreTheGamesOwn() throws IOException {
         List<String> lines = new ArrayList<>();
@@ -45,7 +73,10 @@ class ItemPrototypesDataTest {
             // Item.use swaps a swappable equippable a player may wear with the player's slot (Equippable.swapWithEquipmentSlot)
             String swap = equippable == null || !equippable.swappable() || !equippable.canBeEquippedBy(net.minecraft.world.entity.EntityType.PLAYER) ? "-"
                     : equippable.slot().getSerializedName();
-            lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap);
+            // Minecraft.startAttack: a piercing weapon in the main hand stabs (ServerboundPlayerAction STAB), it never attacks an entity
+            String piercing = item.components().has(DataComponents.PIERCING_WEAPON) ? "piercing" : "-";
+            String stable = stable(item) && !item.components().has(DataComponents.CONSUMABLE) && remainder == null && swap.equals("-") ? "stable" : "-";
+            lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap + "\t" + piercing + "\t" + stable);
         }
         lines.sort(null);
         String table = String.join("\n", lines) + "\n";

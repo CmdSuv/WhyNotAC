@@ -21,9 +21,12 @@ public final class ItemPrototypes {
 
     /**
      * One item: its default attack range (null: none), the item its use leaves (null: none), and the
-     * equipment slot a use swaps it with (a swappable {@code minecraft:equippable}; null: none).
+     * equipment slot a use swaps it with (a swappable {@code minecraft:equippable}; null: none), and whether
+     * it is a piercing weapon ({@code minecraft:piercing_weapon}: the main hand stabs instead of attacking),
+     * and whether a use never changes its stack on the client ({@code stable}: no use method of its class
+     * changes the inventory client-side, and it is not consumable, has no remainder and swaps with nothing).
      */
-    public record Prototype(String key, Stack.AttackRange attackRange, String useRemainder, String swapSlot) {}
+    public record Prototype(String key, Stack.AttackRange attackRange, String useRemainder, String swapSlot, boolean piercing, boolean stable) {}
 
     private static volatile ItemPrototypes vanilla;
 
@@ -47,7 +50,8 @@ public final class ItemPrototypes {
                         range = new Stack.AttackRange(Float.parseFloat(f[0]), Float.parseFloat(f[1]), Float.parseFloat(f[2]), Float.parseFloat(f[3]),
                                 Float.parseFloat(f[4]), Float.parseFloat(f[5]));
                     }
-                    items.put(cells[0], new Prototype(cells[0], range, cells[2].equals("-") ? null : cells[2], cells[3].equals("-") ? null : cells[3]));
+                    items.put(cells[0], new Prototype(cells[0], range, cells[2].equals("-") ? null : cells[2], cells[3].equals("-") ? null : cells[3],
+                            cells[4].equals("piercing"), cells[5].equals("stable")));
                 }
             }
             vanilla = table = new ItemPrototypes(Map.copyOf(items));
@@ -66,7 +70,7 @@ public final class ItemPrototypes {
 
     /**
      * The shipped table: {@code key attackRange(min:max:minCreative:maxCreative:margin:mobFactor | -) useRemainder(item | -)
-     * swapSlot(slot | -)}.
+     * swapSlot(slot | -) piercing(piercing | -) stable(stable | -)}.
      */
     public static String vanillaTable() {
         try (InputStream in = ItemPrototypes.class.getResourceAsStream(TABLE)) {

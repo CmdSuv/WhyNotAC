@@ -203,4 +203,15 @@ class InventoryPacketViewsTest {
                     PacketTranslator.rangeHash(range));
         }
     }
+
+    /** The player's own entity event 9 finishes the item in use: the client's decoded packet gives the id and the event. */
+    @Test
+    void anEntityEventKeepsItsEntityAndEvent() {
+        RegistryFriendlyByteBuf buf = bytes();
+        buf.writeInt(1234);
+        buf.writeByte(9);
+        net.minecraft.network.protocol.game.ClientboundEntityEventPacket packet =
+                net.minecraft.network.protocol.game.ClientboundEntityEventPacket.STREAM_CODEC.decode(buf);
+        assertEquals(new ClientboundPacket.EntityEvent(1234, ClientboundPacket.EntityEvent.FINISH_USING_ITEM), translator.outbound(packet, true));
+    }
 }

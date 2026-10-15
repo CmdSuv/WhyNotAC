@@ -245,6 +245,7 @@ public final class Generators {
             case "SetCursorItem" -> new ClientboundPacket.SetCursorItem(stack(false));
             case "SetPlayerInventory" -> new ClientboundPacket.SetPlayerInventory(anyInt(), stack(false));
             case "SetHeldSlot" -> new ClientboundPacket.SetHeldSlot(anyInt());
+            case "EntityEvent" -> new ClientboundPacket.EntityEvent(anyInt(), random.nextInt(256) - 128);
             case "OpenScreen" -> new ClientboundPacket.OpenScreen(anyInt(), anyString());
             case "MountScreenOpen" -> new ClientboundPacket.MountScreenOpen(anyInt(), anyInt(), anyInt());
             case "ContainerClose" -> new ClientboundPacket.ContainerClose(anyInt());

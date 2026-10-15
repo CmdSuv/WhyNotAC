@@ -101,6 +101,8 @@ public final class ClientInventory {
     private final Set<Integer> allays = new java.util.HashSet<>();
     private boolean allaysUnknown;
     private boolean loggedIn;
+    /** The client's own entity id (from the login), -1 before it. */
+    private int selfId = -1;
     private long overflows;
 
     public ClientInventory(ItemPrototypes prototypes, MenuLayouts layouts, UseEffects uses) {
@@ -151,12 +153,15 @@ public final class ClientInventory {
                 // one reuses it unless the client went through configuration (handleLogin).
                 Op o = new Op.Login(login.gameMode(), !loggedIn);
                 loggedIn = true;
+                selfId = login.entityId();
                 yield o;
             }
             case ClientboundPacket.Respawn respawn -> new Op.NewPlayer(respawn.gameMode());
             case ClientboundPacket.PlayerAbilities abilities -> new Op.Creative(abilities.instabuild() ? YES : NO);
             case ClientboundPacket.GameEvent event when event.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE ->
                     new Op.Creative(Math.round(event.param()) == CREATIVE ? YES : NO);
+            case ClientboundPacket.EntityEvent event when event.event() == ClientboundPacket.EntityEvent.FINISH_USING_ITEM
+                    && (selfId < 0 || event.entityId() == selfId) -> Op.FINISH_USE;
             case ClientboundPacket.AddEntity add -> {
                 if (ALLAY.equals(add.type())) {
                     if (allays.size() < MAX_ALLAYS) {
@@ -172,6 +177,7 @@ public final class ClientInventory {
                     allaysUnknown = true;
                     yield null;
                 }
+                case "minecraft:entity_event" -> Op.FINISH_USE; // maybe the player's own event 9
                 case "minecraft:container_set_content", "minecraft:container_set_slot", "minecraft:set_player_inventory",
                         "minecraft:set_held_slot", "minecraft:open_screen", "minecraft:mount_screen_open", "minecraft:container_close",
                         "minecraft:login", "minecraft:respawn" -> Op.FORGET;
@@ -214,6 +220,8 @@ public final class ClientInventory {
             case ServerboundPacket.ClientTickEnd ignored -> Event.TICK_END;
             case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.DROP_ITEM
                     || action.action() == ServerboundPacket.PlayerAction.Action.DROP_ALL_ITEMS -> Event.DROP;
+            // releaseUsingItem: Item.releaseUsing, then a remainder if that emptied the stack (either hand may be the used one)
+            case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM -> Event.RELEASE;
             case ServerboundPacket.Untranslatable untranslatable -> switch (untranslatable.type()) {
                 case "minecraft:container_click", "minecraft:set_carried_item", "minecraft:set_creative_mode_slot", "minecraft:use_item",
                         "minecraft:use_item_on", "minecraft:interact", "minecraft:container_close" -> Event.FORGET;
@@ -396,6 +404,7 @@ public final class ClientInventory {
                         out.add(u);
                         return;
                     }
+                    case Op.KIND_FINISH_USE -> usedHandsAfter(n, Use.ITEM); // completeUsingItem: consumed, maybe its remainder
                     default -> throw new IllegalStateException();
                 }
             }
@@ -474,6 +483,7 @@ public final class ClientInventory {
                     case Event.KIND_CLOSE -> n.open(0, layouts.inventory());
                     case Event.KIND_FORGET -> n.forgetHands();
                     case Event.KIND_TICK_END -> n.tickSelected = n.selected == UNKNOWN ? ALL_SLOTS : 1 << n.selected;
+                    case Event.KIND_RELEASE -> usedHandsAfter(n, Use.ITEM);
                     case Event.KIND_DROP -> {
                         // LocalPlayer.drop: the selected stack loses one or all, and nothing says which slot that is:
                         // the drop key is handled after the hotbar keys of the same tick, whose selection is only sent
@@ -487,6 +497,16 @@ public final class ClientInventory {
             }
         }
         return n;
+    }
+
+    /** After the item in use finished: the hand using it is the main hand or the off hand ({@code usingItemHand}, not sent). */
+    private void usedHandsAfter(State n, Use use) {
+        afterUse(n, OFFHAND, use);
+        for (int k = 0; k < HOTBAR; k++) {
+            if (n.selected == UNKNOWN || n.selected == k) {
+                afterUse(n, k, use);
+            }
+        }
     }
 
     /** The hand slot after a use of its stack. */
@@ -672,8 +692,11 @@ public final class ClientInventory {
     private sealed interface Op {
         int KIND_CLOSE = 0;
         int KIND_FORGET = 1;
+        int KIND_FINISH_USE = 2;
         Simple CLOSE = new Simple(KIND_CLOSE);
         Simple FORGET = new Simple(KIND_FORGET);
+        /** The player's own entity event 9: the item in use is finished on the client. */
+        Simple FINISH_USE = new Simple(KIND_FINISH_USE);
 
         record Content(int containerId, List<Stack> items) implements Op {}
 
@@ -704,12 +727,15 @@ public final class ClientInventory {
         int KIND_FORGET = 1;
         int KIND_TICK_END = 2;
         int KIND_DROP = 3;
+        int KIND_RELEASE = 4;
         Simple CLOSE = new Simple(KIND_CLOSE);
         /** The client did something to its inventory this replica cannot read. */
         Simple FORGET = new Simple(KIND_FORGET);
         Simple TICK_END = new Simple(KIND_TICK_END);
         /** The drop key: the selected stack loses one or all of its items. */
         Simple DROP = new Simple(KIND_DROP);
+        /** The use key released: the item in use is released. */
+        Simple RELEASE = new Simple(KIND_RELEASE);
 
         record Click(ServerboundPacket.ContainerClick click) implements Event {}
 

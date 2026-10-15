@@ -18,7 +18,14 @@ class VanillaUseEffectsTest {
     void mostUsesKeepTheStackOrLeaveNone() {
         for (ClientInventory.Use use : ClientInventory.Use.values()) {
             assertEquals(ClientInventory.Outcome.KEEP_OR_NONE, effects.outcome(stack("minecraft:golden_apple", 3, List.of(), List.of()), use));
-            assertEquals(ClientInventory.Outcome.KEEP_OR_NONE, effects.outcome(stack("minecraft:iron_spear", 1, List.of(), List.of()), use));
+            // a spear's use only starts using it: nothing changes the stack on the client, except feeding an entity
+            assertEquals(use == ClientInventory.Use.ENTITY ? ClientInventory.Outcome.KEEP_OR_NONE : ClientInventory.Outcome.KEEP,
+                    effects.outcome(stack("minecraft:iron_spear", 1, List.of(), List.of()), use));
+            assertEquals(use == ClientInventory.Use.ENTITY ? ClientInventory.Outcome.KEEP_OR_NONE : ClientInventory.Outcome.KEEP,
+                    effects.outcome(stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of()), use));
+            // unless a patch makes it consumable
+            assertEquals(ClientInventory.Outcome.KEEP_OR_NONE,
+                    effects.outcome(stack("minecraft:iron_spear", 1, List.of(VanillaUseEffects.CONSUMABLE), List.of()), use));
             // a stew's remainder is the bowl (its prototype's): no attack range
             assertEquals(ClientInventory.Outcome.KEEP_OR_NONE, effects.outcome(stack("minecraft:mushroom_stew", 1, List.of(), List.of()), use));
         }
