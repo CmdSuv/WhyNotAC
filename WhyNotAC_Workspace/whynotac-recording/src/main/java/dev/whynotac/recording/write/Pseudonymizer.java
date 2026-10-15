@@ -21,12 +21,23 @@ public final class Pseudonymizer {
     public static final int SECRET_BYTES = 32;
 
     private final SecretKeySpec key;
+    /** One initialised MAC per thread: recordings pseudonymise every entity id they hold. */
+    private final ThreadLocal<Mac> macs;
 
     public Pseudonymizer(byte[] secret) {
         if (secret.length < SECRET_BYTES) {
             throw new IllegalArgumentException("secret must be at least " + SECRET_BYTES + " bytes");
         }
         this.key = new SecretKeySpec(secret.clone(), "HmacSHA256");
+        this.macs = ThreadLocal.withInitial(() -> {
+            try {
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(key);
+                return mac;
+            } catch (GeneralSecurityException e) {
+                throw new IllegalStateException("HmacSHA256 unavailable", e);
+            }
+        });
     }
 
     public static byte[] newSecret() {
@@ -36,19 +47,13 @@ public final class Pseudonymizer {
     }
 
     public UUID pseudonym(UUID playerId) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(key);
-            byte[] digest = mac.doFinal(ByteBuffer.allocate(16).putLong(playerId.getMostSignificantBits()).putLong(playerId.getLeastSignificantBits()).array());
-            ByteBuffer bytes = ByteBuffer.wrap(digest, 0, 16);
-            long msb = bytes.getLong();
-            long lsb = bytes.getLong();
-            msb = (msb & ~0xF000L) | 0x8000L;                          // version 8
-            lsb = (lsb & 0x3FFF_FFFF_FFFF_FFFFL) | 0x8000_0000_0000_0000L; // RFC 4122 variant
-            return new UUID(msb, lsb);
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("HmacSHA256 unavailable", e);
-        }
+        byte[] digest = macs.get().doFinal(ByteBuffer.allocate(16).putLong(playerId.getMostSignificantBits()).putLong(playerId.getLeastSignificantBits()).array());
+        ByteBuffer bytes = ByteBuffer.wrap(digest, 0, 16);
+        long msb = bytes.getLong();
+        long lsb = bytes.getLong();
+        msb = (msb & ~0xF000L) | 0x8000L;                          // version 8
+        lsb = (lsb & 0x3FFF_FFFF_FFFF_FFFFL) | 0x8000_0000_0000_0000L; // RFC 4122 variant
+        return new UUID(msb, lsb);
     }
 
     /** Display name derived from the pseudonym; carries no information about the real name. */

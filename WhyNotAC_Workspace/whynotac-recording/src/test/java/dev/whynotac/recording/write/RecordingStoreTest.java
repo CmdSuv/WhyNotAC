@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
@@ -139,13 +140,26 @@ class RecordingStoreTest {
         player.onInbound(new ServerboundPacket.Unmodeled("minecraft:hello"), 10);
         player.bind(realId, realName, 99, 20);
         player.onInbound(new ServerboundPacket.MovePlayer(1, 2, 3, 4, 5, true, true, true, false), 30);
+        // The player list (its own entry and another player's) and the other player's entity carry UUIDs too.
+        UUID otherId = UUID.fromString("853c80ef-3c37-49fd-aa49-938b674adae6");
+        player.onOutbound(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(realId, 0),
+                new ClientboundPacket.PlayerInfoUpdate.Entry(otherId, 0))), 31);
+        player.onOutbound(ClientboundPacket.AddEntity.received(7, otherId, "minecraft:player", 0, 64, 0, dev.whynotac.math.vector.Vec3d.ZERO,
+                (byte) 0, (byte) 0, (byte) 0, 0), 32);
+        player.onOutbound(new ClientboundPacket.PlayerInfoRemove(List.of(otherId)), 33);
         player.disconnect(40);
         store.close();
 
         List<Path> recordings = files(dir, RecordingFormat.FILE_SUFFIX);
         assertEquals(1, recordings.size(), "the ping session must not create a file");
         List<TimelineEvent> events = read(recordings.getFirst());
-        assertEquals(4, events.size(), "pre-login packet, Bound, move, disconnect");
+        assertEquals(7, events.size(), "pre-login packet, Bound, move, player list, entity, list removal, disconnect");
+        UUID other = new Pseudonymizer(secret).pseudonym(otherId);
+        ClientboundPacket.PlayerInfoUpdate list = (ClientboundPacket.PlayerInfoUpdate) ((TimelineEvent.Outbound) events.get(3)).packet();
+        assertEquals(List.of(new Pseudonymizer(secret).pseudonym(realId), other), list.entries().stream().map(e -> e.profileId()).toList(),
+                "the same pseudonyms as Bound: a replay links the entries as live");
+        assertEquals(other, ((ClientboundPacket.AddEntity) ((TimelineEvent.Outbound) events.get(4)).packet()).uuid());
+        assertEquals(List.of(other), ((ClientboundPacket.PlayerInfoRemove) ((TimelineEvent.Outbound) events.get(5)).packet()).profileIds());
         TimelineEvent.Bound bound = (TimelineEvent.Bound) events.get(1);
         UUID pseudonym = new Pseudonymizer(secret).pseudonym(realId);
         assertEquals(pseudonym, bound.playerId());
@@ -155,11 +169,12 @@ class RecordingStoreTest {
         // Privacy: neither the name, the UUID nor the address appears anywhere in the decoded timeline or the raw file.
         String decoded = events.toString();
         byte[] raw = Files.readAllBytes(recordings.getFirst());
-        for (String secretText : List.of(realName, realId.toString(), "10.0.0.7")) {
+        for (String secretText : List.of(realName, realId.toString(), otherId.toString(), "10.0.0.7")) {
             assertFalse(decoded.contains(secretText), secretText);
             assertFalse(new String(raw, StandardCharsets.ISO_8859_1).contains(secretText), secretText);
         }
         assertFalse(containsUuidBytes(raw, realId));
+        assertFalse(containsUuidBytes(raw, otherId));
     }
 
     @Test

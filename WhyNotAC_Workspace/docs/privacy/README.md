@@ -1,9 +1,14 @@
 # Kişisel veri talepleri / Data-subject requests
 
 WhyNotAC recordings (`plugins/WhyNotAC/recordings/<date>/*.wnrec`) are pseudonymised. They contain
-no IP address, name, chat or commands. The player UUID is replaced by
-`HMAC-SHA256(recording-secret.key, uuid)`, so the server operator, and nobody else, can find one
+no IP address, name, chat or commands. Every UUID in a recording is replaced by
+`HMAC-SHA256(recording-secret.key, uuid)`: the recorded player's, and those of the other players in its
+player list and of the entities it was sent. So the server operator, and nobody else, can find one
 player's recordings. The plugin jar is also the tool for this.
+
+A recording is about one player (its header names that player's pseudonym, which `find` and `forget`
+match). Other players appear in it only by pseudonym, as entries of the recorded player's player list
+and as entities near them.
 
 | Talep / Request | Komut / Command |
 |---|---|

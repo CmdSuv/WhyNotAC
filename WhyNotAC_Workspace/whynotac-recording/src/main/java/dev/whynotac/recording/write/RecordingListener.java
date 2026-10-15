@@ -1,5 +1,6 @@
 package dev.whynotac.recording.write;
 
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -15,9 +16,11 @@ import java.util.UUID;
  * Records every session that reaches the game, from the first packet of its connection.
  *
  * <p>Events before login completes are buffered and only written once the session is bound to a
- * player: server-list pings and failed logins never create a file. The {@code Bound} event is
- * rewritten with the pseudonym; nothing else in the timeline identifies the player. Replay sessions
- * are never re-recorded.
+ * player: server-list pings and failed logins never create a file. Every UUID in the timeline is
+ * rewritten with its pseudonym: the {@code Bound} event's, and the profiles of the player list and the
+ * entities the client was sent (the player's own entry among them, and every other player's). The same
+ * UUID always gets the same pseudonym, so the replicas link a player-list entry to its entity in a replay
+ * exactly as live. Replay sessions are never re-recorded.
  */
 public final class RecordingListener implements TimelineListener {
 
@@ -72,7 +75,7 @@ public final class RecordingListener implements TimelineListener {
                 return;
             }
         } else {
-            state.writer.append(event instanceof TimelineEvent.Bound bound ? anonymise(bound) : event);
+            state.writer.append(anonymise(event));
         }
         if (event instanceof TimelineEvent.Disconnected) {
             state.writer.close();
@@ -95,7 +98,7 @@ public final class RecordingListener implements TimelineListener {
                 UUID.randomUUID(), subject, System.currentTimeMillis());
         state.writer = store.open(header);
         for (TimelineEvent pending : state.pending) {
-            state.writer.append(pending);
+            state.writer.append(anonymise(pending));
         }
         state.pending.clear();
         // Overflow dropped the newest pre-login events, i.e. those between the buffer and the login.
@@ -106,5 +109,36 @@ public final class RecordingListener implements TimelineListener {
     private TimelineEvent.Bound anonymise(TimelineEvent.Bound bound) {
         UUID subject = pseudonymizer.pseudonym(bound.playerId());
         return new TimelineEvent.Bound(bound.sequence(), bound.nanoTime(), subject, Pseudonymizer.displayName(subject), bound.entityId());
+    }
+
+    /** The event as it is recorded: every UUID it carries replaced by its pseudonym. */
+    public TimelineEvent anonymise(TimelineEvent event) {
+        return switch (event) {
+            case TimelineEvent.Bound bound -> anonymise(bound);
+            case TimelineEvent.Outbound out when carriesUuids(out.packet()) -> new TimelineEvent.Outbound(out.sequence(), out.nanoTime(), anonymise(out.packet()));
+            case TimelineEvent.OutboundDivergence d when carriesUuids(d.packet()) ->
+                    new TimelineEvent.OutboundDivergence(d.sequence(), d.nanoTime(), d.kind(), anonymise(d.packet()));
+            default -> event;
+        };
+    }
+
+    private static boolean carriesUuids(ClientboundPacket packet) {
+        return packet instanceof ClientboundPacket.PlayerInfoUpdate || packet instanceof ClientboundPacket.PlayerInfoRemove
+                || packet instanceof ClientboundPacket.AddEntity;
+    }
+
+    private ClientboundPacket anonymise(ClientboundPacket packet) {
+        return switch (packet) {
+            case ClientboundPacket.PlayerInfoUpdate u -> new ClientboundPacket.PlayerInfoUpdate(u.addPlayers(), u.updateGameMode(),
+                    u.entries().stream().map(e -> new ClientboundPacket.PlayerInfoUpdate.Entry(pseudonym(e.profileId()), e.gameMode())).toList());
+            case ClientboundPacket.PlayerInfoRemove r -> new ClientboundPacket.PlayerInfoRemove(r.profileIds().stream().map(this::pseudonym).toList());
+            case ClientboundPacket.AddEntity a -> new ClientboundPacket.AddEntity(a.entityId(), pseudonym(a.uuid()), a.type(), a.x(), a.y(), a.z(),
+                    a.clientMotion(), a.serverMotion(), a.xRot(), a.yRot(), a.yHeadRot(), a.data());
+            default -> packet;
+        };
+    }
+
+    private UUID pseudonym(UUID id) {
+        return id == null ? null : pseudonymizer.pseudonym(id);
     }
 }

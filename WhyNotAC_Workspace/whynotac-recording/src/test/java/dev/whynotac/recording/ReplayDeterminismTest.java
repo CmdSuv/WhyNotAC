@@ -49,7 +49,8 @@ class ReplayDeterminismTest {
         SessionRegistry registry = new SessionRegistry(pool, 1 << 20, (s, e, t) -> errors.add(t));
         List<TimelineEvent> live = java.util.Collections.synchronizedList(new ArrayList<>());
         registry.addListener((session, event) -> live.add(event));
-        registry.addListener(new RecordingListener(store, new Pseudonymizer(secret), 774, "1.21.11", "test"));
+        RecordingListener recorder = new RecordingListener(store, new Pseudonymizer(secret), 774, "1.21.11", "test");
+        registry.addListener(recorder);
 
         UUID realId = UUID.randomUUID();
         PlayerSession session = registry.open("127.0.0.1:1");
@@ -100,9 +101,9 @@ class ReplayDeterminismTest {
         assertEquals(live.size(), replayed.size());
         UUID pseudonym = new Pseudonymizer(secret).pseudonym(realId);
         for (int i = 0; i < live.size(); i++) {
-            TimelineEvent expected = live.get(i);
-            if (expected instanceof TimelineEvent.Bound b) {
-                expected = new TimelineEvent.Bound(b.sequence(), b.nanoTime(), pseudonym, Pseudonymizer.displayName(pseudonym), b.entityId());
+            TimelineEvent expected = recorder.anonymise(live.get(i));
+            if (live.get(i) instanceof TimelineEvent.Bound) {
+                assertEquals(pseudonym, ((TimelineEvent.Bound) expected).playerId());
             }
             BitExact.assertSame(expected, replayed.get(i));
         }

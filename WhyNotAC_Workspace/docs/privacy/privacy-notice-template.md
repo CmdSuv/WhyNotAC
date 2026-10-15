@@ -35,7 +35,8 @@ gönderdiği ve sunucunun size gönderdiği oyun paketlerinin bir kısmı kayded
 
 **Takma adlandırma.** Kayıtlarda Minecraft UUID'niz yerine, yalnızca bu sunucuda saklanan gizli bir
 anahtarla üretilmiş bir takma ad (HMAC-SHA256) bulunur. Anahtar olmadan bir kayıt size
-bağlanamaz.
+bağlanamaz. Başka bir oyuncunun kaydında, onun oyuncu listesinde ya da yakınındaki bir varlık olarak,
+yalnızca aynı takma adınızla geçebilirsiniz.
 
 **Amaç.** Hilelerin tespiti ve hile karşıtı sistemin doğrulanması. Özellikle dürüst oyuncuların
 yanlışlıkla cezalandırılmasının önlenmesi.
