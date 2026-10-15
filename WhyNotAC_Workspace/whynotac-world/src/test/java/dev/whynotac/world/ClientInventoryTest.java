@@ -25,7 +25,8 @@ class ClientInventoryTest {
     private static final Stack SHIELD = plain("minecraft:shield");
     private static final Stack APPLE = plain("minecraft:golden_apple");
     private static final Stack.AttackRange LONG = new Stack.AttackRange(0F, 4.5F, 0F, 6.5F, 0.25F, 1F);
-    private static final Stack LONG_STICK = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), LONG, false);
+    private static final int LONG_HASH = 0x5eed1234;
+    private static final Stack LONG_STICK = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), LONG, false, LONG_HASH);
 
     private ClientInventory inventory;
     private ClientInventory.Outcome outcome;
@@ -344,6 +345,21 @@ class ClientInventoryTest {
         sync();
         in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 3, 0F, 0F));
         assertEquals(APPLE, only().hotbar().get(2));
+    }
+
+    @Test
+    void aHashedStacksRangeIsTheOneAFullStackShowedWithItsHash() {
+        out(new ClientboundPacket.SetPlayerInventory(3, LONG_STICK));
+        sync();
+        // the client moves it: the click carries only the hash
+        Stack moved = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), null, true, LONG_HASH);
+        click(0, 39, "PICKUP", changed(39, Stack.EMPTY));
+        click(0, 41, "PICKUP", changed(41, moved));
+        in(new ServerboundPacket.SetCarriedItem(5));
+        assertEquals(Set.of(new ClientInventory.Reach(LONG, true)), inventory.mainHandReach());
+        Stack other = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), null, true, LONG_HASH + 1);
+        click(0, 41, "PICKUP", changed(41, other));
+        assertEquals(Set.of(ClientInventory.Reach.UNKNOWN), inventory.mainHandReach());
     }
 
     @Test

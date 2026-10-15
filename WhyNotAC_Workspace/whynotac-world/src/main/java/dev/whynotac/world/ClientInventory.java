@@ -47,6 +47,8 @@ public final class ClientInventory {
     static final int SWAP_OFFHAND_BUTTON = 40;
     /** Beyond this many candidates the replica gives up and knows nothing until the server resends. */
     static final int MAX_CANDIDATES = 64;
+    /** Attack ranges remembered by hash; past this many, new ones stay unresolved (unknown). */
+    static final int MAX_RANGES = 4096;
     private static final int MAX_TRACKED_PINGS = 4096;
     private static final int UNKNOWN = -1;
     /** The off hand's index among the hand slots (hotbar 0..8, then the off hand). */
@@ -90,6 +92,8 @@ public final class ClientInventory {
     /** Pings not answered yet, in order: {id, sequence}. */
     private final ArrayDeque<long[]> pings = new ArrayDeque<>();
     private final List<Pending> pending = new ArrayList<>();
+    /** Every attack range a full stack showed, by the client's hash of it: what a hashed stack's range is. */
+    private final java.util.Map<Integer, Stack.AttackRange> rangesByHash = new java.util.HashMap<>();
     private List<State> candidates;
     private boolean loggedIn;
     private long overflows;
@@ -156,6 +160,19 @@ public final class ClientInventory {
         };
         if (op != null) {
             pending.add(new Pending(seq, op));
+            switch (op) {
+                case Op.Content content -> content.items().forEach(this::learn);
+                case Op.Slot slot -> learn(slot.item());
+                case Op.InventorySlot slot -> learn(slot.item());
+                default -> { }
+            }
+        }
+    }
+
+    /** Remembers a full stack's attack range under the client's hash of it. */
+    private void learn(Stack stack) {
+        if (stack != null && !stack.hashed() && stack.attackRange() != null && stack.rangeHash() != null && rangesByHash.size() < MAX_RANGES) {
+            rangesByHash.putIfAbsent(stack.rangeHash(), stack.attackRange());
         }
     }
 
@@ -163,7 +180,10 @@ public final class ClientInventory {
         Event event = switch (packet) {
             case ServerboundPacket.ContainerClick click -> click.carried() == null ? Event.FORGET : new Event.Click(click);
             case ServerboundPacket.SetCarriedItem carried -> new Event.Select(carried.slot());
-            case ServerboundPacket.SetCreativeModeSlot creative -> new Event.CreativeSlot(creative.slot(), creative.item());
+            case ServerboundPacket.SetCreativeModeSlot creative -> {
+                learn(creative.item());
+                yield new Event.CreativeSlot(creative.slot(), creative.item());
+            }
             case ServerboundPacket.UseItem use -> new Event.Used(use.hand(), Use.ITEM);
             case ServerboundPacket.UseItemOn use -> new Event.Used(use.hand(), Use.ITEM_ON_BLOCK);
             case ServerboundPacket.InteractEntity interact when interact.kind() != ServerboundPacket.InteractEntity.Kind.ATTACK && interact.hand() != null ->
@@ -487,8 +507,16 @@ public final class ClientInventory {
 
     // --- queries ------------------------------------------------------------------------------------------
 
-    /** The reach of one stack: empty, a patch that sets or clears {@code attack_range}, else the item's prototype. */
+    /**
+     * The reach of one stack: empty, a patch that sets or clears {@code attack_range}, else the item's
+     * prototype. A hashed stack's range is the one a full stack showed with the same hash (the client
+     * hashes its own stack: the same value hashes the same), else unknown.
+     */
     public Reach reach(Stack stack) {
+        if (stack != null && stack.hashed() && stack.added().contains(Stack.ATTACK_RANGE) && !stack.removed().contains(Stack.ATTACK_RANGE)) {
+            Stack.AttackRange range = stack.rangeHash() == null ? null : rangesByHash.get(stack.rangeHash());
+            return range == null ? Reach.UNKNOWN : new Reach(range, true);
+        }
         return reach(prototypes, stack);
     }
 

@@ -143,17 +143,21 @@ class InventoryPacketViewsTest {
         return stick;
     }
 
-    private static final Stack REACH_STICK = new Stack("minecraft:stick", 1, List.of("minecraft:attack_range", "minecraft:custom_name"),
-            List.of("minecraft:max_stack_size"), new Stack.AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F), false);
+    /** The model of {@link #reachStick()} (its hash needs the bootstrapped game). */
+    private static Stack reachStickModel() {
+        return new Stack("minecraft:stick", 1, List.of("minecraft:attack_range", "minecraft:custom_name"),
+            List.of("minecraft:max_stack_size"), new Stack.AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F), false,
+            PacketTranslator.rangeHash(new AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F)));
+    }
 
     @Test
     void stacksKeepTheirItemCountAndPatch() {
-        assertEquals(new ClientboundPacket.ContainerSetSlot(0, 7, 36, REACH_STICK), setSlot(0, 7, 36, reachStick()));
+        assertEquals(new ClientboundPacket.ContainerSetSlot(0, 7, 36, reachStickModel()), setSlot(0, 7, 36, reachStick()));
         Stack dirt = new Stack("minecraft:dirt", 12, List.of(), List.of(), null, false);
-        assertEquals(new ClientboundPacket.ContainerSetContent(3, 9, List.of(Stack.EMPTY, dirt, REACH_STICK), Stack.EMPTY),
+        assertEquals(new ClientboundPacket.ContainerSetContent(3, 9, List.of(Stack.EMPTY, dirt, reachStickModel()), Stack.EMPTY),
                 setContent(3, 9, List.of(ItemStack.EMPTY, new ItemStack(Items.DIRT, 12), reachStick()), ItemStack.EMPTY));
         assertEquals(new ClientboundPacket.SetCursorItem(dirt), cursor(new ItemStack(Items.DIRT, 12)));
-        assertEquals(new ClientboundPacket.SetPlayerInventory(40, REACH_STICK), playerInventory(40, reachStick()));
+        assertEquals(new ClientboundPacket.SetPlayerInventory(40, reachStickModel()), playerInventory(40, reachStick()));
         assertEquals(new ClientboundPacket.SetHeldSlot(4), translator.outbound(new ClientboundSetHeldSlotPacket(4), true));
     }
 
@@ -165,10 +169,38 @@ class InventoryPacketViewsTest {
         ServerboundContainerClickPacket click = new ServerboundContainerClickPacket(0, 5, (short) 12, (byte) 2, ClickType.SWAP, changed,
                 HashedStack.create(new ItemStack(Items.DIRT, 3), component -> 0));
         Stack hashedStick = new Stack("minecraft:stick", 1, List.of("minecraft:attack_range", "minecraft:custom_name"),
-                List.of("minecraft:max_stack_size"), null, true);
+                List.of("minecraft:max_stack_size"), null, true, 17);
         assertEquals(new ServerboundPacket.ContainerClick(0, 5, 12, 2, "SWAP",
                         List.of(new ServerboundPacket.ContainerClick.ChangedSlot(12, Stack.EMPTY), new ServerboundPacket.ContainerClick.ChangedSlot(38, hashedStick)),
                         new Stack("minecraft:dirt", 3, List.of(), List.of(), null, true)),
                 translator.inbound(click));
+    }
+
+    /**
+     * The client hashes each component of a clicked stack with {@code ClientPacketListener.decoratedHashOpsGenerator}
+     * (CRC32C over the registry-aware encoding); the translator's hash of a full stack's attack range is that
+     * same number, so a hashed stack resolves to the range a full stack showed.
+     */
+    @Test
+    void theRangeHashIsTheClientsHashOfTheComponent() {
+        net.minecraft.resources.RegistryOps<com.google.common.hash.HashCode> ops = registries.createSerializationContext(net.minecraft.util.HashOps.CRC32C_INSTANCE);
+        net.minecraft.network.HashedPatchMap.HashGenerator client = typed -> typed.encodeValue(ops).getOrThrow().asInt();
+        java.util.Random random = new java.util.Random(7);
+        for (int i = 0; i < 200; i++) {
+            AttackRange range = i == 0 ? new AttackRange(0F, 3F, 0F, 5F, 0.3F, 1F)
+                    : new AttackRange(random.nextFloat() * 64F, random.nextFloat() * 64F, random.nextFloat() * 64F, random.nextFloat() * 64F,
+                            random.nextFloat(), random.nextFloat() * 2F);
+            ItemStack stick = new ItemStack(Items.STICK);
+            stick.set(DataComponents.ATTACK_RANGE, range);
+            Stack full = PacketTranslator.stack(stick);
+            Int2ObjectOpenHashMap<HashedStack> changed = new Int2ObjectOpenHashMap<>();
+            changed.put(36, HashedStack.create(stick, client));
+            ServerboundPacket.ContainerClick click = (ServerboundPacket.ContainerClick) translator.inbound(
+                    new ServerboundContainerClickPacket(0, 1, (short) 36, (byte) 0, ClickType.PICKUP, changed, HashedStack.EMPTY));
+            Stack hashed = click.changed().getFirst().item();
+            assertEquals(full.rangeHash(), hashed.rangeHash(), range.toString());
+            assertEquals(client.apply(new net.minecraft.core.component.TypedDataComponent<>(DataComponents.ATTACK_RANGE, range)),
+                    PacketTranslator.rangeHash(range));
+        }
     }
 }

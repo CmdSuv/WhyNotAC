@@ -355,6 +355,7 @@ public final class PacketTranslator {
         List<String> added = new ArrayList<>();
         List<String> removed = new ArrayList<>();
         Stack.AttackRange range = null;
+        Integer hash = null;
         for (Map.Entry<net.minecraft.core.component.DataComponentType<?>, java.util.Optional<?>> entry : stack.getComponentsPatch().entrySet()) {
             String type = net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(entry.getKey()).toString();
             if (entry.getValue().isEmpty()) {
@@ -364,12 +365,23 @@ public final class PacketTranslator {
             added.add(type);
             if (entry.getValue().get() instanceof net.minecraft.world.item.component.AttackRange r) {
                 range = new Stack.AttackRange(r.minRange(), r.maxRange(), r.minCreativeRange(), r.maxCreativeRange(), r.hitboxMargin(), r.mobFactor());
+                hash = rangeHash(r);
             }
         }
         added.sort(null);
         removed.sort(null);
         return new Stack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), added, removed,
-                range, false);
+                range, false, hash);
+    }
+
+    /**
+     * The client's hash of an {@code attack_range} value, as {@code HashedPatchMap} computes it for a click
+     * ({@code ClientPacketListener.decoratedHashOpsGenerator}: CRC32C over the component's encoding). The
+     * value holds no registry element, so the registry context the client adds changes nothing.
+     */
+    public static int rangeHash(net.minecraft.world.item.component.AttackRange value) {
+        return net.minecraft.core.component.DataComponents.ATTACK_RANGE.codecOrThrow()
+                .encodeStart(net.minecraft.util.HashOps.CRC32C_INSTANCE, value).getOrThrow().asInt();
     }
 
     /** A stack the client hashed: item, count and the patch's types; no component values. */
@@ -387,7 +399,8 @@ public final class PacketTranslator {
         }
         added.sort(null);
         removed.sort(null);
-        return new Stack(key(item.item()), item.count(), added, removed, null, true);
+        return new Stack(key(item.item()), item.count(), added, removed, null, true,
+                item.components().addedComponents().get(net.minecraft.core.component.DataComponents.ATTACK_RANGE));
     }
 
     private static ServerboundPacket interact(ServerboundInteractPacket packet) {

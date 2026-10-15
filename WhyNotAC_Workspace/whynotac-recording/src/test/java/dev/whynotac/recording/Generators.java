@@ -263,7 +263,7 @@ public final class Generators {
         List<String> removed = java.util.stream.IntStream.range(0, random.nextInt(2)).mapToObj(n -> anyString()).toList();
         dev.whynotac.protocol.packet.Stack.AttackRange range = hashed || random.nextBoolean() ? null
                 : new dev.whynotac.protocol.packet.Stack.AttackRange(anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat());
-        return new dev.whynotac.protocol.packet.Stack(anyString(), anyInt(), added, removed, range, hashed);
+        return new dev.whynotac.protocol.packet.Stack(anyString(), anyInt(), added, removed, range, hashed, random.nextBoolean() ? anyInt() : null);
     }
 
     /** Next event with a strictly increasing sequence and arbitrary (also backwards) time steps. */
