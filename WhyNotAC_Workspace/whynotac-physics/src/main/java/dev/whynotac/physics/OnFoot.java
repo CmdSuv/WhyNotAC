@@ -207,6 +207,14 @@ public final class OnFoot {
         return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered, tick.speed);
     }
 
+    /**
+     * {@code LivingEntity.onClimbable} for {@code p} where it stands, as a player neither flying nor a spectator (see the
+     * instance method): what {@code isPushable} asks when another entity's tick pushes the player between its ticks.
+     */
+    public static boolean onClimbable(PlayerState p, Colliders.World world) throws Colliders.Unknown {
+        return new OnFoot(p, world, Conditions.VANILLA_DEFAULTS).onClimbable();
+    }
+
     private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,

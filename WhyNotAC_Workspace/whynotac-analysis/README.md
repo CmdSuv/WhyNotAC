@@ -48,8 +48,23 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   açlığı koşmayı sunucudan önce belirler). Çapa her olası kullanımı dener: hiçbiri ya da ellerdeki her yığın.
   İddia yok: blok değiştirebilen kullanım (kova, nilüfer), kendi kendine bitebilen kullanım (fırça, kese),
   bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
-- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, iskele...), itebilecek ya da
-  çarpışan bir varlık yakında (canlılar, tekneler, vagonlar), yerleşmemiş blok, piston, dünya sınırı yakın,
+- **Varlık itmeleri (`ClientEntities.pushers`, `ClientTeams`):** client'ta oyuncuyu yalnızca başka canlıların
+  tick'i iter (`LivingEntity.pushEntities`; client'ta `pushableBy` yalnız yerel oyuncuyu kabul eder): kutusu
+  oyuncununkiyle kesişen canlı, `Entity.push(Entity)` ile hareketine en çok 0.05 ekler. Yarasa, zırh askısı,
+  papağan, vex ve ejderha oyuncuyu itmez. Client varlıklarını tick listesine katıldıkları sırayla tick'ler
+  (`EntityTickList`). Oyuncudan sonra tick'leyenlerin itmesi oyuncunun kendi tick'inin bıraktığı duruma, öncekilerinki
+  tick'ten önceki paketlerden sonraki duruma uygulanır. Oyuncu girişte ve her yeniden doğuşta listeye en sona
+  katılır. Oyuncular eklenince katılır (hep tick'lenirler), diğerleri eklendiklerinde ya da sonra. Bu yüzden
+  oyuncudan sonra eklenen her varlık ondan sonra tick'ler. Oyuncu ancak canlıysa, izleyici değilse ve
+  tırmanılabilir bir blokta değilse itilir. Takımlar client'ın skor tablosundan gelir (`SetPlayerTeam`; Paper
+  `collisions.enable-player-collisions` kapalıyken her takımı NEVER yazar, çevirici bunu da izler). Karar
+  `pushableBy`'ın kurallarıyla verilir ve client'ın o tick tutabileceği her takım durumunda aynı olmalıdır. Bir
+  oyuncunun ya da evcil bir hayvanın takımı adından bilinmez: her takım denenir. Birden çok iticinin sırası
+  izlenmez, her sıra bir hipotezdir (en çok 3 itici).
+- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, iskele...), çarpışan ya da kendi yoluyla iten bir
+  varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
+  boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
+  böyle), itip itmediğine takımlar kesin karar vermiyor, yerleşmemiş blok, piston, dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
   duran oyuncu: 12 tik tuşsuz, en az 3 tik arayla bit bit aynı iki konum paketi, arada gönderim yok, sonda yerde.
@@ -57,16 +72,22 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   çalıştırılarak doğrulanır.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
-  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı
-  ve tırmanma bacaklarıyla): 3659 tikin 3237'si iddia edildi, 0 açıklanamayan, 1686/1686 tick'te client'ın durumu
-  kümede. Efekt modellerinin bilinçli
+  durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
+  az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma ve köylülere
+  yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri): 4131 tikin 4108'i
+  iddia edildi, 0 açıklanamayan, 1978/1978 tick'te client'ın durumu kümede, 24 itme izlendi; kalan 23 tik
+  yüklenmemiş chunk. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
+  da 0.05'i float yerine double alan model açıklanamayan tick verir. Efekt modellerinin bilinçli
   hataları (zıplama gücü, yavaş düşüş, havada süzülme, körlük) takipçide de açıklanamayan tik ya da kümede
   bulunmayan client durumu verir. `MovementCheckTest` aynı adımı koşan sentetik bir
   client'la (hız değiştiricileri gerçek fastutil tablosunda): dürüst hareket, belirsiz pencerede savrulma, çift
   W, hız ve yavaşlık efektiyle koşma, zıplama gücü, yavaş düşüş, havada süzülme, körlük, yemek (sonuna kadar),
-  kılıcın arkasından kalkan ve bırakması, mızrakla koşma ve çapadan önce kaldırılmış kalkanla yürüme açıklanır;
-  0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma, yok sayılan yavaşlık, verilmemiş zıplama
-  gücüyle zıplama, körken koşma ve yerken tam hızla yürüme kanıttır.
+  kılıcın arkasından kalkan ve bırakması, mızrakla koşma, çapadan önce kaldırılmış kalkanla yürüme, bir köylünün ve
+  iki köylünün itmesi ve hiç çarpışmayan takımda itilmemek açıklanır; client'ın belki işlemediği bir takım değişikliği
+  iddiayı yalnızca karar verdiği yerde bitirir. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
+  yok sayılan yavaşlık, verilmemiş zıplama gücüyle zıplama, körken koşma, yerken tam hızla yürüme ve itmeye karşı
+  durmak kanıttır. `ClientPushersTest` ve `ClientTeamsTest` itici sorgusunu (sıra, tick, belirsizlik) ve takım
+  kurallarını tek tek sınar.
 - **Maliyet:** gerçek client oturumunda tick başına ortalama 1.33 hipotez, ≈ 60 µs.
 
 ## Planlanan aileler

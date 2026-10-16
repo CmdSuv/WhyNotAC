@@ -147,13 +147,17 @@ class RecordingStoreTest {
         player.onOutbound(ClientboundPacket.AddEntity.received(7, otherId, "minecraft:player", 0, 64, 0, dev.whynotac.math.vector.Vec3d.ZERO,
                 (byte) 0, (byte) 0, (byte) 0, 0), 32);
         player.onOutbound(new ClientboundPacket.PlayerInfoRemove(List.of(otherId)), 33);
+        // A team names its entries: the player's own name, another player's, an entity's UUID.
+        UUID mobId = UUID.fromString("2b0f4c3d-5e6a-4b7c-8d9e-0f1a2b3c4d5e");
+        player.onOutbound(new ClientboundPacket.SetPlayerTeam("VerySecretTeam", ClientboundPacket.SetPlayerTeam.ADD, "NEVER",
+                List.of(realName, "OtherSecretPlayer", mobId.toString())), 34);
         player.disconnect(40);
         store.close();
 
         List<Path> recordings = files(dir, RecordingFormat.FILE_SUFFIX);
         assertEquals(1, recordings.size(), "the ping session must not create a file");
         List<TimelineEvent> events = read(recordings.getFirst());
-        assertEquals(7, events.size(), "pre-login packet, Bound, move, player list, entity, list removal, disconnect");
+        assertEquals(8, events.size(), "pre-login packet, Bound, move, player list, entity, list removal, team, disconnect");
         UUID other = new Pseudonymizer(secret).pseudonym(otherId);
         ClientboundPacket.PlayerInfoUpdate list = (ClientboundPacket.PlayerInfoUpdate) ((TimelineEvent.Outbound) events.get(3)).packet();
         assertEquals(List.of(new Pseudonymizer(secret).pseudonym(realId), other), list.entries().stream().map(e -> e.profileId()).toList(),
@@ -165,11 +169,17 @@ class RecordingStoreTest {
         assertEquals(pseudonym, bound.playerId());
         assertEquals(Pseudonymizer.displayName(pseudonym), bound.playerName());
         assertEquals(pseudonym, RecordingReader.open(recordings.getFirst()).header().subject());
+        ClientboundPacket.SetPlayerTeam team = (ClientboundPacket.SetPlayerTeam) ((TimelineEvent.Outbound) events.get(6)).packet();
+        assertEquals("team-1", team.team());
+        assertEquals("NEVER", team.collisionRule());
+        assertEquals(List.of(bound.playerName(), "entry-1", new Pseudonymizer(secret).pseudonym(mobId).toString()), team.players(),
+                "the player's own entry as its Bound name, an entity's as its UUID's pseudonym: a replay matches them as live");
 
         // Privacy: neither the name, the UUID nor the address appears anywhere in the decoded timeline or the raw file.
         String decoded = events.toString();
         byte[] raw = Files.readAllBytes(recordings.getFirst());
-        for (String secretText : List.of(realName, realId.toString(), otherId.toString(), "10.0.0.7")) {
+        for (String secretText : List.of(realName, realId.toString(), otherId.toString(), "10.0.0.7", "VerySecretTeam", "OtherSecretPlayer",
+                mobId.toString())) {
             assertFalse(decoded.contains(secretText), secretText);
             assertFalse(new String(raw, StandardCharsets.ISO_8859_1).contains(secretText), secretText);
         }

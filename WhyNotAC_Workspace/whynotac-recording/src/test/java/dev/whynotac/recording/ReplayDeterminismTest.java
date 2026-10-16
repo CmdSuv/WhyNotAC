@@ -100,8 +100,9 @@ class ReplayDeterminismTest {
         assertTrue(live.stream().anyMatch(e -> e instanceof TimelineEvent.Anomaly));
         assertEquals(live.size(), replayed.size());
         UUID pseudonym = new Pseudonymizer(secret).pseudonym(realId);
+        RecordingListener.Names names = new RecordingListener.Names("Steve", pseudonym);
         for (int i = 0; i < live.size(); i++) {
-            TimelineEvent expected = recorder.anonymise(live.get(i));
+            TimelineEvent expected = recorder.anonymise(live.get(i), names);
             if (live.get(i) instanceof TimelineEvent.Bound) {
                 assertEquals(pseudonym, ((TimelineEvent.Bound) expected).playerId());
             }

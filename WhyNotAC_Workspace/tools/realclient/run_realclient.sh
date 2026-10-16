@@ -228,6 +228,22 @@ lane 40.5 w/0.5 w,Button3/0.5 w,Button3,Control_L/1.5 w/0.5
 echo "item replace entity $NAME weapon.mainhand with minecraft:bow" > "$FIFO"
 echo "give $NAME minecraft:arrow 16" > "$FIFO"; sleep 0.5
 lane 40.5 w/0.5 w,Button3/1.5 w/1.0
+# Pushes, on a lane at z = 20.5: villagers without AI (added after the player, they tick after it and push it away
+# from them, LivingEntity.pushEntities): one walked into and stood in, one the player is placed inside, two side by
+# side; then in a team whose collision rule is never, which keeps every push off the player.
+for v in "44.5 -60 20.5" "50.5 -60 20.2" "50.5 -60 20.9" "56.5 -60 20.5"; do
+  echo "summon minecraft:villager $v {NoAI:1b,PersistenceRequired:1b,Silent:1b}" > "$FIFO"
+done
+sleep 1
+pushes() { echo "tp $NAME $1 -60 $2 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+pushes 41.5 20.5 w/1.0 -/1.5
+pushes 44.6 20.7 -/1.5
+pushes 47.5 20.5 w/1.0 -/1.5 d/0.5 -/1.0
+for c in "team add wnc" "team modify wnc collisionRule never" "team join wnc $NAME"; do echo "$c" > "$FIFO"; done
+sleep 0.5
+pushes 53.5 20.5 w/1.0 -/1.5
+for c in "team leave $NAME" "team remove wnc"; do echo "$c" > "$FIFO"; done
+sleep 0.5
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2

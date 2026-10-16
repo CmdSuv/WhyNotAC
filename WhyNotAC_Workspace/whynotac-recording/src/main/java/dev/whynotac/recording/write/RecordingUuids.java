@@ -7,8 +7,9 @@ import java.util.function.UnaryOperator;
 
 /**
  * Every UUID a timeline event carries, and the same event with each one mapped: the {@code Bound} event's
- * player, the profiles of the player list ({@code PlayerInfoUpdate}, {@code PlayerInfoRemove}) and the
- * entities the client was sent ({@code AddEntity}), in either view of an outbound packet.
+ * player, the profiles of the player list ({@code PlayerInfoUpdate}, {@code PlayerInfoRemove}), the
+ * entities the client was sent ({@code AddEntity}) and the entities a team lists by UUID ({@code SetPlayerTeam}),
+ * in either view of an outbound packet.
  */
 public final class RecordingUuids {
 
@@ -40,7 +41,24 @@ public final class RecordingUuids {
 
     private static boolean carriesUuids(ClientboundPacket packet) {
         return packet instanceof ClientboundPacket.PlayerInfoUpdate || packet instanceof ClientboundPacket.PlayerInfoRemove
-                || packet instanceof ClientboundPacket.AddEntity;
+                || packet instanceof ClientboundPacket.AddEntity || packet instanceof ClientboundPacket.SetPlayerTeam;
+    }
+
+    /** A team entry that is an entity's UUID (the scoreboard name of an entity that is not a player), mapped; any other unchanged. */
+    private static String entry(String name, UnaryOperator<UUID> map) {
+        return isUuid(name) ? map.apply(UUID.fromString(name)).toString() : name;
+    }
+
+    /** Whether a scoreboard name is a UUID as {@code Entity.getStringUUID} writes it. */
+    public static boolean isUuid(String name) {
+        if (name.length() != 36 || name.charAt(8) != '-') {
+            return false;
+        }
+        try {
+            return UUID.fromString(name).toString().equals(name);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private static ClientboundPacket map(ClientboundPacket packet, UnaryOperator<UUID> map) {
@@ -51,6 +69,8 @@ public final class RecordingUuids {
             case ClientboundPacket.PlayerInfoRemove r -> new ClientboundPacket.PlayerInfoRemove(r.profileIds().stream().map(safe).toList());
             case ClientboundPacket.AddEntity a -> new ClientboundPacket.AddEntity(a.entityId(), safe.apply(a.uuid()), a.type(), a.x(), a.y(), a.z(),
                     a.clientMotion(), a.serverMotion(), a.xRot(), a.yRot(), a.yHeadRot(), a.data());
+            case ClientboundPacket.SetPlayerTeam t -> new ClientboundPacket.SetPlayerTeam(t.team(), t.method(), t.collisionRule(),
+                    t.players().stream().map(n -> entry(n, safe)).toList());
             default -> packet;
         };
     }

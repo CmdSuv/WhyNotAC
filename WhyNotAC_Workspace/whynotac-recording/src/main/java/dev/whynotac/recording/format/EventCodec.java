@@ -639,6 +639,17 @@ public final class EventCodec {
                     body.writeZigZag(h.food());
                     body.writeFloat(h.saturation());
                 }
+                case ClientboundPacket.SetPlayerTeam t -> {
+                    body.writeVarInt(CB_SET_PLAYER_TEAM);
+                    string(t.team());
+                    body.writeZigZag(t.method());
+                    body.writeByte(t.collisionRule() == null ? 0 : 1);
+                    if (t.collisionRule() != null) {
+                        string(t.collisionRule());
+                    }
+                    body.writeVarInt(t.players().size());
+                    t.players().forEach(this::string);
+                }
                 case ClientboundPacket.InitializeBorder b -> {
                     body.writeVarInt(CB_INITIALIZE_BORDER);
                     body.writeDouble(b.centerX());
@@ -1195,6 +1206,17 @@ public final class EventCodec {
                 case CB_ENTITY_EVENT -> new ClientboundPacket.EntityEvent(zint(in), zint(in));
                 case CB_SET_CAMERA -> new ClientboundPacket.SetCamera(zint(in));
                 case CB_SET_HEALTH -> new ClientboundPacket.SetHealth(in.readFloat(), zint(in), in.readFloat());
+                case CB_SET_PLAYER_TEAM -> {
+                    String team = string(in);
+                    int method = zint(in);
+                    String rule = in.readUnsignedByte() != 0 ? string(in) : null;
+                    int n = in.readVarInt();
+                    List<String> players = new ArrayList<>(Math.min(n, 1024));
+                    for (int i = 0; i < n; i++) {
+                        players.add(string(in));
+                    }
+                    yield new ClientboundPacket.SetPlayerTeam(team, method, rule, players);
+                }
                 case CB_INITIALIZE_BORDER -> new ClientboundPacket.InitializeBorder(in.readDouble(), in.readDouble(), in.readDouble(), in.readDouble(),
                         in.readLong(), zint(in));
                 case CB_SET_BORDER_CENTER -> new ClientboundPacket.SetBorderCenter(in.readDouble(), in.readDouble());

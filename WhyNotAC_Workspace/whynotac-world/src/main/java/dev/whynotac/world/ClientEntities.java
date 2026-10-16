@@ -83,6 +83,9 @@ public final class ClientEntities {
     private boolean complete;
     private boolean playerInfoComplete;
     private int selfId = NONE;
+    /** The sequence of the packet that made the client's current player ({@code Login}, {@code Respawn}): it joined the tick list then. */
+    private long selfCreated = Long.MIN_VALUE;
+    private String whyNotKnown;
     private String dimension;
     private int minY = -64;
     private int serverChunkRadius = -1;
@@ -213,6 +216,7 @@ public final class ClientEntities {
             case ClientboundPacket.Login login -> {
                 // A new ClientPacketListener and ClientLevel: no entities, no player list.
                 selfId = login.entityId();
+                selfCreated = seq;
                 self = new Head(selfId, null, EntityTypes.PLAYER, true);
                 serverChunkRadius = login.chunkRadius();
                 playerInfo.clear();
@@ -221,6 +225,7 @@ public final class ClientEntities {
                 newLevel(seq, login.dimension());
             }
             case ClientboundPacket.Respawn respawn -> {
+                selfCreated = seq; // a new LocalPlayer, added to the level (and its tick list) last
                 // ClientPacketListener.handleRespawn makes a new ClientLevel only for another dimension.
                 if (respawn.dimension() == null || dimension == null || !respawn.dimension().key().equals(dimension)) {
                     newLevel(seq, respawn.dimension());
@@ -366,7 +371,7 @@ public final class ClientEntities {
             tracks.put(id, new Track(id, complete ? State.absent() : State.lostAll()));
         }
         enqueue(seq, id, new Op.Add(seq, kind, add.type(), player, minY, add.x(), add.y(), add.z(), VanillaMath.unpackDegrees(add.yRot()),
-                VanillaMath.unpackDegrees(add.xRot()), VanillaMath.unpackDegrees(add.yHeadRot()), maybe, player ? spectator(add.uuid()) : 0));
+                VanillaMath.unpackDegrees(add.xRot()), VanillaMath.unpackDegrees(add.yHeadRot()), maybe, player ? spectator(add.uuid()) : 0, add.uuid()));
     }
 
     /** The entity leaves the client's level: its passengers stop riding it, it stops riding its vehicle. */
@@ -1173,6 +1178,8 @@ public final class ClientEntities {
 
     /** One client tick for this candidate, with the client's prefix X in (lower, upper]. */
     private void tick(State s, long lower, long upper, List<State> out) {
+        s.ticked = false;
+        s.tickedKnown = true;
         if (!s.present || s.lostAll) {
             out.add(s);
             return;
@@ -1199,7 +1206,11 @@ public final class ClientEntities {
             out.add(s.copy());
             branches++;
         }
+        int from = out.size();
         tickNow(s, out);
+        for (int i = from; i < out.size(); i++) {
+            out.get(i).ticked = true;
+        }
     }
 
     private void tickNow(State s, List<State> out) {
@@ -1521,6 +1532,11 @@ public final class ClientEntities {
      * counted: {@code self}, and entities WhyNotAC lost track of only if the replica is complete.
      */
     public boolean mayHavePusherNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
+        return mayHaveNear(self, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, false);
+    }
+
+    private boolean mayHaveNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius,
+            boolean collidersOnly) {
         if (!complete) {
             return true;
         }
@@ -1534,8 +1550,8 @@ public final class ClientEntities {
                 if (near[0] || st.known() && !st.present()) {
                     return;
                 }
-                String type = st.known() ? st.type() : head != null ? head.type : null;
-                if (type != null && !pushesOrCollides(type)) {
+                String type = st.type() != null ? st.type() : head != null ? head.type : null;
+                if (type != null && types.known(type) && !(collidersOnly ? collidesOrPushesItself(type) : pushesOrCollides(type))) {
                     return;
                 }
                 if (!st.known() || type == null || st.size() == null) {
@@ -1562,8 +1578,173 @@ public final class ClientEntities {
 
     /** Living entities are pushable (armour stands too, conservatively), boats collide and push, minecarts push. */
     private boolean pushesOrCollides(String type) {
-        return types.kind(type).living() || type.endsWith("_boat") || type.endsWith("_raft") || type.equals("minecraft:minecart")
-                || type.endsWith("_minecart");
+        return types.kind(type).living() || collidesOrPushesItself(type);
+    }
+
+    /**
+     * Types that stop the player's movement or push it otherwise than {@link #pushers} follows: boats collide
+     * ({@code canBeCollidedWith}) and push in their tick, minecarts push, shulkers and happy ghasts collide.
+     */
+    private static boolean collidesOrPushesItself(String type) {
+        return type.endsWith("_boat") || type.endsWith("_raft") || type.equals("minecraft:minecart") || type.endsWith("_minecart")
+                || type.equals("minecraft:shulker") || type.equals("minecraft:happy_ghast");
+    }
+
+    /**
+     * {@link #mayHavePusherNear} for the entities that collide with the player or push it otherwise than living entities
+     * do in their tick ({@link #collidesOrPushesItself}), and those of a type or size not known: the living ones that
+     * push are followed by {@link #pushers}.
+     */
+    public boolean mayHaveColliderNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
+        return mayHaveNear(self, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, true);
+    }
+
+    /**
+     * Living types whose tick pushes no player ({@code LivingEntity.pushEntities} and {@code doPush} overridden, decompiled
+     * 1.21.11): bats push nothing, armour stands only minecarts, parrots no player; vexes (in their tick) and the ender
+     * dragon have no physics ({@code Entity.push} skips them).
+     */
+    static final Set<String> PUSH_NO_PLAYER = Set.of("minecraft:bat", "minecraft:armor_stand", "minecraft:parrot", "minecraft:vex",
+            "minecraft:ender_dragon");
+    /** {@code TamableAnimal.getTeam}: a tamed one without a team of its own is in its owner's. */
+    static final Set<String> TAMABLE = Set.of("minecraft:wolf", "minecraft:cat", "minecraft:parrot", "minecraft:nautilus", "minecraft:zombie_nautilus");
+
+    /**
+     * A living entity whose tick just pushed the client's own player, or would have if teams and the player allow it
+     * ({@code LivingEntity.pushEntities}: its box met the player's): where it is, and its scoreboard name (another
+     * entity's UUID; null where not known: a player's profile name, a tamable animal's owner's team).
+     */
+    public record Pusher(int id, double x, double z, String scoreboardName) {}
+
+    /**
+     * The living entities whose tick in the client's last tick met the player's box {@code (minX..maxZ)} (strictly, as
+     * {@code AABB.intersects}), of those ticking after the player ({@code beforeSelf} false) or before it: the client
+     * ticks its entities in the order they joined its tick list ({@code EntityTickList}, linked). The player joins at its
+     * creation ({@code Login}, {@code Respawn}); players are always ticking and join when added; any other entity joins
+     * when added in a ticking chunk or later, so every entity added after the player ticks after it. Null when not known:
+     * an entity of a pushing type that may meet the box with its position, size, tick or order not known exactly, one
+     * WhyNotAC lost, a collider ({@link #collidesOrPushesItself}) that may meet it, or the player's own creation not
+     * certainly processed. Read right after the tick (the candidates as the tick left them).
+     */
+    public List<Pusher> pushers(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, boolean beforeSelf,
+            double unknownRadius) {
+        if (!complete) {
+            whyNotKnown = "entities WhyNotAC lost track of";
+            return null;
+        }
+        List<Pusher> out = new ArrayList<>(0);
+        for (Track track : tracks.values()) {
+            if (track.id == self) {
+                continue;
+            }
+            Head head = heads.get(track.id);
+            Pusher effect = null;
+            boolean first = true;
+            for (State st : track.candidates) {
+                Pusher e;
+                try {
+                    e = push(track.id, st, head, minX, minY, minZ, maxX, maxY, maxZ, beforeSelf, unknownRadius);
+                } catch (NotKnown unknown) {
+                    whyNotKnown = unknown.getMessage();
+                    return null;
+                }
+                if (!first && !java.util.Objects.equals(effect, e)) {
+                    whyNotKnown = "an entity whose possible states push differently";
+                    return null;
+                }
+                first = false;
+                effect = e;
+            }
+            if (effect != null) {
+                out.add(effect);
+            }
+        }
+        if (!out.isEmpty() && !self().passengers.isEmpty()) {
+            whyNotKnown = "the player carries passengers"; // Entity.push: not while it does
+            return null;
+        }
+        return out;
+    }
+
+    /** Why the last {@link #pushers} that returned null did. */
+    public String whyNotKnown() {
+        return whyNotKnown;
+    }
+
+    /** One candidate's push at the box ({@link #pushers}): the pusher, or null for none; throws where it is not known. */
+    private Pusher push(int id, State st, Head head, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
+            boolean beforeSelf, double unknownRadius) throws NotKnown {
+        if (!st.lostAll && !st.present) {
+            return null;
+        }
+        // A candidate lost in place keeps its type (a non-living entity the client moves, which may have fallen out of the world).
+        String type = st.type != null ? st.type : head != null ? head.type : null;
+        if (type != null && types.known(type) && (!types.kind(type).living() && !collidesOrPushesItself(type) || PUSH_NO_PLAYER.contains(type))) {
+            return null;
+        }
+        if (st.lostAll || type == null) {
+            throw new NotKnown(type == null ? "an entity WhyNotAC lost track of" : type + " WhyNotAC lost track of");
+        }
+        if (st.lostPosition) {
+            Vec3d base = serverOrderBase(id);
+            if (base == null || base.x() > minX - unknownRadius && base.x() < maxX + unknownRadius && base.y() > minY - unknownRadius
+                    && base.y() < maxY + unknownRadius && base.z() > minZ - unknownRadius && base.z() < maxZ + unknownRadius) {
+                throw new NotKnown(type + " whose position the client does not take from the packets");
+            }
+            return null;
+        }
+        EntitySizes.Size size = st.view().size();
+        if (size == null) {
+            if (st.x > minX - unknownRadius && st.x < maxX + unknownRadius && st.y > minY - unknownRadius && st.y < maxY + unknownRadius
+                    && st.z > minZ - unknownRadius && st.z < maxZ + unknownRadius) {
+                throw new NotKnown(type + " of a size not known");
+            }
+            return null;
+        }
+        EntitySizes.Box b = size.box(st.x, st.y, st.z);
+        double r = st.rPos;
+        if (!(b.minX() - r <= maxX && b.maxX() + r >= minX && b.minY() - r <= maxY && b.maxY() + r >= minY && b.minZ() - r <= maxZ
+                && b.maxZ() + r >= minZ)) {
+            return null; // cannot meet the box
+        }
+        if (r != 0 || !st.tickedKnown || collidesOrPushesItself(type)) {
+            throw new NotKnown(collidesOrPushesItself(type) ? type + ", which collides" : r != 0 ? type + " whose position is not known exactly"
+                    : type + " that may or may not have ticked");
+        }
+        boolean meets = minX < b.maxX() && maxX > b.minX() && minY < b.maxY() && maxY > b.minY() && minZ < b.maxZ() && maxZ > b.minZ();
+        if (!meets || !st.ticked || st.player && st.spectator == 1) {
+            return null; // apart, not ticked, or a spectator (noPhysics)
+        }
+        if (st.player && st.spectator != 0) {
+            throw new NotKnown("a player that may be a spectator");
+        }
+        if (selfCreated >= certain) {
+            throw new NotKnown("the player itself may have been made again"); // since the last certain point
+        }
+        // Its place in the tick list against the player's.
+        boolean before;
+        if (st.addedSeq > selfCreated) {
+            before = false;
+        } else if (st.player) {
+            before = true;
+        } else {
+            throw new NotKnown(type + " from before the player was made (its place in the tick list is not followed)");
+        }
+        if (before != beforeSelf) {
+            return null;
+        }
+        return new Pusher(id, st.x, st.z, st.player || TAMABLE.contains(type) || st.uuid == null ? null : st.uuid.toString());
+    }
+
+    /** {@link #push}: not known, and why. */
+    private static final class NotKnown extends Exception {
+        NotKnown(String reason) {
+            super(reason, null, false, false);
+        }
+    }
+
+    private Head self() {
+        return self;
     }
 
     /** Whether the client has this entity now. */
@@ -1813,7 +1994,7 @@ public final class ClientEntities {
 
         /** {@code spectator}: for a player, whether its PlayerInfo says spectator (1, 0, -1 unknown). */
         record Add(long seq, EntityTypes.Kind kind, String type, boolean player, int minY, double x, double y, double z, float yRot, float xRot,
-                   float yHeadRot, boolean maybe, int spectator) implements Op {}
+                   float yHeadRot, boolean maybe, int spectator, UUID uuid) implements Op {}
 
         /** A player's PlayerInfo changed its game mode: spectator 1, 0, or -1 when no longer known. */
         record GameMode(long seq, int spectator) implements Op {}
@@ -1898,6 +2079,12 @@ public final class ClientEntities {
         // LivingEntity head
         int headSteps;
         double headTarget;
+        /** The entity ticked in the client's last tick ({@code ClientLevel.tickEntities}); {@code tickedKnown} false once candidates that disagree on it were merged. */
+        boolean ticked;
+        boolean tickedKnown = true;
+        /** The sequence of the {@code AddEntity} that made this entity object: where it joined the client's tick list relative to the player. */
+        long addedSeq = Long.MIN_VALUE;
+        UUID uuid;
         /** Pending ops of the track this candidate has processed. */
         int applied;
 
@@ -1915,6 +2102,8 @@ public final class ClientEntities {
         static State added(Op.Add add) {
             State s = new State();
             s.present = true;
+            s.addedSeq = add.seq();
+            s.uuid = add.uuid();
             s.kind = add.kind();
             s.type = add.type();
             s.player = add.player();
@@ -2000,6 +2189,10 @@ public final class ClientEntities {
             c.rotMoved = rotMoved;
             c.headSteps = headSteps;
             c.headTarget = headTarget;
+            c.ticked = ticked;
+            c.tickedKnown = tickedKnown;
+            c.addedSeq = addedSeq;
+            c.uuid = uuid;
             c.applied = applied;
             return c;
         }
@@ -2009,10 +2202,14 @@ public final class ClientEntities {
             if (applied != o.applied || present != o.present || lostAll != o.lostAll) {
                 return false;
             }
-            if (!present || lostAll) {
+            if (!present) {
                 return true;
             }
-            if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || minY != o.minY || lostPosition != o.lostPosition
+            if (lostAll) {
+                return java.util.Objects.equals(type, o.type); // lost in place: the type stays known
+            }
+            if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || addedSeq != o.addedSeq || minY != o.minY
+                    || lostPosition != o.lostPosition
                     || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
                     || Double.compare(shownScale, o.shownScale) != 0
                     || data0 != o.data0 || data1 != o.data1 || spectator != o.spectator) {
@@ -2036,6 +2233,7 @@ public final class ClientEntities {
                 return;
             }
             onGroundKnown &= o.onGroundKnown && onGround == o.onGround;
+            tickedKnown &= o.tickedKnown && ticked == o.ticked;
             if (lostPosition) {
                 return;
             }

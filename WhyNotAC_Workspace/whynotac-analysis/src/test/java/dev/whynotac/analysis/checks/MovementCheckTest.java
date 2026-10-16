@@ -10,6 +10,7 @@ import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
@@ -104,6 +105,11 @@ class MovementCheckTest {
     private OnFoot.Effects effects = OnFoot.Effects.NONE;
     /** The item the synthetic client uses (null: none), and what it sends from its keybinds at the start of the next tick. */
     private OnFoot.ItemUse use;
+    /** Villagers without AI (they stay where they were added; added after the player, they tick after it): {x, y, z}. */
+    private final List<double[]> villagers = new ArrayList<>();
+    /** Whether their pushes reach the player (teams); {@code ignorePushes}: the client drops them. */
+    private boolean pushedByVillagers = true;
+    private boolean ignorePushes;
     private final List<ServerboundPacket> keybinds = new ArrayList<>();
     // the server: its movement speed modifiers in its own order (an Object2ObjectArrayMap, insertion order), and
     // whether it sends them again when sprinting starts or stops (as it does: the modifier set changed)
@@ -265,6 +271,7 @@ class MovementCheckTest {
         }
         sentOnGround = post.onGround();
         sentCollision = post.horizontalCollision();
+        villagersPush();
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
         if (sprintSent && serverSendsSpeed) {
@@ -344,6 +351,49 @@ class MovementCheckTest {
         out(new ClientboundPacket.MobEffect(SELF, effect, 0, 600, 0));
         serverModifiers.add(new ClientboundPacket.UpdateAttributes.Modifier(modifier, amount, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL));
         sendSpeed(handled);
+    }
+
+    private void villager(int id, double x, double y, double z) {
+        out(new ClientboundPacket.AddEntity(id, new UUID(1, id), "minecraft:villager", x, y, z, Vec3d.ZERO, null, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        villagers.add(new double[] {x, y, z});
+    }
+
+    /**
+     * The villagers' ticks after the player's: {@code LivingEntity.pushEntities} finds the player where its box meets
+     * theirs ({@code EntityType.VILLAGER}: 0.6 by 1.95), then {@code Entity.push(Entity)} adds to its motion.
+     */
+    private void villagersPush() {
+        if (!pushedByVillagers || ignorePushes) {
+            return;
+        }
+        for (double[] v : villagers) {
+            float half = 0.6F / 2.0F;
+            float height = 1.95F;
+            Box b = player.box();
+            if (!(b.minX() < v[0] + half && b.maxX() > v[0] - half && b.minY() < v[1] + height && b.maxY() > v[1] && b.minZ() < v[2] + half
+                    && b.maxZ() > v[2] - half)) {
+                continue;
+            }
+            double d = v[0] - player.x();
+            double e = v[2] - player.z();
+            double f = Math.max(Math.abs(d), Math.abs(e));
+            if (f >= 0.01F) {
+                f = Math.sqrt(f);
+                d /= f;
+                e /= f;
+                double g = 1.0 / f;
+                if (g > 1.0) {
+                    g = 1.0;
+                }
+                d *= g;
+                e *= g;
+                d *= 0.05F;
+                e *= 0.05F;
+                Vec3d m = player.deltaMovement();
+                player = withDelta(player, new Vec3d(m.x() + -d, m.y() + 0.0, m.z() + -e));
+            }
+        }
     }
 
     private void ticks(int count, PlayerState.Keys keys, float yRot) throws Colliders.Unknown {
@@ -705,5 +755,63 @@ class MovementCheckTest {
         assertTrue(player.sprinting());
         assertEquals(List.of(), evidence);
         assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aVillagerPushingThePlayerIsFollowed() throws Exception {
+        ticks(5, NONE, 30.0F);
+        villager(100, 0.9, 64.0, 0.6); // its box meets the player's: it pushes the player away, tick by tick
+        ticks(20, NONE, 30.0F);
+        assertTrue(player.x() + 0.3 <= 0.6, "pushed clear of the villager: " + player);
+        villager(101, player.x() - 0.5, 64.0, player.z() - 0.3); // a second one on the other side, in the way
+        ticks(10, FORWARD, 200.0F);
+        walkAround();
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void standingAgainstAPushIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ignorePushes = true; // the client drops the villager's push
+        villager(100, 0.9, 64.0, 0.6);
+        ticks(5, NONE, 30.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+        assertEquals(MovementCheck.ID, evidence.get(0).check());
+    }
+
+    @Test
+    void aTeamThatNeverCollidesKeepsThePlayerFromBeingPushed() throws Exception {
+        out(new ClientboundPacket.SetPlayerTeam("calm", ClientboundPacket.SetPlayerTeam.ADD, "NEVER", List.of("me")));
+        sync();
+        pushedByVillagers = false; // EntitySelector.pushableBy: the player's rule is NEVER
+        ticks(5, NONE, 30.0F);
+        villager(100, 0.9, 64.0, 0.6);
+        ticks(20, NONE, 30.0F);
+        walkAround();
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aTeamChangeTheClientMayNotHaveHandledEndsTheClaimOnlyWhereItDecides() throws Exception {
+        ticks(5, NONE, 30.0F);
+        out(new ClientboundPacket.SetPlayerTeam("calm", ClientboundPacket.SetPlayerTeam.ADD, "NEVER", List.of("me")));
+        int unanswered = ping(); // not answered yet: the client may have handled the team or not
+        ticks(3, NONE, 30.0F);
+        assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), "no entity near: the teams decide nothing");
+        acknowledge(unanswered);
+        out(new ClientboundPacket.SetPlayerTeam("calm", ClientboundPacket.SetPlayerTeam.LEAVE, null, List.of("me")));
+        sync();
+        villager(100, 0.9, 64.0, 0.6);
+        ticks(2, NONE, 30.0F); // pushed
+        out(new ClientboundPacket.SetPlayerTeam("calm", ClientboundPacket.SetPlayerTeam.JOIN, null, List.of("me")));
+        unanswered = ping();
+        pushedByVillagers = false; // the client did handle it
+        ticks(2, NONE, 30.0F);
+        // the push at the end of the player's tick may or may not land: the next tick starts untracked
+        assertTrue(ticks.stream().anyMatch(t -> t.outcome() == MovementTracker.Outcome.UNTRACKED && t.reason().contains("teams")), String.valueOf(ticks));
+        acknowledge(unanswered);
+        assertEquals(List.of(), evidence);
     }
 }

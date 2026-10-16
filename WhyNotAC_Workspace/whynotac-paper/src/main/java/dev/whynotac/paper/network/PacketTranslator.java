@@ -42,6 +42,7 @@ import net.minecraft.network.protocol.game.ClientboundMoveVehiclePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundRotateHeadPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.protocol.game.ClientboundSetPlayerTeamPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
@@ -235,7 +236,7 @@ public final class PacketTranslator {
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
             "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
             "mount_screen_open", "container_close", "entity_event", "set_camera", "set_health", "initialize_border", "set_border_center",
-            "set_border_lerp_size", "set_border_size");
+            "set_border_lerp_size", "set_border_size", "set_player_team");
 
     /**
      * Packets about other entities that come by the hundred per tick: the edge decodes them (the client's
@@ -270,7 +271,7 @@ public final class PacketTranslator {
             ClientboundOpenScreenPacket.class, ClientboundMountScreenOpenPacket.class,
             ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class, ClientboundSetCameraPacket.class,
             ClientboundSetHealthPacket.class, ClientboundInitializeBorderPacket.class, ClientboundSetBorderCenterPacket.class,
-            ClientboundSetBorderLerpSizePacket.class, ClientboundSetBorderSizePacket.class);
+            ClientboundSetBorderLerpSizePacket.class, ClientboundSetBorderSizePacket.class, ClientboundSetPlayerTeamPacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
     static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
@@ -594,6 +595,7 @@ public final class PacketTranslator {
             case ClientboundMountScreenOpenPacket mount -> new ClientboundPacket.MountScreenOpen(
                     mount.getContainerId(), mount.getInventoryColumns(), mount.getEntityId());
             case ClientboundContainerClosePacket close -> new ClientboundPacket.ContainerClose(close.getContainerId());
+            case ClientboundSetPlayerTeamPacket team -> playerTeam(team, fromWire);
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }
@@ -655,6 +657,38 @@ public final class PacketTranslator {
     }
 
     /** The scalar values of a synched-data packet, exactly as the client decodes them; the others counted. */
+    /**
+     * The method from the packet's actions ({@code getTeamAction}: 0 ADD, 1 REMOVE; {@code getPlayerAction}: 3 ADD,
+     * 4 REMOVE; neither: 2, a change of the parameters), the entries only for the methods that carry them.
+     */
+    static ClientboundPacket.SetPlayerTeam playerTeam(ClientboundSetPlayerTeamPacket packet, boolean fromWire) {
+        ClientboundSetPlayerTeamPacket.Action team = packet.getTeamAction();
+        ClientboundSetPlayerTeamPacket.Action player = packet.getPlayerAction();
+        int method = team == ClientboundSetPlayerTeamPacket.Action.ADD ? ClientboundPacket.SetPlayerTeam.ADD
+                : team == ClientboundSetPlayerTeamPacket.Action.REMOVE ? ClientboundPacket.SetPlayerTeam.REMOVE
+                : player == ClientboundSetPlayerTeamPacket.Action.ADD ? ClientboundPacket.SetPlayerTeam.JOIN
+                : player == ClientboundSetPlayerTeamPacket.Action.REMOVE ? ClientboundPacket.SetPlayerTeam.LEAVE
+                : ClientboundPacket.SetPlayerTeam.CHANGE;
+        String rule = packet.getParameters().map(p -> collisionRule(p.getCollisionRule(), fromWire)).orElse(null);
+        boolean entries = method == ClientboundPacket.SetPlayerTeam.ADD || method == ClientboundPacket.SetPlayerTeam.JOIN
+                || method == ClientboundPacket.SetPlayerTeam.LEAVE;
+        return new ClientboundPacket.SetPlayerTeam(packet.getName(), method, rule, entries ? List.copyOf(packet.getPlayers()) : List.of());
+    }
+
+    /**
+     * The rule the client receives. Paper writes {@code NEVER} for every team while player collisions are off
+     * ({@code collisions.enable-player-collisions}); the game's object still holds the team's own.
+     */
+    private static String collisionRule(net.minecraft.world.scores.Team.CollisionRule rule, boolean fromWire) {
+        if (!fromWire) {
+            io.papermc.paper.configuration.GlobalConfiguration config = io.papermc.paper.configuration.GlobalConfiguration.get();
+            if (config != null && !config.collisions.enablePlayerCollisions) {
+                return "NEVER";
+            }
+        }
+        return rule == null ? "UNKNOWN" : rule.name();
+    }
+
     static ClientboundPacket.SetEntityData entityData(ClientboundSetEntityDataPacket packet) {
         List<ClientboundPacket.SetEntityData.DataEntry> entries = new ArrayList<>(packet.packedItems().size());
         int dropped = 0;

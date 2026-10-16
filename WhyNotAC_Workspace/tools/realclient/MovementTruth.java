@@ -36,7 +36,9 @@ import java.util.TreeMap;
  *
  * <p>Then the movement check's tracker ({@code MovementTracker}) runs over the same recording as the server
  * would: at every tick whose movement packet it explained, the client's own state after the tick must be one of
- * its hypotheses ({@code truthMissing} counts those where it is not), and no tick may be unexplained.
+ * its hypotheses as they stood when the client sent it ({@code truthMissing} counts those where it is not), no tick
+ * may be unexplained, and the pushes of living entities it followed ({@code pushesFollowed}; the session walks into
+ * villagers) must be more than none.
  *
  * <p>usage: java -cp WhyNotAC.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on any difference
  */
@@ -82,7 +84,7 @@ public class MovementTruth {
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
-                && ((Number) tracker.get("truthFound")).longValue() > 0;
+                && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -133,7 +135,7 @@ public class MovementTruth {
                     counts[0]++;
                     boolean found = false;
                     List<String> nearest = null;
-                    for (Hypothesis h : tracker.hypotheses()) {
+                    for (Hypothesis h : tracker.sentHypotheses()) {
                         List<String> d = differences(h.player(), truth);
                         found |= d.isEmpty();
                         if (nearest == null || d.size() < nearest.size()) {
@@ -143,7 +145,7 @@ public class MovementTruth {
                     counts[found ? 1 : 2]++;
                     if (!found && examples.size() < 12) {
                         examples.add("tick " + tick.number() + " (sent tick " + (sentIndex[0] - 1) + "): the client's state is no hypothesis of "
-                                + tracker.hypotheses().size() + "; nearest differs in " + nearest);
+                                + tracker.sentHypotheses().size() + "; nearest differs in " + nearest);
                     }
                 }
             }
@@ -156,6 +158,7 @@ public class MovementTruth {
         out.put("truthFound", counts[1]);
         out.put("truthMissing", counts[2]);
         out.put("unexplained", counts[3]);
+        out.put("pushesFollowed", tracker.pushesFollowed());
         out.put("examples", examples);
         return out;
     }

@@ -15,6 +15,7 @@ import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientEntities;
 import dev.whynotac.world.ClientInventory;
+import dev.whynotac.world.ClientTeams;
 import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.ItemPrototypes;
 import java.util.ArrayDeque;
@@ -116,6 +117,14 @@ public final class MovementTracker {
     private long queueBase;
     private int selfId = -1;
 
+    // --- the client's scoreboard teams: the state the client certainly holds, then each later one from its packet's sequence ---
+    private static final int MAX_TEAM_CHANGES = 4096;
+    /** The player's scoreboard name (its profile name), from the session's binding; null: not known. */
+    private String selfName;
+    private ClientTeams teamsBase = ClientTeams.NONE;
+    /** {sequence, teams after it}, ascending, from {@link #certain} on. */
+    private final ArrayDeque<Object[]> teamChanges = new ArrayDeque<>();
+
     // --- the tick being collected ------------------------------------------------------------------------------------
     private final List<TimelineEvent.Inbound> inbound = new ArrayList<>();
     private long ticks;
@@ -134,6 +143,8 @@ public final class MovementTracker {
 
     // --- tracking ---------------------------------------------------------------------------------------------------
     private List<Hypothesis> hypotheses;
+    private List<Hypothesis> sent = List.of();
+    private long pushesFollowed;
     private long since = Long.MIN_VALUE;
     /** While untracked: the player's state as far as the server knows it for certain, and what it last sent. */
     private SelfState base = SelfState.INITIAL;
@@ -158,6 +169,20 @@ public final class MovementTracker {
     /** The current hypotheses (empty while untracked), for audits. */
     public List<Hypothesis> hypotheses() {
         return hypotheses == null ? List.of() : List.copyOf(hypotheses);
+    }
+
+    /**
+     * The last explained tick's hypotheses as they stood when the client sent its packets, before the entities that
+     * tick after the player pushed it ({@link #hypotheses} holds them after): what a client-side record of that moment
+     * is one of. Empty after any other tick.
+     */
+    public List<Hypothesis> sentHypotheses() {
+        return sent;
+    }
+
+    /** States a push of a living entity changed, since the start (diagnostics). */
+    public long pushesFollowed() {
+        return pushesFollowed;
     }
 
     /** Why the player is not tracked, or null while it is. */
@@ -186,9 +211,11 @@ public final class MovementTracker {
                 if (bound.entityId() >= 0) {
                     selfId = bound.entityId();
                 }
+                selfName = bound.playerName();
             }
             case TimelineEvent.Gap gap -> {
                 lose("events were lost");
+                teamChange(gap.sequence(), ClientTeams.LOST); // until a login
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
                 pings.clear();
                 inbound.clear();
@@ -217,6 +244,13 @@ public final class MovementTracker {
         }
         if (packet instanceof ClientboundPacket.Login login) {
             selfId = login.entityId();
+            teamChange(seq, ClientTeams.NONE); // a new ClientPacketListener, with a new scoreboard
+        }
+        switch (packet) {
+            case ClientboundPacket.SetPlayerTeam team -> teamChange(seq, latestTeams().apply(team));
+            case ClientboundPacket.Unmodeled u when u.type().equals("minecraft:set_player_team") -> teamChange(seq, ClientTeams.LOST); // an older recording
+            case ClientboundPacket.Untranslatable u when u.type().equals("minecraft:set_player_team") -> teamChange(seq, ClientTeams.LOST);
+            default -> { }
         }
         if (!aboutSelf(packet)) {
             return;
@@ -280,6 +314,45 @@ public final class MovementTracker {
             pings.pollFirst();
         }
         certain = Math.max(certain, seq);
+        while (!teamChanges.isEmpty() && (long) teamChanges.peekFirst()[0] < certain) {
+            teamsBase = (ClientTeams) teamChanges.pollFirst()[1];
+        }
+    }
+
+    // --- teams ------------------------------------------------------------------------------------------------------
+
+    private ClientTeams latestTeams() {
+        return teamChanges.isEmpty() ? teamsBase : (ClientTeams) teamChanges.peekLast()[1];
+    }
+
+    private void teamChange(long seq, ClientTeams after) {
+        teamChanges.add(new Object[] {seq, after});
+        if (teamChanges.size() > MAX_TEAM_CHANGES) {
+            teamChanges.pollFirst();
+            teamsBase = ClientTeams.LOST; // the client stopped answering: which of them it holds is not followed
+        }
+    }
+
+    /**
+     * Whether teams let a pusher's push reach the player in this tick ({@link ClientTeams#pushes}), the same in every
+     * state the client may hold: the certain one and each one sent before the window's end. Null where they differ or
+     * do not know.
+     */
+    private Boolean teamsLetPush(String pusher) {
+        long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
+        Boolean answer = teamsBase.pushes(pusher, selfName);
+        if (answer == null) {
+            return null;
+        }
+        for (Object[] change : teamChanges) {
+            if ((long) change[0] >= windowEnd) {
+                break;
+            }
+            if (!answer.equals(((ClientTeams) change[1]).pushes(pusher, selfName))) {
+                return null;
+            }
+        }
+        return answer;
     }
 
     /** Queue indices: packets before {@code must} were handled before this tick, those from {@code may} on were not. */
@@ -424,6 +497,7 @@ public final class MovementTracker {
 
     private Tick closeTick(TimelineEvent.Inbound end, ClientWorld world, ClientEntities entities) {
         long number = ticks++;
+        sent = List.of();
         handsNow.clear();
         TickInput in = sortOut();
         inbound.clear();
@@ -448,14 +522,15 @@ public final class MovementTracker {
     private Tick tracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         Set<Hypothesis> next = new LinkedHashSet<>();
         List<PlayerState> predictions = new ArrayList<>();
+        View view = new View(world, entities, selfId);
         try {
-            View view = new View(world, entities, selfId);
             List<Hypothesis> starts = new ArrayList<>();
             for (Hypothesis h : hypotheses) {
                 for (long k = Math.max(h.applied(), w[0]); k <= Math.max(h.applied(), w[1]); k++) {
                     starts.add(applyPending(h, k));
                 }
             }
+            starts = pushed(starts, true, view); // the entities that tick before the player, after the packets
             view.checkSurroundings(starts);
             Map<StepKey, OnFoot.Step> steps = new HashMap<>();
             for (Hypothesis a : starts) {
@@ -474,9 +549,137 @@ public final class MovementTracker {
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, "no vanilla client sends this", 0, from,
                     closest(predictions, in.move), in.move);
         }
-        hypotheses = merged(next);
         lastHands = hands();
+        sent = merged(next);
+        try {
+            // the entities that tick after the player, in this same client tick
+            hypotheses = merged(new LinkedHashSet<>(pushed(sent, false, view)));
+            if (hypotheses.size() > MAX_HYPOTHESES) {
+                throw new Lose("more than " + MAX_HYPOTHESES + " hypotheses");
+            }
+        } catch (Lose e) {
+            lose(e.getMessage()); // this tick is explained; the next one starts untracked
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, 0, since, null, null);
+        }
         return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, hypotheses.size(), since, null, null);
+    }
+
+    /** More living entities than this pushing the player at once end the claim (their order is tried in full). */
+    static final int MAX_PUSHERS = 3;
+
+    /**
+     * Each state after the pushes of the living entities whose tick fell where the state stands
+     * ({@code LivingEntity.pushEntities}, then {@code Entity.push(Entity)} on the player): those ticking before the
+     * player in the client's tick ({@code beforeSelf}: the states are where the packets before the tick left the player)
+     * or after it (where the player's own tick left it). Teams and the player decide whether a push lands
+     * ({@code EntitySelector.pushableBy}: alive, not a spectator, not on a climbable block); the pushes of several
+     * entities add up in their tick order, which is not followed: every order is a state.
+     */
+    private List<Hypothesis> pushed(List<Hypothesis> states, boolean beforeSelf, View view) throws Lose {
+        List<Hypothesis> out = new ArrayList<>(states.size());
+        for (Hypothesis h : states) {
+            PlayerState p = h.player();
+            if (p == null || !h.self().positionKnown()) {
+                // no position yet: the first teleport sets the motion (one that keeps it ends the claim, see apply)
+                addIfNew(out, h);
+                continue;
+            }
+            Box box = p.box();
+            List<ClientEntities.Pusher> pushers = view.entities.pushers(selfId, box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(),
+                    beforeSelf, UNKNOWN_ENTITY_RADIUS);
+            if (pushers == null) {
+                throw new Lose("an entity that may push the player is near: " + view.entities.whyNotKnown());
+            }
+            if (pushers.isEmpty() || !pushable(h, view)) {
+                addIfNew(out, h);
+                continue;
+            }
+            List<ClientEntities.Pusher> landing = new ArrayList<>(pushers.size());
+            for (ClientEntities.Pusher pusher : pushers) {
+                Boolean teams = teamsLetPush(pusher.scoreboardName());
+                if (teams == null) {
+                    throw new Lose("teams may keep an entity from pushing the player");
+                }
+                if (teams) {
+                    landing.add(pusher);
+                }
+            }
+            if (landing.size() > MAX_PUSHERS) {
+                throw new Lose("more than " + MAX_PUSHERS + " entities push the player");
+            }
+            for (List<ClientEntities.Pusher> order : orders(landing)) {
+                Vec3d d = p.deltaMovement();
+                for (ClientEntities.Pusher pusher : order) {
+                    d = pushedBy(d, p.x(), p.z(), pusher.x(), pusher.z());
+                }
+                addIfNew(out, h.withPlayer(withDelta(p, d)));
+            }
+            if (!landing.isEmpty()) {
+                pushesFollowed++;
+            }
+        }
+        return out;
+    }
+
+    /** {@code LivingEntity.isPushable} for the player: alive, not a spectator, not on a climbable block (unless flying). */
+    private static boolean pushable(Hypothesis h, View view) throws Lose {
+        SelfState s = h.self();
+        if (!(s.health() > 0.0F) || s.gameMode() == 3) {
+            return false;
+        }
+        if (s.flying()) {
+            return true; // Player.onClimbable: never while flying
+        }
+        try {
+            return !OnFoot.onClimbable(h.player(), view);
+        } catch (Colliders.Unknown e) {
+            throw new Lose(e.getMessage());
+        }
+    }
+
+    /** Every order of {@code items}. */
+    private static <T> List<List<T>> orders(List<T> items) {
+        List<List<T>> out = new ArrayList<>();
+        if (items.size() <= 1) {
+            out.add(items);
+            return out;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            List<T> rest = new ArrayList<>(items);
+            T first = rest.remove(i);
+            for (List<T> tail : orders(rest)) {
+                List<T> order = new ArrayList<>(items.size());
+                order.add(first);
+                order.addAll(tail);
+                out.add(order);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * {@code Entity.push(Entity)} on the player at {@code (lx, lz)} from an entity at {@code (rx, rz)}, as the client
+     * computes it: away from it along the larger axis' square root, 0.05 at most, added to the motion.
+     */
+    static Vec3d pushedBy(Vec3d delta, double lx, double lz, double rx, double rz) {
+        double d = rx - lx;
+        double e = rz - lz;
+        double max = Math.max(Math.abs(d), Math.abs(e)); // Mth.absMax
+        if (!(max >= 0.01F)) {
+            return delta;
+        }
+        max = Math.sqrt(max);
+        d /= max;
+        e /= max;
+        double g = 1.0 / max;
+        if (g > 1.0) {
+            g = 1.0;
+        }
+        d *= g;
+        e *= g;
+        d *= 0.05F;
+        e *= 0.05F;
+        return new Vec3d(delta.x() + -d, delta.y() + 0.0, delta.z() + -e); // push(-d, 0.0, -e): getDeltaMovement().add
     }
 
     /** The prediction nearest to the position sent (the first one when none was sent). */
@@ -554,6 +757,11 @@ public final class MovementTracker {
             case ClientboundPacket.PlayerPosition teleport -> {
                 if (s.vehicle() != -1) {
                     yield h; // handleMovePlayer: not while riding
+                }
+                Set<RelativeFlag> r = teleport.relatives();
+                if (!s.positionKnown() && (r.contains(RelativeFlag.DELTA_X) || r.contains(RelativeFlag.DELTA_Y) || r.contains(RelativeFlag.DELTA_Z))) {
+                    // entities near where the client had the player may have pushed it: their pushes are not followed there
+                    throw new Lose("a teleport that keeps the motion from before the player's position was known");
                 }
                 yield h.withPlayer(teleported(p, teleport)).withSelf(s.withPositionKnown());
             }
@@ -1229,7 +1437,7 @@ public final class MovementTracker {
             if (!base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
                 return null;
             }
-            view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
+            view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
             OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects());
             PlayerState first = OnFoot.tick(guess, PlayerState.Keys.NONE, view, conditions);
             PlayerState again = OnFoot.tick(first, PlayerState.Keys.NONE, view, conditions);
@@ -1311,7 +1519,10 @@ public final class MovementTracker {
             return world.isLoaded(chunkX, chunkZ) && world.settled(chunkX << 4, world.minY(), chunkZ << 4);
         }
 
-        /** No entity that pushes or collides, no piston, the world border far, around everywhere the player may be this tick. */
+        /**
+         * No entity that collides (or pushes otherwise than living entities in their tick, which {@link #pushed} follows), no
+         * piston, the world border far, around everywhere the player may be this tick.
+         */
         void checkSurroundings(List<Hypothesis> starts) throws Lose {
             double minX = Double.POSITIVE_INFINITY;
             double minY = Double.POSITIVE_INFINITY;
@@ -1340,14 +1551,19 @@ public final class MovementTracker {
             if (minX == Double.POSITIVE_INFINITY) {
                 return;
             }
-            check(minX, minY, minZ, maxX, maxY, maxZ);
+            check(minX, minY, minZ, maxX, maxY, maxZ, false);
         }
 
-        /** {@link #checkSurroundings} for one box that may be swept this tick. */
-        void check(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) throws Lose {
-            if (entities.mayHavePusherNear(self, minX - ENTITY_MARGIN, minY - ENTITY_MARGIN, minZ - ENTITY_MARGIN, maxX + ENTITY_MARGIN,
+        /**
+         * {@link #checkSurroundings} for one box that may be swept this tick; {@code living}: living entities too (the
+         * anchor, which follows no push).
+         */
+        void check(double minX, double minY, double minZ, double maxX, double maxY, double maxZ, boolean living) throws Lose {
+            if (living ? entities.mayHavePusherNear(self, minX - ENTITY_MARGIN, minY - ENTITY_MARGIN, minZ - ENTITY_MARGIN, maxX + ENTITY_MARGIN,
+                    maxY + ENTITY_MARGIN, maxZ + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)
+                    : entities.mayHaveColliderNear(self, minX - ENTITY_MARGIN, minY - ENTITY_MARGIN, minZ - ENTITY_MARGIN, maxX + ENTITY_MARGIN,
                     maxY + ENTITY_MARGIN, maxZ + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)) {
-                throw new Lose("an entity that may push the player is near");
+                throw new Lose(living ? "an entity that may push the player is near" : "an entity that may collide with the player is near");
             }
             if (world.mayMoveEntitiesIn((int) Math.floor(minX) - MOVER_MARGIN, (int) Math.floor(minY) - MOVER_MARGIN, (int) Math.floor(minZ) - MOVER_MARGIN,
                     (int) Math.floor(maxX) + MOVER_MARGIN, (int) Math.floor(maxY) + MOVER_MARGIN, (int) Math.floor(maxZ) + MOVER_MARGIN,

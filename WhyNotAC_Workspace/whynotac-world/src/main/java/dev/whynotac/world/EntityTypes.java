@@ -70,6 +70,11 @@ public final class EntityTypes {
         return kind != null ? kind : unknown(key);
     }
 
+    /** Whether the table has the type (one it does not have may be anything). */
+    public boolean known(String key) {
+        return kinds.containsKey(key);
+    }
+
     public int size() {
         return kinds.size();
     }

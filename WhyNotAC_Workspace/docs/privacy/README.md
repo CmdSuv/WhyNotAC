@@ -6,6 +6,12 @@ no IP address, name, chat or commands. Every UUID in a recording is replaced by
 player list and of the entities it was sent. So the server operator, and nobody else, can find one
 player's recordings. The plugin jar is also the tool for this.
 
+Scoreboard teams list their members by name (whether entities push the player depends on them). In a
+recording the recorded player's own name becomes its pseudonym's display name (`anon-…`, as in the
+recording's header), an entity's UUID its pseudonym, and every other name, and every team's name, a
+token of that recording alone (`entry-1`, `team-1`, … in the order the recording first meets them).
+The tokens are derived from nothing, so they link to nobody outside the one recording.
+
 A recording is about one player (its header names that player's pseudonym, which `find` and `forget`
 match). Other players appear in it only by pseudonym, as entries of the recorded player's player list
 and as entities near them. `find` lists those recordings too, under `mentioned_in`, with the number of

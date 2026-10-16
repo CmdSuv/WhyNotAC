@@ -106,6 +106,10 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
   - **Son oturum (tırmanma ve itilme bacaklarıyla):** 3635 tikin 3617'si bit bit eşit, 0 fark. Negatif kontroller
     (hepsi yakalandı): 0.15 → 0.16 (7 fark), tırmanışta 0.2'yi yok saymak (120), shift'le tutunmayı yok saymak (44),
     itilme 0.1 → 0.11 (1), merdiven üstü tuzak kapıyı yok saymak (18).
+  - **Varlıkların itmesi:** tick'ler arasında olur (başka bir canlının tick'i oyuncunun hareketine ekler), adımın
+    dışındadır: `MovementTracker` uygular (bkz. whynotac-analysis). Kayıt cihazı oyuncunun durumunu kendi tick'inin
+    başında alır, itmeler dahil; adım bu yüzden onlarla da bit bit aynıdır. **Son oturum (köylülere yürüyen itme
+    şeridiyle):** 4110 tikin 4093'ü bit bit eşit, 0 fark.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar), iskele;
     - slime ve yatak sekmesi; çit ve duvar üstü;

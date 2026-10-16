@@ -248,6 +248,8 @@ public final class Generators {
             case "EntityEvent" -> new ClientboundPacket.EntityEvent(anyInt(), random.nextInt(256) - 128);
             case "SetCamera" -> new ClientboundPacket.SetCamera(anyInt());
             case "SetHealth" -> new ClientboundPacket.SetHealth(anyFloat(), anyInt(), anyFloat());
+            case "SetPlayerTeam" -> new ClientboundPacket.SetPlayerTeam(anyString(), random.nextInt(5), random.nextBoolean() ? null : anyString(),
+                    java.util.stream.IntStream.range(0, random.nextInt(4)).mapToObj(n -> anyString()).toList());
             case "InitializeBorder" -> new ClientboundPacket.InitializeBorder(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyLong(),
                     anyInt());
             case "SetBorderCenter" -> new ClientboundPacket.SetBorderCenter(anyDouble(), anyDouble());

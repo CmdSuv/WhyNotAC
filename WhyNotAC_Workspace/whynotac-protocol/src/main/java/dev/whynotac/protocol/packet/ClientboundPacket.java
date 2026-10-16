@@ -436,6 +436,26 @@ public sealed interface ClientboundPacket {
     record SetHealth(float health, int food, float saturation) implements ClientboundPacket {}
 
     /**
+     * {@code ClientboundSetPlayerTeamPacket}: a scoreboard team added, removed or changed, or entries joining or
+     * leaving it ({@code ClientPacketListener.handleSetPlayerTeamPacket}). {@code collisionRule}: the parameters'
+     * {@code Team.CollisionRule} by constant name ({@code ALWAYS}, {@code NEVER}, {@code PUSH_OTHER_TEAMS},
+     * {@code PUSH_OWN_TEAM}; {@code UNKNOWN} for one this build does not know), null for a method without
+     * parameters. {@code players}: scoreboard names (a player's profile name, another entity's UUID). Whether
+     * entities push the player depends on them ({@code EntitySelector.pushableBy}).
+     */
+    record SetPlayerTeam(String team, int method, String collisionRule, List<String> players) implements ClientboundPacket {
+        public static final int ADD = 0;
+        public static final int REMOVE = 1;
+        public static final int CHANGE = 2;
+        public static final int JOIN = 3;
+        public static final int LEAVE = 4;
+
+        public SetPlayerTeam {
+            players = List.copyOf(players);
+        }
+    }
+
+    /**
      * {@code ClientboundInitializeBorderPacket}: the world border's centre and size; with a positive
      * {@code lerpTime} the size moves from {@code oldSize} to {@code newSize} over that time
      * ({@code WorldBorder.lerpSizeBetween}). The warning distance and time are only drawn: not kept.

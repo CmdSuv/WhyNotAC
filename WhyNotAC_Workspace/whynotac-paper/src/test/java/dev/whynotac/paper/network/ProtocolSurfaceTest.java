@@ -86,7 +86,7 @@ class ProtocolSurfaceTest {
             "player_combat_enter", "pong_response", "recipe_book_add", "recipe_book_remove",
             "recipe_book_settings", "reset_score", "resource_pack_pop", "resource_pack_push", "select_advancements_tab", "server_data",
             "server_links", "set_action_bar_text", "set_border_warning_delay", "set_border_warning_distance", "set_default_spawn_position",
-            "set_display_objective", "set_experience", "set_objective", "set_player_team", "set_score", "set_simulation_distance",
+            "set_display_objective", "set_experience", "set_objective", "set_score", "set_simulation_distance",
             "set_subtitle_text", "set_time", "set_title_text", "set_titles_animation", "show_dialog", "sound", "sound_entity", "stop_sound",
             "store_cookie", "system_chat", "tab_list", "tag_query", "take_item_entity", "test_instance_block_status", "transfer",
             "update_advancements", "update_recipes", "update_tags", "waypoint");

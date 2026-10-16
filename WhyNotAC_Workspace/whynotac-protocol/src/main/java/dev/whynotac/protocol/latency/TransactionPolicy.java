@@ -71,6 +71,8 @@ public final class TransactionPolicy {
             case ClientboundPacket.SetCamera ignored -> true;
             // Food decides whether the player can sprint: frequent in combat, placed by the flush brackets.
             case ClientboundPacket.SetHealth ignored -> false;
+            // Teams decide whether entities push the player; rare.
+            case ClientboundPacket.SetPlayerTeam ignored -> true;
             // The world border collides with the player; rare.
             case ClientboundPacket.InitializeBorder ignored -> true;
             case ClientboundPacket.SetBorderCenter ignored -> true;
