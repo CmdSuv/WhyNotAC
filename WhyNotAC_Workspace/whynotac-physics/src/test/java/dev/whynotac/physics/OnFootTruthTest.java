@@ -28,7 +28,8 @@ import org.junit.jupiter.api.Test;
  * eaten while sprinting and walking, a shield raised behind a sword (the sprint key, a double tap and sneaking while
  * blocking), a spear charged while a sprint starts, a bow drawn. {@code truth-climb.jsonl.gz} holds a ladder, vines and an
  * open trapdoor over a ladder, climbed by walking into them, held with shift, jumped on and slid down, and the client
- * pushing itself out of a wall it was placed 0.15 into. Each tick, run from its start in the same world (rebuilt here from the
+ * pushing itself out of a wall it was placed 0.15 into. {@code truth-bounce.jsonl.gz} holds a slime pad walked across
+ * (sneaking too), jumped across and dropped onto (with shift held too), and a bed jumped and dropped onto. Each tick, run from its start in the same world (rebuilt here from the
  * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -86,6 +87,9 @@ class OnFootTruthTest {
         {72, -60, -11, 72, -58, -9, blockState("minecraft:stone")},
         {71, -60, -10, 71, -60, -10, blockState("minecraft:ladder", "facing=west", "waterlogged=false")},
         {71, -59, -10, 71, -59, -10, blockState("minecraft:oak_trapdoor", "facing=west", "half=bottom", "open=true", "powered=false", "waterlogged=false")},
+        {80, -61, -16, 85, -61, -13, blockState("minecraft:slime_block")},
+        {90, -60, -15, 90, -60, -15, blockState("minecraft:red_bed", "facing=east", "occupied=false", "part=foot")},
+        {91, -60, -15, 91, -60, -15, blockState("minecraft:red_bed", "facing=east", "occupied=false", "part=head")},
     };
 
     private static final Colliders.World COURSE_WORLD = new Colliders.World() {
@@ -152,6 +156,13 @@ class OnFootTruthTest {
     }
 
     @Test
+    void slimeAndBedBouncesAreTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-bounce.jsonl.gz", COURSE_WORLD);
+        // landings that bounce on slime and on the bed, walking on slime, and landings on it with shift held (no bounce)
+        assertTrue(counts[0] > 600 && counts[15] >= 5 && counts[16] >= 2 && counts[17] > 20 && counts[18] >= 1, java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -160,7 +171,8 @@ class OnFootTruthTest {
     /**
      * {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered, then ticks under jump
      * boost, slow falling, levitation, blindness, then ticks with an item in use, and with one in use while sprinting, then
-     * ticks ending in a climbable column, and ticks after a push out of a block}.
+     * ticks ending in a climbable column, and ticks after a push out of a block, then landings that bounce on the slime
+     * pad and on the bed, ticks walking on the slime pad, and landings on it with shift held}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -170,7 +182,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[15];
+        int[] counts = new int[19];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -207,6 +219,13 @@ class OnFootTruthTest {
             counts[4] += expected.horizontalCollision() ? 1 : 0;
             counts[5] += expected.verticalCollision() && !expected.verticalCollisionBelow() ? 1 : 0;
             counts[6] += expected.autoJumpTime() == 1 ? 1 : 0;
+            boolean overSlime = expected.x() > 79.7 && expected.x() < 86.3 && expected.z() > -16.3 && expected.z() < -12.7;
+            boolean overBed = expected.x() > 89.7 && expected.x() < 92.3 && expected.z() > -15.3 && expected.z() < -13.7;
+            boolean landed = expected.verticalCollisionBelow() && before.deltaMovement().y() < -0.2;
+            counts[15] += landed && overSlime && expected.deltaMovement().y() > 0.0 ? 1 : 0;
+            counts[16] += landed && overBed && expected.deltaMovement().y() > 0.0 ? 1 : 0;
+            counts[17] += expected.onGround() && overSlime && expected.deltaMovement().horizontalDistanceSqr() > 0.0 ? 1 : 0;
+            counts[18] += landed && overSlime && expected.keys().shift() ? 1 : 0;
         }
         return counts;
     }

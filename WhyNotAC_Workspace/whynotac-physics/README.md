@@ -95,7 +95,7 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
     yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200,
-    tırmanma alanında 499 tik.
+    tırmanma alanında 499, sekme alanında 756 tik.
   - **Tırmanma (`onClimbable`, `handleOnClimbable`):** ayaktaki blok tırmanılabilir (merdiven, sarmaşıklar) ya da
     aynı yöne bakan bir merdivenin üstünde açık bir tuzak kapı: hareket tik başına 0.15'e tutulur, düşüş mesafesi
     sıfırlanır, shift aşağı kaymayı durdurur; hareketten sonra yatay çarpışma ya da zıplama dikey hızı 0.2 yapar.
@@ -106,13 +106,20 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
   - **Son oturum (tırmanma ve itilme bacaklarıyla):** 3635 tikin 3617'si bit bit eşit, 0 fark. Negatif kontroller
     (hepsi yakalandı): 0.15 → 0.16 (7 fark), tırmanışta 0.2'yi yok saymak (120), shift'le tutunmayı yok saymak (44),
     itilme 0.1 → 0.11 (1), merdiven üstü tuzak kapıyı yok saymak (18).
+  - **Sekme (`updateEntityMovementAfterFallOn`, `stepOn`):** dikey çarpışmadan sonra ayağın altındaki blok
+    (`getOnPosLegacy`) dikey hızı sıfırlar; slime bloğu düşen oyuncuyu geri sektirir (hız tersine, canlı için çarpan
+    1.0), yatak da 0.66'sıyla. Shift sekmeyi bastırır (`isSuppressingBounce`); yukarı doğru hızı sekme blokları olduğu
+    gibi bırakır. Yerde, slime bloğunun adımı dikey hızı 0.1'in altındaki ve sinsi yürümeyen oyuncuyu yatayda
+    `0.4 + |y|·0.2` ile yavaşlatır. **Son oturum (slime pedi ve yatakla):** 4856 tikin 4838'i bit bit eşit, 0 fark.
+    Negatif kontroller (hepsi yakalandı): slime sekmesi ×0.99 (61 fark), yatak 0.66 → 0.67 (94), slime adımı
+    0.4 → 0.41 (18), shift'in sekmeyi bastırmasını yok saymak (77), shift'in yavaşlamayı durdurmasını yok saymak (34).
   - **Varlıkların itmesi:** tick'ler arasında olur (başka bir canlının tick'i oyuncunun hareketine ekler), adımın
     dışındadır: `MovementTracker` uygular (bkz. whynotac-analysis). Kayıt cihazı oyuncunun durumunu kendi tick'inin
     başında alır, itmeler dahil; adım bu yüzden onlarla da bit bit aynıdır. **Son oturum (köylülere yürüyen itme
     şeridiyle):** 4110 tikin 4093'ü bit bit eşit, 0 fark.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar), iskele;
-    - slime ve yatak sekmesi; çit ve duvar üstü;
+    - çit ve duvar üstü;
     - yüklenmemiş chunk, sürünme;
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 

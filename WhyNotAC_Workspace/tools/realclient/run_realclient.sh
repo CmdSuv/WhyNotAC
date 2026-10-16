@@ -86,7 +86,9 @@ for c in "forceload add 32 -16 191 16" \
   "fill 62 -60 -11 62 -55 -9 minecraft:stone" "fill 61 -60 -10 61 -57 -10 minecraft:ladder[facing=west]" \
   "fill 67 -60 -11 67 -55 -9 minecraft:stone" "fill 66 -60 -10 66 -57 -10 minecraft:vine[east=true]" \
   "fill 72 -60 -11 72 -58 -9 minecraft:stone" "setblock 71 -60 -10 minecraft:ladder[facing=west]" \
-  "setblock 71 -59 -10 minecraft:oak_trapdoor[facing=west,open=true,half=bottom]"; do
+  "setblock 71 -59 -10 minecraft:oak_trapdoor[facing=west,open=true,half=bottom]" \
+  "fill 80 -61 -16 85 -61 -13 minecraft:slime_block" "setblock 91 -60 -15 minecraft:red_bed[facing=east,part=head]" \
+  "setblock 90 -60 -15 minecraft:red_bed[facing=east,part=foot]"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -213,6 +215,19 @@ climb 64.5 w/2.0 Shift_L/0.8 -/1.5
 climb 69.5 w/1.5 -/1.0
 # Placed 0.15 into a wall: the client pushes itself out (moveTowardsClosestSpace), then walks back into it.
 climb 71.85 -/1.0 w/1.0
+# Bounces, at z = -14.5: a slime pad in the ground (x 80..85) walked onto (its step slows a player not sneaking) and
+# walked across sneaking,
+# jumped across, dropped onto from five blocks (it bounces back, again and again) and dropped onto holding shift (no
+# bounce); a bed (x 90..91) jumped onto, dropped onto (0.66 of the fall back) and dropped onto holding shift.
+bounce() { echo "tp $NAME $1 $2 -14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+bounce 77.5 -60 w/2.0 -/0.5
+bounce 79.5 -60 Shift_L,w/2.0 -/0.3
+bounce 78.5 -60 w/1.8/space -/1.5
+bounce 82.5 -55 -/3.0
+bounce 83.5 -55 Shift_L/2.0 -/0.5
+bounce 87.5 -60 w/0.6/space -/1.5
+bounce 90.5 -55 -/2.5
+bounce 91.5 -55 Shift_L/2.0 -/0.5
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap

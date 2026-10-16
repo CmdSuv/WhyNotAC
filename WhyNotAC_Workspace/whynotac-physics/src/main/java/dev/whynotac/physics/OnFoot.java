@@ -588,14 +588,29 @@ public final class OnFoot {
             delta = new Vec3d(xHit ? 0.0 : delta.x(), delta.y(), zHit ? 0.0 : delta.z());
         }
         if (movement.y() != collided.y()) {
-            String block = states.block(legacyState);
-            if (block.equals("minecraft:slime_block") || block.endsWith("_bed")) {
-                throw new Colliders.Unknown(block + " bounce (not modelled)");
-            }
-            delta = delta.multiply(1.0, 0.0, 1.0); // Block.updateEntityMovementAfterFallOn
+            updateEntityMovementAfterFallOn(states.block(legacyState));
         }
         float speedFactor = blockSpeedFactor();
         delta = delta.multiply(speedFactor, 1.0, speedFactor);
+    }
+
+    /**
+     * {@code Block.updateEntityMovementAfterFallOn} for the block below the feet ({@code getOnPosLegacy}), after a vertical
+     * collision: the vertical motion stops; on a slime block or a bed a falling player bounces instead
+     * ({@code bounceUp}: the motion reversed, times 0.66 on a bed; a living entity's factor 1.0), unless shift
+     * suppresses it ({@code isSuppressingBounce}). Bouncing blocks leave an upward motion as it is.
+     */
+    private void updateEntityMovementAfterFallOn(String block) {
+        boolean slime = block.equals("minecraft:slime_block");
+        boolean bed = block.endsWith("_bed");
+        if (!(slime || bed) || keys.shift()) {
+            delta = delta.multiply(1.0, 0.0, 1.0);
+            return;
+        }
+        if (delta.y() < 0.0) {
+            double living = 1.0;
+            delta = new Vec3d(delta.x(), slime ? -delta.y() * living : -delta.y() * 0.66F * living, delta.z());
+        }
     }
 
     /** {@code Player.maybeBackOffFromEdge}: a sneaking player on the ground does not walk off an edge it could fall down. */
@@ -698,12 +713,20 @@ public final class OnFoot {
         return factor;
     }
 
-    /** {@code LivingEntity.applyEffectsFromBlocks}: no block with an effect was inside the box (checked along the move); stepping on slime is not modelled. */
+    /**
+     * {@code Entity.applyEffectsFromBlocks}: on the ground, the block below the feet's {@code stepOn} (a slime block slows
+     * a player not sneaking while its vertical motion is under 0.1: {@code 0.4 + |y| * 0.2} horizontally; no other block's
+     * changes the motion); no block with an effect was inside the box (checked along the move).
+     */
     private void applyEffectsFromBlocks() throws Colliders.Unknown {
         if (onGround) {
             String block = states.block(state(onPos(0.2F)));
             if (block.equals("minecraft:slime_block")) {
-                throw new Colliders.Unknown("stepping on slime (not modelled)");
+                double vy = Math.abs(delta.y());
+                if (vy < 0.1 && !keys.shift()) { // isSteppingCarefully: isShiftKeyDown
+                    double factor = 0.4 + vy * 0.2;
+                    delta = delta.multiply(factor, 1.0, factor);
+                }
             }
         }
     }
