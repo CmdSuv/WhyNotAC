@@ -19,6 +19,9 @@ public final class Colliders {
         BlockStates states();
 
         int blockState(int x, int y, int z);
+
+        /** {@code level.hasChunkAt}: the client holds this chunk. */
+        boolean isLoaded(int chunkX, int chunkZ);
     }
 
     /** A collision shape the client has that WhyNotAC cannot reproduce. */
@@ -38,8 +41,43 @@ public final class Colliders {
         return colliders;
     }
 
+    /** {@code CollisionGetter.noCollision(player, box)} with no solid entity near and the world border far: no block shape in the box. */
+    public static boolean noCollision(World world, Box box) throws Unknown {
+        List<Voxels> shapes = new ArrayList<>();
+        blocks(world, box, shapes, null);
+        return shapes.isEmpty();
+    }
+
+    /**
+     * {@code CollisionGetter.findSupportingBlock(player, box)}: of the blocks colliding with the box, the one
+     * whose centre is nearest to {@code (px, py, pz)}; on a tie the greatest by {@code Vec3i.compareTo}
+     * (y, then z, then x). Null if none.
+     */
+    public static BlockPos supportingBlock(World world, Box box, double px, double py, double pz) throws Unknown {
+        List<BlockPos> positions = new ArrayList<>();
+        blocks(world, box, new ArrayList<>(), positions);
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos pos : positions) {
+            double dx = pos.x() + 0.5 - px;
+            double dy = pos.y() + 0.5 - py;
+            double dz = pos.z() + 0.5 - pz;
+            double distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance || distance == bestDistance && (best == null || best.compareTo(pos) < 0)) {
+                best = pos;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
     /** {@code Level.getBlockCollisions(player, box)}: {@code BlockCollisions}, cell by cell in {@code Cursor3D} order. */
     static void blocks(World world, Box box, List<Voxels> out) throws Unknown {
+        blocks(world, box, out, null);
+    }
+
+    /** As {@link #blocks(World, Box, List)}, also collecting each shape's block position when {@code positions} is not null. */
+    static void blocks(World world, Box box, List<Voxels> out, List<BlockPos> positions) throws Unknown {
         BlockStates states = world.states();
         int x0 = floor(box.minX() - VoxelCollisions.EPSILON) - 1;
         int x1 = floor(box.maxX() + VoxelCollisions.EPSILON) + 1;
@@ -73,17 +111,20 @@ public final class Colliders {
                     if (shape.isEmpty()) {
                         continue;
                     }
+                    boolean collides;
+                    Voxels moved = Voxels.moved(shape, x, y, z);
                     if (states.has(state, BlockStates.FULL_BLOCK)) {
-                        if (box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0)) {
-                            out.add(Voxels.moved(shape, x, y, z));
-                        }
+                        collides = box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0);
                     } else {
-                        Voxels moved = Voxels.moved(shape, x, y, z);
                         if (entityShape == null) {
                             entityShape = VoxelCollisions.create(box);
                         }
-                        if (VoxelCollisions.overlaps(moved, entityShape)) {
-                            out.add(moved);
+                        collides = VoxelCollisions.overlaps(moved, entityShape);
+                    }
+                    if (collides) {
+                        out.add(moved);
+                        if (positions != null) {
+                            positions.add(new BlockPos(x, y, z));
                         }
                     }
                 }

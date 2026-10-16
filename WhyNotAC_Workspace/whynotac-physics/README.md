@@ -40,5 +40,19 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
 - **Bilinmeyen şekiller iddia üretmez:** dünyaya bağlı şekiller (hareketli piston, shulker kutusu),
   oyuncuya bağlı şekiller (toz kar, iskele), kaydırılmış şekiller ve bilinmeyen bloklar `Colliders.Unknown`
   fırlatır. Sıvılar oyuncu için boş şekildir.
-- **Sırada:** yaya hareket adımı (girdi, koşma, zıplama, sürtünme, yerçekimi). Doğrulama gerçek client'ın
-  tick başına kaydıyla yapılacak.
+- **Yaya hareket adımı (`OnFoot`, tamam):** bir `LocalPlayer.tick()` bit bit. Girdi vektörü ve kare düzeltmesi,
+  eğilme (önceki tikin shift'i) ve kenardan geri çekilme (bu tikin shift'i), koşma başlatma ve durdurma, zıplama
+  ve `noJumpDelay`, sürtünme bloğu (destek bloğundan), dürtü, `Entity.move` (çarpışma, basamak, bayraklar,
+  destek bloğu, düşüş mesafesi, hız sıfırlama, blok hız çarpanı), yerçekimi ve sürüklenme, sonraki tikin duruşu.
+  - **Doğrulama:** `tools/realclient/MovementTruth`, gerçek client'ın kaydettiği her tiki başındaki durumdan
+    çalıştırır ve sonundaki durumla bit bit karşılaştırır. Dünya, WhyNotAC'ın kayıttan kurduğu replikadır.
+    İlk oturumda 942 tikin 942'si eşit çıktı. Negatif kontroller: sürüklenme sabitinin 7. hanesi değişince
+    33, sıfırlama eşiği değişince 2 fark çıktı. Koşu CI'da her oturumda tekrarlanır.
+  - **Birim testi:** `OnFootTruthTest`, aynı oturumun hareket eden 195 tikini düz dünyada yeniden oynatır.
+  - **Kapsam dışında `Colliders.Unknown`:** sıvı, tırmanma, örümcek ağı ve kutunun içindeki diğer bloklar,
+    slime ve yatak sekmesi, çit ve duvar üstü, boğulma itmesi, yüklenmemiş chunk, sürünme, otomatik zıplama
+    geometrisi. Varsayılan öznitelikler ve etkisiz oyuncu varsayılır. Katı varlıklar ve dünya sınırı çağıranın
+    sorumluluğundadır.
+- **Kapsam açığı:** bu oturum, koşma tetikleyicisinin önceki ve şimdiki shift'e bağlı yolunu sınamıyor
+  (bilinçli değişiklik fark üretmedi). Merdiven, buz, ruh kumu, kenarda eğilme, tavan ve düşüş içeren bir
+  parkur sırada.

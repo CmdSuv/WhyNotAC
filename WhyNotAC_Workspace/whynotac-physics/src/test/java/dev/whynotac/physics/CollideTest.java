@@ -53,6 +53,11 @@ class CollideTest {
         public int blockState(int x, int y, int z) {
             return blocks.getOrDefault(List.of(x, y, z), AIR);
         }
+
+        @Override
+        public boolean isLoaded(int chunkX, int chunkZ) {
+            return true;
+        }
     }
 
     private static Box player(double x, double y, double z) {

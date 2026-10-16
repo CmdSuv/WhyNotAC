@@ -34,6 +34,9 @@ public final class Recorder {
     private static Field keyPresses, connection, clientLoaded;
     private static Field keyForward, keyBackward, keyLeft, keyRight, keyJump, keyShift, keySprint;
     private static Field vecX, vecY, vecZ;
+    // hidden state the movement step reads: supporting block, jump delay, speed, sneak state, the input's vector
+    private static Field mainSupportingBlockPos, onGroundNoBlocks, noJumpDelay, speed, crouching, sprintTriggerTime, autoJumpTime, moveVector;
+    private static Field posX, posY, posZ, vec2X, vec2Y;
     private static Method isSprinting, isShiftKeyDown, getPose, isPassenger;
 
     private Recorder() {}
@@ -89,6 +92,18 @@ public final class Recorder {
             bool(line, "sprinting", (Boolean) isSprinting.invoke(player));
             bool(line, "shiftKeyDown", (Boolean) isShiftKeyDown.invoke(player));
             line.append(",\"pose\":\"").append(getPose.invoke(player)).append('"');
+            java.util.Optional<?> support = (java.util.Optional<?>) mainSupportingBlockPos.get(player);
+            line.append(",\"support\":").append(support.isEmpty() ? "null" : "[" + posX.getInt(support.get()) + "," + posY.getInt(support.get()) + ","
+                    + posZ.getInt(support.get()) + "]");
+            bool(line, "onGroundNoBlocks", onGroundNoBlocks.getBoolean(player));
+            line.append(",\"noJumpDelay\":").append(noJumpDelay.getInt(player));
+            f32(line, "speed", speed.getFloat(player));
+            bool(line, "crouching", crouching.getBoolean(player));
+            line.append(",\"sprintTriggerTime\":").append(sprintTriggerTime.getInt(player));
+            line.append(",\"autoJumpTime\":").append(autoJumpTime.getInt(player));
+            Object move = moveVector.get(input.get(player));
+            line.append(",\"moveVector\":[\"").append(Integer.toHexString(Float.floatToRawIntBits(vec2X.getFloat(move)))).append("\",\"")
+                    .append(Integer.toHexString(Float.floatToRawIntBits(vec2Y.getFloat(move)))).append("\"]");
             f64(line, "xLast", xLast.getDouble(player));
             f64(line, "yLast", yLast.getDouble(player));
             f64(line, "zLast", zLast.getDouble(player));
@@ -162,6 +177,19 @@ public final class Recorder {
         vecX = field(loader, vec3, "x");
         vecY = field(loader, vec3, "y");
         vecZ = field(loader, vec3, "z");
+        mainSupportingBlockPos = field(loader, entity, "mainSupportingBlockPos");
+        onGroundNoBlocks = field(loader, entity, "onGroundNoBlocks");
+        noJumpDelay = field(loader, living, "noJumpDelay");
+        speed = field(loader, living, "speed");
+        crouching = field(loader, local, "crouching");
+        sprintTriggerTime = field(loader, local, "sprintTriggerTime");
+        autoJumpTime = field(loader, local, "autoJumpTime");
+        moveVector = field(loader, clientInput, "moveVector");
+        posX = field(loader, "net.minecraft.core.Vec3i", "x");
+        posY = field(loader, "net.minecraft.core.Vec3i", "y");
+        posZ = field(loader, "net.minecraft.core.Vec3i", "z");
+        vec2X = field(loader, "net.minecraft.world.phys.Vec2", "x");
+        vec2Y = field(loader, "net.minecraft.world.phys.Vec2", "y");
         isSprinting = method(loader, entity, "isSprinting()");
         isShiftKeyDown = method(loader, entity, "isShiftKeyDown()");
         getPose = method(loader, entity, "getPose()");

@@ -76,11 +76,12 @@ echo "server up"
 # The ground-truth agent: records the client's exact physics state every tick (see agent/).
 AGENT_OUT="$WORK_DIR/agent-build"
 rm -rf "$AGENT_OUT" && mkdir -p "$AGENT_OUT/classes"
-(cd "$ROOT" && ./gradlew -q :whynotac-world:jar :whynotac-physics:jar)
+(cd "$ROOT" && ./gradlew -q :whynotac-world:jar :whynotac-physics:jar :whynotac-recording:jar)
 WORLD_JAR=$(find "$ROOT/whynotac-world/build/libs" -name 'whynotac-world-*.jar' ! -name '*-sources.jar' | head -1)
 PROTOCOL_JAR=$(find "$ROOT/whynotac-protocol/build/libs" -name 'whynotac-protocol-*.jar' ! -name '*-sources.jar' | head -1)
 PHYSICS_JAR=$(find "$ROOT/whynotac-physics/build/libs" -name 'whynotac-physics-*.jar' ! -name '*-sources.jar' | head -1)
 MATH_JAR=$(find "$ROOT/whynotac-math/build/libs" -name 'whynotac-math-*.jar' ! -name '*-sources.jar' | head -1)
+RECORDING_JAR=$(find "$ROOT/whynotac-recording/build/libs" -name 'whynotac-recording-*.jar' ! -name '*-sources.jar' | head -1)
 WHYNOTAC_CP="$WORLD_JAR:$PROTOCOL_JAR:$PHYSICS_JAR:$MATH_JAR"
 javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -cp "$WHYNOTAC_CP" -d "$AGENT_OUT/classes" $(find "$HERE/agent/src" -name '*.java')
 printf 'Premain-Class: dev.whynotac.truth.TruthAgent\n' > "$AGENT_OUT/manifest.txt"
@@ -166,6 +167,14 @@ STATUS=0
 python3 -I "$HERE/verify_realclient.py" "$WORK_DIR" || STATUS=1
 echo "--- client truth"
 python3 -I "$HERE/verify_truth.py" "$WORK_DIR" || STATUS=1
+echo "--- movement engine"
+# whynotac-physics' on-foot step, run from each recorded tick's start, must give the client's own end of the tick, bit for bit.
+if java -cp "$WHYNOTAC_CP:$RECORDING_JAR" "$HERE/MovementTruth.java" "$RECORDING" "$WORK_DIR/truth.jsonl" | grep -v '^Picked up' | tee "$WORK_DIR/movement.json"; then
+  echo "PASS every tick in the on-foot engine's scope equals the client's own tick, bit for bit"
+else
+  echo "FAIL the on-foot engine differs from the client (see movement.json)"
+  STATUS=1
+fi
 echo "--- block-state data"
 # whynotac-world ships block-state data generated from this very client; regenerate it and require equality.
 (cd "$WORK_DIR" && java -cp "$CP:$AGENT_OUT/classes:$WHYNOTAC_CP" dev.whynotac.truth.BlockDataDump "$MAPPINGS" "$WORK_DIR/block-states.txt.gz") \

@@ -16,7 +16,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
-| Hareket fiziği (`whynotac-physics`) | **Yok** | Modül yalnızca sözleşme |
+| Hareket fiziği (`whynotac-physics`) | Başladı | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı gerçek client'ın 942 tikiyle bit bit aynı; parkur ve kontrol sırada |
 | Kalıcı depolama, karar, yapay zekâ modülleri | Planlı | `whynotac-storage`, `whynotac-verdict`, `whynotac-ai` |
 
 ## Kapı kuralı
@@ -92,7 +92,7 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 ## Faz 6 — İşletme ve dağıtım
 
 - **Tedarik zinciri:**
-  - CI action'ları SHA'ya sabitlenir, en az yetkili token kullanılır (`REL-01`).
+  - ~~CI action'ları SHA'ya sabitlenir, en az yetkili token kullanılır (`REL-01`).~~ Yapıldı.
   - Gradle bağımlılıkları doğrulanır (`REL-02`).
   - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`).
 - **Gözlemlenebilirlik:** metrikler ve sağlık modeli (`OBS-01`). Performans hedefi gerçek arazide
@@ -118,4 +118,5 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 | `F1`, `F3`, `F4` replikalar | Varlık, dünya, envanter ve öz-oyuncu replikaları (Faz 2b-3, 2b-5–2b-8) |
 | `PHY-A9` gerçek client doğruluk kaydı | `tools/realclient` javaagent kaydedicisi |
 | `C1` erişim (ilk P-A) | `attack-reach` (Faz 2b-8); kalan kutular görev #37 |
+| `REL-01` CI sabitleme | Her action bir commit'e sabit (yorumda o anki etiketi var); token yalnızca okuyabilir |
 | `PROD-1`, `PROD-2`, `PROD-3` vakalar ve günlükler | `/whynotac privacy` kayıtları ve vakaları birlikte kapsar. Vaka saklama süresi saatte bir uygulanır, sahipsiz dosya kalmaz. Günlüklerde IP adresi yok |

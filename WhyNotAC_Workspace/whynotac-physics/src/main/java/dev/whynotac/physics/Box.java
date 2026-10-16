@@ -50,6 +50,11 @@ public record Box(double minX, double minY, double minZ, double maxX, double max
         return of(x0, y0, z0, x1, y1, z1);
     }
 
+    /** {@code AABB.inflate(x, y, z)}; a negative amount is {@code deflate}. */
+    public Box inflate(double x, double y, double z) {
+        return of(minX - x, minY - y, minZ - z, maxX + x, maxY + y, maxZ + z);
+    }
+
     /** {@code AABB.intersects(double...)}: a common interior, so touching faces do not count. */
     public boolean intersects(double x0, double y0, double z0, double x1, double y1, double z1) {
         return minX < x1 && maxX > x0 && minY < y1 && maxY > y0 && minZ < z1 && maxZ > z0;
