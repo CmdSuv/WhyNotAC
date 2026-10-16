@@ -139,8 +139,9 @@ echo "execute at $NAME run summon minecraft:husk ~3 ~ ~3 {NoAI:1b,PersistenceReq
 echo "execute at $NAME run summon minecraft:villager ~-3 ~ ~3 {NoAI:1b,PersistenceRequired:1b}" > "$FIFO"
 echo "execute at $NAME run summon minecraft:villager ~-3 ~ ~-3 {NoAI:1b,PersistenceRequired:1b,Age:-24000}" > "$FIFO"
 echo "execute at $NAME run summon minecraft:armor_stand ~3 ~ ~-3" > "$FIFO"
-# Sizes from data: a slime's (no AI: it cannot hurt the player) and an interaction's.
-echo "execute at $NAME run summon minecraft:slime ~5 ~ ~0.5 {NoAI:1b,PersistenceRequired:1b,Size:2}" > "$FIFO"
+# Sizes from data: a slime's (no AI: it cannot hurt the player) and an interaction's. The slime stays off the reach
+# stage's line (x 5.5 to 10.5 at z 0.5): a player placed in it would be pushed off the line.
+echo "execute at $NAME run summon minecraft:slime ~-5 ~ ~-4 {NoAI:1b,PersistenceRequired:1b,Size:2}" > "$FIFO"
 echo "execute at $NAME run summon minecraft:interaction ~-5 ~ ~0.5 {width:1.75f,height:0.5f}" > "$FIFO"
 sleep 1; echo "execute at $NAME run tp @e[tag=wnz,limit=1] ~2.3172 ~ ~3.7071 45 10" > "$FIFO"
 # Items: a sword (hotbar 0), a stick with an attack range of its own (hotbar 1; the driver moves it to hotbar 4
