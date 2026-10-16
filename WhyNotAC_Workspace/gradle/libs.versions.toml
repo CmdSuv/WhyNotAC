@@ -10,6 +10,8 @@ paperweight = "2.0.0-beta.24"
 junit = "6.1.3"
 jmh = "1.37"
 packetevents = "2.14.0"
+# The client's own fastutil (1.21.11): the movement check replicates its hash order and is tested against it.
+fastutil = "8.5.18"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -20,6 +22,7 @@ jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
 jmh-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
 
 packetevents-api = { module = "com.github.retrooper:packetevents-api", version.ref = "packetevents" }
+fastutil = { module = "it.unimi.dsi:fastutil", version.ref = "fastutil" }
 
 [plugins]
 paperweight-userdev = { id = "io.papermc.paperweight.userdev", version.ref = "paperweight" }

@@ -24,6 +24,7 @@ import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Trust;
 import dev.whynotac.protocol.session.TimelineEvent.Observation.Source;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.Replicas;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -95,6 +96,65 @@ class MovementCheckTest {
     private int reminder;
     private boolean sentSprinting;
     private PlayerState.Keys sentInput = NONE;
+    private final ClientSpeed speed = new ClientSpeed();
+    // the server: its movement speed modifiers in its own order (an Object2ObjectArrayMap, insertion order), and
+    // whether it sends them again when sprinting starts or stops (as it does: the modifier set changed)
+    private final List<ClientboundPacket.UpdateAttributes.Modifier> serverModifiers = new ArrayList<>();
+    private boolean serverSendsSpeed;
+
+    /** {@code Identifier}'s equality and hash: what the client's modifier table sees of an id. */
+    private record Key(String namespace, String path) {
+        static Key of(String id) {
+            int colon = id.indexOf(':');
+            return new Key(id.substring(0, colon), id.substring(colon + 1));
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * namespace.hashCode() + path.hashCode();
+        }
+    }
+
+    /**
+     * The client's movement speed attribute: base {@code 0.1F}, the modifiers multiplying the total in fastutil's
+     * own table ({@code AttributeInstance}), summed in its iteration order.
+     */
+    private static final class ClientSpeed implements OnFoot.Speed {
+        private static final String SPRINTING = "minecraft:sprinting";
+        private final Object2ObjectOpenHashMap<Key, Double> total = new Object2ObjectOpenHashMap<>();
+
+        boolean holdsSprinting() {
+            return total.containsKey(Key.of(SPRINTING));
+        }
+
+        @Override
+        public double value(boolean sprintModifier) {
+            assertEquals(holdsSprinting(), sprintModifier, "the synthetic client's state follows its own attribute");
+            double value = 0.1F;
+            for (double amount : total.values()) {
+                value *= 1.0 + amount;
+            }
+            return value;
+        }
+
+        @Override
+        public OnFoot.Speed setSprinting(boolean sprinting) {
+            total.remove(Key.of(SPRINTING));
+            if (sprinting) {
+                total.put(Key.of(SPRINTING), (double) 0.3F);
+            }
+            return this;
+        }
+
+        /** {@code handleUpdateAttributes}: every modifier removed, then the update's added in its order. */
+        void replace(List<ClientboundPacket.UpdateAttributes.Modifier> modifiers) {
+            total.clear();
+            for (ClientboundPacket.UpdateAttributes.Modifier m : modifiers) {
+                assertEquals(ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL, m.operation());
+                total.put(Key.of(m.id()), m.amount());
+            }
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -159,7 +219,7 @@ class MovementCheckTest {
     /** One client tick with these keys and this rotation; {@code cheat} moves the result before it is sent. */
     private void tick(PlayerState.Keys keys, float yRot, float xRot, Vec3d cheat) throws Colliders.Unknown {
         PlayerState pre = rotate(player, yRot, xRot);
-        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick));
+        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed));
         firstTick = false;
         if (!cheat.equals(Vec3d.ZERO)) {
             post = move(post, cheat);
@@ -169,7 +229,8 @@ class MovementCheckTest {
             in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
             sentInput = keys;
         }
-        if (post.sprinting() != sentSprinting) {
+        boolean sprintSent = post.sprinting() != sentSprinting;
+        if (sprintSent) {
             in(new ServerboundPacket.PlayerCommand(SELF, post.sprinting() ? ServerboundPacket.PlayerCommand.Action.START_SPRINTING
                     : ServerboundPacket.PlayerCommand.Action.STOP_SPRINTING, 0));
             sentSprinting = post.sprinting();
@@ -196,6 +257,33 @@ class MovementCheckTest {
         sentCollision = post.horizontalCollision();
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
+        if (sprintSent && serverSendsSpeed) {
+            // the server's setSprinting: its modifier removed, then added at the end of its set when sprinting
+            serverModifiers.removeIf(m -> m.id().equals(ClientSpeed.SPRINTING));
+            if (post.sprinting()) {
+                serverModifiers.add(new ClientboundPacket.UpdateAttributes.Modifier(ClientSpeed.SPRINTING, 0.3F,
+                        ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL));
+            }
+            sendSpeed(true);
+        }
+    }
+
+    /** The server's movement speed update, handled before the client's next tick ({@code handled} false: ignored). */
+    private void sendSpeed(boolean handled) {
+        out(new ClientboundPacket.UpdateAttributes(SELF, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 0.1F,
+                serverModifiers))));
+        sync();
+        if (handled) {
+            speed.replace(serverModifiers);
+            player = withSprintModifier(player, speed.holdsSprinting());
+        }
+    }
+
+    /** A potion effect whose attribute modifier multiplies the speed's total, as the server adds it. */
+    private void effect(String effect, String modifier, double amount, boolean handled) {
+        out(new ClientboundPacket.MobEffect(SELF, effect, 0, 600, 0));
+        serverModifiers.add(new ClientboundPacket.UpdateAttributes.Modifier(modifier, amount, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL));
+        sendSpeed(handled);
     }
 
     private void ticks(int count, PlayerState.Keys keys, float yRot) throws Colliders.Unknown {
@@ -220,6 +308,12 @@ class MovementCheckTest {
     private static PlayerState withDelta(PlayerState p, Vec3d delta) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
+                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+    }
+
+    private static PlayerState withSprintModifier(PlayerState p, boolean sprintModifier) {
+        return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
+                p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), sprintModifier, p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
     }
 
@@ -383,6 +477,28 @@ class MovementCheckTest {
         // and a cheat is caught again
         tick(SPRINT_JUMP, 60.0F, 0.0F, new Vec3d(0.05, 0.0, 0.0));
         assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void speedEffectsWithSprintingAreSummedInTheClientsOwnOrder() throws Exception {
+        serverSendsSpeed = true;
+        ticks(5, NONE, 30.0F);
+        // speed II and slowness I: with sprinting, three modifiers multiplying the total, in the client's hash order
+        effect("minecraft:speed", "minecraft:effect.speed", 0.4000000059604645, true);
+        effect("minecraft:slowness", "minecraft:effect.slowness", -0.15000000596046448, true);
+        walkAround();
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+        assertEquals(130, count(MovementTracker.Outcome.EXPLAINED));
+    }
+
+    @Test
+    void movingAsIfASlownessModifierWereNotThereIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        effect("minecraft:slowness", "minecraft:effect.slowness", -0.15000000596046448, false); // the client keeps its old speed
+        ticks(20, FORWARD, 30.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
     }
 
     @Test

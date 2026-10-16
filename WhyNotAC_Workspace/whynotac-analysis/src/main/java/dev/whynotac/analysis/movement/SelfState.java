@@ -17,8 +17,8 @@ import java.util.TreeSet;
  * @param food            {@code FoodData.foodLevel}: a new player's is 20
  * @param gameMode        the local game mode id, -1 before the login
  * @param effects         the active effects that change on-foot movement ({@link #MOVEMENT_EFFECTS})
- * @param speed           the movement speed attribute without the sprinting modifier; null when its value is not
- *                        exactly known (several modifiers of one operation: the client's order is a hash order)
+ * @param speed           the movement speed attribute, its modifiers in the client's own order; null when that is
+ *                        not followed (a table past its size, an unknown operation)
  * @param otherAttributes the other attributes on-foot movement reads whose value is not the default
  * @param vehicle         the entity the player rides ({@code -1}: none)
  * @param border          the world border
@@ -80,7 +80,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             return "effect " + new TreeSet<>(effects).first();
         }
         if (speed == null) {
-            return "movement speed modifiers in an unknown order";
+            return "movement speed modifiers not followed";
         }
         if (!otherAttributes.isEmpty()) {
             return "attribute " + new TreeSet<>(otherAttributes).first();
@@ -178,6 +178,11 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, other, camera, vehicle,
                 noGravity, usingItem, frozen, border);
+    }
+
+    SelfState withSpeed(SpeedAttribute newSpeed) {
+        return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, otherAttributes, camera,
+                vehicle, noGravity, usingItem, frozen, border);
     }
 
     SelfState withCamera(boolean self) {

@@ -56,13 +56,19 @@ public final class OnFoot {
         }
     }
 
-    /** The movement speed attribute's value with and without the sprinting modifier, the rest of its modifiers fixed. */
+    /** The movement speed attribute ({@code AttributeInstance}), as {@code setSprinting} changes it during the tick. */
     @FunctionalInterface
     public interface Speed {
         /** The player's base and no modifier but sprinting's: {@code 0.1F}, times {@code 1 + 0.3F} when sprinting. */
         Speed VANILLA = sprintModifier -> sprintModifier ? BASE_SPEED * (1.0 + SPRINT_MODIFIER) : BASE_SPEED;
 
+        /** {@code getValue()}, the sprinting modifier there or not as the player's state says. */
         double value(boolean sprintModifier);
+
+        /** {@code LivingEntity.setSprinting}: the sprinting modifier removed, then added back when sprinting. */
+        default Speed setSprinting(boolean sprinting) {
+            return this;
+        }
     }
 
     /**
@@ -72,8 +78,9 @@ public final class OnFoot {
      *                           {@code sprintTriggerTime}; otherwise the counter only counted down (or was cleared)
      * @param readSprintWindow   the tick started the double-tap window: {@code sprintTriggerTime} was set to the option
      * @param autoJumpTriggered  with auto-jump enabled, the tick set {@code autoJumpTime} to 1 (the next tick jumps)
+     * @param speed              the speed attribute after the tick's {@code setSprinting} calls
      */
-    public record Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered) {}
+    public record Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered, Speed speed) {}
 
     private final Colliders.World world;
     private final BlockStates states;
@@ -96,6 +103,7 @@ public final class OnFoot {
     private boolean sprintModifier;
     private boolean crouching;
     private boolean readSprintTrigger;
+    private Speed speed;
     private boolean readSprintWindow;
     private boolean autoJumpTriggered;
     private PlayerState.Pose pose;
@@ -116,6 +124,7 @@ public final class OnFoot {
         this.world = world;
         this.states = world.states();
         this.conditions = conditions;
+        this.speed = conditions.speed();
         x = pre.x();
         y = pre.y();
         z = pre.z();
@@ -153,7 +162,7 @@ public final class OnFoot {
         }
         OnFoot tick = new OnFoot(pre, world, conditions);
         tick.run(keys);
-        return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered);
+        return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered, tick.speed);
     }
 
     private PlayerState state() {
@@ -243,9 +252,13 @@ public final class OnFoot {
     }
 
     /** {@code LivingEntity.setSprinting}: the flag and the attribute's sprinting modifier together. */
-    private void setSprinting(boolean value) {
+    private void setSprinting(boolean value) throws Colliders.Unknown {
         sprinting = value;
         sprintModifier = value;
+        speed = speed.setSprinting(value);
+        if (speed == null) {
+            throw new Colliders.Unknown("more speed modifiers than the client's table holds unresized");
+        }
     }
 
     /** {@code KeyboardInput.tick}: the strafe and forward impulses, normalised ({@code Vec2.normalized}). */
@@ -353,7 +366,7 @@ public final class OnFoot {
 
     /** {@code Player.getSpeed()}: the attribute's value as a float. */
     private float speed() {
-        return (float) conditions.speed().value(sprintModifier);
+        return (float) speed.value(sprintModifier);
     }
 
     /** {@code LocalPlayer.move(MoverType.SELF, movement)}: {@code Entity.move}, then auto-jump on the horizontal step taken. */

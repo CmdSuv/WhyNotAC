@@ -456,6 +456,9 @@ public final class MovementTracker {
         return List.copyOf(out);
     }
 
+    /** A state a tick may start from, with the speed attribute it holds then. */
+    private record Start(PlayerState player, SpeedAttribute speed) {}
+
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
     private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, int window) {}
 
@@ -494,10 +497,8 @@ public final class MovementTracker {
             case ClientboundPacket.UpdateAttributes update -> {
                 SelfState next = s.withAttributes(update.attributes());
                 PlayerState q = p;
-                for (ClientboundPacket.UpdateAttributes.Attribute a : update.attributes()) {
-                    if (a.key().equals(SelfState.MOVEMENT_SPEED)) {
-                        q = withSprintModifier(q, SpeedAttribute.holdsSprinting(a));
-                    }
+                if (next.speed() != null && next.speed() != s.speed()) {
+                    q = withSprintModifier(q, next.speed().holdsSprinting()); // the server's set replaces the client's own
                 }
                 yield h.withSelf(next).withPlayer(q);
             }
@@ -610,13 +611,14 @@ public final class MovementTracker {
         if (keepData && old == null) {
             throw new Lose("a respawn keeps the state of an untracked player");
         }
-        SelfState self = SelfState.fresh(gameMode < 0 ? s.gameMode() : gameMode, keepAttributes ? s.speed() : baseOnly(s.speed()),
+        SpeedAttribute speed = s.speed() == null ? null : keepAttributes ? s.speed().copied() : s.speed().baseOnly();
+        SelfState self = SelfState.fresh(gameMode < 0 ? s.gameMode() : gameMode, speed,
                 keepAttributes ? s.otherAttributes() : Set.of(), s.border()).withGameMode(gameMode < 0 ? s.gameMode() : gameMode);
         Vec3d delta = keepData ? old.deltaMovement() : Vec3d.ZERO;
         float yRot = keepData ? old.yRot() : -180.0F;
         float xRot = keepData ? old.xRot() : 0.0F;
         boolean sprinting = keepData && old.sprinting(); // the entity data, with its flags
-        boolean sprintModifier = keepAttributes && old != null && old.sprintModifier();
+        boolean sprintModifier = speed != null && speed.holdsSprinting();
         PlayerState.Pose pose = keepData ? old.pose() : PlayerState.Pose.STANDING;
         PlayerState player = new PlayerState(0.0, 0.0, 0.0, delta, yRot, xRot, false, false, false, false, false, 0.0, sprinting, sprintModifier, false,
                 pose, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO);
@@ -632,11 +634,6 @@ public final class MovementTracker {
         boolean keepAttributes = (keep & ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS) != 0;
         boolean keepData = (keep & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) != 0;
         return freshPlayer(h, h.self(), respawn.gameMode(), keepAttributes, keepData);
-    }
-
-    /** {@code AttributeMap.assignBaseValues}: the bases stay, the modifiers go. */
-    private static SpeedAttribute baseOnly(SpeedAttribute speed) {
-        return speed == null ? null : new SpeedAttribute(speed.base(), List.of());
     }
 
     /** {@code setValuesFromPositionPacket} ({@code PositionMoveRotation.calculateAbsolute}): position and motion. */
@@ -710,12 +707,17 @@ public final class MovementTracker {
             }
         }
         PlayerState pre = rotated(h.player(), yRot, xRot);
-        List<PlayerState> starts = new ArrayList<>(List.of(pre));
+        List<Start> starts = new ArrayList<>(List.of(new Start(pre, self.speed())));
         for (int i = 0; i < in.attacks; i++) {
             // Player.causeExtraKnockback, when the client's own simulation of the hit knocks back: slowed, not sprinting
-            List<PlayerState> more = new ArrayList<>();
-            for (PlayerState s : starts) {
-                PlayerState slowed = withSprinting(withSprintModifier(withDelta(s, s.deltaMovement().multiply(0.6, 1.0, 0.6)), false), false);
+            List<Start> more = new ArrayList<>();
+            for (Start s : starts) {
+                SpeedAttribute speed = s.speed().setSprinting(false);
+                if (speed == null) {
+                    throw new Lose("more speed modifiers than the client's table holds unresized");
+                }
+                Start slowed = new Start(withSprinting(withSprintModifier(withDelta(s.player(), s.player().deltaMovement().multiply(0.6, 1.0, 0.6)),
+                        false), false), speed);
                 if (!starts.contains(slowed) && !more.contains(slowed)) {
                     more.add(slowed);
                 }
@@ -724,21 +726,23 @@ public final class MovementTracker {
         }
         boolean autoJump = self.firstTick() || (h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON) != 0;
         int window = Integer.numberOfTrailingZeros(h.windowMask());
-        for (PlayerState start : starts) {
-            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, self.speed(), window);
+        for (Start begin : starts) {
+            PlayerState start = begin.player();
+            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), window);
             OnFoot.Step step = steps.get(key);
             if (step != null && !step.readSprintTrigger()) {
                 // the same step: only this state's own counter counted down (or was cleared by shift or backward)
                 int counter = start.keys().shift() || keys.backward() ? 0 : Math.max(start.sprintTriggerTime() - 1, 0);
-                step = new OnFoot.Step(withSprintTrigger(step.state(), counter), false, false, step.autoJumpTriggered());
+                step = new OnFoot.Step(withSprintTrigger(step.state(), counter), false, false, step.autoJumpTriggered(), step.speed());
             } else {
                 try {
-                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, self.speed()));
+                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed()));
                 } catch (Colliders.Unknown e) {
                     throw new Lose(e.getMessage());
                 }
                 steps.putIfAbsent(key, step);
             }
+            SelfState after = self.afterFirstTick().withSpeed((SpeedAttribute) step.speed());
             List<Hypothesis> variants = new ArrayList<>();
             int jumpMask = self.firstTick() ? h.autoJumpMask() : step.autoJumpTriggered() ? h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON : h.autoJumpMask();
             PlayerState s = step.state();
@@ -760,9 +764,9 @@ public final class MovementTracker {
             }
             for (Hypothesis v : variants) {
                 predictions.add(v.player());
-                Hypothesis.Sent after = observe(v.player(), sent, keys, in);
-                if (after != null) {
-                    out.add(new Hypothesis(v.player(), self.afterFirstTick(), after, v.windowMask(), v.autoJumpMask(), h.applied()));
+                Hypothesis.Sent sentAfter = observe(v.player(), sent, keys, in);
+                if (sentAfter != null) {
+                    out.add(new Hypothesis(v.player(), after, sentAfter, v.windowMask(), v.autoJumpMask(), h.applied()));
                 }
             }
         }
@@ -815,7 +819,9 @@ public final class MovementTracker {
     private Tick untracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         Hypothesis settled = baseReliable ? settleAnchor(number, in, w, world, entities) : null;
         if (settled != null) {
-            hypotheses = List.of(settled, settled.withPlayer(withSprintModifier(settled.player(), !settled.player().sprintModifier())));
+            boolean present = settled.self().speed().holdsSprinting();
+            SpeedAttribute other = settled.self().speed().setSprinting(!present);
+            hypotheses = List.of(settled, settled.withPlayer(withSprintModifier(settled.player(), !present)).withSelf(settled.self().withSpeed(other)));
             since = end.sequence();
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: standing still", hypotheses.size(), since, null, null);
         }
@@ -947,8 +953,12 @@ public final class MovementTracker {
             return null;
         }
         // a guess for the start of the tick; the step recomputes everything the guess leaves open
+        if (!base.speed().sprintLayoutCanonical()) {
+            return null; // the sprinting modifier's place in the client's table would depend on a history not seen
+        }
         PlayerState guess = new PlayerState(x, y, z, new Vec3d(0.0, SETTLED_Y_MOTION, 0.0), baseSent.yRot(), baseSent.xRot(), true, false, false, true,
-                true, 0.0, baseSent.sprinting(), false, false, PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO);
+                true, 0.0, baseSent.sprinting(), base.speed().holdsSprinting(), false, PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null,
+                false, Vec3d.ZERO);
         try {
             Box box = guess.box();
             if (!base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {

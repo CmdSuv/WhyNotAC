@@ -9,6 +9,7 @@ dependencies {
     api(project(":whynotac-world")) // the replicas the checks read
     implementation(project(":whynotac-physics")) // the on-foot step the movement check runs
     implementation(project(":whynotac-recording")) // the verify tool re-runs checks over recordings
+    testImplementation(libs.fastutil) // the modifier tables are checked against the client's own hash map
 }
 
 // The policy test compares the code's matrix with the table in docs/POLICY.md.
