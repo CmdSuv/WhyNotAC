@@ -13,10 +13,10 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | Çevrilmiş client'lar için ikinci kenar katmanı yok (`NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
-| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük |
+| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement` orada ayrı sayılır) |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
-| Hareket fiziği (`whynotac-physics`) | Başladı | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı gerçek client'ın parkurdaki 1803 tikiyle bit bit aynı; sunucu tarafı kontrol sırada |
+| Hareket fiziği (`whynotac-physics`) | Yaya kısmı tamam | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı (otomatik zıplama dahil) gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü SHADOW'da, gerçek client oturumunda 0 açıklanamayan tick |
 | Kalıcı depolama, karar, yapay zekâ modülleri | Planlı | `whynotac-storage`, `whynotac-verdict`, `whynotac-ai` |
 
 ## Kapı kuralı

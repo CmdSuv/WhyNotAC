@@ -66,11 +66,23 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     | Kenardan geri çekilmeyi kaldırmak | 24 |
     | Hız sıfırlama eşiği | 2 |
     | Eğilme yavaşlatmasının, kenar korumasının ve koşma tetikleyicisinin shift zamanlaması | 1'er |
+  - **Otomatik zıplama (`LocalPlayer.updateAutoJump`, tamam):** seçenek açıkken bir blok yüksekliğindeki basamağa
+    yürüyen oyuncunun bir sonraki tikte zıplaması, client'ın geometrisiyle bit bit (bakış yönü, baş üstü boşluğu,
+    ileriye süpürülen kutu, ilk kesişen kutunun yüksekliği). Gerçek client oturumu artık seçenek açık koşar; iki
+    bacak tek bloklu basamağa önden ve açıyla yürür. **Son oturum:** 1956 tikin 1952'si bit bit eşit, 0 fark;
+    otomatik zıplama 3 kez tetiklendi. Negatif kontroller: yükselme sınırı (1.2 → 0.9), karşılaştırma (`>` → `>=`)
+    ve ileri bakış mesafesinin yarıya inmesi testi bozar; 0.51'lik çizgi yüksekliği bu düz basamakta ayırt edilmez.
+  - **Hız özniteliği:** `OnFoot.Speed` ile dışarıdan verilir (sunucunun gönderdiği taban ve değiştiriciler).
+    Koşma değiştiricisinin özniteliğde olup olmadığı (`PlayerState.sprintModifier`) bayraktan ayrı izlenir: sunucu
+    ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
-    yeniden kurulan parkurda 544 tik.
+    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166 tik.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı, tırmanma ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar);
     - slime ve yatak sekmesi; çit ve duvar üstü;
-    - boğulma itmesi, yüklenmemiş chunk, sürünme, otomatik zıplama geometrisi.
+    - boğulma itmesi, yüklenmemiş chunk, sürünme;
+    - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 
-    Varsayılan öznitelikler ve etkisiz oyuncu varsayılır. Katı varlıklar ve dünya sınırı çağıranın sorumluluğundadır.
+    Varsayılan öznitelikler (hız dışında) ve etkisiz oyuncu varsayılır. Katı varlıklar ve dünya sınırı çağıranın
+    sorumluluğundadır.
+- **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.

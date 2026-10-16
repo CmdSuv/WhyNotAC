@@ -1,3 +1,5 @@
+import dev.whynotac.analysis.movement.Hypothesis;
+import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.BlockPos;
 import dev.whynotac.physics.Colliders;
@@ -32,8 +34,11 @@ import java.util.TreeMap;
  * the next tick that sent one) arrives in the replay: the k-th packet the client sent, rebuilt from its own
  * tick states as verify_truth.py does, is the k-th one the server recorded (teleport replies aside).
  *
- * <p>usage: java -cp WhyNotAC.jar:whynotac-physics.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on
- * any difference
+ * <p>Then the movement check's tracker ({@code MovementTracker}) runs over the same recording as the server
+ * would: at every tick whose movement packet it explained, the client's own state after the tick must be one of
+ * its hypotheses ({@code truthMissing} counts those where it is not), and no tick may be unexplained.
+ *
+ * <p>usage: java -cp WhyNotAC.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on any difference
  */
 public class MovementTruth {
 
@@ -72,9 +77,86 @@ public class MovementTruth {
         Replayer.replay(RecordingReader.open(Path.of(args[0])), chain);
         Map<String, Object> result = comparison.result();
         result.put("blockChangesDuringPlay", blockChanges[0]);
+        Map<String, Object> tracker = track(Path.of(args[0]), comparison.sentTicks());
+        result.put("tracker", tracker);
         System.out.println(Json.write(result));
-        boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0;
+        boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
+                && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
+                && ((Number) tracker.get("truthFound")).longValue() > 0;
         System.exit(clean ? 0 : 1);
+    }
+
+    /**
+     * The movement check's tracker over the recording: outcomes by reason, and at every explained tick that
+     * sent a movement packet whether the client's own state after it (the k-th such tick of the truth) is a hypothesis.
+     */
+    private static Map<String, Object> track(Path recording, List<PlayerState> sentTicks) throws Exception {
+        Replicas replicas = Replicas.vanilla();
+        MovementTracker tracker = new MovementTracker();
+        Map<String, Long> outcomes = new TreeMap<>();
+        Map<String, Long> reasons = new TreeMap<>();
+        long[] counts = new long[4]; // explained ticks compared, truth found, truth missing, unexplained
+        List<String> examples = new ArrayList<>();
+        int[] sentIndex = {0};
+        boolean[] moved = {false};
+        boolean[] afterAccept = {false};
+        List<TimelineListener> chain = new ArrayList<>(replicas.listeners());
+        chain.add((session, event) -> {
+            if (event instanceof TimelineEvent.Inbound in && !(in.packet() instanceof ServerboundPacket.ClientTickEnd)) {
+                boolean reply = afterAccept[0] && in.packet() instanceof ServerboundPacket.MovePlayer;
+                afterAccept[0] = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
+                moved[0] |= in.packet() instanceof ServerboundPacket.MovePlayer && !reply;
+            }
+            MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session));
+            if (tick == null) {
+                return;
+            }
+            outcomes.merge(tick.outcome().name(), 1L, Long::sum);
+            if (tick.outcome() == MovementTracker.Outcome.NO_CLAIM && examples.size() < 40) {
+                examples.add("no claim at tick " + tick.number() + ": " + tick.reason());
+            }
+            if (tick.reason() != null) {
+                reasons.merge(tick.reason().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]|-?\\d+\\.\\d+", ""), 1L, Long::sum);
+            }
+            if (tick.outcome() == MovementTracker.Outcome.UNEXPLAINED) {
+                counts[3]++;
+                if (examples.size() < 12) {
+                    examples.add("unexplained tick " + tick.number() + ": sent " + tick.sent() + ", e.g. predicted " + tick.closest());
+                }
+            }
+            if (moved[0]) {
+                moved[0] = false;
+                PlayerState truth = sentIndex[0] < sentTicks.size() ? sentTicks.get(sentIndex[0]) : null;
+                sentIndex[0]++;
+                if (tick.outcome() == MovementTracker.Outcome.EXPLAINED && truth != null) {
+                    counts[0]++;
+                    boolean found = false;
+                    List<String> nearest = null;
+                    for (Hypothesis h : tracker.hypotheses()) {
+                        List<String> d = differences(h.player(), truth);
+                        found |= d.isEmpty();
+                        if (nearest == null || d.size() < nearest.size()) {
+                            nearest = d;
+                        }
+                    }
+                    counts[found ? 1 : 2]++;
+                    if (!found && examples.size() < 12) {
+                        examples.add("tick " + tick.number() + " (sent tick " + (sentIndex[0] - 1) + "): the client's state is no hypothesis of "
+                                + tracker.hypotheses().size() + "; nearest differs in " + nearest);
+                    }
+                }
+            }
+        });
+        Replayer.replay(RecordingReader.open(recording), chain);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("outcomes", outcomes);
+        out.put("reasons", reasons);
+        out.put("explainedSentTicks", counts[0]);
+        out.put("truthFound", counts[1]);
+        out.put("truthMissing", counts[2]);
+        out.put("unexplained", counts[3]);
+        out.put("examples", examples);
+        return out;
     }
 
     private static Colliders.World view(ClientWorld world) {
@@ -129,6 +211,17 @@ public class MovementTruth {
             }
         }
 
+        /** The client's own state after each tick that sent a movement packet, in order. */
+        List<PlayerState> sentTicks() {
+            List<PlayerState> out = new ArrayList<>();
+            for (int i = 0; i < ticks.size(); i++) {
+                if (sent.get(i)) {
+                    out.add(state(ticks.get(i)[1]));
+                }
+            }
+            return out;
+        }
+
         /** A movement packet arrived: the ticks up to the one that sent it are compared in {@code world}. */
         void packetArrived(Colliders.World world) {
             while (next < ticks.size()) {
@@ -143,10 +236,16 @@ public class MovementTruth {
         }
 
         private void compare(Map<String, Object> pre, Map<String, Object> post, Colliders.World world) {
-            boolean autoJump = firstLoaded; // LocalPlayer.autoJumpEnabled starts true until the first sendPosition
+            // LocalPlayer.autoJumpEnabled: true until a new player's first sendPosition, then the option (older truth files: off)
+            boolean autoJump = firstLoaded || Boolean.TRUE.equals(pre.get("autoJumpEnabled"));
             firstLoaded = false;
             PlayerState before = state(pre);
             PlayerState expected = state(post);
+            float speed = f32(pre.get("speed"));
+            if (speed != (float) OnFoot.Speed.VANILLA.value(true) && speed != (float) OnFoot.Speed.VANILLA.value(false)) {
+                unknown.merge("a speed attribute other than the vanilla walk or sprint", 1L, Long::sum);
+                return;
+            }
             try {
                 PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
                         new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump));
@@ -195,6 +294,7 @@ public class MovementTruth {
         same(d, "verticalCollision", p.verticalCollision(), e.verticalCollision());
         same(d, "verticalCollisionBelow", p.verticalCollisionBelow(), e.verticalCollisionBelow());
         same(d, "sprinting", p.sprinting(), e.sprinting());
+        same(d, "sprintModifier", p.sprintModifier(), e.sprintModifier());
         same(d, "crouching", p.crouching(), e.crouching());
         same(d, "pose", p.pose(), e.pose());
         same(d, "noJumpDelay", p.noJumpDelay(), e.noJumpDelay());
@@ -224,7 +324,7 @@ public class MovementTruth {
         return new PlayerState(f64(pos.get(0)), f64(pos.get(1)), f64(pos.get(2)), vec(r.get("deltaMovement")), f32(r.get("yRot")), f32(r.get("xRot")),
                 (Boolean) r.get("onGround"), (Boolean) r.get("horizontalCollision"), (Boolean) r.get("minorHorizontalCollision"),
                 (Boolean) r.get("verticalCollision"), (Boolean) r.get("verticalCollisionBelow"), f64(r.get("fallDistance")), (Boolean) r.get("sprinting"),
-                (Boolean) r.get("crouching"), PlayerState.Pose.valueOf((String) r.get("pose")), keys((String) r.get("keys")),
+                f32(r.get("speed")) == (float) OnFoot.Speed.VANILLA.value(true), (Boolean) r.get("crouching"), PlayerState.Pose.valueOf((String) r.get("pose")), keys((String) r.get("keys")),
                 ((Number) r.get("noJumpDelay")).intValue(), ((Number) r.get("sprintTriggerTime")).intValue(), ((Number) r.get("autoJumpTime")).intValue(),
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),

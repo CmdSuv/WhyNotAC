@@ -21,8 +21,9 @@ import org.junit.jupiter.api.Test;
  * jumping, strafing, sneaking on a superflat world; tools/realclient). {@code truth-course.jsonl.gz} holds the
  * movement course of the same session: step-ups onto a slab, a block and a slab on a block, ice, soul sand, a
  * wall met at an angle, sneaking to a platform's edge and off it, jumps under a low ceiling, a double-tapped
- * sprint and stairs. Each tick, run from its start in the same world (rebuilt here from the commands that
- * built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
+ * sprint and stairs. {@code truth-autojump.jsonl.gz} holds one-block steps walked into head on and at an angle with
+ * the client's auto-jump option on. Each tick, run from its start in the same world (rebuilt here from the
+ * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
 class OnFootTruthTest {
@@ -69,6 +70,8 @@ class OnFootTruthTest {
         {98, -58, -1, 101, -58, 1, blockState("minecraft:stone")},
         {124, -60, -1, 124, -60, 1, blockState("minecraft:oak_stairs", "facing=east", "half=bottom", "shape=straight", "waterlogged=false")},
         {125, -60, -1, 127, -60, 1, blockState("minecraft:stone")},
+        {136, -60, -1, 139, -60, 1, blockState("minecraft:stone")},
+        {143, -60, -3, 146, -60, 3, blockState("minecraft:stone")},
     };
 
     private static final Colliders.World COURSE_WORLD = new Colliders.World() {
@@ -115,7 +118,13 @@ class OnFootTruthTest {
         assertTrue(counts[0] > 400 && counts[1] >= 5 && counts[3] > 20 && counts[4] > 20 && counts[5] >= 1, java.util.Arrays.toString(counts));
     }
 
-    /** {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits}. */
+    @Test
+    void autoJumpIsTheClientsOwnAtOneBlockSteps() throws Exception {
+        int[] counts = replay("truth-autojump.jsonl.gz", COURSE_WORLD);
+        assertTrue(counts[0] > 150 && counts[6] >= 2 && counts[1] >= 2, java.util.Arrays.toString(counts));
+    }
+
+    /** {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered}. */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
         try (BufferedReader in = new BufferedReader(new InputStreamReader(
@@ -124,7 +133,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[6];
+        int[] counts = new int[7];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -133,7 +142,9 @@ class OnFootTruthTest {
             String where = "tick " + number(pre, "tickCount") + " keys " + text(post, "keys");
             PlayerState predicted;
             try {
-                predicted = OnFoot.tick(before, keys(text(post, "keys")), world, OnFoot.Conditions.VANILLA_DEFAULTS);
+                // LocalPlayer.autoJumpEnabled (recorded in newer files; the older ones were recorded with the option off)
+                boolean autoJump = pre.contains("\"autoJumpEnabled\":true");
+                predicted = OnFoot.tick(before, keys(text(post, "keys")), world, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump));
             } catch (Colliders.Unknown e) {
                 continue; // outside the engine's scope (the session's suffocation check at the wall): no claim, nothing to compare
             }
@@ -144,6 +155,7 @@ class OnFootTruthTest {
             counts[3] += expected.crouching() ? 1 : 0;
             counts[4] += expected.horizontalCollision() ? 1 : 0;
             counts[5] += expected.verticalCollision() && !expected.verticalCollisionBelow() ? 1 : 0;
+            counts[6] += expected.autoJumpTime() == 1 ? 1 : 0;
         }
         return counts;
     }
@@ -159,9 +171,18 @@ class OnFootTruthTest {
         return new PlayerState(f64(pos.get(0)), f64(pos.get(1)), f64(pos.get(2)), vec(list(line, "deltaMovement")), f32(text(line, "yRot")),
                 f32(text(line, "xRot")), bool(line, "onGround"), bool(line, "horizontalCollision"), bool(line, "minorHorizontalCollision"),
                 bool(line, "verticalCollision"), bool(line, "verticalCollisionBelow"), f64(text(line, "fallDistance")), bool(line, "sprinting"),
-                bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
+                sprintModifier(line), bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
                 number(line, "sprintTriggerTime"), number(line, "autoJumpTime"), supportPos, bool(line, "onGroundNoBlocks"),
                 vec(list(line, "stuckSpeedMultiplier")));
+    }
+
+    /** {@code LivingEntity.speed} (the attribute as a float, set in the last tick's aiStep) holds the sprinting modifier or not. */
+    private static boolean sprintModifier(String line) {
+        float speed = f32(text(line, "speed"));
+        if (speed != (float) OnFoot.Speed.VANILLA.value(true) && speed != (float) OnFoot.Speed.VANILLA.value(false)) {
+            throw new AssertionError("speed " + speed + " in " + line);
+        }
+        return speed == (float) OnFoot.Speed.VANILLA.value(true);
     }
 
     private static PlayerState.Keys keys(String k) {

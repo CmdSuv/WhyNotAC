@@ -8,6 +8,10 @@ public record BlockPos(int x, int y, int z) implements Comparable<BlockPos> {
         return new BlockPos(Colliders.floor(x), Colliders.floor(y), Colliders.floor(z));
     }
 
+    public BlockPos above() {
+        return new BlockPos(x, y + 1, z);
+    }
+
     public BlockPos atY(int newY) {
         return new BlockPos(x, newY, z);
     }

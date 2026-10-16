@@ -1,0 +1,398 @@
+package dev.whynotac.analysis.checks;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import dev.whynotac.analysis.evidence.Admissibility;
+import dev.whynotac.analysis.evidence.Evidence;
+import dev.whynotac.analysis.evidence.EvidenceClass;
+import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.movement.MovementTracker;
+import dev.whynotac.math.vanilla.VanillaMath;
+import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.Colliders;
+import dev.whynotac.physics.OnFoot;
+import dev.whynotac.physics.PlayerState;
+import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PlayerSession;
+import dev.whynotac.protocol.session.SessionRegistry;
+import dev.whynotac.protocol.session.TimelineEvent;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Fact;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Trust;
+import dev.whynotac.protocol.session.TimelineEvent.Observation.Source;
+import dev.whynotac.world.BlockStates;
+import dev.whynotac.world.Replicas;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The check over a client that runs the same on-foot step and sends what {@code LocalPlayer} sends: its own
+ * ticks are explained, and a client that moves, lands or sends otherwise is not. (The step itself is held to
+ * the real client by the physics module's truth tests; this holds the tracking around it.)
+ */
+class MovementCheckTest {
+
+    private static final BlockStates STATES = BlockStates.vanilla();
+    private static final ClientboundPacket.Dimension OVERWORLD = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384);
+    private static final UUID ME = new UUID(7, 7);
+    private static final int SELF = 1;
+    private static final long SECOND = 1_000_000_000L;
+    private static final int STONE = STATES.firstStateOf("minecraft:stone");
+    private static final int AIR = STATES.firstStateOf("minecraft:air");
+    private static final PlayerState.Keys NONE = PlayerState.Keys.NONE;
+    private static final PlayerState.Keys FORWARD = new PlayerState.Keys(true, false, false, false, false, false, false);
+    private static final PlayerState.Keys SPRINT = new PlayerState.Keys(true, false, false, false, false, false, true);
+    private static final PlayerState.Keys SPRINT_JUMP = new PlayerState.Keys(true, false, false, false, true, false, true);
+    private static final PlayerState.Keys STRAFE_SNEAK = new PlayerState.Keys(false, false, true, false, false, true, false);
+
+    /** Stone below y 64, air above: the replica's world, as the synthetic client sees it. */
+    private static final Colliders.World GROUND = new Colliders.World() {
+        @Override
+        public BlockStates states() {
+            return STATES;
+        }
+
+        @Override
+        public int blockState(int x, int y, int z) {
+            return y < 64 ? STONE : AIR;
+        }
+
+        @Override
+        public boolean isLoaded(int chunkX, int chunkZ) {
+            return chunkX >= -2 && chunkX <= 2 && chunkZ >= -2 && chunkZ <= 2;
+        }
+    };
+
+    private final List<Evidence> evidence = new ArrayList<>();
+    private final List<Admissibility> rejected = new ArrayList<>();
+    private final Map<MovementTracker.Outcome, Integer> outcomes = new EnumMap<>(MovementTracker.Outcome.class);
+    private final List<MovementTracker.Tick> ticks = new ArrayList<>();
+    private PlayerSession session;
+    private long seq;
+    private long now;
+    private int pingId;
+    private int teleportId;
+
+    // the synthetic client
+    private PlayerState player;
+    private boolean firstTick = true;
+    private double sentX;
+    private double sentY;
+    private double sentZ;
+    private float sentYRot;
+    private float sentXRot;
+    private boolean sentOnGround;
+    private boolean sentCollision;
+    private int reminder;
+    private boolean sentSprinting;
+    private PlayerState.Keys sentInput = NONE;
+
+    @BeforeEach
+    void setUp() {
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (s, e, t) -> { throw new AssertionError(t); });
+        Replicas replicas = Replicas.vanilla();
+        replicas.listeners().forEach(registry::addListener);
+        registry.addListener(new MovementCheck(new EvidenceSink() {
+            @Override
+            public void accept(PlayerSession s, Evidence e) {
+                evidence.add(e);
+            }
+
+            @Override
+            public void rejected(PlayerSession s, String check, Admissibility a) {
+                rejected.add(a);
+            }
+        }, replicas));
+        MovementTracker tracker = new MovementTracker();
+        registry.addListener((s, event) -> {
+            MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(s), replicas.entities().entities(s));
+            if (tick != null) {
+                ticks.add(tick);
+                outcomes.merge(tick.outcome(), 1, Integer::sum);
+            }
+        });
+        session = registry.openReplay("test");
+        deliver(new TimelineEvent.Observation(seq++, now, Source.WIRE, Source.WIRE, 774, "edge decoding"));
+        deliver(new ClientFact(seq++, now, Fact.IDENTITY, "UNAUTHENTICATED", Trust.CLAIMED, "test"));
+        deliver(new ClientFact(seq++, now, Fact.NATIVE_PROTOCOL, "774", Trust.FORMAT_BOUND, "test"));
+        deliver(new ClientFact(seq++, now, Fact.TRANSLATOR, "none", Trust.FORMAT_BOUND, "test"));
+        deliver(new ClientFact(seq++, now, Fact.TRANSACTION_ORIGIN, "CLIENT", Trust.FORMAT_BOUND, "test"));
+        deliver(new TimelineEvent.Bound(seq++, now, ME, "me", SELF));
+        out(new ClientboundPacket.Login(SELF, 8, OVERWORLD, 0));
+        out(new ClientboundPacket.ChunkCacheCenter(0, 0));
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) {
+                out(new ClientboundPacket.LevelChunk(x, z, chunk(OVERWORLD.sections())));
+            }
+        }
+        // a new LocalPlayer: the client's defaults
+        player = new PlayerState(0.0, 0.0, 0.0, Vec3d.ZERO, -180.0F, 0.0F, false, false, false, false, false, 0.0, false, false, false,
+                PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO);
+        teleport(0.5, 64.0, 0.5, 30.0F, 0.0F);
+        in(new ServerboundPacket.PlayerLoaded());
+    }
+
+    // --- the synthetic client ---
+
+    /** The server teleports the player; the client handles it before its next tick and replies. */
+    private void teleport(double x, double y, double z, float yaw, float pitch) {
+        int id = ++teleportId;
+        out(new ClientboundPacket.PlayerPosition(id, new Vec3d(x, y, z), Vec3d.ZERO, yaw, pitch, Set.of()));
+        sync();
+        player = new PlayerState(x, y, z, Vec3d.ZERO, yaw, pitch, player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
+                player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(), player.sprintModifier(),
+                player.crouching(), player.pose(), player.keys(), player.noJumpDelay(), player.sprintTriggerTime(), player.autoJumpTime(), player.support(),
+                player.onGroundNoBlocks(), player.stuckSpeedMultiplier());
+        in(new ServerboundPacket.AcceptTeleportation(id));
+        in(new ServerboundPacket.MovePlayer(x, y, z, yaw, pitch, true, true, false, false));
+    }
+
+    /** One client tick with these keys and this rotation; {@code cheat} moves the result before it is sent. */
+    private void tick(PlayerState.Keys keys, float yRot, float xRot, Vec3d cheat) throws Colliders.Unknown {
+        PlayerState pre = rotate(player, yRot, xRot);
+        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick));
+        firstTick = false;
+        if (!cheat.equals(Vec3d.ZERO)) {
+            post = move(post, cheat);
+        }
+        player = post;
+        if (!keys.equals(sentInput)) {
+            in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
+            sentInput = keys;
+        }
+        if (post.sprinting() != sentSprinting) {
+            in(new ServerboundPacket.PlayerCommand(SELF, post.sprinting() ? ServerboundPacket.PlayerCommand.Action.START_SPRINTING
+                    : ServerboundPacket.PlayerCommand.Action.STOP_SPRINTING, 0));
+            sentSprinting = post.sprinting();
+        }
+        reminder++;
+        boolean position = VanillaMath.lengthSquared(post.x() - sentX, post.y() - sentY, post.z() - sentZ) > VanillaMath.square(2.0E-4) || reminder >= 20;
+        boolean rotation = yRot != sentYRot || xRot != sentXRot;
+        boolean flags = post.onGround() != sentOnGround || post.horizontalCollision() != sentCollision;
+        if (position || rotation || flags) {
+            in(new ServerboundPacket.MovePlayer(position ? post.x() : Double.NaN, position ? post.y() : Double.NaN, position ? post.z() : Double.NaN,
+                    rotation ? yRot : Float.NaN, rotation ? xRot : Float.NaN, position, rotation, post.onGround(), post.horizontalCollision()));
+        }
+        if (position) {
+            sentX = post.x();
+            sentY = post.y();
+            sentZ = post.z();
+            reminder = 0;
+        }
+        if (rotation) {
+            sentYRot = yRot;
+            sentXRot = xRot;
+        }
+        sentOnGround = post.onGround();
+        sentCollision = post.horizontalCollision();
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+    }
+
+    private void ticks(int count, PlayerState.Keys keys, float yRot) throws Colliders.Unknown {
+        for (int i = 0; i < count; i++) {
+            tick(keys, yRot, 0.0F, Vec3d.ZERO);
+        }
+    }
+
+    private static PlayerState rotate(PlayerState p, float yRot, float xRot) {
+        return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
+                p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
+                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+    }
+
+    private static PlayerState move(PlayerState p, Vec3d by) {
+        return new PlayerState(p.x() + by.x(), p.y() + by.y(), p.z() + by.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(),
+                p.horizontalCollision(), p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(),
+                p.sprintModifier(), p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(),
+                p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+    }
+
+    private static PlayerState withDelta(PlayerState p, Vec3d delta) {
+        return new PlayerState(p.x(), p.y(), p.z(), delta, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
+                p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
+                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+    }
+
+    // --- timeline helpers ---
+
+    private void deliver(TimelineEvent event) {
+        session.deliver(event);
+    }
+
+    private void out(ClientboundPacket packet) {
+        deliver(new TimelineEvent.Outbound(seq++, now, packet));
+    }
+
+    private void in(ServerboundPacket packet) {
+        deliver(new TimelineEvent.Inbound(seq++, now, 0, packet));
+    }
+
+    /** A transaction the client answers at once: everything sent before it was handled before its next tick. */
+    private void sync() {
+        int id = ping();
+        acknowledge(id);
+    }
+
+    private int ping() {
+        int id = ++pingId;
+        out(new ClientboundPacket.Ping(id));
+        return id;
+    }
+
+    private void acknowledge(int id) {
+        in(new ServerboundPacket.Pong(id));
+        deliver(new TimelineEvent.Acknowledged(seq++, now, id, now, 0));
+    }
+
+    /** A chunk of {@code sections} sections: stone up to y 64, air above. */
+    private static byte[] chunk(int sections) {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        varInt(body, 0); // no heightmaps
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
+        for (int i = 0; i < sections; i++) {
+            boolean solid = -64 + i * 16 < 64;
+            data.write(solid ? 0x10 : 0);
+            data.write(0); // non-empty count (short)
+            data.write(0); // single-valued palette
+            varInt(data, solid ? STONE : AIR);
+            data.write(0); // biomes: one value
+            varInt(data, 0);
+        }
+        varInt(body, data.size());
+        body.writeBytes(data.toByteArray());
+        varInt(body, 0); // block entities
+        return body.toByteArray();
+    }
+
+    private static void varInt(ByteArrayOutputStream out, int value) {
+        while ((value & ~0x7F) != 0) {
+            out.write(value & 0x7F | 0x80);
+            value >>>= 7;
+        }
+        out.write(value);
+    }
+
+    private int count(MovementTracker.Outcome outcome) {
+        return outcomes.getOrDefault(outcome, 0);
+    }
+
+    private void walkAround() throws Colliders.Unknown {
+        ticks(5, NONE, 30.0F);
+        ticks(30, FORWARD, 30.0F);
+        ticks(10, SPRINT, 31.5F);
+        ticks(25, SPRINT_JUMP, 33.0F);
+        ticks(15, NONE, 33.0F);
+        ticks(20, STRAFE_SNEAK, 120.0F);
+        ticks(20, NONE, 120.0F);
+    }
+
+    // --- tests ---
+
+    @Test
+    void aVanillaClientsTicksAreExplained() throws Exception {
+        walkAround();
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+        assertEquals(125, count(MovementTracker.Outcome.EXPLAINED));
+    }
+
+    @Test
+    void movingAHundredthOfABlockFurtherIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ticks(20, FORWARD, 30.0F);
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.01));
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        Evidence e = evidence.get(0);
+        assertEquals(MovementCheck.ID, e.check());
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertTrue(e.details().get("offset").startsWith("0.000000,0.000000,0.01"), e.details().toString());
+    }
+
+    @Test
+    void hoveringInTheAirIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        // jump, then stay at the top: the client cancels gravity
+        tick(SPRINT_JUMP, 30.0F, 0.0F, Vec3d.ZERO);
+        for (int i = 0; i < 6; i++) {
+            tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, -player.deltaMovement().y() / 0.98, 0.0));
+        }
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void knockbackTheClientHandledBeforeItsTickIsFollowed() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        Vec3d knockback = new Vec3d(0.4, 0.36, -0.2);
+        out(ClientboundPacket.SetEntityMotion.received(SELF, knockback));
+        sync();
+        player = withDelta(player, knockback);
+        ticks(30, FORWARD, 30.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void knockbackInATickTheTransactionsCannotPlaceIsTriedInEach() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        Vec3d knockback = new Vec3d(-0.3, 0.2, 0.5);
+        int before = ping();
+        out(ClientboundPacket.SetEntityMotion.received(SELF, knockback));
+        int after = ping();
+        acknowledge(before);
+        // the client handles the knockback, then ticks before it handles the second transaction
+        player = withDelta(player, knockback);
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        acknowledge(after);
+        ticks(30, FORWARD, 30.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void knockbackTheClientDidNotApplyIsAFinding() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        out(ClientboundPacket.SetEntityMotion.received(SELF, new Vec3d(0.0, 0.42, 0.0)));
+        sync();
+        ticks(5, FORWARD, 30.0F); // the client ignores it
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+    }
+
+    @Test
+    void aPlayerStandingStillIsTrackedAgainAfterAnUnmodelledTick() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        in(new ServerboundPacket.UseItem(dev.whynotac.protocol.packet.Hand.MAIN_HAND, 1, 30.0F, 0.0F)); // not modelled: no claim
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(1, count(MovementTracker.Outcome.NO_CLAIM));
+        ticks(50, NONE, 30.0F); // standing still: two identical position reminders, 20 ticks apart
+        int anchoredAt = ticks.size();
+        ticks(40, SPRINT_JUMP, 60.0F);
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(10, 45)));
+        assertTrue(ticks.subList(anchoredAt, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(anchoredAt - 30, ticks.size())));
+        // and a cheat is caught again
+        tick(SPRINT_JUMP, 60.0F, 0.0F, new Vec3d(0.05, 0.0, 0.0));
+        assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void aDoubleTappedSprintIsExplainedWhateverTheWindowOption() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ticks(1, FORWARD, 30.0F);
+        ticks(2, NONE, 30.0F);
+        ticks(30, FORWARD, 30.0F); // the second press within the default window starts sprinting
+        assertTrue(player.sprinting());
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+}

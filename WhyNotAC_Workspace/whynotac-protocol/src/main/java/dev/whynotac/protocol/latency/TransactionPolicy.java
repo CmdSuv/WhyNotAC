@@ -69,6 +69,13 @@ public final class TransactionPolicy {
             case ClientboundPacket.EntityEvent event -> targetsSelf(event.entityId(), selfEntityId);
             // Another entity's camera stops the player's own movement input (LocalPlayer.isControlledCamera).
             case ClientboundPacket.SetCamera ignored -> true;
+            // Food decides whether the player can sprint: frequent in combat, placed by the flush brackets.
+            case ClientboundPacket.SetHealth ignored -> false;
+            // The world border collides with the player; rare.
+            case ClientboundPacket.InitializeBorder ignored -> true;
+            case ClientboundPacket.SetBorderCenter ignored -> true;
+            case ClientboundPacket.SetBorderLerpSize ignored -> true;
+            case ClientboundPacket.SetBorderSize ignored -> true;
             // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).
             case ClientboundPacket.SetPassengers ignored -> true;
             case ClientboundPacket.MoveVehicle ignored -> true; // moves the vehicle the player controls

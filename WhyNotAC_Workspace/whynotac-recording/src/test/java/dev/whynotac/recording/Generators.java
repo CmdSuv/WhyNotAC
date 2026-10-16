@@ -247,6 +247,12 @@ public final class Generators {
             case "SetHeldSlot" -> new ClientboundPacket.SetHeldSlot(anyInt());
             case "EntityEvent" -> new ClientboundPacket.EntityEvent(anyInt(), random.nextInt(256) - 128);
             case "SetCamera" -> new ClientboundPacket.SetCamera(anyInt());
+            case "SetHealth" -> new ClientboundPacket.SetHealth(anyFloat(), anyInt(), anyFloat());
+            case "InitializeBorder" -> new ClientboundPacket.InitializeBorder(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyLong(),
+                    anyInt());
+            case "SetBorderCenter" -> new ClientboundPacket.SetBorderCenter(anyDouble(), anyDouble());
+            case "SetBorderLerpSize" -> new ClientboundPacket.SetBorderLerpSize(anyDouble(), anyDouble(), anyLong());
+            case "SetBorderSize" -> new ClientboundPacket.SetBorderSize(anyDouble());
             case "OpenScreen" -> new ClientboundPacket.OpenScreen(anyInt(), anyString());
             case "MountScreenOpen" -> new ClientboundPacket.MountScreenOpen(anyInt(), anyInt(), anyInt());
             case "ContainerClose" -> new ClientboundPacket.ContainerClose(anyInt());

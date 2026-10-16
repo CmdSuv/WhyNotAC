@@ -26,7 +26,7 @@ tasks.processResources {
 
 // The plugin jar must carry the platform-agnostic modules (they are not provided by the server).
 tasks.jar {
-    dependsOn(":whynotac-analysis:jar", ":whynotac-recording:jar", ":whynotac-world:jar", ":whynotac-protocol:jar", ":whynotac-math:jar")
+    dependsOn(":whynotac-analysis:jar", ":whynotac-physics:jar", ":whynotac-recording:jar", ":whynotac-world:jar", ":whynotac-protocol:jar", ":whynotac-math:jar")
     // The plugin jar doubles as the offline tool: java -jar WhyNotAC.jar inspect|dump|find|forget|verify ...
     manifest.attributes("Main-Class" to "dev.whynotac.analysis.cli.Tool")
     from(configurations.runtimeClasspath.map { cp ->

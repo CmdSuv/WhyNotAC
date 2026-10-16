@@ -102,6 +102,23 @@ public final class Voxels {
         return min - 1;
     }
 
+    /** {@code VoxelShape.toAabbs().size()}. */
+    public int boxCount() {
+        return shape.boxCount();
+    }
+
+    /**
+     * Box {@code index} of {@code VoxelShape.toAabbs()}, in its order: a moved shape's coordinates are the
+     * shape's plus the offset ({@code OffsetDoubleList}), its cells and their order the same.
+     */
+    public Box box(int index) {
+        if (!moved) {
+            return new Box(shape.box(index, 0), shape.box(index, 1), shape.box(index, 2), shape.box(index, 3), shape.box(index, 4), shape.box(index, 5));
+        }
+        return new Box(shape.box(index, 0) + ox, shape.box(index, 1) + oy, shape.box(index, 2) + oz, shape.box(index, 3) + ox, shape.box(index, 4) + oy,
+                shape.box(index, 5) + oz);
+    }
+
     /** {@code VoxelShape.min(axis)}: the coordinate where the first filled cell starts. */
     public double min(Axis axis) {
         double min = Double.POSITIVE_INFINITY;

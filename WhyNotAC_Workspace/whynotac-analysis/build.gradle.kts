@@ -7,6 +7,7 @@ description = "Checks, evidence and admissibility, the action policy (docs/POLIC
 dependencies {
     api(project(":whynotac-protocol"))
     api(project(":whynotac-world")) // the replicas the checks read
+    implementation(project(":whynotac-physics")) // the on-foot step the movement check runs
     implementation(project(":whynotac-recording")) // the verify tool re-runs checks over recordings
 }
 

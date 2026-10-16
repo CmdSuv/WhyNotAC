@@ -429,6 +429,29 @@ public sealed interface ClientboundPacket {
      */
     record SetCamera(int entityId) implements ClientboundPacket {}
 
+    /**
+     * {@code ClientboundSetHealthPacket}: the player's own health ({@code LocalPlayer.hurtTo}), food level
+     * and saturation ({@code FoodData}). A food level of 6 or less stops sprinting on foot.
+     */
+    record SetHealth(float health, int food, float saturation) implements ClientboundPacket {}
+
+    /**
+     * {@code ClientboundInitializeBorderPacket}: the world border's centre and size; with a positive
+     * {@code lerpTime} the size moves from {@code oldSize} to {@code newSize} over that time
+     * ({@code WorldBorder.lerpSizeBetween}). The warning distance and time are only drawn: not kept.
+     */
+    record InitializeBorder(double centerX, double centerZ, double oldSize, double newSize, long lerpTime, int absoluteMaxSize)
+            implements ClientboundPacket {}
+
+    /** {@code ClientboundSetBorderCenterPacket}. */
+    record SetBorderCenter(double centerX, double centerZ) implements ClientboundPacket {}
+
+    /** {@code ClientboundSetBorderLerpSizePacket}: the size moves from {@code oldSize} to {@code newSize} over {@code lerpTime}. */
+    record SetBorderLerpSize(double oldSize, double newSize, long lerpTime) implements ClientboundPacket {}
+
+    /** {@code ClientboundSetBorderSizePacket}: the size, at once. */
+    record SetBorderSize(double size) implements ClientboundPacket {}
+
     record Unmodeled(String type) implements ClientboundPacket {}
 
     /**

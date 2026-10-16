@@ -41,7 +41,8 @@ rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases
 printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 2048\n  max-queued-megabytes: 64\n' > "$WORK_DIR/plugins/WhyNotAC/config.yml"
 find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' -exec cp {} "$WORK_DIR/plugins/WhyNotAC.jar" \;
 find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delete
-# Options that would otherwise stop the client on a screen (first-run onboarding, warnings) or slow it down.
+# Options that would otherwise stop the client on a screen (first-run onboarding, warnings) or slow it down; auto-jump
+# on, so the course's step-ups exercise it (the engine and the movement check model it).
 cat > "$WORK_DIR/game/options.txt" <<'OPTS'
 onboardAccessibility:false
 skipMultiplayerWarning:true
@@ -54,6 +55,7 @@ maxFps:60
 narrator:0
 soundCategory_master:0.0
 mouseSensitivity:0.83
+autoJump:true
 OPTS
 
 Xvfb "$DISPLAY_NUM" -screen 0 1024x768x24 -nolisten tcp > "$WORK_DIR/xvfb.log" 2>&1 &
@@ -74,12 +76,13 @@ done
 echo "server up"
 # The movement course, east of everything else along z = -1..1 (the ground's top is y = -60). Built before the
 # client joins, so it arrives with the chunks: the physics check needs the world as the client had it.
-for c in "forceload add 32 -16 135 16" \
+for c in "forceload add 32 -16 151 16" \
   "fill 44 -60 -1 44 -60 1 minecraft:smooth_stone_slab[type=bottom]" "fill 45 -60 -1 46 -60 1 minecraft:stone" \
   "fill 46 -59 -1 46 -59 1 minecraft:smooth_stone_slab[type=bottom]" \
   "fill 52 -61 -1 62 -61 1 minecraft:ice" "fill 70 -61 -1 74 -61 1 minecraft:soul_sand" "fill 82 -60 -2 82 -59 2 minecraft:stone" \
   "fill 88 -60 -1 91 -60 1 minecraft:stone" "fill 98 -58 -1 101 -58 1 minecraft:stone" \
-  "fill 124 -60 -1 124 -60 1 minecraft:oak_stairs[facing=east]" "fill 125 -60 -1 127 -60 1 minecraft:stone"; do
+  "fill 124 -60 -1 124 -60 1 minecraft:oak_stairs[facing=east]" "fill 125 -60 -1 127 -60 1 minecraft:stone" \
+  "fill 136 -60 -1 139 -60 1 minecraft:stone" "fill 143 -60 -3 146 -60 3 minecraft:stone"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -161,7 +164,7 @@ reach 7.15
 # physics engine afterwards (MovementTruth). Step-ups (slab, block, slab on block) and a drop; walking, sprinting and
 # sliding on ice; soul sand; a wall approached at an angle; sneaking to a platform's edge, then releasing shift there and
 # walking off; jumping under a low ceiling; a double-tapped sprint jumping; shift pressed inside the double-tap window;
-# stairs.
+# stairs; one-block steps met head on and at an angle (auto-jump).
 leg() { echo "tp $NAME $1 $2 0.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
 leg 41.5 -60 -90 w/3.0
 leg 50.5 -60 -90 w/1.0 w,Control_L/1.0 -/1.5
@@ -172,6 +175,8 @@ leg 97.5 -60 -90 w/1.5/space
 leg 104.5 -60 -90 w/0.1 -/0.1 w/1.5/space
 leg 108.5 -60 -90 w/0.1 -/0.05 Shift_L/0.5 -/0.3 w/0.1 -/0.1 w/1.0
 leg 121.5 -60 -90 w/2.0
+leg 132.5 -60 -90 w/2.0
+leg 140.5 -60 -60 w/1.5
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2
@@ -195,8 +200,8 @@ echo "--- client truth"
 python3 -I "$HERE/verify_truth.py" "$WORK_DIR" || STATUS=1
 echo "--- movement engine"
 # whynotac-physics' on-foot step, run from each recorded tick's start, must give the client's own end of the tick, bit for bit.
-if java -cp "$WHYNOTAC_CP:$RECORDING_JAR" "$HERE/MovementTruth.java" "$RECORDING" "$WORK_DIR/truth.jsonl" | grep -v '^Picked up' | tee "$WORK_DIR/movement.json"; then
-  echo "PASS every tick in the on-foot engine's scope equals the client's own tick, bit for bit"
+if java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/MovementTruth.java" "$RECORDING" "$WORK_DIR/truth.jsonl" | grep -v '^Picked up' | tee "$WORK_DIR/movement.json"; then
+  echo "PASS every tick in the on-foot engine's scope equals the client's own tick, bit for bit; the movement check explained every tick it claimed, the client's own state among its hypotheses"
 else
   echo "FAIL the on-foot engine differs from the client (see movement.json)"
   STATUS=1

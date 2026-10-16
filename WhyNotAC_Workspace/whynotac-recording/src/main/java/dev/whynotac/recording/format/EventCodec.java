@@ -633,6 +633,36 @@ public final class EventCodec {
                     body.writeVarInt(CB_SET_CAMERA);
                     body.writeZigZag(c.entityId());
                 }
+                case ClientboundPacket.SetHealth h -> {
+                    body.writeVarInt(CB_SET_HEALTH);
+                    body.writeFloat(h.health());
+                    body.writeZigZag(h.food());
+                    body.writeFloat(h.saturation());
+                }
+                case ClientboundPacket.InitializeBorder b -> {
+                    body.writeVarInt(CB_INITIALIZE_BORDER);
+                    body.writeDouble(b.centerX());
+                    body.writeDouble(b.centerZ());
+                    body.writeDouble(b.oldSize());
+                    body.writeDouble(b.newSize());
+                    body.writeLong(b.lerpTime());
+                    body.writeZigZag(b.absoluteMaxSize());
+                }
+                case ClientboundPacket.SetBorderCenter b -> {
+                    body.writeVarInt(CB_SET_BORDER_CENTER);
+                    body.writeDouble(b.centerX());
+                    body.writeDouble(b.centerZ());
+                }
+                case ClientboundPacket.SetBorderLerpSize b -> {
+                    body.writeVarInt(CB_SET_BORDER_LERP_SIZE);
+                    body.writeDouble(b.oldSize());
+                    body.writeDouble(b.newSize());
+                    body.writeLong(b.lerpTime());
+                }
+                case ClientboundPacket.SetBorderSize b -> {
+                    body.writeVarInt(CB_SET_BORDER_SIZE);
+                    body.writeDouble(b.size());
+                }
                 case ClientboundPacket.SetHeldSlot h -> {
                     body.writeVarInt(CB_SET_HELD_SLOT);
                     body.writeZigZag(h.slot());
@@ -1164,6 +1194,12 @@ public final class EventCodec {
                 case CB_SET_HELD_SLOT -> new ClientboundPacket.SetHeldSlot(zint(in));
                 case CB_ENTITY_EVENT -> new ClientboundPacket.EntityEvent(zint(in), zint(in));
                 case CB_SET_CAMERA -> new ClientboundPacket.SetCamera(zint(in));
+                case CB_SET_HEALTH -> new ClientboundPacket.SetHealth(in.readFloat(), zint(in), in.readFloat());
+                case CB_INITIALIZE_BORDER -> new ClientboundPacket.InitializeBorder(in.readDouble(), in.readDouble(), in.readDouble(), in.readDouble(),
+                        in.readLong(), zint(in));
+                case CB_SET_BORDER_CENTER -> new ClientboundPacket.SetBorderCenter(in.readDouble(), in.readDouble());
+                case CB_SET_BORDER_LERP_SIZE -> new ClientboundPacket.SetBorderLerpSize(in.readDouble(), in.readDouble(), in.readLong());
+                case CB_SET_BORDER_SIZE -> new ClientboundPacket.SetBorderSize(in.readDouble());
                 case CB_OPEN_SCREEN -> new ClientboundPacket.OpenScreen(zint(in), string(in));
                 case CB_MOUNT_SCREEN_OPEN -> new ClientboundPacket.MountScreenOpen(zint(in), zint(in), zint(in));
                 case CB_CONTAINER_CLOSE -> new ClientboundPacket.ContainerClose(zint(in));

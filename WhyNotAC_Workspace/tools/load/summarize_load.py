@@ -59,7 +59,9 @@ def main():
         warmup = {"seconds": int(warmed), "settled": int(settled) >= 2}
     except (OSError, ValueError):
         warmup = None
-    # Every bot is honest: any case WhyNotAC opened for one of them is a false positive.
+    # Every bot is honest: any case WhyNotAC opened for one of them is a false positive, except the movement check's.
+    # The bots walk their circle with their own arithmetic, not the vanilla client's physics, so no vanilla client
+    # moves as they do: that check rightly finds them modified (its false-positive evidence is the real client's).
     cases_dir = os.path.join(os.path.dirname(out_prefix), "plugins", "WhyNotAC", "cases")
     cases = [json.load(open(os.path.join(cases_dir, f))) for f in sorted(os.listdir(cases_dir)) if f.endswith(".json")] \
         if os.path.isdir(cases_dir) else []
@@ -89,8 +91,10 @@ def main():
         "botSide": bot_summary,
         "serverMovementCorrections": moved_wrongly,
         "attackReach": attack_reach,
-        "casesOpened": len(cases),
-        "caseSummaries": [c.get("playerName", "?") + " " + c.get("check", "?") + ": " + c.get("summary", "") for c in cases][:10],
+        "casesOpened": sum(1 for c in cases if c.get("check") != "movement"),
+        "caseSummaries": [c.get("playerName", "?") + " " + c.get("check", "?") + ": " + c.get("summary", "") for c in cases
+                          if c.get("check") != "movement"][:10],
+        "movementCases": sum(1 for c in cases if c.get("check") == "movement"),
     }, indent=1))
 
 

@@ -140,6 +140,11 @@ public final class RecordingFormat {
     /** Respawn with the dimension, the game mode and what the client keeps. */
     public static final int CB_RESPAWN_KEEP = 51;
     public static final int CB_SET_CAMERA = 52;
+    public static final int CB_SET_HEALTH = 53;
+    public static final int CB_INITIALIZE_BORDER = 54;
+    public static final int CB_SET_BORDER_CENTER = 55;
+    public static final int CB_SET_BORDER_LERP_SIZE = 56;
+    public static final int CB_SET_BORDER_SIZE = 57;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

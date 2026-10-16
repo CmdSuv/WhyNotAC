@@ -132,6 +132,11 @@ public final class Colliders {
         }
     }
 
+    /** {@code state.getCollisionShape(level, pos, CollisionContext.of(player))}: the table's shape where it is the client's. */
+    static Shape playerShape(BlockStates states, int state, int x, int y, int z) throws Unknown {
+        return playerShape(states, state, states.collisionShape(state), x, y, z);
+    }
+
     /** {@code EntityCollisionContext.getCollisionShape} for a player: the table's shape where it is the client's. */
     private static Shape playerShape(BlockStates states, int state, Shape shape, int x, int y, int z) throws Unknown {
         if (states.has(state, BlockStates.DYNAMIC_SHAPE)) {

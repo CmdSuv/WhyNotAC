@@ -59,4 +59,10 @@ public record Box(double minX, double minY, double minZ, double maxX, double max
     public boolean intersects(double x0, double y0, double z0, double x1, double y1, double z1) {
         return minX < x1 && maxX > x0 && minY < y1 && maxY > y0 && minZ < z1 && maxZ > z0;
     }
+
+    /** {@code AABB.intersects(Vec3, Vec3)}: with the box the two points span. */
+    public boolean intersects(dev.whynotac.math.vector.Vec3d a, dev.whynotac.math.vector.Vec3d b) {
+        return intersects(Math.min(a.x(), b.x()), Math.min(a.y(), b.y()), Math.min(a.z(), b.z()), Math.max(a.x(), b.x()), Math.max(a.y(), b.y()),
+                Math.max(a.z(), b.z()));
+    }
 }

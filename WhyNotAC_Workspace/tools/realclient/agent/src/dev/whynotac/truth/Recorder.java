@@ -35,7 +35,7 @@ public final class Recorder {
     private static Field keyForward, keyBackward, keyLeft, keyRight, keyJump, keyShift, keySprint;
     private static Field vecX, vecY, vecZ;
     // hidden state the movement step reads: supporting block, jump delay, speed, sneak state, the input's vector
-    private static Field mainSupportingBlockPos, onGroundNoBlocks, noJumpDelay, speed, crouching, sprintTriggerTime, autoJumpTime, moveVector;
+    private static Field mainSupportingBlockPos, onGroundNoBlocks, noJumpDelay, speed, crouching, sprintTriggerTime, autoJumpTime, autoJumpEnabled, moveVector;
     private static Field posX, posY, posZ, vec2X, vec2Y;
     private static Method isSprinting, isShiftKeyDown, getPose, isPassenger;
 
@@ -101,6 +101,7 @@ public final class Recorder {
             bool(line, "crouching", crouching.getBoolean(player));
             line.append(",\"sprintTriggerTime\":").append(sprintTriggerTime.getInt(player));
             line.append(",\"autoJumpTime\":").append(autoJumpTime.getInt(player));
+            bool(line, "autoJumpEnabled", autoJumpEnabled.getBoolean(player));
             Object move = moveVector.get(input.get(player));
             line.append(",\"moveVector\":[\"").append(Integer.toHexString(Float.floatToRawIntBits(vec2X.getFloat(move)))).append("\",\"")
                     .append(Integer.toHexString(Float.floatToRawIntBits(vec2Y.getFloat(move)))).append("\"]");
@@ -184,6 +185,7 @@ public final class Recorder {
         crouching = field(loader, local, "crouching");
         sprintTriggerTime = field(loader, local, "sprintTriggerTime");
         autoJumpTime = field(loader, local, "autoJumpTime");
+        autoJumpEnabled = field(loader, local, "autoJumpEnabled");
         moveVector = field(loader, clientInput, "moveVector");
         posX = field(loader, "net.minecraft.core.Vec3i", "x");
         posY = field(loader, "net.minecraft.core.Vec3i", "y");

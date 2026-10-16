@@ -46,10 +46,34 @@ public final class OnFoot {
      * @param foodAllowsSprint {@code hasEnoughFoodToDoExhaustiveManoeuvres}: food above 6, or allowed to fly
      * @param sprintWindow     the client's {@code sprintWindow} option (double-tap window, 0..10)
      * @param autoJumpEnabled  {@code LocalPlayer.autoJumpEnabled}: the option, but true during a new player's first tick
+     * @param speed            the movement speed attribute's value ({@code AttributeInstance.getValue})
      */
-    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
-        public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false);
+    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed) {
+        public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA);
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, Speed.VANILLA);
+        }
     }
+
+    /** The movement speed attribute's value with and without the sprinting modifier, the rest of its modifiers fixed. */
+    @FunctionalInterface
+    public interface Speed {
+        /** The player's base and no modifier but sprinting's: {@code 0.1F}, times {@code 1 + 0.3F} when sprinting. */
+        Speed VANILLA = sprintModifier -> sprintModifier ? BASE_SPEED * (1.0 + SPRINT_MODIFIER) : BASE_SPEED;
+
+        double value(boolean sprintModifier);
+    }
+
+    /**
+     * One tick's result, with what it read that its state does not say.
+     *
+     * @param readSprintTrigger  the tick met a forward press it could start sprinting on: what it did depended on
+     *                           {@code sprintTriggerTime}; otherwise the counter only counted down (or was cleared)
+     * @param readSprintWindow   the tick started the double-tap window: {@code sprintTriggerTime} was set to the option
+     * @param autoJumpTriggered  with auto-jump enabled, the tick set {@code autoJumpTime} to 1 (the next tick jumps)
+     */
+    public record Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered) {}
 
     private final Colliders.World world;
     private final BlockStates states;
@@ -61,6 +85,7 @@ public final class OnFoot {
     private double z;
     private Vec3d delta;
     private final float yRot;
+    private final float xRot;
     private boolean onGround;
     private boolean horizontalCollision;
     private boolean minorHorizontalCollision;
@@ -68,7 +93,11 @@ public final class OnFoot {
     private boolean verticalCollisionBelow;
     private double fallDistance;
     private boolean sprinting;
+    private boolean sprintModifier;
     private boolean crouching;
+    private boolean readSprintTrigger;
+    private boolean readSprintWindow;
+    private boolean autoJumpTriggered;
     private PlayerState.Pose pose;
     private PlayerState.Keys keys;
     private int noJumpDelay;
@@ -92,6 +121,7 @@ public final class OnFoot {
         z = pre.z();
         delta = pre.deltaMovement();
         yRot = pre.yRot();
+        xRot = pre.xRot();
         onGround = pre.onGround();
         horizontalCollision = pre.horizontalCollision();
         minorHorizontalCollision = pre.minorHorizontalCollision();
@@ -99,6 +129,7 @@ public final class OnFoot {
         verticalCollisionBelow = pre.verticalCollisionBelow();
         fallDistance = pre.fallDistance();
         sprinting = pre.sprinting();
+        sprintModifier = pre.sprintModifier();
         crouching = pre.crouching();
         pose = pre.pose();
         keys = pre.keys();
@@ -112,17 +143,22 @@ public final class OnFoot {
 
     /** The player after one client tick in which the keys were {@code keys}. */
     public static PlayerState tick(PlayerState pre, PlayerState.Keys keys, Colliders.World world, Conditions conditions) throws Colliders.Unknown {
+        return step(pre, keys, world, conditions).state();
+    }
+
+    /** {@link #tick}, with what the tick read beyond its state. */
+    public static Step step(PlayerState pre, PlayerState.Keys keys, Colliders.World world, Conditions conditions) throws Colliders.Unknown {
         if (pre.pose() == PlayerState.Pose.SWIMMING) {
             throw new Colliders.Unknown("crawling");
         }
         OnFoot tick = new OnFoot(pre, world, conditions);
         tick.run(keys);
-        return tick.state(pre.xRot());
+        return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered);
     }
 
-    private PlayerState state(float xRot) {
+    private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
-                verticalCollisionBelow, fallDistance, sprinting, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
+                verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
                 onGroundNoBlocks, stuck);
     }
 
@@ -153,18 +189,20 @@ public final class OnFoot {
         boolean movingSlowly = crouching;
         if (!sprinting && forward && conditions.foodAllowsSprint() && !movingSlowly) { // canStartSprinting
             if (!previousForward) {
+                readSprintTrigger = true;
                 if (sprintTriggerTime > 0) {
-                    sprinting = true;
+                    setSprinting(true);
                 } else {
                     sprintTriggerTime = conditions.sprintWindow();
+                    readSprintWindow = true;
                 }
             }
             if (keys.sprint()) {
-                sprinting = true;
+                setSprinting(true);
             }
         }
         if (sprinting && (!conditions.foodAllowsSprint() || !forward || horizontalCollision && !minorHorizontalCollision)) { // shouldStopRunSprinting
-            sprinting = false;
+            setSprinting(false);
         }
 
         // --- LivingEntity.aiStep ---
@@ -202,6 +240,12 @@ public final class OnFoot {
             z = clampedZ;
         }
         updatePlayerPose();
+    }
+
+    /** {@code LivingEntity.setSprinting}: the flag and the attribute's sprinting modifier together. */
+    private void setSprinting(boolean value) {
+        sprinting = value;
+        sprintModifier = value;
     }
 
     /** {@code KeyboardInput.tick}: the strafe and forward impulses, normalised ({@code Vec2.normalized}). */
@@ -302,17 +346,129 @@ public final class OnFoot {
     /** {@code getFrictionInfluencedSpeed}: on the ground the speed attribute scaled by friction, else the air speed. */
     private float frictionInfluencedSpeed(float friction) {
         if (onGround) {
-            double speed = BASE_SPEED;
-            if (sprinting) {
-                speed *= 1.0 + SPRINT_MODIFIER;
-            }
-            return (float) speed * (0.21600002F / (friction * friction * friction));
+            return speed() * (0.21600002F / (friction * friction * friction));
         }
         return sprinting ? 0.025999999F : 0.02F;
     }
 
-    /** {@code Entity.move(MoverType.SELF, movement)} for the local player. */
+    /** {@code Player.getSpeed()}: the attribute's value as a float. */
+    private float speed() {
+        return (float) conditions.speed().value(sprintModifier);
+    }
+
+    /** {@code LocalPlayer.move(MoverType.SELF, movement)}: {@code Entity.move}, then auto-jump on the horizontal step taken. */
     private void move(Vec3d movement) throws Colliders.Unknown {
+        double startX = x;
+        double startZ = z;
+        entityMove(movement);
+        if (conditions.autoJumpEnabled()) {
+            updateAutoJump((float) (x - startX), (float) (z - startZ));
+        }
+    }
+
+    /**
+     * {@code LocalPlayer.updateAutoJump}: walking at a step between 0.5 and 1.2 high (no jump boost in scope)
+     * with room above the head, the next tick jumps.
+     */
+    private void updateAutoJump(float stepX, float stepZ) throws Colliders.Unknown {
+        boolean moving = moveX * moveX + moveY * moveY > 0.0F; // input.getMoveVector(): normalised, not modified
+        if (!(autoJumpTime <= 0 && onGround && !keys.shift() && moving && blockJumpFactor() >= 1.0)) { // canAutoJump
+            return;
+        }
+        Vec3d position = new Vec3d(x, y, z);
+        Vec3d target = position.add(stepX, 0.0, stepZ);
+        Vec3d direction = new Vec3d(stepX, 0.0, stepZ);
+        float speed = speed();
+        float lengthSqr = (float) direction.lengthSqr();
+        if (lengthSqr <= 0.001F) {
+            float ix = speed * moveX;
+            float iz = speed * moveY;
+            float sin = VanillaMath.sin(yRot * VanillaMath.DEG_TO_RAD);
+            float cos = VanillaMath.cos(yRot * VanillaMath.DEG_TO_RAD);
+            direction = new Vec3d(ix * cos - iz * sin, direction.y(), iz * cos + ix * sin);
+            lengthSqr = (float) direction.lengthSqr();
+            if (lengthSqr <= 0.001F) {
+                return;
+            }
+        }
+        float inverse = 1.0F / (float) Math.sqrt(lengthSqr); // Mth.invSqrt: org.joml.Math.invsqrt
+        Vec3d unit = direction.scale(inverse);
+        Vec3d forward = Vec3d.directionFromRotation(xRot, yRot);
+        float facing = (float) (forward.x() * unit.x() + forward.z() * unit.z());
+        if (facing < -0.15F) {
+            return;
+        }
+        Box box = pose.box(x, y, z);
+        BlockPos head = BlockPos.containing(x, box.maxY(), z);
+        if (!collisionShape(head).isEmpty()) {
+            return;
+        }
+        head = head.above();
+        if (!collisionShape(head).isEmpty()) {
+            return;
+        }
+        float maxRise = 1.2F;
+        float reach = Math.max(speed * 7.0F, 1.0F / inverse);
+        Vec3d from = position;
+        Vec3d to = target.add(unit.scale(reach));
+        float width = pose.width;
+        float height = pose.height;
+        Box area = Box.of(from.x(), from.y(), from.z(), to.x(), to.y() + height, to.z()).inflate(width, 0.0, width);
+        from = from.add(0.0, 0.51F, 0.0);
+        to = to.add(0.0, 0.51F, 0.0);
+        Vec3d side = unit.cross(new Vec3d(0.0, 1.0, 0.0));
+        Vec3d half = side.scale(width * 0.5F);
+        Vec3d leftFrom = from.subtract(half);
+        Vec3d leftTo = to.subtract(half);
+        Vec3d rightFrom = from.add(half);
+        Vec3d rightTo = to.add(half);
+        float top = Float.MIN_VALUE;
+        List<Voxels> colliders = new java.util.ArrayList<>();
+        Colliders.blocks(world, area, colliders); // level.getCollisions: no solid entity in scope
+        search:
+        for (Voxels shape : colliders) {
+            for (int i = 0; i < shape.boxCount(); i++) { // VoxelShape.toAabbs
+                Box b = shape.box(i);
+                if (b.intersects(leftFrom, leftTo) || b.intersects(rightFrom, rightTo)) {
+                    top = (float) b.maxY();
+                    BlockPos centre = BlockPos.containing(VanillaMath.lerp(0.5, b.minX(), b.maxX()), VanillaMath.lerp(0.5, b.minY(), b.maxY()),
+                            VanillaMath.lerp(0.5, b.minZ(), b.maxZ()));
+                    for (int up = 1; up < maxRise; up++) {
+                        BlockPos above = centre.atY(centre.y() + up);
+                        Voxels aboveShape = collisionShape(above);
+                        if (!aboveShape.isEmpty()) {
+                            top = (float) aboveShape.max(Axis.Y) + above.y();
+                            if (top - y > maxRise) {
+                                return;
+                            }
+                        }
+                        if (up > 1) {
+                            head = head.above();
+                            if (!collisionShape(head).isEmpty()) {
+                                return;
+                            }
+                        }
+                    }
+                    break search;
+                }
+            }
+        }
+        if (top != Float.MIN_VALUE) {
+            float rise = (float) (top - y);
+            if (!(rise <= 0.5F) && !(rise > maxRise)) {
+                autoJumpTime = 1;
+                autoJumpTriggered = true;
+            }
+        }
+    }
+
+    /** {@code blockState.getCollisionShape(level, pos, CollisionContext.of(player))}, unmoved. */
+    private Voxels collisionShape(BlockPos pos) throws Colliders.Unknown {
+        return Voxels.of(Colliders.playerShape(states, state(pos), pos.x(), pos.y(), pos.z()));
+    }
+
+    /** {@code Entity.move(MoverType.SELF, movement)} for the local player. */
+    private void entityMove(Vec3d movement) throws Colliders.Unknown {
         if (stuck.lengthSqr() > 1.0E-7) {
             movement = movement.multiply(stuck);
             stuck = Vec3d.ZERO;
@@ -401,6 +557,9 @@ public final class OnFoot {
     }
 
     private boolean isAboveGround(float step) throws Colliders.Unknown {
+        if (!onGround && Double.isNaN(fallDistance)) {
+            throw new Colliders.Unknown("the fall distance is not known");
+        }
         return onGround || fallDistance < step && !canFallAtLeast(0.0, 0.0, step - fallDistance);
     }
 

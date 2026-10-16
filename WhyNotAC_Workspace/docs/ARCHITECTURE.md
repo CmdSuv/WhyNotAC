@@ -315,8 +315,8 @@ menziliyle vurur. İsabet tikin başında `getActiveItem()` ile, kontrol saldır
 | `whynotac-recording` | **Faz 2a ✔** | Çökmeye dayanıklı kayıt formatı, takma adlandırma, deterministik replay, çevrimdışı araç |
 | `whynotac-bench` | **Faz 2a ✔** | JMH performans tabanı (`docs/benchmarks/`) |
 | `whynotac-world` | **Faz 2b-3 ✔ · 2b-5 ✔ · 2b-6 ✔ · 2b-7 ✔ · 2b-8 ✔** | Client'ın dünyası: 29.671 blok durumu (çarpışma şekli oyunun kendi VoxelShape biçiminde, sürtünme, sıvı...), chunk decoder, client'ın chunk deposunun birebir kopyası, değişikliklerin ve client tahminlerinin belirsizliği. Client'ın gördüğü varlıklar: client sırasıyla, tick tick, aday durumlar ve yarıçaplarla; boyutları ve seçilebilirlikleri oyunun kendi tablosundan. Client'ın elindeki eşya ve menzili, kendi oyuncusunun gözü, modu ve öznitelikleri |
-| `whynotac-physics` | Faz 2 (planlı) | Katmanlı, hipotez kümeli fizik motoru (bkz. modül README) |
-| `whynotac-analysis` | **Slice 0 ✔ · 2b-8 ✔** | Kontroller (tick framing, client saati, saldırı mesafesi), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
+| `whynotac-physics` | **Faz 3 (yaya) ✔** | Client'ın çarpışma kodu ve yaya hareket adımı, bit bit (bkz. modül README) |
+| `whynotac-analysis` | **Slice 0 ✔ · 2b-8 ✔ · Faz 3 ✔** | Kontroller (tick framing, client saati, saldırı mesafesi, yaya hareket), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |
 | `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve ARMED karar (Slice 0'ın SHADOW kararı şimdilik `whynotac-analysis`'te) |
 | `whynotac-storage` | Faz 4 (planlı) | Profil ve kanıt kalıcılığı |

@@ -1511,6 +1511,61 @@ public final class ClientEntities {
         return false;
     }
 
+    /**
+     * Whether an entity the client may hold now could push the player or stop it ({@code LivingEntity.pushEntities},
+     * {@code Entity.collide}'s entity colliders) in the box (inclusive bounds): a living entity, a boat or a
+     * minecart (every type that is pushable or collidable for a player, decompiled 1.21.11) whose box in some
+     * possible state, widened by its position's radius, meets the box. An entity of an unknown type or size
+     * counts as such; one whose position the client does not take from the packets (boats and minecarts it
+     * simulates) counts when the server's last position for it is within {@code unknownRadius} of the box. Not
+     * counted: {@code self}, and entities WhyNotAC lost track of only if the replica is complete.
+     */
+    public boolean mayHavePusherNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
+        if (!complete) {
+            return true;
+        }
+        boolean[] near = {false};
+        for (Track track : tracks.values()) {
+            if (track.id == self) {
+                continue;
+            }
+            Head head = heads.get(track.id);
+            forEachPossibleState(track.id, st -> {
+                if (near[0] || st.known() && !st.present()) {
+                    return;
+                }
+                String type = st.known() ? st.type() : head != null ? head.type : null;
+                if (type != null && !pushesOrCollides(type)) {
+                    return;
+                }
+                if (!st.known() || type == null || st.size() == null) {
+                    near[0] = true;
+                    return;
+                }
+                if (!st.positionKnown()) {
+                    Vec3d base = serverOrderBase(track.id);
+                    near[0] = base == null || base.x() > minX - unknownRadius && base.x() < maxX + unknownRadius && base.y() > minY - unknownRadius
+                            && base.y() < maxY + unknownRadius && base.z() > minZ - unknownRadius && base.z() < maxZ + unknownRadius;
+                    return;
+                }
+                EntitySizes.Box b = st.size().box(st.x(), st.y(), st.z());
+                double r = st.positionRadius();
+                near[0] = b.minX() - r <= maxX && b.maxX() + r >= minX && b.minY() - r <= maxY && b.maxY() + r >= minY && b.minZ() - r <= maxZ
+                        && b.maxZ() + r >= minZ;
+            });
+            if (near[0]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Living entities are pushable (armour stands too, conservatively), boats collide and push, minecarts push. */
+    private boolean pushesOrCollides(String type) {
+        return types.kind(type).living() || type.endsWith("_boat") || type.endsWith("_raft") || type.equals("minecraft:minecart")
+                || type.endsWith("_minecart");
+    }
+
     /** Whether the client has this entity now. */
     public Existence existence(int entityId) {
         boolean[] seen = new boolean[3]; // present, absent, unknown
