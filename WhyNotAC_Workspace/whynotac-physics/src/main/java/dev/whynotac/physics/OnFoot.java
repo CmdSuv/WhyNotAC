@@ -29,6 +29,16 @@ public final class OnFoot {
     static final double GRAVITY = 0.08;
     /** {@code options.sprintWindow()} default. */
     public static final int DEFAULT_SPRINT_WINDOW = 7;
+    /**
+     * Blocks whose {@code entityInside} changes the player's movement on the client: velocity (bubble
+     * columns, honey slides) or the next tick's stuck multiplier (cobwebs, berry bushes, powder snow).
+     */
+    static final java.util.Set<String> MOVING_INSIDE = java.util.Set.of("minecraft:bubble_column", "minecraft:honey_block", "minecraft:cobweb",
+            "minecraft:sweet_berry_bush", "minecraft:powder_snow");
+    /** {@code BlockTags.CLIMBABLE}; trapdoors can be ladders too ({@code trapdoorUsableAsLadder}). */
+    static final java.util.Set<String> CLIMBABLE = java.util.Set.of("minecraft:ladder", "minecraft:vine", "minecraft:scaffolding",
+            "minecraft:weeping_vines", "minecraft:weeping_vines_plant", "minecraft:twisting_vines", "minecraft:twisting_vines_plant",
+            "minecraft:cave_vines", "minecraft:cave_vines_plant");
 
     /**
      * What the step needs beyond the player and the world.
@@ -117,8 +127,10 @@ public final class OnFoot {
     }
 
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
-        // baseTick's fluid checks use the box deflated by 0.001: with only air there, no fluid, powder snow or climbable is near
-        requireAir(pose.box(x, y, z).inflate(-0.001, -0.001, -0.001), "at the start of the tick");
+        // baseTick's fluid checks use the box deflated by 0.001; the feet block decides climbing
+        Box start = pose.box(x, y, z);
+        requireNoEffects(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
+        requireNotClimbing();
         // --- LocalPlayer.aiStep ---
         if (sprintTriggerTime > 0) {
             sprintTriggerTime--;
@@ -266,7 +278,11 @@ public final class OnFoot {
         float drag = friction * 0.91F;
         // handleRelativeFrictionAndCalculateMovement (not climbing: the box is in air)
         delta = delta.add(Vec3d.inputVector(input, frictionInfluencedSpeed(friction), yRot));
+        Box before = pose.box(x, y, z);
         move(delta);
+        requireNotClimbing(); // handleRelativeFrictionAndCalculateMovement asks again after the move
+        // checkInsideBlocks sweeps the box (deflated by 1.0E-5F) along the move
+        requireNoEffects(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
         Vec3d moved = delta;
         double vy = moved.y();
         if (world.isLoaded(below.x() >> 4, below.z() >> 4)) {
@@ -442,9 +458,8 @@ public final class OnFoot {
         return factor;
     }
 
-    /** {@code LivingEntity.applyEffectsFromBlocks}: only blocks without effects (air) were inside the box; stepping on slime is not modelled. */
+    /** {@code LivingEntity.applyEffectsFromBlocks}: no block with an effect was inside the box (checked along the move); stepping on slime is not modelled. */
     private void applyEffectsFromBlocks() throws Colliders.Unknown {
-        requireAir(pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "at the end of the move"); // checkInsideBlocks' box
         if (onGround) {
             String block = states.block(state(onPos(0.2F)));
             if (block.equals("minecraft:slime_block")) {
@@ -501,17 +516,32 @@ public final class OnFoot {
         return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
     }
 
-    /** Every block the box touches is air: no fluid, climbable, cobweb, powder snow or other block with an effect inside it. */
-    private void requireAir(Box box, String when) throws Colliders.Unknown {
-        for (int bx = Colliders.floor(box.minX()); bx <= Colliders.floor(box.maxX()); bx++) {
-            for (int by = Colliders.floor(box.minY()); by <= Colliders.floor(box.maxY()); by++) {
-                for (int bz = Colliders.floor(box.minZ()); bz <= Colliders.floor(box.maxZ()); bz++) {
+    /** No block in the cells the two boxes span holds a fluid or moves the player from inside ({@link #MOVING_INSIDE}). */
+    private void requireNoEffects(Box a, Box b, String when) throws Colliders.Unknown {
+        int x0 = Colliders.floor(Math.min(a.minX(), b.minX()));
+        int x1 = Colliders.floor(Math.max(a.maxX(), b.maxX()));
+        int y0 = Colliders.floor(Math.min(a.minY(), b.minY()));
+        int y1 = Colliders.floor(Math.max(a.maxY(), b.maxY()));
+        int z0 = Colliders.floor(Math.min(a.minZ(), b.minZ()));
+        int z1 = Colliders.floor(Math.max(a.maxZ(), b.maxZ()));
+        for (int bx = x0; bx <= x1; bx++) {
+            for (int by = y0; by <= y1; by++) {
+                for (int bz = z0; bz <= z1; bz++) {
                     int s = state(new BlockPos(bx, by, bz));
-                    if (!states.isAir(s)) {
+                    String fluid = states.fluid(s);
+                    if (fluid != null && !fluid.isEmpty() || MOVING_INSIDE.contains(states.block(s))) {
                         throw new Colliders.Unknown(states.block(s) + " inside the box " + when + " (not modelled)");
                     }
                 }
             }
+        }
+    }
+
+    /** {@code onClimbable()}: the feet block is climbable (a trapdoor might be). */
+    private void requireNotClimbing() throws Colliders.Unknown {
+        String block = states.block(state(BlockPos.containing(x, y, z)));
+        if (CLIMBABLE.contains(block) || block.endsWith("_trapdoor")) {
+            throw new Colliders.Unknown("climbing " + block + " (not modelled)");
         }
     }
 

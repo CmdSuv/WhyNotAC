@@ -16,7 +16,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
-| Hareket fiziği (`whynotac-physics`) | Başladı | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı gerçek client'ın 942 tikiyle bit bit aynı; parkur ve kontrol sırada |
+| Hareket fiziği (`whynotac-physics`) | Başladı | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı gerçek client'ın parkurdaki 1803 tikiyle bit bit aynı; sunucu tarafı kontrol sırada |
 | Kalıcı depolama, karar, yapay zekâ modülleri | Planlı | `whynotac-storage`, `whynotac-verdict`, `whynotac-ai` |
 
 ## Kapı kuralı

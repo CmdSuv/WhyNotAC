@@ -72,6 +72,17 @@ until grep -q 'Done (' "$WORK_DIR/server.log" 2>/dev/null; do
   sleep 1
 done
 echo "server up"
+# The movement course, east of everything else along z = -1..1 (the ground's top is y = -60). Built before the
+# client joins, so it arrives with the chunks: the physics check needs the world as the client had it.
+for c in "forceload add 32 -16 135 16" \
+  "fill 44 -60 -1 44 -60 1 minecraft:smooth_stone_slab[type=bottom]" "fill 45 -60 -1 46 -60 1 minecraft:stone" \
+  "fill 46 -59 -1 46 -59 1 minecraft:smooth_stone_slab[type=bottom]" \
+  "fill 52 -61 -1 62 -61 1 minecraft:ice" "fill 70 -61 -1 74 -61 1 minecraft:soul_sand" "fill 82 -60 -2 82 -59 2 minecraft:stone" \
+  "fill 88 -60 -1 91 -60 1 minecraft:stone" "fill 98 -58 -1 101 -58 1 minecraft:stone" \
+  "fill 124 -60 -1 124 -60 1 minecraft:oak_stairs[facing=east]" "fill 125 -60 -1 127 -60 1 minecraft:stone"; do
+  echo "$c" > "$FIFO"
+done
+sleep 2
 
 # The ground-truth agent: records the client's exact physics state every tick (see agent/).
 AGENT_OUT="$WORK_DIR/agent-build"
@@ -146,6 +157,21 @@ reach 5.5
 python3 -I "$HERE/reach.py" "$DISPLAY_NUM" key 1; sleep 0.6
 reach 7.22
 reach 7.15
+# The movement course: each leg places the player (yaw, pitch 0) and presses keys; every tick is compared with the
+# physics engine afterwards (MovementTruth). Step-ups (slab, block, slab on block) and a drop; walking, sprinting and
+# sliding on ice; soul sand; a wall approached at an angle; sneaking to a platform's edge, then releasing shift there and
+# walking off; jumping under a low ceiling; a double-tapped sprint jumping; shift pressed inside the double-tap window;
+# stairs.
+leg() { echo "tp $NAME $1 $2 0.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+leg 41.5 -60 -90 w/3.0
+leg 50.5 -60 -90 w/1.0 w,Control_L/1.0 -/1.5
+leg 68.5 -60 -90 w/2.5
+leg 79.5 -60 -75 w/1.5 -/0.3 w,Control_L/0.8
+leg 88.5 -59 -90 Shift_L,w/4.0 w/0.6
+leg 97.5 -60 -90 w/1.5/space
+leg 104.5 -60 -90 w/0.1 -/0.1 w/1.5/space
+leg 108.5 -60 -90 w/0.1 -/0.05 Shift_L/0.5 -/0.3 w/0.1 -/0.1 w/1.0
+leg 121.5 -60 -90 w/2.0
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2

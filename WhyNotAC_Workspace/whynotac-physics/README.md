@@ -45,14 +45,32 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
   ve `noJumpDelay`, sürtünme bloğu (destek bloğundan), dürtü, `Entity.move` (çarpışma, basamak, bayraklar,
   destek bloğu, düşüş mesafesi, hız sıfırlama, blok hız çarpanı), yerçekimi ve sürüklenme, sonraki tikin duruşu.
   - **Doğrulama:** `tools/realclient/MovementTruth`, gerçek client'ın kaydettiği her tiki başındaki durumdan
-    çalıştırır ve sonundaki durumla bit bit karşılaştırır. Dünya, WhyNotAC'ın kayıttan kurduğu replikadır.
-    İlk oturumda 942 tikin 942'si eşit çıktı. Negatif kontroller: sürüklenme sabitinin 7. hanesi değişince
-    33, sıfırlama eşiği değişince 2 fark çıktı. Koşu CI'da her oturumda tekrarlanır.
-  - **Birim testi:** `OnFootTruthTest`, aynı oturumun hareket eden 195 tikini düz dünyada yeniden oynatır.
-  - **Kapsam dışında `Colliders.Unknown`:** sıvı, tırmanma, örümcek ağı ve kutunun içindeki diğer bloklar,
-    slime ve yatak sekmesi, çit ve duvar üstü, boğulma itmesi, yüklenmemiş chunk, sürünme, otomatik zıplama
-    geometrisi. Varsayılan öznitelikler ve etkisiz oyuncu varsayılır. Katı varlıklar ve dünya sınırı çağıranın
-    sorumluluğundadır.
-- **Kapsam açığı:** bu oturum, koşma tetikleyicisinin önceki ve şimdiki shift'e bağlı yolunu sınamıyor
-  (bilinçli değişiklik fark üretmedi). Merdiven, buz, ruh kumu, kenarda eğilme, tavan ve düşüş içeren bir
-  parkur sırada.
+    çalıştırır ve sonundaki durumla bit bit karşılaştırır. Her tik, client'ın o tikte gönderdiği hareket paketi
+    kayıtta geldiğinde replikanın tuttuğu dünyada değerlendirilir. Koşu CI'da her oturumda tekrarlanır.
+  - **Parkur:** gerçek client oturumu artık bir parkur da koşar:
+    - basamak çıkma (yarım blok, blok, blok üstünde yarım blok) ve düşüş;
+    - buzda yürüme, koşma ve kayma; ruh kumu;
+    - açıyla yaklaşılan duvar;
+    - platform kenarına eğilerek yürüme ve kenarda shift bırakıp inme;
+    - alçak tavanın altında zıplama;
+    - çift W ile koşma; çift W penceresinde basılan shift;
+    - merdiven.
+  - **Son oturum:** 1805 tikin 1803'ü bit bit eşit, 0 fark. 2 tik kapsam dışı (duvarda boğulma itmesi denetimi).
+  - **Negatif kontroller (bilinçli hatalar, hepsi yakalandı):**
+
+    | Değişiklik | Fark |
+    |---|---|
+    | Sürüklenme sabitinin 7. hanesi | 33 |
+    | Buzun sürtünmesini yok saymak | 89 |
+    | Ruh kumunun hız çarpanını yok saymak | 34 |
+    | Kenardan geri çekilmeyi kaldırmak | 24 |
+    | Hız sıfırlama eşiği | 2 |
+    | Eğilme yavaşlatmasının, kenar korumasının ve koşma tetikleyicisinin shift zamanlaması | 1'er |
+  - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
+    yeniden kurulan parkurda 544 tik.
+  - **Kapsam dışında `Colliders.Unknown`:**
+    - sıvı, tırmanma ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar);
+    - slime ve yatak sekmesi; çit ve duvar üstü;
+    - boğulma itmesi, yüklenmemiş chunk, sürünme, otomatik zıplama geometrisi.
+
+    Varsayılan öznitelikler ve etkisiz oyuncu varsayılır. Katı varlıklar ve dünya sınırı çağıranın sorumluluğundadır.

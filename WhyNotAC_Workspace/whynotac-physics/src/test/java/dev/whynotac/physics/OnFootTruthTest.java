@@ -18,8 +18,11 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link OnFoot} against ticks of the official client: {@code truth-flat.jsonl.gz} holds the client's own
  * state before and after every tick in which it moved during a real-client session (walking, sprinting,
- * jumping, strafing, sneaking on a superflat world; tools/realclient). Each tick, run from its start in the
- * same flat world, must end exactly as the client's did. The real-client CI job runs the same comparison
+ * jumping, strafing, sneaking on a superflat world; tools/realclient). {@code truth-course.jsonl.gz} holds the
+ * movement course of the same session: step-ups onto a slab, a block and a slab on a block, ice, soul sand, a
+ * wall met at an angle, sneaking to a platform's edge and off it, jumps under a low ceiling, a double-tapped
+ * sprint and stairs. Each tick, run from its start in the same world (rebuilt here from the commands that
+ * built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
 class OnFootTruthTest {
@@ -54,35 +57,95 @@ class OnFootTruthTest {
         }
     };
 
+    /** The course of run_realclient.sh on the flat world: {x0, y0, z0, x1, y1, z1, state}. */
+    private static final int[][] COURSE = {
+        {44, -60, -1, 44, -60, 1, blockState("minecraft:smooth_stone_slab", "type=bottom")},
+        {45, -60, -1, 46, -60, 1, blockState("minecraft:stone")},
+        {46, -59, -1, 46, -59, 1, blockState("minecraft:smooth_stone_slab", "type=bottom")},
+        {52, -61, -1, 62, -61, 1, blockState("minecraft:ice")},
+        {70, -61, -1, 74, -61, 1, blockState("minecraft:soul_sand")},
+        {82, -60, -2, 82, -59, 2, blockState("minecraft:stone")},
+        {88, -60, -1, 91, -60, 1, blockState("minecraft:stone")},
+        {98, -58, -1, 101, -58, 1, blockState("minecraft:stone")},
+        {124, -60, -1, 124, -60, 1, blockState("minecraft:oak_stairs", "facing=east", "half=bottom", "shape=straight", "waterlogged=false")},
+        {125, -60, -1, 127, -60, 1, blockState("minecraft:stone")},
+    };
+
+    private static final Colliders.World COURSE_WORLD = new Colliders.World() {
+        @Override
+        public BlockStates states() {
+            return STATES;
+        }
+
+        @Override
+        public int blockState(int x, int y, int z) {
+            for (int[] c : COURSE) {
+                if (x >= c[0] && x <= c[3] && y >= c[1] && y <= c[4] && z >= c[2] && z <= c[5]) {
+                    return c[6];
+                }
+            }
+            return FLAT.blockState(x, y, z);
+        }
+
+        @Override
+        public boolean isLoaded(int chunkX, int chunkZ) {
+            return true;
+        }
+    };
+
+    private static int blockState(String block, String... properties) {
+        for (int id = 0; id < STATES.size(); id++) {
+            if (STATES.block(id).equals(block) && java.util.Arrays.stream(properties).allMatch(STATES.properties(id)::contains)) {
+                return id;
+            }
+        }
+        throw new AssertionError(block);
+    }
+
     @Test
-    void everyRecordedTickEndsAsTheClientsDid() throws Exception {
+    void everyRecordedTickOnTheFlatWorldEndsAsTheClientsDid() throws Exception {
+        int[] counts = replay("truth-flat.jsonl.gz", FLAT);
+        // the fixture exercises what it claims to
+        assertTrue(counts[0] > 150 && counts[1] >= 3 && counts[2] > 10 && counts[3] > 10, java.util.Arrays.toString(counts));
+    }
+
+    @Test
+    void everyRecordedTickOfTheCourseEndsAsTheClientsDid() throws Exception {
+        int[] counts = replay("truth-course.jsonl.gz", COURSE_WORLD);
+        assertTrue(counts[0] > 400 && counts[1] >= 5 && counts[3] > 20 && counts[4] > 20 && counts[5] >= 1, java.util.Arrays.toString(counts));
+    }
+
+    /** {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits}. */
+    private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
         try (BufferedReader in = new BufferedReader(new InputStreamReader(
-                new GZIPInputStream(OnFootTruthTest.class.getResourceAsStream("truth-flat.jsonl.gz")), StandardCharsets.UTF_8))) {
+                new GZIPInputStream(OnFootTruthTest.class.getResourceAsStream(resource)), StandardCharsets.UTF_8))) {
             for (String line = in.readLine(); line != null; line = in.readLine()) {
                 lines.add(line);
             }
         }
-        int ticks = 0;
-        int jumps = 0;
-        int sprinting = 0;
-        int crouching = 0;
+        int[] counts = new int[6];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
             PlayerState before = state(pre);
             PlayerState expected = state(post);
-            PlayerState predicted = OnFoot.tick(before, keys(text(post, "keys")), FLAT, OnFoot.Conditions.VANILLA_DEFAULTS);
             String where = "tick " + number(pre, "tickCount") + " keys " + text(post, "keys");
+            PlayerState predicted;
+            try {
+                predicted = OnFoot.tick(before, keys(text(post, "keys")), world, OnFoot.Conditions.VANILLA_DEFAULTS);
+            } catch (Colliders.Unknown e) {
+                continue; // outside the engine's scope (the session's suffocation check at the wall): no claim, nothing to compare
+            }
             assertEquals(expected, predicted, where);
-            ticks++;
-            jumps += expected.noJumpDelay() == 10 ? 1 : 0;
-            sprinting += expected.sprinting() ? 1 : 0;
-            crouching += expected.crouching() ? 1 : 0;
+            counts[0]++;
+            counts[1] += expected.noJumpDelay() == 10 ? 1 : 0;
+            counts[2] += expected.sprinting() ? 1 : 0;
+            counts[3] += expected.crouching() ? 1 : 0;
+            counts[4] += expected.horizontalCollision() ? 1 : 0;
+            counts[5] += expected.verticalCollision() && !expected.verticalCollisionBelow() ? 1 : 0;
         }
-        // the fixture exercises what it claims to
-        assertTrue(ticks > 150 && jumps >= 3 && sprinting > 10 && crouching > 10, ticks + " ticks, " + jumps + " jumps, " + sprinting + " sprinting, "
-                + crouching + " crouching");
+        return counts;
     }
 
     private static PlayerState state(String line) {

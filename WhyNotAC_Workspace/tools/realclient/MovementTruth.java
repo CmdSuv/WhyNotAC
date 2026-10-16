@@ -28,8 +28,9 @@ import java.util.TreeMap;
  * collision flags, fall distance, sprint, crouch, pose, the jump and sprint counters and the supporting
  * block. Ticks outside its scope are counted by reason.
  *
- * <p>The world is taken when the recording ends. A tick within 4 blocks of a block the server changed during
- * play is not compared (the replica's final world may differ from the client's at that tick).
+ * <p>Each tick is evaluated in the world the replica holds when the client's movement packet of that tick (or of
+ * the next tick that sent one) arrives in the replay: the k-th packet the client sent, rebuilt from its own
+ * tick states as verify_truth.py does, is the k-th one the server recorded (teleport replies aside).
  *
  * <p>usage: java -cp WhyNotAC.jar:whynotac-physics.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on
  * any difference
@@ -44,37 +45,40 @@ public class MovementTruth {
             }
         }
         Replicas replicas = Replicas.vanilla();
-        List<int[]> changed = new ArrayList<>();
+        Comparison comparison = new Comparison(truth);
+        long[] blockChanges = {0};
         boolean[] played = {false};
-        Map<String, Object> result = new LinkedHashMap<>();
+        boolean[] afterAccept = {false};
         List<TimelineListener> chain = new ArrayList<>();
-        // First in the chain: at the disconnect the replicas still hold the world.
+        // First in the chain: the replicas hold the world as it was before this event.
         chain.add((session, event) -> {
-            if (event instanceof TimelineEvent.Inbound in && in.packet() instanceof ServerboundPacket.MovePlayer) {
-                played[0] = true;
-            }
-            if (played[0] && event instanceof TimelineEvent.Outbound out) {
-                if (out.packet() instanceof ClientboundPacket.BlockUpdate u) {
-                    changed.add(new int[] {u.position().x(), u.position().y(), u.position().z()});
-                } else if (out.packet() instanceof ClientboundPacket.SectionBlocksUpdate u) {
-                    // the whole section: coarse but safe
-                    changed.add(new int[] {u.sectionX() * 16 + 8, u.sectionY() * 16 + 8, u.sectionZ() * 16 + 8, 12});
+            if (event instanceof TimelineEvent.Inbound in) {
+                boolean reply = afterAccept[0] && in.packet() instanceof ServerboundPacket.MovePlayer;
+                afterAccept[0] = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
+                if (in.packet() instanceof ServerboundPacket.MovePlayer && !reply) {
+                    played[0] = true;
+                    comparison.packetArrived(view(replicas.world().world(session)));
                 }
             }
-            if (event instanceof TimelineEvent.Disconnected && result.isEmpty()) {
-                result.putAll(compare(truth, replicas.world().world(session), changed));
+            if (played[0] && event instanceof TimelineEvent.Outbound out
+                    && (out.packet() instanceof ClientboundPacket.BlockUpdate || out.packet() instanceof ClientboundPacket.SectionBlocksUpdate)) {
+                blockChanges[0]++;
+            }
+            if (event instanceof TimelineEvent.Disconnected) {
+                comparison.packetArrived(view(replicas.world().world(session))); // the ticks after the last packet
             }
         });
         chain.addAll(replicas.listeners());
         Replayer.replay(RecordingReader.open(Path.of(args[0])), chain);
-        result.put("blockChangesDuringPlay", (long) changed.size());
+        Map<String, Object> result = comparison.result();
+        result.put("blockChangesDuringPlay", blockChanges[0]);
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
-    private static Map<String, Object> compare(List<Map<String, Object>> truth, ClientWorld world, List<int[]> changed) {
-        Colliders.World view = new Colliders.World() {
+    private static Colliders.World view(ClientWorld world) {
+        return new Colliders.World() {
             @Override
             public BlockStates states() {
                 return world.states();
@@ -90,33 +94,61 @@ public class MovementTruth {
                 return world.isLoaded(chunkX, chunkZ);
             }
         };
-        long ticks = 0;
-        long matched = 0;
-        long mismatched = 0;
-        Map<String, Long> unknown = new TreeMap<>();
-        Map<String, Long> differingFields = new TreeMap<>();
-        List<String> examples = new ArrayList<>();
-        boolean firstLoaded = true;
-        for (int i = 0; i + 1 < truth.size(); i++) {
-            Map<String, Object> pre = truth.get(i);
-            Map<String, Object> post = truth.get(i + 1);
-            if (!"pre".equals(pre.get("hook")) || !"post".equals(post.get("hook")) || !pre.get("tickCount").equals(post.get("tickCount"))) {
-                continue;
+    }
+
+    /** The recorded ticks in order, each compared when its movement packet (or the next one) arrives. */
+    private static final class Comparison {
+        private final List<Map<String, Object>[]> ticks = new ArrayList<>();
+        private final List<Boolean> sent = new ArrayList<>();
+        private int next;
+        private boolean firstLoaded = true;
+        long matched;
+        long mismatched;
+        final Map<String, Long> unknown = new TreeMap<>();
+        final Map<String, Long> differingFields = new TreeMap<>();
+        final List<String> examples = new ArrayList<>();
+
+        @SuppressWarnings("unchecked")
+        Comparison(List<Map<String, Object>> truth) {
+            for (int i = 0; i + 1 < truth.size(); i++) {
+                Map<String, Object> pre = truth.get(i);
+                Map<String, Object> post = truth.get(i + 1);
+                if ("pre".equals(pre.get("hook")) && "post".equals(post.get("hook")) && pre.get("tickCount").equals(post.get("tickCount"))
+                        && (Boolean) pre.get("loaded")) {
+                    if ((Boolean) pre.get("passenger")) {
+                        throw new IllegalStateException("the session rode a vehicle");
+                    }
+                    ticks.add(new Map[] {pre, post});
+                    // sendPosition: a position (reminder reset), a rotation (last sent changed) or the flags changed
+                    boolean position = ((Number) post.get("positionReminder")).longValue() == 0;
+                    boolean rotation = !post.get("yRotLast").equals(pre.get("yRotLast")) || !post.get("xRotLast").equals(pre.get("xRotLast"));
+                    boolean status = !pre.get("lastOnGround").equals(post.get("onGround"))
+                            || !pre.get("lastHorizontalCollision").equals(post.get("horizontalCollision"));
+                    sent.add(position || rotation || status);
+                }
             }
-            if (!(Boolean) pre.get("loaded") || (Boolean) pre.get("passenger")) {
-                continue;
+        }
+
+        /** A movement packet arrived: the ticks up to the one that sent it are compared in {@code world}. */
+        void packetArrived(Colliders.World world) {
+            while (next < ticks.size()) {
+                Map<String, Object>[] tick = ticks.get(next);
+                boolean sentHere = sent.get(next);
+                next++;
+                compare(tick[0], tick[1], world);
+                if (sentHere) {
+                    return;
+                }
             }
-            ticks++;
+        }
+
+        private void compare(Map<String, Object> pre, Map<String, Object> post, Colliders.World world) {
             boolean autoJump = firstLoaded; // LocalPlayer.autoJumpEnabled starts true until the first sendPosition
             firstLoaded = false;
             PlayerState before = state(pre);
             PlayerState expected = state(post);
-            if (nearChange(before, changed)) {
-                unknown.merge("a block changed near the player during play", 1L, Long::sum);
-                continue;
-            }
             try {
-                PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), view,
+                PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
                         new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump));
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
@@ -134,24 +166,18 @@ public class MovementTruth {
                 unknown.merge(e.getMessage().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]", ""), 1L, Long::sum);
             }
         }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("ticks", ticks);
-        out.put("matched", matched);
-        out.put("mismatched", mismatched);
-        out.put("unknown", unknown);
-        out.put("differingFields", differingFields);
-        out.put("examples", examples);
-        return out;
-    }
 
-    private static boolean nearChange(PlayerState p, List<int[]> changed) {
-        for (int[] c : changed) {
-            double reach = 4 + (c.length > 3 ? c[3] : 0);
-            if (Math.abs(c[0] + 0.5 - p.x()) <= reach && Math.abs(c[1] + 0.5 - p.y()) <= reach + 2 && Math.abs(c[2] + 0.5 - p.z()) <= reach) {
-                return true;
-            }
+        Map<String, Object> result() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("ticks", (long) ticks.size());
+            out.put("compared", (long) next);
+            out.put("matched", matched);
+            out.put("mismatched", mismatched);
+            out.put("unknown", unknown);
+            out.put("differingFields", differingFields);
+            out.put("examples", examples);
+            return out;
         }
-        return false;
     }
 
     private static List<String> differences(PlayerState p, PlayerState e) {
