@@ -1,4 +1,4 @@
-# whynotac-physics — Katmanlı hipotez-kümesi fizik motoru (Faz 2, planlı)
+# whynotac-physics — Katmanlı hipotez-kümesi fizik motoru (Faz 3)
 
 **Sözleşme:** Bir oyuncunun zaman çizelgesinden (`TimelineEvent`) client'ın her tick'i için,
 gözlenen kanıtla tutarlı **tüm durumların kümesini** üretir. Bir gözlem (bildirilen konum, yer
@@ -30,3 +30,15 @@ ancak **hiçbir** meşru hipotez gözlemi açıklayamadığında kanıt doğar.
 
 Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynaktan okunacak ve
 `whynotac-conformance` içinde gerçek oyun koduna karşı diferansiyel test edilecek.
+
+## Durum
+- **Çarpışma çekirdeği (tamam):** `VoxelShape.collide`, `Shapes.collide`, `Shapes.joinIsNotEmpty` (birleştiricilerle),
+  `Shapes.create`, `BlockCollisions`, `Entity.collide` (basamak çıkma dahil). `tools/realclient` içindeki
+  `CollisionConformance`, bunları resmi client'ın kendi koduyla her CI koşusunda yeni bir tohumla, rastgele
+  vakalarda bit bit karşılaştırır. Yerelde 200.000 denemede 3,4 milyon karşılaştırma yapıldı, 0 fark çıktı.
+  Toleransa iki bilinçli hata eklendiğinde test 409 ve 234 fark buldu.
+- **Bilinmeyen şekiller iddia üretmez:** dünyaya bağlı şekiller (hareketli piston, shulker kutusu),
+  oyuncuya bağlı şekiller (toz kar, iskele), kaydırılmış şekiller ve bilinmeyen bloklar `Colliders.Unknown`
+  fırlatır. Sıvılar oyuncu için boş şekildir.
+- **Sırada:** yaya hareket adımı (girdi, koşma, zıplama, sürtünme, yerçekimi). Doğrulama gerçek client'ın
+  tick başına kaydıyla yapılacak.

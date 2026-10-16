@@ -53,7 +53,13 @@ public final class BlockStates {
     public static final int BLOCKS_MOTION = 1 << 5;
     /** {@code requiresCorrectToolForDrops()}. */
     public static final int TOOL_REQUIRED = 1 << 6;
-    private static final String FLAG_LETTERS = "adcormt";
+    /**
+     * The collision shape is the game's full-block object itself ({@code Shapes.block()}). Block collision
+     * keeps such a block when its cube intersects the box, every other shape when it overlaps the box's
+     * shape ({@code BlockCollisions.computeNext}).
+     */
+    public static final int FULL_BLOCK = 1 << 7;
+    private static final String FLAG_LETTERS = "adcormtf";
 
     private static volatile BlockStates vanilla;
 

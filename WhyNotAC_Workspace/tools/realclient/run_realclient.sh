@@ -76,10 +76,13 @@ echo "server up"
 # The ground-truth agent: records the client's exact physics state every tick (see agent/).
 AGENT_OUT="$WORK_DIR/agent-build"
 rm -rf "$AGENT_OUT" && mkdir -p "$AGENT_OUT/classes"
-(cd "$ROOT" && ./gradlew -q :whynotac-world:jar)
+(cd "$ROOT" && ./gradlew -q :whynotac-world:jar :whynotac-physics:jar)
 WORLD_JAR=$(find "$ROOT/whynotac-world/build/libs" -name 'whynotac-world-*.jar' ! -name '*-sources.jar' | head -1)
 PROTOCOL_JAR=$(find "$ROOT/whynotac-protocol/build/libs" -name 'whynotac-protocol-*.jar' ! -name '*-sources.jar' | head -1)
-javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -cp "$WORLD_JAR:$PROTOCOL_JAR" -d "$AGENT_OUT/classes" $(find "$HERE/agent/src" -name '*.java')
+PHYSICS_JAR=$(find "$ROOT/whynotac-physics/build/libs" -name 'whynotac-physics-*.jar' ! -name '*-sources.jar' | head -1)
+MATH_JAR=$(find "$ROOT/whynotac-math/build/libs" -name 'whynotac-math-*.jar' ! -name '*-sources.jar' | head -1)
+WHYNOTAC_CP="$WORLD_JAR:$PROTOCOL_JAR:$PHYSICS_JAR:$MATH_JAR"
+javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -cp "$WHYNOTAC_CP" -d "$AGENT_OUT/classes" $(find "$HERE/agent/src" -name '*.java')
 printf 'Premain-Class: dev.whynotac.truth.TruthAgent\n' > "$AGENT_OUT/manifest.txt"
 jar --create --file "$AGENT_OUT/truth-agent.jar" --manifest "$AGENT_OUT/manifest.txt" -C "$AGENT_OUT/classes" .
 rm -f "$WORK_DIR/truth.jsonl"
@@ -165,12 +168,24 @@ echo "--- client truth"
 python3 -I "$HERE/verify_truth.py" "$WORK_DIR" || STATUS=1
 echo "--- block-state data"
 # whynotac-world ships block-state data generated from this very client; regenerate it and require equality.
-(cd "$WORK_DIR" && java -cp "$CP:$AGENT_OUT/classes:$WORLD_JAR:$PROTOCOL_JAR" dev.whynotac.truth.BlockDataDump "$MAPPINGS" "$WORK_DIR/block-states.txt.gz") \
+(cd "$WORK_DIR" && java -cp "$CP:$AGENT_OUT/classes:$WHYNOTAC_CP" dev.whynotac.truth.BlockDataDump "$MAPPINGS" "$WORK_DIR/block-states.txt.gz") \
   | grep -v '^Picked up' | tail -1
 if cmp -s <(zcat "$WORK_DIR/block-states.txt.gz") <(zcat "$ROOT/whynotac-world/src/main/resources/dev/whynotac/world/block-states.txt.gz"); then
   echo "PASS whynotac-world's block-state data is exactly what the official client's registry yields"
 else
   echo "FAIL whynotac-world's block-state data differs from the official client (copy $WORK_DIR/block-states.txt.gz over the resource)"
+  STATUS=1
+fi
+echo "--- collision kernel"
+# whynotac-physics' collisions against the client's own VoxelShape/Shapes/Entity code, on random cases; a new seed every run.
+SEED=${GITHUB_RUN_ID:-$(date +%s)}
+CONFORMANCE=$( (cd "$WORK_DIR" && java -cp "$CP:$AGENT_OUT/classes:$WHYNOTAC_CP" dev.whynotac.truth.CollisionConformance "$MAPPINGS" 50000 "$SEED") \
+  | grep -o '{"shapes".*}' || true)
+echo "seed $SEED: $CONFORMANCE"
+if echo "$CONFORMANCE" | grep -q '"differences":0,'; then
+  echo "PASS whynotac-physics' collision kernel equals the official client's, bit for bit, on every random case"
+else
+  echo "FAIL whynotac-physics' collision kernel differs from the official client (seed $SEED)"
   STATUS=1
 fi
 exit $STATUS

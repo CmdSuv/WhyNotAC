@@ -34,6 +34,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.CubeVoxelShape;
 import net.minecraft.world.phys.shapes.DiscreteVoxelShape;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -88,6 +89,9 @@ class BlockStatesDataTest {
             }
             if (state.requiresCorrectToolForDrops()) {
                 flags |= BlockStates.TOOL_REQUIRED;
+            }
+            if (collision == Shapes.block()) {
+                flags |= BlockStates.FULL_BLOCK;
             }
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), flags, block.getFriction(), block.getSpeedFactor(),

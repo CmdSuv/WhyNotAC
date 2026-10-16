@@ -5,13 +5,13 @@
  *
  *   whynotac-paper ──► whynotac-recording ──► whynotac-protocol ──► whynotac-math
  *   whynotac-paper ──► whynotac-world ──► whynotac-protocol (the client's world: block data, chunks, replica)
+ *   whynotac-physics ──► whynotac-world, whynotac-math (the client's own movement, bit for bit)
  *   whynotac-conformance ──► whynotac-math (+ vanilla 1.21.11 server code, test-only)
  *   whynotac-bench ──► everything (JMH micro-benchmarks, never shipped)
  *   whynotac-interop-probe: test-only Paper plugin for the live interop E2E (never shipped)
  *
  * Planned layers (folders exist with a README describing their contract; they are added to the
- * build when their phase starts): whynotac-physics, whynotac-analysis, whynotac-ai,
- * whynotac-verdict, whynotac-storage.
+ * build when their phase starts): whynotac-ai, whynotac-verdict, whynotac-storage.
  */
 pluginManagement {
     includeBuild("build-logic")
@@ -42,6 +42,7 @@ include(
     "whynotac-protocol",
     "whynotac-recording",
     "whynotac-world",
+    "whynotac-physics",
     "whynotac-analysis",
     "whynotac-paper",
     "whynotac-conformance",

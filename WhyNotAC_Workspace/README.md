@@ -53,7 +53,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 - [Yol haritası](docs/ROADMAP.md): bugünkü durum, sıradaki fazlar ve kapıları, sahibin kararını bekleyenler
 - [Gizlilik ve veri sahibi talepleri](docs/privacy/README.md): neyin saklandığı, `/whynotac privacy find|forget`
 - [Doğrulanmış vanilla 1.21.11 referansı](docs/reference/vanilla-1.21.11.md): decompile edilmiş kaynaktan okunan her sabit
-- Planlı katmanlar: [physics](whynotac-physics/README.md) · [analysis](whynotac-analysis/README.md) ·
+- Katman sözleşmeleri: [physics](whynotac-physics/README.md) · [analysis](whynotac-analysis/README.md) ·
   [ai](whynotac-ai/README.md) · [verdict](whynotac-verdict/README.md) · [storage](whynotac-storage/README.md)
 
 ## Modüller
@@ -63,6 +63,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 | `whynotac-protocol` | Platformdan bağımsız paket modeli, oyuncu zaman çizelgesi, transaction/gecikme izleme |
 | `whynotac-recording` | Kayıpsız, çökmeye dayanıklı oturum kaydı, takma adlandırma, replay, inspect/dump aracı |
 | `whynotac-world` | Client'ın dünyası: blok durumu verisi (resmi client'tan), chunk decoder, client'ın chunk deposunun kopyası ve belirsizliği |
+| `whynotac-physics` | Client'ın kendi hareketi, decompile edilmiş koddan bit bit: çarpışma çekirdeği (resmi client'ın koduyla rastgele vakalarda bit bit karşılaştırılır) |
 | `whynotac-analysis` | Kontroller, kanıt ve kabul edilebilirlik, eylem politikası (POLICY.md), karar katmanı, `verify` aracı |
 | `whynotac-paper` | Paper 1.21.11 eklentisi: NMS/Netty paket yakalayıcı, kayıt entegrasyonu, vakalar ve uyarılar |
 | `whynotac-conformance` | Gerçek oyun sınıflarına karşı diferansiyel testler (dağıtılmaz) |
@@ -72,7 +73,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 377 test
+./gradlew build                       # tüm modüller + 383 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

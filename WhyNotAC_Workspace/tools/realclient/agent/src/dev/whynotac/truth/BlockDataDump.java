@@ -42,7 +42,7 @@ public final class BlockDataDump {
             "net.minecraft.core.registries.BuiltInRegistries", "net.minecraft.core.Registry", "net.minecraft.world.level.EmptyBlockGetter",
             "net.minecraft.core.Direction$Axis", "net.minecraft.world.level.material.FlowingFluid", "net.minecraft.world.level.block.LiquidBlock",
             "net.minecraft.world.level.block.PowderSnowBlock", "net.minecraft.world.level.block.ScaffoldingBlock",
-            "net.minecraft.world.phys.shapes.CubeVoxelShape");
+            "net.minecraft.world.phys.shapes.CubeVoxelShape", "net.minecraft.world.phys.shapes.Shapes");
 
     private final Mappings m;
 
@@ -73,6 +73,7 @@ public final class BlockDataDump {
         Object emptyGetter = staticField("net.minecraft.world.level.EmptyBlockGetter", "INSTANCE");
         Object zero = staticField(POS, "ZERO");
         Object emptyContext = invokeStatic(CONTEXT, "empty()");
+        Object fullBlock = invokeStatic("net.minecraft.world.phys.shapes.Shapes", "block()");
         Object falling = staticField("net.minecraft.world.level.material.FlowingFluid", "FALLING");
         Object[] axes = cls("net.minecraft.core.Direction$Axis").getEnumConstants(); // X, Y, Z
 
@@ -113,6 +114,8 @@ public final class BlockDataDump {
             flags |= (boolean) replaceable.invoke(state) ? BlockStates.REPLACEABLE : 0;
             flags |= (boolean) blocksMotion.invoke(state) ? BlockStates.BLOCKS_MOTION : 0;
             flags |= (boolean) tool.invoke(state) ? BlockStates.TOOL_REQUIRED : 0;
+            Object collisionShape = collision.invoke(state, emptyGetter, zero, emptyContext);
+            flags |= collisionShape == fullBlock ? BlockStates.FULL_BLOCK : 0;
 
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {
@@ -129,7 +132,7 @@ public final class BlockDataDump {
                         + (Boolean.TRUE.equals(fallingValue) ? 1 : 0);
             }
             builder.add(getKey.invoke(blocks, block).toString(), properties.toString(),
-                    shapes.read(collision.invoke(state, emptyGetter, zero, emptyContext)), flags, (float) friction.invoke(block),
+                    shapes.read(collisionShape), flags, (float) friction.invoke(block),
                     (float) speed.invoke(block), (float) jump.invoke(block), (float) destroySpeed.invoke(state, emptyGetter, zero), fluidText);
         }
         return builder.build();
