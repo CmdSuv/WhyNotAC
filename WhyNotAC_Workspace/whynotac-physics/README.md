@@ -72,18 +72,28 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     bacak tek bloklu basamağa önden ve açıyla yürür. **Son oturum:** 1956 tikin 1952'si bit bit eşit, 0 fark;
     otomatik zıplama 3 kez tetiklendi. Negatif kontroller: yükselme sınırı (1.2 → 0.9), karşılaştırma (`>` → `>=`)
     ve ileri bakış mesafesinin yarıya inmesi testi bozar; 0.51'lik çizgi yüksekliği bu düz basamakta ayırt edilmez.
+  - **Efektler (`OnFoot.Effects`, tamam):** zıplama gücü (`getJumpBoostPower`, seviye başına `0.1F`; otomatik
+    zıplamanın erişimi seviye başına `0.75F`), yavaş düşüş (`getEffectiveGravity`: yükselmezken yerçekimi en çok
+    `0.01`; `aiStep` düşüş mesafesini sıfırlar), havada süzülme (`travelInAir`: dikey hız seviye başına `0.05`'e
+    çekilir, yerçekiminin yerine) ve körlük (`isMobilityRestricted`: koşma başlamaz, süren durur). Gerçek client
+    oturumu dört bacak koşar: zıplama gücü II ile koşarak zıplama ve iki blokluk duvara otomatik zıplama, yavaş
+    düşüşle zıplama ve altı blokluk düşüş, bir saniyelik havada süzülme II, körken koşma tuşu ve çift W.
+    **Son oturum:** 2557 tikin 2553'ü bit bit eşit, 0 fark; 504 tik efekt altında. Negatif kontroller (hepsi
+    yakalandı): zıplama gücü `0.1F` → `0.11F` (3 fark), yavaş düşüş sınırı `0.01` → `0.02` (177), havada süzülme
+    `0.05` → `0.06` (20), körlüğü yok saymak (22), düşüş mesafesini sıfırlamamak (55).
   - **Hız özniteliği:** `OnFoot.Speed` ile dışarıdan verilir (sunucunun gönderdiği taban ve değiştiriciler); tick
     içindeki `setSprinting` çağrıları onu da değiştirir (`Speed.setSprinting`, sonucu `Step.speed`).
     Koşma değiştiricisinin özniteliğde olup olmadığı (`PlayerState.sprintModifier`) bayraktan ayrı izlenir: sunucu
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
-    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166 tik.
+    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504 tik.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı, tırmanma ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar);
     - slime ve yatak sekmesi; çit ve duvar üstü;
     - boğulma itmesi, yüklenmemiş chunk, sürünme;
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 
-    Varsayılan öznitelikler (hız dışında) ve etkisiz oyuncu varsayılır. Katı varlıklar ve dünya sınırı çağıranın
+    Varsayılan öznitelikler (hız dışında) varsayılır; adımın okuduğu efektler (`OnFoot.Effects`: zıplama gücü,
+    havada süzülme, yavaş düşüş, körlük) dışarıdan verilir. Katı varlıklar ve dünya sınırı çağıranın
     sorumluluğundadır.
 - **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.

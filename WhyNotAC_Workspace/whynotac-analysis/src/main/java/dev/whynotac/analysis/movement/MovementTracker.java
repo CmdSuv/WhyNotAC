@@ -42,7 +42,7 @@ import java.util.Set;
  * position to the bit, the same flags. When none does, no vanilla client could have sent it
  * ({@link Outcome#UNEXPLAINED}). Where any hypothesis leaves the on-foot step's scope, or something the
  * engine does not model may act on the player (an entity that pushes, an unsettled block, an item in use, a
- * vehicle, effects, a packet the client may have handled in a way not followed), there is no claim and the
+ * vehicle, a packet the client may have handled in a way not followed), there is no claim and the
  * set is dropped until an anchor fixes the state again:
  * <ul>
  *   <li>a new player (login, or a respawn that keeps no entity data), whose state is the client's defaults;</li>
@@ -50,7 +50,8 @@ import java.util.Set;
  *       bit, in two position packets at least {@link #SETTLE_MIN_TICKS} ticks apart with nothing sent in
  *       between and on the ground throughout. Its horizontal motion is then zero (anything faster than the
  *       client's zeroing threshold would have moved it beyond the send threshold) and its vertical motion is
- *       one tick of gravity; the rest follows from the world, checked by running the step once more.</li>
+ *       one tick of gravity (slow falling's, if on; never under levitation); the rest follows from the world,
+ *       checked by running the step once more.</li>
  * </ul>
  */
 public final class MovementTracker {
@@ -460,7 +461,8 @@ public final class MovementTracker {
     private record Start(PlayerState player, SpeedAttribute speed) {}
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
-    private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, int window) {}
+    private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, OnFoot.Effects effects,
+            int window) {}
 
     private void lose(String reason) {
         hypotheses = null; // the base goes on from what the server knows for certain
@@ -502,8 +504,8 @@ public final class MovementTracker {
                 }
                 yield h.withSelf(next).withPlayer(q);
             }
-            case ClientboundPacket.MobEffect effect -> h.withSelf(s.withEffect(effect.effectKey(), true));
-            case ClientboundPacket.RemoveMobEffect effect -> h.withSelf(s.withEffect(effect.effectKey(), false));
+            case ClientboundPacket.MobEffect effect -> h.withSelf(s.withEffect(effect.effectKey(), effect.amplifier(), true));
+            case ClientboundPacket.RemoveMobEffect effect -> h.withSelf(s.withEffect(effect.effectKey(), 0, false));
             case ClientboundPacket.PlayerAbilities abilities -> h.withSelf(s.withAbilities(abilities.flying(), abilities.mayFly()));
             case ClientboundPacket.GameEvent event -> gameEvent(h, event);
             case ClientboundPacket.SetHealth health -> h.withSelf(s.withHealth(health.health(), health.food()));
@@ -728,7 +730,7 @@ public final class MovementTracker {
         int window = Integer.numberOfTrailingZeros(h.windowMask());
         for (Start begin : starts) {
             PlayerState start = begin.player();
-            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), window);
+            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), window);
             OnFoot.Step step = steps.get(key);
             if (step != null && !step.readSprintTrigger()) {
                 // the same step: only this state's own counter counted down (or was cleared by shift or backward)
@@ -736,7 +738,7 @@ public final class MovementTracker {
                 step = new OnFoot.Step(withSprintTrigger(step.state(), counter), false, false, step.autoJumpTriggered(), step.speed());
             } else {
                 try {
-                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed()));
+                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects()));
                 } catch (Colliders.Unknown e) {
                     throw new Lose(e.getMessage());
                 }
@@ -956,7 +958,11 @@ public final class MovementTracker {
         if (!base.speed().sprintLayoutCanonical()) {
             return null; // the sprinting modifier's place in the client's table would depend on a history not seen
         }
-        PlayerState guess = new PlayerState(x, y, z, new Vec3d(0.0, SETTLED_Y_MOTION, 0.0), baseSent.yRot(), baseSent.xRot(), true, false, false, true,
+        double settled = settledYMotion(base.effects());
+        if (Double.isNaN(settled)) {
+            return null;
+        }
+        PlayerState guess = new PlayerState(x, y, z, new Vec3d(0.0, settled, 0.0), baseSent.yRot(), baseSent.xRot(), true, false, false, true,
                 true, 0.0, baseSent.sprinting(), base.speed().holdsSprinting(), false, PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null,
                 false, Vec3d.ZERO);
         try {
@@ -965,11 +971,11 @@ public final class MovementTracker {
                 return null;
             }
             view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
-            OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed());
+            OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects());
             PlayerState first = OnFoot.tick(guess, PlayerState.Keys.NONE, view, conditions);
             PlayerState again = OnFoot.tick(first, PlayerState.Keys.NONE, view, conditions);
             if (!first.equals(again) || first.x() != x || first.y() != y || first.z() != z || !first.onGround() || first.horizontalCollision()
-                    || first.deltaMovement().x() != 0.0 || first.deltaMovement().z() != 0.0 || first.deltaMovement().y() != SETTLED_Y_MOTION
+                    || first.deltaMovement().x() != 0.0 || first.deltaMovement().z() != 0.0 || first.deltaMovement().y() != settled
                     || first.sprinting() != baseSent.sprinting()) {
                 return null;
             }
@@ -978,6 +984,17 @@ public final class MovementTracker {
         } catch (Colliders.Unknown | Lose e) {
             return null;
         }
+    }
+
+    /**
+     * The vertical motion of a player standing on the ground at the end of a tick: gravity (slow falling's while not
+     * rising) after the landing cleared it, times the drag. NaN under levitation, which lifts the player off.
+     */
+    static double settledYMotion(OnFoot.Effects effects) {
+        if (effects.levitation() > 0) {
+            return Double.NaN;
+        }
+        return effects.slowFalling() ? (0.0 - Math.min(0.08, 0.01)) * 0.98F : SETTLED_Y_MOTION;
     }
 
     private static Hypothesis withSprintModifierHyp(Hypothesis h, boolean present) {

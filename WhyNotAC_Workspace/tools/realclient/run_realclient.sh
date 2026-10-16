@@ -76,13 +76,13 @@ done
 echo "server up"
 # The movement course, east of everything else along z = -1..1 (the ground's top is y = -60). Built before the
 # client joins, so it arrives with the chunks: the physics check needs the world as the client had it.
-for c in "forceload add 32 -16 151 16" \
+for c in "forceload add 32 -16 191 16" \
   "fill 44 -60 -1 44 -60 1 minecraft:smooth_stone_slab[type=bottom]" "fill 45 -60 -1 46 -60 1 minecraft:stone" \
   "fill 46 -59 -1 46 -59 1 minecraft:smooth_stone_slab[type=bottom]" \
   "fill 52 -61 -1 62 -61 1 minecraft:ice" "fill 70 -61 -1 74 -61 1 minecraft:soul_sand" "fill 82 -60 -2 82 -59 2 minecraft:stone" \
   "fill 88 -60 -1 91 -60 1 minecraft:stone" "fill 98 -58 -1 101 -58 1 minecraft:stone" \
   "fill 124 -60 -1 124 -60 1 minecraft:oak_stairs[facing=east]" "fill 125 -60 -1 127 -60 1 minecraft:stone" \
-  "fill 136 -60 -1 139 -60 1 minecraft:stone" "fill 143 -60 -3 146 -60 3 minecraft:stone"; do
+  "fill 136 -60 -1 139 -60 1 minecraft:stone" "fill 143 -60 -3 146 -60 3 minecraft:stone" "fill 170 -60 -1 170 -59 1 minecraft:stone"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -177,6 +177,24 @@ leg 108.5 -60 -90 w/0.1 -/0.05 Shift_L/0.5 -/0.3 w/0.1 -/0.1 w/1.0
 leg 121.5 -60 -90 w/2.0
 leg 132.5 -60 -90 w/2.0
 leg 140.5 -60 -60 w/1.5
+# Effects the step reads: jump boost II (sprint jumps; auto-jump meets a two-block wall at x 170), slow falling (jumps
+# and a six-block drop), levitation II for a second right after the leg starts (rise, then fall back), and blindness
+# (no sprinting: sprint key and a double tap).
+effect() { echo "effect $*" > "$FIFO"; sleep 0.5; }
+effect give $NAME minecraft:jump_boost 60 1 true
+leg 152.5 -60 -90 w,Control_L/1.5/space -/1.0
+leg 165.5 -60 -90 w/2.5
+effect clear $NAME minecraft:jump_boost
+effect give $NAME minecraft:slow_falling 60 0 true
+leg 152.5 -60 -90 w/1.5/space -/0.8
+leg 180.5 -54 -90 -/2.5
+effect clear $NAME minecraft:slow_falling
+echo "tp $NAME 185.5 -60 0.5 -90 0" > "$FIFO"; sleep 1.5
+effect give $NAME minecraft:levitation 1 1 true
+(cd "$HERE" && python3 -I course.py "$DISPLAY_NUM" -/3.0)
+effect give $NAME minecraft:blindness 60 0 true
+leg 152.5 -60 -90 w,Control_L/1.0 -/0.3 w/0.1 -/0.1 w/1.0
+effect clear $NAME minecraft:blindness
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2

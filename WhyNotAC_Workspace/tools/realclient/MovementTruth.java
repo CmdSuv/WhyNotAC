@@ -186,6 +186,7 @@ public class MovementTruth {
         private boolean firstLoaded = true;
         long matched;
         long mismatched;
+        long effectTicks;
         final Map<String, Long> unknown = new TreeMap<>();
         final Map<String, Long> differingFields = new TreeMap<>();
         final List<String> examples = new ArrayList<>();
@@ -246,9 +247,17 @@ public class MovementTruth {
                 unknown.merge("a speed attribute other than the vanilla walk or sprint", 1L, Long::sum);
                 return;
             }
+            OnFoot.Effects effects = effects(pre);
+            if (effects == null) {
+                unknown.merge("an effect not recorded by name", 1L, Long::sum);
+                return;
+            }
+            if (!effects.equals(OnFoot.Effects.NONE)) {
+                effectTicks++;
+            }
             try {
                 PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects));
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
                     matched++;
@@ -272,6 +281,7 @@ public class MovementTruth {
             out.put("compared", (long) next);
             out.put("matched", matched);
             out.put("mismatched", mismatched);
+            out.put("withEffects", effectTicks);
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
             out.put("examples", examples);
@@ -329,6 +339,31 @@ public class MovementTruth {
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")));
+    }
+
+    /** The recorded effects the on-foot step reads (older truth files: none); null if one was not recorded by name. */
+    @SuppressWarnings("unchecked")
+    private static OnFoot.Effects effects(Map<String, Object> r) {
+        Map<String, Object> active = (Map<String, Object>) r.getOrDefault("effects", Map.of());
+        int jumpBoost = 0;
+        int levitation = 0;
+        boolean slowFalling = false;
+        boolean blindness = false;
+        for (Map.Entry<String, Object> e : active.entrySet()) {
+            int level = ((Number) e.getValue()).intValue() + 1;
+            switch (e.getKey()) {
+                case "minecraft:jump_boost" -> jumpBoost = level;
+                case "minecraft:levitation" -> levitation = level;
+                case "minecraft:slow_falling" -> slowFalling = true;
+                case "minecraft:blindness" -> blindness = true;
+                default -> {
+                    if (e.getKey().startsWith("unparsed:")) {
+                        return null;
+                    }
+                }
+            }
+        }
+        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness);
     }
 
     /** The recorder's key string: W S A D J H R or '-' per key, in {@code Input}'s order. */

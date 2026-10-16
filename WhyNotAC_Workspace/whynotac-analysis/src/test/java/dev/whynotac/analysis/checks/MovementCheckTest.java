@@ -97,6 +97,7 @@ class MovementCheckTest {
     private boolean sentSprinting;
     private PlayerState.Keys sentInput = NONE;
     private final ClientSpeed speed = new ClientSpeed();
+    private OnFoot.Effects effects = OnFoot.Effects.NONE;
     // the server: its movement speed modifiers in its own order (an Object2ObjectArrayMap, insertion order), and
     // whether it sends them again when sprinting starts or stops (as it does: the modifier set changed)
     private final List<ClientboundPacket.UpdateAttributes.Modifier> serverModifiers = new ArrayList<>();
@@ -219,7 +220,7 @@ class MovementCheckTest {
     /** One client tick with these keys and this rotation; {@code cheat} moves the result before it is sent. */
     private void tick(PlayerState.Keys keys, float yRot, float xRot, Vec3d cheat) throws Colliders.Unknown {
         PlayerState pre = rotate(player, yRot, xRot);
-        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed));
+        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects));
         firstTick = false;
         if (!cheat.equals(Vec3d.ZERO)) {
             post = move(post, cheat);
@@ -276,6 +277,26 @@ class MovementCheckTest {
         if (handled) {
             speed.replace(serverModifiers);
             player = withSprintModifier(player, speed.holdsSprinting());
+        }
+    }
+
+    /**
+     * The server adds ({@code amplifier} 0 or more) or removes ({@code -1}) an effect the step reads; the client
+     * handles it before its next tick ({@code handled} false: ignores it).
+     */
+    private void potion(String effect, int amplifier, boolean handled) {
+        out(amplifier < 0 ? new ClientboundPacket.RemoveMobEffect(SELF, effect) : new ClientboundPacket.MobEffect(SELF, effect, amplifier, 600, 0));
+        sync();
+        if (handled) {
+            int level = amplifier + 1;
+            OnFoot.Effects e = effects;
+            effects = switch (effect) {
+                case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness());
+                case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness());
+                case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), level > 0, e.blindness());
+                case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), level > 0);
+                default -> throw new AssertionError(effect);
+            };
         }
     }
 
@@ -498,6 +519,48 @@ class MovementCheckTest {
         ticks(5, NONE, 30.0F);
         effect("minecraft:slowness", "minecraft:effect.slowness", -0.15000000596046448, false); // the client keeps its old speed
         ticks(20, FORWARD, 30.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void jumpBoostSlowFallingAndLevitationAreFollowed() throws Exception {
+        ticks(5, NONE, 30.0F);
+        potion("minecraft:jump_boost", 1, true);
+        ticks(25, SPRINT_JUMP, 30.0F);
+        ticks(15, NONE, 30.0F);
+        potion("minecraft:slow_falling", 0, true);
+        ticks(30, SPRINT_JUMP, 45.0F);
+        ticks(20, NONE, 45.0F);
+        potion("minecraft:jump_boost", -1, true);
+        ticks(20, FORWARD, 45.0F);
+        potion("minecraft:slow_falling", -1, true);
+        potion("minecraft:levitation", 1, true);
+        ticks(20, NONE, 45.0F);
+        potion("minecraft:levitation", -1, true);
+        ticks(40, FORWARD, 45.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(175, count(MovementTracker.Outcome.EXPLAINED), String.valueOf(ticks));
+        assertTrue(player.onGround());
+    }
+
+    @Test
+    void jumpingHigherThanTheEffectsAllowIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        effects = new OnFoot.Effects(3, 0, false, false); // jump boost the server never sent
+        tick(SPRINT_JUMP, 30.0F, 0.0F, Vec3d.ZERO);
+        ticks(3, FORWARD, 30.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void sprintingWhileBlindIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        potion("minecraft:blindness", 0, true);
+        ticks(20, SPRINT, 30.0F); // the client cannot sprint
+        assertTrue(!player.sprinting());
+        assertEquals(List.of(), evidence, String.valueOf(ticks));
+        effects = OnFoot.Effects.NONE; // the client drops the effect on its own
+        ticks(10, SPRINT, 30.0F);
         assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
     }
 

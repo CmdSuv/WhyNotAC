@@ -1,5 +1,6 @@
 package dev.whynotac.analysis.movement;
 
+import dev.whynotac.physics.OnFoot;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import java.util.List;
 import java.util.Set;
@@ -16,7 +17,7 @@ import java.util.TreeSet;
  * @param firstTick       a new player whose first {@code sendPosition} has not run: auto-jump is enabled whatever the option
  * @param food            {@code FoodData.foodLevel}: a new player's is 20
  * @param gameMode        the local game mode id, -1 before the login
- * @param effects         the active effects that change on-foot movement ({@link #MOVEMENT_EFFECTS})
+ * @param effects         the active effects the on-foot step reads, at the potency the client holds
  * @param speed           the movement speed attribute, its modifiers in the client's own order; null when that is
  *                        not followed (a table past its size, an unknown operation)
  * @param otherAttributes the other attributes on-foot movement reads whose value is not the default
@@ -24,12 +25,9 @@ import java.util.TreeSet;
  * @param border          the world border
  */
 public record SelfState(boolean ticking, boolean positionKnown, boolean firstTick, int food, float health, int gameMode, boolean flying, boolean mayFly,
-        Set<String> effects, SpeedAttribute speed, Set<String> otherAttributes, boolean camera, int vehicle, boolean noGravity,
+        OnFoot.Effects effects, SpeedAttribute speed, Set<String> otherAttributes, boolean camera, int vehicle, boolean noGravity,
         boolean usingItem, boolean frozen, Border border) {
 
-    /** Effects read by the on-foot step's code paths: jump power, auto-jump, gravity, levitation, sprinting, water. */
-    static final Set<String> MOVEMENT_EFFECTS = Set.of("minecraft:jump_boost", "minecraft:slow_falling", "minecraft:levitation",
-            "minecraft:blindness", "minecraft:dolphins_grace");
     static final String MOVEMENT_SPEED = "minecraft:movement_speed";
     /** Attributes the on-foot step reads, with the client's default value (decompiled {@code Attributes}). */
     static final java.util.Map<String, Double> OTHER_ATTRIBUTES = java.util.Map.of(
@@ -43,7 +41,6 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
     static final int ADVENTURE = 2;
 
     public SelfState {
-        effects = Set.copyOf(effects);
         otherAttributes = Set.copyOf(otherAttributes);
     }
 
@@ -61,7 +58,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
 
     /** A new player's own state before any packet about it: the client's defaults. */
     static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, Border border) {
-        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, Set.of(), speed, otherAttributes, true, -1, false, false, false,
+        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, false, false,
                 border);
     }
 
@@ -75,9 +72,6 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
         }
         if (flying || mayFly) {
             return "may fly";
-        }
-        if (!effects.isEmpty()) {
-            return "effect " + new TreeSet<>(effects).first();
         }
         if (speed == null) {
             return "movement speed modifiers not followed";
@@ -145,15 +139,24 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
                 vehicle, noGravity, usingItem, frozen, border);
     }
 
-    SelfState withEffect(String key, boolean active) {
-        if (!MOVEMENT_EFFECTS.contains(key) || effects.contains(key) == active) {
+    /**
+     * {@code handleUpdateMobEffect} ({@code forceAddEffect}: the instance replaced, its amplifier clamped to 0..255)
+     * or {@code handleRemoveMobEffect}. The client counts a duration down but never ends an effect itself: it lasts
+     * until the server removes it. Effects the on-foot step does not read change nothing (speed and slowness act
+     * through the attribute the server sends; dolphin's grace only in water, outside the step).
+     */
+    SelfState withEffect(String key, int amplifier, boolean active) {
+        int level = active ? Math.clamp(amplifier, 0, 255) + 1 : 0;
+        OnFoot.Effects e = effects;
+        OnFoot.Effects next = switch (key) {
+            case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness());
+            case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness());
+            case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), active, e.blindness());
+            case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), active);
+            default -> e;
+        };
+        if (next.equals(e)) {
             return this;
-        }
-        Set<String> next = new TreeSet<>(effects);
-        if (active) {
-            next.add(key);
-        } else {
-            next.remove(key);
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, next, speed, otherAttributes, camera, vehicle,
                 noGravity, usingItem, frozen, border);

@@ -24,6 +24,11 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **Sunucunun gönderdikleri:** ışınlama, `SetEntityMotion` (set), patlama itmesi (add), öznitelikler, açlık
   (`SetHealth`), kendi bayrak ve duruş yankısı (`SetEntityData`), yetenekler, oyun modu, efektler, dünya sınırı,
   binek ve kamera.
+- **Efektler:** adımın okuduğu dördü client'ın tuttuğu güçle izlenir (`OnFoot.Effects`): zıplama gücü
+  (zıplamada ve otomatik zıplamanın erişiminde), yavaş düşüş (yükselmezken yerçekimi en çok 0.01, düşüş mesafesi
+  sıfırlanır), havada süzülme (yerçekiminin yerine) ve körlük (koşulamaz). Client bir efekti kendisi bitirmez:
+  süresini sayar ama sunucu kaldırana kadar tutar, bu yüzden varlık ve güç yalnızca sunucunun paketlerinden
+  gelir. Hız ve yavaşlık özniteliğe sunucu üzerinden etki eder; yunus lütfu yalnızca suda (adımın dışında).
 - **Hız değiştiricileri (`SpeedAttribute`, `ModifierTable`):** client değiştiricileri işlem başına fastutil
   `Object2ObjectOpenHashMap` içinde tutar ve değeri o tablonun sırasıyla çarpar; sıra değerin son bitleridir.
   Tablo birebir kopyalanır (32 yuva, `HashCommon.mix(Identifier.hashCode())`, doğrusal yoklama, `shiftKeys`
@@ -34,19 +39,21 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   okunduklarında dallanır; maskeleri dışında aynı durumlar birleşir.
 - **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, tırmanma...), eşya kullanımı, itebilecek ya da
   çarpışan bir varlık yakında (canlılar, tekneler, vagonlar), yerleşmemiş blok, piston, dünya sınırı yakın,
-  hareketi değiştiren efekt (zıplama, yavaş düşüş, havada süzülme, körlük, yunus), hız dışında bir öznitelik,
-  uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
+  hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
   duran oyuncu: 12 tik tuşsuz, en az 3 tik arayla bit bit aynı iki konum paketi, arada gönderim yok, sonda yerde.
   Arada 0.003'ten hızlı her yatay hareket gönderim eşiğini aşardı; durum dünyadan hesaplanır ve bir tik daha
   çalıştırılarak doğrulanır.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
-  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık): 1977 tikin 1497'si iddia edildi, 0
-  açıklanamayan, 711/711 tick'te client'ın durumu kümede. `MovementCheckTest` aynı adımı koşan sentetik bir
+  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık, efekt bacaklarıyla): 2576 tikin 2301'i
+  iddia edildi, 0 açıklanamayan, 1028/1028 tick'te client'ın durumu kümede. Efekt modellerinin bilinçli
+  hataları (zıplama gücü, yavaş düşüş, havada süzülme, körlük) takipçide de açıklanamayan tik ya da kümede
+  bulunmayan client durumu verir. `MovementCheckTest` aynı adımı koşan sentetik bir
   client'la (hız değiştiricileri gerçek fastutil tablosunda): dürüst hareket, belirsiz pencerede savrulma, çift
-  W, hız ve yavaşlık efektiyle koşma açıklanır; 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan
-  savrulma ve yok sayılan yavaşlık kanıttır.
+  W, hız ve yavaşlık efektiyle koşma, zıplama gücü, yavaş düşüş, havada süzülme ve körlük açıklanır; 0.01 blok
+  fazla hareket, havada asılı kalma, uygulanmayan savrulma, yok sayılan yavaşlık, verilmemiş zıplama gücüyle
+  zıplama ve körken koşma kanıttır.
 - **Maliyet:** gerçek client oturumunda tick başına ortalama 1.33 hipotez, ≈ 60 µs.
 
 ## Planlanan aileler

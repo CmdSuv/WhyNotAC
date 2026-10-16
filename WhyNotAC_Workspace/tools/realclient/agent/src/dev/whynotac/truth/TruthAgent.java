@@ -27,7 +27,8 @@ public final class TruthAgent {
     static final String LOCAL_PLAYER = "net.minecraft.client.player.LocalPlayer";
     static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, "net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity",
             "net.minecraft.client.player.ClientInput", "net.minecraft.world.entity.player.Input", "net.minecraft.world.phys.Vec3",
-            "net.minecraft.client.multiplayer.ClientPacketListener", "net.minecraft.core.Vec3i", "net.minecraft.world.phys.Vec2");
+            "net.minecraft.client.multiplayer.ClientPacketListener", "net.minecraft.core.Vec3i", "net.minecraft.world.phys.Vec2",
+            "net.minecraft.world.effect.MobEffectInstance");
 
     private TruthAgent() {}
 

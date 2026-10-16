@@ -20,10 +20,10 @@ import java.util.TreeMap;
  * Movement (P-M): the client moved on foot as no vanilla 1.21.11 client could, every state it may have been
  * in considered ({@link MovementTracker}). Its own player is followed tick by tick through the bit-exact
  * on-foot step, from an anchor where its state is known (a new player, or one standing still), through what
- * the server sends it (teleports, knockback, explosions, attributes, food, its own flags), each in the client
+ * the server sends it (teleports, knockback, explosions, attributes, effects, food, its own flags), each in the client
  * tick the transactions place it in or, where they cannot, in every tick it may be in. A tick is a finding
  * when no state the client may have been in sends what it sent: the position to the bit, the flags, the
- * sprint and input packets. Whatever the step does not model (fluids, climbing, effects, items in use,
+ * sprint and input packets. Whatever the step does not model (fluids, climbing, items in use,
  * vehicles, pushing entities, blocks still changing, the world border) ends the claim until the next anchor.
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even

@@ -22,7 +22,9 @@ import org.junit.jupiter.api.Test;
  * movement course of the same session: step-ups onto a slab, a block and a slab on a block, ice, soul sand, a
  * wall met at an angle, sneaking to a platform's edge and off it, jumps under a low ceiling, a double-tapped
  * sprint and stairs. {@code truth-autojump.jsonl.gz} holds one-block steps walked into head on and at an angle with
- * the client's auto-jump option on. Each tick, run from its start in the same world (rebuilt here from the
+ * the client's auto-jump option on. {@code truth-effects.jsonl.gz} holds the ticks under effects the step reads: jump
+ * boost II (sprint jumps, auto-jump at a two-block wall), slow falling (jumps, a six-block drop), levitation II and
+ * blindness (sprint key and a double tap). Each tick, run from its start in the same world (rebuilt here from the
  * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -72,6 +74,7 @@ class OnFootTruthTest {
         {125, -60, -1, 127, -60, 1, blockState("minecraft:stone")},
         {136, -60, -1, 139, -60, 1, blockState("minecraft:stone")},
         {143, -60, -3, 146, -60, 3, blockState("minecraft:stone")},
+        {170, -60, -1, 170, -59, 1, blockState("minecraft:stone")},
     };
 
     private static final Colliders.World COURSE_WORLD = new Colliders.World() {
@@ -124,7 +127,17 @@ class OnFootTruthTest {
         assertTrue(counts[0] > 150 && counts[6] >= 2 && counts[1] >= 2, java.util.Arrays.toString(counts));
     }
 
-    /** {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered}. */
+    @Test
+    void effectsAreTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-effects.jsonl.gz", COURSE_WORLD);
+        assertTrue(counts[0] > 450 && counts[1] >= 3 && counts[7] > 150 && counts[8] > 150 && counts[9] >= 15 && counts[10] > 80,
+                java.util.Arrays.toString(counts));
+    }
+
+    /**
+     * {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered, then ticks under jump
+     * boost, slow falling, levitation, blindness}.
+     */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
         try (BufferedReader in = new BufferedReader(new InputStreamReader(
@@ -133,7 +146,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[7];
+        int[] counts = new int[11];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -144,7 +157,13 @@ class OnFootTruthTest {
             try {
                 // LocalPlayer.autoJumpEnabled (recorded in newer files; the older ones were recorded with the option off)
                 boolean autoJump = pre.contains("\"autoJumpEnabled\":true");
-                predicted = OnFoot.tick(before, keys(text(post, "keys")), world, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump));
+                OnFoot.Effects effects = effects(pre);
+                predicted = OnFoot.tick(before, keys(text(post, "keys")), world,
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects));
+                counts[7] += effects.jumpBoost() > 0 ? 1 : 0;
+                counts[8] += effects.slowFalling() ? 1 : 0;
+                counts[9] += effects.levitation() > 0 ? 1 : 0;
+                counts[10] += effects.blindness() ? 1 : 0;
             } catch (Colliders.Unknown e) {
                 continue; // outside the engine's scope (the session's suffocation check at the wall): no claim, nothing to compare
             }
@@ -174,6 +193,30 @@ class OnFootTruthTest {
                 sprintModifier(line), bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
                 number(line, "sprintTriggerTime"), number(line, "autoJumpTime"), supportPos, bool(line, "onGroundNoBlocks"),
                 vec(list(line, "stuckSpeedMultiplier")));
+    }
+
+    /** The recorded active effects ({@code "effects":{"minecraft:jump_boost":1,...}}, newer files only), by amplifier. */
+    private static OnFoot.Effects effects(String line) {
+        Matcher m = Pattern.compile("\"effects\":\\{([^}]*)\\}").matcher(line);
+        int jumpBoost = 0;
+        int levitation = 0;
+        boolean slowFalling = false;
+        boolean blindness = false;
+        if (m.find() && !m.group(1).isEmpty()) {
+            for (String entry : m.group(1).split(",")) {
+                String[] kv = entry.split("\":");
+                String key = kv[0].substring(1);
+                int level = Integer.parseInt(kv[1]) + 1;
+                switch (key) {
+                    case "minecraft:jump_boost" -> jumpBoost = level;
+                    case "minecraft:levitation" -> levitation = level;
+                    case "minecraft:slow_falling" -> slowFalling = true;
+                    case "minecraft:blindness" -> blindness = true;
+                    default -> throw new AssertionError("effect " + key);
+                }
+            }
+        }
+        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness);
     }
 
     /** {@code LivingEntity.speed} (the attribute as a float, set in the last tick's aiStep) holds the sprinting modifier or not. */

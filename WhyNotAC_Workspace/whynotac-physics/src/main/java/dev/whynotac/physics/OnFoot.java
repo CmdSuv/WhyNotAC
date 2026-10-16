@@ -11,7 +11,8 @@ import java.util.List;
  * ({@code travelInAir}: friction, the input impulse, {@code Entity.move} with collisions and step-up,
  * gravity and drag) and the pose for the next tick ({@code Player.updatePlayerPose}).
  *
- * <p>The scope is a survival player on foot with default attributes and no effects, not using an item,
+ * <p>The scope is a survival player on foot with default attributes but the speed ({@link Speed}) and the
+ * effects the step reads ({@link Effects}), not using an item,
  * not riding, flying, gliding or swimming, on blocks without side effects and away from solid entities and
  * the world border. Outside it, or where the client's world is not known, {@link Colliders.Unknown} is
  * thrown: no claim can rest on that tick. Sources: the decompiled client, {@code LocalPlayer},
@@ -47,12 +48,36 @@ public final class OnFoot {
      * @param sprintWindow     the client's {@code sprintWindow} option (double-tap window, 0..10)
      * @param autoJumpEnabled  {@code LocalPlayer.autoJumpEnabled}: the option, but true during a new player's first tick
      * @param speed            the movement speed attribute's value ({@code AttributeInstance.getValue})
+     * @param effects          the player's active effects the step reads
      */
-    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed) {
-        public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA);
+    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects) {
+        public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE);
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
-            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, Speed.VANILLA);
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, Speed.VANILLA, Effects.NONE);
+        }
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, Effects.NONE);
+        }
+    }
+
+    /**
+     * The active effects the on-foot step reads, each potency {@code amplifier + 1} (0: not active; the client
+     * clamps the amplifier to 0..255).
+     *
+     * @param jumpBoost   {@code getJumpBoostPower} ({@code 0.1F} a level) and the auto-jump's reach ({@code 0.75F} a level)
+     * @param levitation  {@code travelInAir}: the vertical motion pulled toward {@code 0.05} a level, in place of gravity
+     * @param slowFalling {@code getEffectiveGravity}: at most {@code 0.01} while not rising; the fall distance reset
+     * @param blindness   {@code isMobilityRestricted}: sprinting is not possible
+     */
+    public record Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness) {
+        public static final Effects NONE = new Effects(0, 0, false, false);
+
+        public Effects {
+            if (jumpBoost < 0 || jumpBoost > 256 || levitation < 0 || levitation > 256) {
+                throw new IllegalArgumentException("effect level out of 0..256");
+            }
         }
     }
 
@@ -196,7 +221,8 @@ public final class OnFoot {
         }
         boolean forward = moveY > 1.0E-5F;
         boolean movingSlowly = crouching;
-        if (!sprinting && forward && conditions.foodAllowsSprint() && !movingSlowly) { // canStartSprinting
+        boolean sprintPossible = !conditions.effects().blindness() && conditions.foodAllowsSprint(); // isSprintingPossible
+        if (!sprinting && forward && sprintPossible && !movingSlowly) { // canStartSprinting
             if (!previousForward) {
                 readSprintTrigger = true;
                 if (sprintTriggerTime > 0) {
@@ -210,7 +236,7 @@ public final class OnFoot {
                 setSprinting(true);
             }
         }
-        if (sprinting && (!conditions.foodAllowsSprint() || !forward || horizontalCollision && !minorHorizontalCollision)) { // shouldStopRunSprinting
+        if (sprinting && (!sprintPossible || !forward || horizontalCollision && !minorHorizontalCollision)) { // shouldStopRunSprinting
             setSprinting(false);
         }
 
@@ -237,6 +263,9 @@ public final class OnFoot {
             }
         } else {
             noJumpDelay = 0;
+        }
+        if (conditions.effects().slowFalling() || conditions.effects().levitation() > 0) {
+            fallDistance = 0.0; // resetFallDistance
         }
         travelInAir(new Vec3d(xxa, 0.0, zza));
         applyEffectsFromBlocks();
@@ -308,7 +337,8 @@ public final class OnFoot {
 
     /** {@code LivingEntity.jumpFromGround}. */
     private void jumpFromGround() throws Colliders.Unknown {
-        float power = JUMP_STRENGTH * 1.0F * blockJumpFactor();
+        int jumpBoost = conditions.effects().jumpBoost();
+        float power = JUMP_STRENGTH * 1.0F * blockJumpFactor() + (jumpBoost > 0 ? 0.1F * (float) jumpBoost : 0.0F);
         if (!(power <= 1.0E-5F)) {
             delta = new Vec3d(delta.x(), Math.max(power, delta.y()), delta.z());
             if (sprinting) {
@@ -342,8 +372,11 @@ public final class OnFoot {
         requireNoEffects(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
         Vec3d moved = delta;
         double vy = moved.y();
-        if (world.isLoaded(below.x() >> 4, below.z() >> 4)) {
-            vy -= GRAVITY;
+        int levitation = conditions.effects().levitation();
+        if (levitation > 0) {
+            vy += (0.05 * levitation - moved.y()) * 0.2;
+        } else if (world.isLoaded(below.x() >> 4, below.z() >> 4)) {
+            vy -= moved.y() <= 0.0 && conditions.effects().slowFalling() ? Math.min(GRAVITY, 0.01) : GRAVITY; // getEffectiveGravity
         } else if (y > minY()) {
             vy = -0.1;
         } else {
@@ -421,6 +454,9 @@ public final class OnFoot {
             return;
         }
         float maxRise = 1.2F;
+        if (conditions.effects().jumpBoost() > 0) {
+            maxRise += conditions.effects().jumpBoost() * 0.75F;
+        }
         float reach = Math.max(speed * 7.0F, 1.0F / inverse);
         Vec3d from = position;
         Vec3d to = target.add(unit.scale(reach));

@@ -37,6 +37,8 @@ public final class Recorder {
     // hidden state the movement step reads: supporting block, jump delay, speed, sneak state, the input's vector
     private static Field mainSupportingBlockPos, onGroundNoBlocks, noJumpDelay, speed, crouching, sprintTriggerTime, autoJumpTime, autoJumpEnabled, moveVector;
     private static Field posX, posY, posZ, vec2X, vec2Y;
+    // the active effects (the client keeps each until the server removes it) and their amplifiers
+    private static Field activeEffects, amplifier;
     private static Method isSprinting, isShiftKeyDown, getPose, isPassenger;
 
     private Recorder() {}
@@ -102,6 +104,7 @@ public final class Recorder {
             line.append(",\"sprintTriggerTime\":").append(sprintTriggerTime.getInt(player));
             line.append(",\"autoJumpTime\":").append(autoJumpTime.getInt(player));
             bool(line, "autoJumpEnabled", autoJumpEnabled.getBoolean(player));
+            effects(line, (java.util.Map<?, ?>) activeEffects.get(player));
             Object move = moveVector.get(input.get(player));
             line.append(",\"moveVector\":[\"").append(Integer.toHexString(Float.floatToRawIntBits(vec2X.getFloat(move)))).append("\",\"")
                     .append(Integer.toHexString(Float.floatToRawIntBits(vec2Y.getFloat(move)))).append("\"]");
@@ -192,6 +195,8 @@ public final class Recorder {
         posZ = field(loader, "net.minecraft.core.Vec3i", "z");
         vec2X = field(loader, "net.minecraft.world.phys.Vec2", "x");
         vec2Y = field(loader, "net.minecraft.world.phys.Vec2", "y");
+        activeEffects = field(loader, living, "activeEffects");
+        amplifier = field(loader, "net.minecraft.world.effect.MobEffectInstance", "amplifier");
         isSprinting = method(loader, entity, "isSprinting()");
         isShiftKeyDown = method(loader, entity, "isShiftKeyDown()");
         getPose = method(loader, entity, "getPose()");
@@ -210,6 +215,25 @@ public final class Recorder {
         Method m = owner.getDeclaredMethod(mappings.method(mojangClass, signature));
         m.setAccessible(true);
         return m;
+    }
+
+    /**
+     * {@code "effects":{"minecraft:jump_boost":1,...}}: each active effect's registry name and amplifier. The key
+     * is a {@code Holder.Reference}, whose {@code toString} names its {@code ResourceKey}:
+     * {@code Reference{ResourceKey[minecraft:mob_effect / minecraft:jump_boost]=...}}.
+     */
+    private static void effects(StringBuilder line, java.util.Map<?, ?> active) throws IllegalAccessException {
+        line.append(",\"effects\":{");
+        boolean first = true;
+        for (java.util.Map.Entry<?, ?> e : active.entrySet()) {
+            String holder = String.valueOf(e.getKey());
+            int from = holder.indexOf(" / ");
+            int to = from < 0 ? -1 : holder.indexOf(']', from);
+            String name = to < 0 ? "unparsed:" + holder.replaceAll("[^A-Za-z0-9_.:/-]", "_") : holder.substring(from + 3, to);
+            line.append(first ? "" : ",").append('"').append(name).append("\":").append(amplifier.getInt(e.getValue()));
+            first = false;
+        }
+        line.append('}');
     }
 
     private static void vec(StringBuilder line, String name, Object vec) throws IllegalAccessException {
