@@ -1,1505 +1,1505 @@
-minecraft:acacia_boat	-	-	-	-	stable
-minecraft:acacia_button	-	-	-	-	-
-minecraft:acacia_chest_boat	-	-	-	-	stable
-minecraft:acacia_door	-	-	-	-	-
-minecraft:acacia_fence	-	-	-	-	-
-minecraft:acacia_fence_gate	-	-	-	-	-
-minecraft:acacia_hanging_sign	-	-	-	-	-
-minecraft:acacia_leaves	-	-	-	-	-
-minecraft:acacia_log	-	-	-	-	-
-minecraft:acacia_planks	-	-	-	-	-
-minecraft:acacia_pressure_plate	-	-	-	-	-
-minecraft:acacia_sapling	-	-	-	-	-
-minecraft:acacia_shelf	-	-	-	-	-
-minecraft:acacia_sign	-	-	-	-	-
-minecraft:acacia_slab	-	-	-	-	-
-minecraft:acacia_stairs	-	-	-	-	-
-minecraft:acacia_trapdoor	-	-	-	-	-
-minecraft:acacia_wood	-	-	-	-	-
-minecraft:activator_rail	-	-	-	-	-
-minecraft:air	-	-	-	-	stable
-minecraft:allay_spawn_egg	-	-	-	-	stable
-minecraft:allium	-	-	-	-	-
-minecraft:amethyst_block	-	-	-	-	-
-minecraft:amethyst_cluster	-	-	-	-	-
-minecraft:amethyst_shard	-	-	-	-	stable
-minecraft:ancient_debris	-	-	-	-	-
-minecraft:andesite	-	-	-	-	-
-minecraft:andesite_slab	-	-	-	-	-
-minecraft:andesite_stairs	-	-	-	-	-
-minecraft:andesite_wall	-	-	-	-	-
-minecraft:angler_pottery_sherd	-	-	-	-	stable
-minecraft:anvil	-	-	-	-	-
-minecraft:apple	-	-	-	-	-
-minecraft:archer_pottery_sherd	-	-	-	-	stable
-minecraft:armadillo_scute	-	-	-	-	stable
-minecraft:armadillo_spawn_egg	-	-	-	-	stable
-minecraft:armor_stand	-	-	-	-	-
-minecraft:arms_up_pottery_sherd	-	-	-	-	stable
-minecraft:arrow	-	-	-	-	stable
-minecraft:axolotl_bucket	-	-	-	-	-
-minecraft:axolotl_spawn_egg	-	-	-	-	stable
-minecraft:azalea	-	-	-	-	-
-minecraft:azalea_leaves	-	-	-	-	-
-minecraft:azure_bluet	-	-	-	-	-
-minecraft:baked_potato	-	-	-	-	-
-minecraft:bamboo	-	-	-	-	-
-minecraft:bamboo_block	-	-	-	-	-
-minecraft:bamboo_button	-	-	-	-	-
-minecraft:bamboo_chest_raft	-	-	-	-	stable
-minecraft:bamboo_door	-	-	-	-	-
-minecraft:bamboo_fence	-	-	-	-	-
-minecraft:bamboo_fence_gate	-	-	-	-	-
-minecraft:bamboo_hanging_sign	-	-	-	-	-
-minecraft:bamboo_mosaic	-	-	-	-	-
-minecraft:bamboo_mosaic_slab	-	-	-	-	-
-minecraft:bamboo_mosaic_stairs	-	-	-	-	-
-minecraft:bamboo_planks	-	-	-	-	-
-minecraft:bamboo_pressure_plate	-	-	-	-	-
-minecraft:bamboo_raft	-	-	-	-	stable
-minecraft:bamboo_shelf	-	-	-	-	-
-minecraft:bamboo_sign	-	-	-	-	-
-minecraft:bamboo_slab	-	-	-	-	-
-minecraft:bamboo_stairs	-	-	-	-	-
-minecraft:bamboo_trapdoor	-	-	-	-	-
-minecraft:barrel	-	-	-	-	-
-minecraft:barrier	-	-	-	-	-
-minecraft:basalt	-	-	-	-	-
-minecraft:bat_spawn_egg	-	-	-	-	stable
-minecraft:beacon	-	-	-	-	-
-minecraft:bedrock	-	-	-	-	-
-minecraft:bee_nest	-	-	-	-	-
-minecraft:bee_spawn_egg	-	-	-	-	stable
-minecraft:beef	-	-	-	-	-
-minecraft:beehive	-	-	-	-	-
-minecraft:beetroot	-	-	-	-	-
-minecraft:beetroot_seeds	-	-	-	-	-
-minecraft:beetroot_soup	-	minecraft:bowl	-	-	-
-minecraft:bell	-	-	-	-	-
-minecraft:big_dripleaf	-	-	-	-	-
-minecraft:birch_boat	-	-	-	-	stable
-minecraft:birch_button	-	-	-	-	-
-minecraft:birch_chest_boat	-	-	-	-	stable
-minecraft:birch_door	-	-	-	-	-
-minecraft:birch_fence	-	-	-	-	-
-minecraft:birch_fence_gate	-	-	-	-	-
-minecraft:birch_hanging_sign	-	-	-	-	-
-minecraft:birch_leaves	-	-	-	-	-
-minecraft:birch_log	-	-	-	-	-
-minecraft:birch_planks	-	-	-	-	-
-minecraft:birch_pressure_plate	-	-	-	-	-
-minecraft:birch_sapling	-	-	-	-	-
-minecraft:birch_shelf	-	-	-	-	-
-minecraft:birch_sign	-	-	-	-	-
-minecraft:birch_slab	-	-	-	-	-
-minecraft:birch_stairs	-	-	-	-	-
-minecraft:birch_trapdoor	-	-	-	-	-
-minecraft:birch_wood	-	-	-	-	-
-minecraft:black_banner	-	-	-	-	-
-minecraft:black_bed	-	-	-	-	-
-minecraft:black_bundle	-	-	-	-	-
-minecraft:black_candle	-	-	-	-	-
-minecraft:black_carpet	-	-	-	-	-
-minecraft:black_concrete	-	-	-	-	-
-minecraft:black_concrete_powder	-	-	-	-	-
-minecraft:black_dye	-	-	-	-	stable
-minecraft:black_glazed_terracotta	-	-	-	-	-
-minecraft:black_harness	-	-	-	-	stable
-minecraft:black_shulker_box	-	-	-	-	-
-minecraft:black_stained_glass	-	-	-	-	-
-minecraft:black_stained_glass_pane	-	-	-	-	-
-minecraft:black_terracotta	-	-	-	-	-
-minecraft:black_wool	-	-	-	-	-
-minecraft:blackstone	-	-	-	-	-
-minecraft:blackstone_slab	-	-	-	-	-
-minecraft:blackstone_stairs	-	-	-	-	-
-minecraft:blackstone_wall	-	-	-	-	-
-minecraft:blade_pottery_sherd	-	-	-	-	stable
-minecraft:blast_furnace	-	-	-	-	-
-minecraft:blaze_powder	-	-	-	-	stable
-minecraft:blaze_rod	-	-	-	-	stable
-minecraft:blaze_spawn_egg	-	-	-	-	stable
-minecraft:blue_banner	-	-	-	-	-
-minecraft:blue_bed	-	-	-	-	-
-minecraft:blue_bundle	-	-	-	-	-
-minecraft:blue_candle	-	-	-	-	-
-minecraft:blue_carpet	-	-	-	-	-
-minecraft:blue_concrete	-	-	-	-	-
-minecraft:blue_concrete_powder	-	-	-	-	-
-minecraft:blue_dye	-	-	-	-	stable
-minecraft:blue_egg	-	-	-	-	-
-minecraft:blue_glazed_terracotta	-	-	-	-	-
-minecraft:blue_harness	-	-	-	-	stable
-minecraft:blue_ice	-	-	-	-	-
-minecraft:blue_orchid	-	-	-	-	-
-minecraft:blue_shulker_box	-	-	-	-	-
-minecraft:blue_stained_glass	-	-	-	-	-
-minecraft:blue_stained_glass_pane	-	-	-	-	-
-minecraft:blue_terracotta	-	-	-	-	-
-minecraft:blue_wool	-	-	-	-	-
-minecraft:bogged_spawn_egg	-	-	-	-	stable
-minecraft:bolt_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:bone	-	-	-	-	stable
-minecraft:bone_block	-	-	-	-	-
-minecraft:bone_meal	-	-	-	-	-
-minecraft:book	-	-	-	-	stable
-minecraft:bookshelf	-	-	-	-	-
-minecraft:bordure_indented_banner_pattern	-	-	-	-	stable
-minecraft:bow	-	-	-	-	stable
-minecraft:bowl	-	-	-	-	stable
-minecraft:brain_coral	-	-	-	-	-
-minecraft:brain_coral_block	-	-	-	-	-
-minecraft:brain_coral_fan	-	-	-	-	-
-minecraft:bread	-	-	-	-	-
-minecraft:breeze_rod	-	-	-	-	stable
-minecraft:breeze_spawn_egg	-	-	-	-	stable
-minecraft:brewer_pottery_sherd	-	-	-	-	stable
-minecraft:brewing_stand	-	-	-	-	-
-minecraft:brick	-	-	-	-	stable
-minecraft:brick_slab	-	-	-	-	-
-minecraft:brick_stairs	-	-	-	-	-
-minecraft:brick_wall	-	-	-	-	-
-minecraft:bricks	-	-	-	-	-
-minecraft:brown_banner	-	-	-	-	-
-minecraft:brown_bed	-	-	-	-	-
-minecraft:brown_bundle	-	-	-	-	-
-minecraft:brown_candle	-	-	-	-	-
-minecraft:brown_carpet	-	-	-	-	-
-minecraft:brown_concrete	-	-	-	-	-
-minecraft:brown_concrete_powder	-	-	-	-	-
-minecraft:brown_dye	-	-	-	-	stable
-minecraft:brown_egg	-	-	-	-	-
-minecraft:brown_glazed_terracotta	-	-	-	-	-
-minecraft:brown_harness	-	-	-	-	stable
-minecraft:brown_mushroom	-	-	-	-	-
-minecraft:brown_mushroom_block	-	-	-	-	-
-minecraft:brown_shulker_box	-	-	-	-	-
-minecraft:brown_stained_glass	-	-	-	-	-
-minecraft:brown_stained_glass_pane	-	-	-	-	-
-minecraft:brown_terracotta	-	-	-	-	-
-minecraft:brown_wool	-	-	-	-	-
-minecraft:brush	-	-	-	-	stable
-minecraft:bubble_coral	-	-	-	-	-
-minecraft:bubble_coral_block	-	-	-	-	-
-minecraft:bubble_coral_fan	-	-	-	-	-
-minecraft:bucket	-	-	-	-	-
-minecraft:budding_amethyst	-	-	-	-	-
-minecraft:bundle	-	-	-	-	-
-minecraft:burn_pottery_sherd	-	-	-	-	stable
-minecraft:bush	-	-	-	-	-
-minecraft:cactus	-	-	-	-	-
-minecraft:cactus_flower	-	-	-	-	-
-minecraft:cake	-	-	-	-	-
-minecraft:calcite	-	-	-	-	-
-minecraft:calibrated_sculk_sensor	-	-	-	-	-
-minecraft:camel_husk_spawn_egg	-	-	-	-	stable
-minecraft:camel_spawn_egg	-	-	-	-	stable
-minecraft:campfire	-	-	-	-	-
-minecraft:candle	-	-	-	-	-
-minecraft:carrot	-	-	-	-	-
-minecraft:carrot_on_a_stick	-	-	-	-	stable
-minecraft:cartography_table	-	-	-	-	-
-minecraft:carved_pumpkin	-	-	-	-	-
-minecraft:cat_spawn_egg	-	-	-	-	stable
-minecraft:cauldron	-	-	-	-	-
-minecraft:cave_spider_spawn_egg	-	-	-	-	stable
-minecraft:chain_command_block	-	-	-	-	-
-minecraft:chainmail_boots	-	-	feet	-	-
-minecraft:chainmail_chestplate	-	-	chest	-	-
-minecraft:chainmail_helmet	-	-	head	-	-
-minecraft:chainmail_leggings	-	-	legs	-	-
-minecraft:charcoal	-	-	-	-	stable
-minecraft:cherry_boat	-	-	-	-	stable
-minecraft:cherry_button	-	-	-	-	-
-minecraft:cherry_chest_boat	-	-	-	-	stable
-minecraft:cherry_door	-	-	-	-	-
-minecraft:cherry_fence	-	-	-	-	-
-minecraft:cherry_fence_gate	-	-	-	-	-
-minecraft:cherry_hanging_sign	-	-	-	-	-
-minecraft:cherry_leaves	-	-	-	-	-
-minecraft:cherry_log	-	-	-	-	-
-minecraft:cherry_planks	-	-	-	-	-
-minecraft:cherry_pressure_plate	-	-	-	-	-
-minecraft:cherry_sapling	-	-	-	-	-
-minecraft:cherry_shelf	-	-	-	-	-
-minecraft:cherry_sign	-	-	-	-	-
-minecraft:cherry_slab	-	-	-	-	-
-minecraft:cherry_stairs	-	-	-	-	-
-minecraft:cherry_trapdoor	-	-	-	-	-
-minecraft:cherry_wood	-	-	-	-	-
-minecraft:chest	-	-	-	-	-
-minecraft:chest_minecart	-	-	-	-	-
-minecraft:chicken	-	-	-	-	-
-minecraft:chicken_spawn_egg	-	-	-	-	stable
-minecraft:chipped_anvil	-	-	-	-	-
-minecraft:chiseled_bookshelf	-	-	-	-	-
-minecraft:chiseled_copper	-	-	-	-	-
-minecraft:chiseled_deepslate	-	-	-	-	-
-minecraft:chiseled_nether_bricks	-	-	-	-	-
-minecraft:chiseled_polished_blackstone	-	-	-	-	-
-minecraft:chiseled_quartz_block	-	-	-	-	-
-minecraft:chiseled_red_sandstone	-	-	-	-	-
-minecraft:chiseled_resin_bricks	-	-	-	-	-
-minecraft:chiseled_sandstone	-	-	-	-	-
-minecraft:chiseled_stone_bricks	-	-	-	-	-
-minecraft:chiseled_tuff	-	-	-	-	-
-minecraft:chiseled_tuff_bricks	-	-	-	-	-
-minecraft:chorus_flower	-	-	-	-	-
-minecraft:chorus_fruit	-	-	-	-	-
-minecraft:chorus_plant	-	-	-	-	-
-minecraft:clay	-	-	-	-	-
-minecraft:clay_ball	-	-	-	-	stable
-minecraft:clock	-	-	-	-	stable
-minecraft:closed_eyeblossom	-	-	-	-	-
-minecraft:coal	-	-	-	-	stable
-minecraft:coal_block	-	-	-	-	-
-minecraft:coal_ore	-	-	-	-	-
-minecraft:coarse_dirt	-	-	-	-	-
-minecraft:coast_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:cobbled_deepslate	-	-	-	-	-
-minecraft:cobbled_deepslate_slab	-	-	-	-	-
-minecraft:cobbled_deepslate_stairs	-	-	-	-	-
-minecraft:cobbled_deepslate_wall	-	-	-	-	-
-minecraft:cobblestone	-	-	-	-	-
-minecraft:cobblestone_slab	-	-	-	-	-
-minecraft:cobblestone_stairs	-	-	-	-	-
-minecraft:cobblestone_wall	-	-	-	-	-
-minecraft:cobweb	-	-	-	-	-
-minecraft:cocoa_beans	-	-	-	-	-
-minecraft:cod	-	-	-	-	-
-minecraft:cod_bucket	-	-	-	-	-
-minecraft:cod_spawn_egg	-	-	-	-	stable
-minecraft:command_block	-	-	-	-	-
-minecraft:command_block_minecart	-	-	-	-	-
-minecraft:comparator	-	-	-	-	-
-minecraft:compass	-	-	-	-	-
-minecraft:composter	-	-	-	-	-
-minecraft:conduit	-	-	-	-	-
-minecraft:cooked_beef	-	-	-	-	-
-minecraft:cooked_chicken	-	-	-	-	-
-minecraft:cooked_cod	-	-	-	-	-
-minecraft:cooked_mutton	-	-	-	-	-
-minecraft:cooked_porkchop	-	-	-	-	-
-minecraft:cooked_rabbit	-	-	-	-	-
-minecraft:cooked_salmon	-	-	-	-	-
-minecraft:cookie	-	-	-	-	-
-minecraft:copper_axe	-	-	-	-	stable
-minecraft:copper_bars	-	-	-	-	-
-minecraft:copper_block	-	-	-	-	-
-minecraft:copper_boots	-	-	feet	-	-
-minecraft:copper_bulb	-	-	-	-	-
-minecraft:copper_chain	-	-	-	-	-
-minecraft:copper_chest	-	-	-	-	-
-minecraft:copper_chestplate	-	-	chest	-	-
-minecraft:copper_door	-	-	-	-	-
-minecraft:copper_golem_spawn_egg	-	-	-	-	stable
-minecraft:copper_golem_statue	-	-	-	-	-
-minecraft:copper_grate	-	-	-	-	-
-minecraft:copper_helmet	-	-	head	-	-
-minecraft:copper_hoe	-	-	-	-	stable
-minecraft:copper_horse_armor	-	-	-	-	stable
-minecraft:copper_ingot	-	-	-	-	stable
-minecraft:copper_lantern	-	-	-	-	-
-minecraft:copper_leggings	-	-	legs	-	-
-minecraft:copper_nautilus_armor	-	-	-	-	stable
-minecraft:copper_nugget	-	-	-	-	stable
-minecraft:copper_ore	-	-	-	-	-
-minecraft:copper_pickaxe	-	-	-	-	stable
-minecraft:copper_shovel	-	-	-	-	stable
-minecraft:copper_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:copper_sword	-	-	-	-	stable
-minecraft:copper_torch	-	-	-	-	-
-minecraft:copper_trapdoor	-	-	-	-	-
-minecraft:cornflower	-	-	-	-	-
-minecraft:cow_spawn_egg	-	-	-	-	stable
-minecraft:cracked_deepslate_bricks	-	-	-	-	-
-minecraft:cracked_deepslate_tiles	-	-	-	-	-
-minecraft:cracked_nether_bricks	-	-	-	-	-
-minecraft:cracked_polished_blackstone_bricks	-	-	-	-	-
-minecraft:cracked_stone_bricks	-	-	-	-	-
-minecraft:crafter	-	-	-	-	-
-minecraft:crafting_table	-	-	-	-	-
-minecraft:creaking_heart	-	-	-	-	-
-minecraft:creaking_spawn_egg	-	-	-	-	stable
-minecraft:creeper_banner_pattern	-	-	-	-	stable
-minecraft:creeper_head	-	-	-	-	-
-minecraft:creeper_spawn_egg	-	-	-	-	stable
-minecraft:crimson_button	-	-	-	-	-
-minecraft:crimson_door	-	-	-	-	-
-minecraft:crimson_fence	-	-	-	-	-
-minecraft:crimson_fence_gate	-	-	-	-	-
-minecraft:crimson_fungus	-	-	-	-	-
-minecraft:crimson_hanging_sign	-	-	-	-	-
-minecraft:crimson_hyphae	-	-	-	-	-
-minecraft:crimson_nylium	-	-	-	-	-
-minecraft:crimson_planks	-	-	-	-	-
-minecraft:crimson_pressure_plate	-	-	-	-	-
-minecraft:crimson_roots	-	-	-	-	-
-minecraft:crimson_shelf	-	-	-	-	-
-minecraft:crimson_sign	-	-	-	-	-
-minecraft:crimson_slab	-	-	-	-	-
-minecraft:crimson_stairs	-	-	-	-	-
-minecraft:crimson_stem	-	-	-	-	-
-minecraft:crimson_trapdoor	-	-	-	-	-
-minecraft:crossbow	-	-	-	-	stable
-minecraft:crying_obsidian	-	-	-	-	-
-minecraft:cut_copper	-	-	-	-	-
-minecraft:cut_copper_slab	-	-	-	-	-
-minecraft:cut_copper_stairs	-	-	-	-	-
-minecraft:cut_red_sandstone	-	-	-	-	-
-minecraft:cut_red_sandstone_slab	-	-	-	-	-
-minecraft:cut_sandstone	-	-	-	-	-
-minecraft:cut_sandstone_slab	-	-	-	-	-
-minecraft:cyan_banner	-	-	-	-	-
-minecraft:cyan_bed	-	-	-	-	-
-minecraft:cyan_bundle	-	-	-	-	-
-minecraft:cyan_candle	-	-	-	-	-
-minecraft:cyan_carpet	-	-	-	-	-
-minecraft:cyan_concrete	-	-	-	-	-
-minecraft:cyan_concrete_powder	-	-	-	-	-
-minecraft:cyan_dye	-	-	-	-	stable
-minecraft:cyan_glazed_terracotta	-	-	-	-	-
-minecraft:cyan_harness	-	-	-	-	stable
-minecraft:cyan_shulker_box	-	-	-	-	-
-minecraft:cyan_stained_glass	-	-	-	-	-
-minecraft:cyan_stained_glass_pane	-	-	-	-	-
-minecraft:cyan_terracotta	-	-	-	-	-
-minecraft:cyan_wool	-	-	-	-	-
-minecraft:damaged_anvil	-	-	-	-	-
-minecraft:dandelion	-	-	-	-	-
-minecraft:danger_pottery_sherd	-	-	-	-	stable
-minecraft:dark_oak_boat	-	-	-	-	stable
-minecraft:dark_oak_button	-	-	-	-	-
-minecraft:dark_oak_chest_boat	-	-	-	-	stable
-minecraft:dark_oak_door	-	-	-	-	-
-minecraft:dark_oak_fence	-	-	-	-	-
-minecraft:dark_oak_fence_gate	-	-	-	-	-
-minecraft:dark_oak_hanging_sign	-	-	-	-	-
-minecraft:dark_oak_leaves	-	-	-	-	-
-minecraft:dark_oak_log	-	-	-	-	-
-minecraft:dark_oak_planks	-	-	-	-	-
-minecraft:dark_oak_pressure_plate	-	-	-	-	-
-minecraft:dark_oak_sapling	-	-	-	-	-
-minecraft:dark_oak_shelf	-	-	-	-	-
-minecraft:dark_oak_sign	-	-	-	-	-
-minecraft:dark_oak_slab	-	-	-	-	-
-minecraft:dark_oak_stairs	-	-	-	-	-
-minecraft:dark_oak_trapdoor	-	-	-	-	-
-minecraft:dark_oak_wood	-	-	-	-	-
-minecraft:dark_prismarine	-	-	-	-	-
-minecraft:dark_prismarine_slab	-	-	-	-	-
-minecraft:dark_prismarine_stairs	-	-	-	-	-
-minecraft:daylight_detector	-	-	-	-	-
-minecraft:dead_brain_coral	-	-	-	-	-
-minecraft:dead_brain_coral_block	-	-	-	-	-
-minecraft:dead_brain_coral_fan	-	-	-	-	-
-minecraft:dead_bubble_coral	-	-	-	-	-
-minecraft:dead_bubble_coral_block	-	-	-	-	-
-minecraft:dead_bubble_coral_fan	-	-	-	-	-
-minecraft:dead_bush	-	-	-	-	-
-minecraft:dead_fire_coral	-	-	-	-	-
-minecraft:dead_fire_coral_block	-	-	-	-	-
-minecraft:dead_fire_coral_fan	-	-	-	-	-
-minecraft:dead_horn_coral	-	-	-	-	-
-minecraft:dead_horn_coral_block	-	-	-	-	-
-minecraft:dead_horn_coral_fan	-	-	-	-	-
-minecraft:dead_tube_coral	-	-	-	-	-
-minecraft:dead_tube_coral_block	-	-	-	-	-
-minecraft:dead_tube_coral_fan	-	-	-	-	-
-minecraft:debug_stick	-	-	-	-	stable
-minecraft:decorated_pot	-	-	-	-	-
-minecraft:deepslate	-	-	-	-	-
-minecraft:deepslate_brick_slab	-	-	-	-	-
-minecraft:deepslate_brick_stairs	-	-	-	-	-
-minecraft:deepslate_brick_wall	-	-	-	-	-
-minecraft:deepslate_bricks	-	-	-	-	-
-minecraft:deepslate_coal_ore	-	-	-	-	-
-minecraft:deepslate_copper_ore	-	-	-	-	-
-minecraft:deepslate_diamond_ore	-	-	-	-	-
-minecraft:deepslate_emerald_ore	-	-	-	-	-
-minecraft:deepslate_gold_ore	-	-	-	-	-
-minecraft:deepslate_iron_ore	-	-	-	-	-
-minecraft:deepslate_lapis_ore	-	-	-	-	-
-minecraft:deepslate_redstone_ore	-	-	-	-	-
-minecraft:deepslate_tile_slab	-	-	-	-	-
-minecraft:deepslate_tile_stairs	-	-	-	-	-
-minecraft:deepslate_tile_wall	-	-	-	-	-
-minecraft:deepslate_tiles	-	-	-	-	-
-minecraft:detector_rail	-	-	-	-	-
-minecraft:diamond	-	-	-	-	stable
-minecraft:diamond_axe	-	-	-	-	stable
-minecraft:diamond_block	-	-	-	-	-
-minecraft:diamond_boots	-	-	feet	-	-
-minecraft:diamond_chestplate	-	-	chest	-	-
-minecraft:diamond_helmet	-	-	head	-	-
-minecraft:diamond_hoe	-	-	-	-	stable
-minecraft:diamond_horse_armor	-	-	-	-	stable
-minecraft:diamond_leggings	-	-	legs	-	-
-minecraft:diamond_nautilus_armor	-	-	-	-	stable
-minecraft:diamond_ore	-	-	-	-	-
-minecraft:diamond_pickaxe	-	-	-	-	stable
-minecraft:diamond_shovel	-	-	-	-	stable
-minecraft:diamond_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:diamond_sword	-	-	-	-	stable
-minecraft:diorite	-	-	-	-	-
-minecraft:diorite_slab	-	-	-	-	-
-minecraft:diorite_stairs	-	-	-	-	-
-minecraft:diorite_wall	-	-	-	-	-
-minecraft:dirt	-	-	-	-	-
-minecraft:dirt_path	-	-	-	-	-
-minecraft:disc_fragment_5	-	-	-	-	stable
-minecraft:dispenser	-	-	-	-	-
-minecraft:dolphin_spawn_egg	-	-	-	-	stable
-minecraft:donkey_spawn_egg	-	-	-	-	stable
-minecraft:dragon_breath	-	-	-	-	stable
-minecraft:dragon_egg	-	-	-	-	-
-minecraft:dragon_head	-	-	-	-	-
-minecraft:dried_ghast	-	-	-	-	-
-minecraft:dried_kelp	-	-	-	-	-
-minecraft:dried_kelp_block	-	-	-	-	-
-minecraft:dripstone_block	-	-	-	-	-
-minecraft:dropper	-	-	-	-	-
-minecraft:drowned_spawn_egg	-	-	-	-	stable
-minecraft:dune_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:echo_shard	-	-	-	-	stable
-minecraft:egg	-	-	-	-	-
-minecraft:elder_guardian_spawn_egg	-	-	-	-	stable
-minecraft:elytra	-	-	chest	-	-
-minecraft:emerald	-	-	-	-	stable
-minecraft:emerald_block	-	-	-	-	-
-minecraft:emerald_ore	-	-	-	-	-
-minecraft:enchanted_book	-	-	-	-	stable
-minecraft:enchanted_golden_apple	-	-	-	-	-
-minecraft:enchanting_table	-	-	-	-	-
-minecraft:end_crystal	-	-	-	-	-
-minecraft:end_portal_frame	-	-	-	-	-
-minecraft:end_rod	-	-	-	-	-
-minecraft:end_stone	-	-	-	-	-
-minecraft:end_stone_brick_slab	-	-	-	-	-
-minecraft:end_stone_brick_stairs	-	-	-	-	-
-minecraft:end_stone_brick_wall	-	-	-	-	-
-minecraft:end_stone_bricks	-	-	-	-	-
-minecraft:ender_chest	-	-	-	-	-
-minecraft:ender_dragon_spawn_egg	-	-	-	-	stable
-minecraft:ender_eye	-	-	-	-	stable
-minecraft:ender_pearl	-	-	-	-	-
-minecraft:enderman_spawn_egg	-	-	-	-	stable
-minecraft:endermite_spawn_egg	-	-	-	-	stable
-minecraft:evoker_spawn_egg	-	-	-	-	stable
-minecraft:experience_bottle	-	-	-	-	-
-minecraft:explorer_pottery_sherd	-	-	-	-	stable
-minecraft:exposed_chiseled_copper	-	-	-	-	-
-minecraft:exposed_copper	-	-	-	-	-
-minecraft:exposed_copper_bars	-	-	-	-	-
-minecraft:exposed_copper_bulb	-	-	-	-	-
-minecraft:exposed_copper_chain	-	-	-	-	-
-minecraft:exposed_copper_chest	-	-	-	-	-
-minecraft:exposed_copper_door	-	-	-	-	-
-minecraft:exposed_copper_golem_statue	-	-	-	-	-
-minecraft:exposed_copper_grate	-	-	-	-	-
-minecraft:exposed_copper_lantern	-	-	-	-	-
-minecraft:exposed_copper_trapdoor	-	-	-	-	-
-minecraft:exposed_cut_copper	-	-	-	-	-
-minecraft:exposed_cut_copper_slab	-	-	-	-	-
-minecraft:exposed_cut_copper_stairs	-	-	-	-	-
-minecraft:exposed_lightning_rod	-	-	-	-	-
-minecraft:eye_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:farmland	-	-	-	-	-
-minecraft:feather	-	-	-	-	stable
-minecraft:fermented_spider_eye	-	-	-	-	stable
-minecraft:fern	-	-	-	-	-
-minecraft:field_masoned_banner_pattern	-	-	-	-	stable
-minecraft:filled_map	-	-	-	-	stable
-minecraft:fire_charge	-	-	-	-	-
-minecraft:fire_coral	-	-	-	-	-
-minecraft:fire_coral_block	-	-	-	-	-
-minecraft:fire_coral_fan	-	-	-	-	-
-minecraft:firefly_bush	-	-	-	-	-
-minecraft:firework_rocket	-	-	-	-	stable
-minecraft:firework_star	-	-	-	-	stable
-minecraft:fishing_rod	-	-	-	-	stable
-minecraft:fletching_table	-	-	-	-	-
-minecraft:flint	-	-	-	-	stable
-minecraft:flint_and_steel	-	-	-	-	stable
-minecraft:flow_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:flow_banner_pattern	-	-	-	-	stable
-minecraft:flow_pottery_sherd	-	-	-	-	stable
-minecraft:flower_banner_pattern	-	-	-	-	stable
-minecraft:flower_pot	-	-	-	-	-
-minecraft:flowering_azalea	-	-	-	-	-
-minecraft:flowering_azalea_leaves	-	-	-	-	-
-minecraft:fox_spawn_egg	-	-	-	-	stable
-minecraft:friend_pottery_sherd	-	-	-	-	stable
-minecraft:frog_spawn_egg	-	-	-	-	stable
-minecraft:frogspawn	-	-	-	-	-
-minecraft:furnace	-	-	-	-	-
-minecraft:furnace_minecart	-	-	-	-	-
-minecraft:ghast_spawn_egg	-	-	-	-	stable
-minecraft:ghast_tear	-	-	-	-	stable
-minecraft:gilded_blackstone	-	-	-	-	-
-minecraft:glass	-	-	-	-	-
-minecraft:glass_bottle	-	-	-	-	-
-minecraft:glass_pane	-	-	-	-	-
-minecraft:glistering_melon_slice	-	-	-	-	stable
-minecraft:globe_banner_pattern	-	-	-	-	stable
-minecraft:glow_berries	-	-	-	-	-
-minecraft:glow_ink_sac	-	-	-	-	stable
-minecraft:glow_item_frame	-	-	-	-	-
-minecraft:glow_lichen	-	-	-	-	-
-minecraft:glow_squid_spawn_egg	-	-	-	-	stable
-minecraft:glowstone	-	-	-	-	-
-minecraft:glowstone_dust	-	-	-	-	stable
-minecraft:goat_horn	-	-	-	-	stable
-minecraft:goat_spawn_egg	-	-	-	-	stable
-minecraft:gold_block	-	-	-	-	-
-minecraft:gold_ingot	-	-	-	-	stable
-minecraft:gold_nugget	-	-	-	-	stable
-minecraft:gold_ore	-	-	-	-	-
-minecraft:golden_apple	-	-	-	-	-
-minecraft:golden_axe	-	-	-	-	stable
-minecraft:golden_boots	-	-	feet	-	-
-minecraft:golden_carrot	-	-	-	-	-
-minecraft:golden_chestplate	-	-	chest	-	-
-minecraft:golden_helmet	-	-	head	-	-
-minecraft:golden_hoe	-	-	-	-	stable
-minecraft:golden_horse_armor	-	-	-	-	stable
-minecraft:golden_leggings	-	-	legs	-	-
-minecraft:golden_nautilus_armor	-	-	-	-	stable
-minecraft:golden_pickaxe	-	-	-	-	stable
-minecraft:golden_shovel	-	-	-	-	stable
-minecraft:golden_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:golden_sword	-	-	-	-	stable
-minecraft:granite	-	-	-	-	-
-minecraft:granite_slab	-	-	-	-	-
-minecraft:granite_stairs	-	-	-	-	-
-minecraft:granite_wall	-	-	-	-	-
-minecraft:grass_block	-	-	-	-	-
-minecraft:gravel	-	-	-	-	-
-minecraft:gray_banner	-	-	-	-	-
-minecraft:gray_bed	-	-	-	-	-
-minecraft:gray_bundle	-	-	-	-	-
-minecraft:gray_candle	-	-	-	-	-
-minecraft:gray_carpet	-	-	-	-	-
-minecraft:gray_concrete	-	-	-	-	-
-minecraft:gray_concrete_powder	-	-	-	-	-
-minecraft:gray_dye	-	-	-	-	stable
-minecraft:gray_glazed_terracotta	-	-	-	-	-
-minecraft:gray_harness	-	-	-	-	stable
-minecraft:gray_shulker_box	-	-	-	-	-
-minecraft:gray_stained_glass	-	-	-	-	-
-minecraft:gray_stained_glass_pane	-	-	-	-	-
-minecraft:gray_terracotta	-	-	-	-	-
-minecraft:gray_wool	-	-	-	-	-
-minecraft:green_banner	-	-	-	-	-
-minecraft:green_bed	-	-	-	-	-
-minecraft:green_bundle	-	-	-	-	-
-minecraft:green_candle	-	-	-	-	-
-minecraft:green_carpet	-	-	-	-	-
-minecraft:green_concrete	-	-	-	-	-
-minecraft:green_concrete_powder	-	-	-	-	-
-minecraft:green_dye	-	-	-	-	stable
-minecraft:green_glazed_terracotta	-	-	-	-	-
-minecraft:green_harness	-	-	-	-	stable
-minecraft:green_shulker_box	-	-	-	-	-
-minecraft:green_stained_glass	-	-	-	-	-
-minecraft:green_stained_glass_pane	-	-	-	-	-
-minecraft:green_terracotta	-	-	-	-	-
-minecraft:green_wool	-	-	-	-	-
-minecraft:grindstone	-	-	-	-	-
-minecraft:guardian_spawn_egg	-	-	-	-	stable
-minecraft:gunpowder	-	-	-	-	stable
-minecraft:guster_banner_pattern	-	-	-	-	stable
-minecraft:guster_pottery_sherd	-	-	-	-	stable
-minecraft:hanging_roots	-	-	-	-	-
-minecraft:happy_ghast_spawn_egg	-	-	-	-	stable
-minecraft:hay_block	-	-	-	-	-
-minecraft:heart_of_the_sea	-	-	-	-	stable
-minecraft:heart_pottery_sherd	-	-	-	-	stable
-minecraft:heartbreak_pottery_sherd	-	-	-	-	stable
-minecraft:heavy_core	-	-	-	-	-
-minecraft:heavy_weighted_pressure_plate	-	-	-	-	-
-minecraft:hoglin_spawn_egg	-	-	-	-	stable
-minecraft:honey_block	-	-	-	-	-
-minecraft:honey_bottle	-	minecraft:glass_bottle	-	-	-
-minecraft:honeycomb	-	-	-	-	-
-minecraft:honeycomb_block	-	-	-	-	-
-minecraft:hopper	-	-	-	-	-
-minecraft:hopper_minecart	-	-	-	-	-
-minecraft:horn_coral	-	-	-	-	-
-minecraft:horn_coral_block	-	-	-	-	-
-minecraft:horn_coral_fan	-	-	-	-	-
-minecraft:horse_spawn_egg	-	-	-	-	stable
-minecraft:host_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:howl_pottery_sherd	-	-	-	-	stable
-minecraft:husk_spawn_egg	-	-	-	-	stable
-minecraft:ice	-	-	-	-	-
-minecraft:infested_chiseled_stone_bricks	-	-	-	-	-
-minecraft:infested_cobblestone	-	-	-	-	-
-minecraft:infested_cracked_stone_bricks	-	-	-	-	-
-minecraft:infested_deepslate	-	-	-	-	-
-minecraft:infested_mossy_stone_bricks	-	-	-	-	-
-minecraft:infested_stone	-	-	-	-	-
-minecraft:infested_stone_bricks	-	-	-	-	-
-minecraft:ink_sac	-	-	-	-	stable
-minecraft:iron_axe	-	-	-	-	stable
-minecraft:iron_bars	-	-	-	-	-
-minecraft:iron_block	-	-	-	-	-
-minecraft:iron_boots	-	-	feet	-	-
-minecraft:iron_chain	-	-	-	-	-
-minecraft:iron_chestplate	-	-	chest	-	-
-minecraft:iron_door	-	-	-	-	-
-minecraft:iron_golem_spawn_egg	-	-	-	-	stable
-minecraft:iron_helmet	-	-	head	-	-
-minecraft:iron_hoe	-	-	-	-	stable
-minecraft:iron_horse_armor	-	-	-	-	stable
-minecraft:iron_ingot	-	-	-	-	stable
-minecraft:iron_leggings	-	-	legs	-	-
-minecraft:iron_nautilus_armor	-	-	-	-	stable
-minecraft:iron_nugget	-	-	-	-	stable
-minecraft:iron_ore	-	-	-	-	-
-minecraft:iron_pickaxe	-	-	-	-	stable
-minecraft:iron_shovel	-	-	-	-	stable
-minecraft:iron_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:iron_sword	-	-	-	-	stable
-minecraft:iron_trapdoor	-	-	-	-	-
-minecraft:item_frame	-	-	-	-	-
-minecraft:jack_o_lantern	-	-	-	-	-
-minecraft:jigsaw	-	-	-	-	-
-minecraft:jukebox	-	-	-	-	-
-minecraft:jungle_boat	-	-	-	-	stable
-minecraft:jungle_button	-	-	-	-	-
-minecraft:jungle_chest_boat	-	-	-	-	stable
-minecraft:jungle_door	-	-	-	-	-
-minecraft:jungle_fence	-	-	-	-	-
-minecraft:jungle_fence_gate	-	-	-	-	-
-minecraft:jungle_hanging_sign	-	-	-	-	-
-minecraft:jungle_leaves	-	-	-	-	-
-minecraft:jungle_log	-	-	-	-	-
-minecraft:jungle_planks	-	-	-	-	-
-minecraft:jungle_pressure_plate	-	-	-	-	-
-minecraft:jungle_sapling	-	-	-	-	-
-minecraft:jungle_shelf	-	-	-	-	-
-minecraft:jungle_sign	-	-	-	-	-
-minecraft:jungle_slab	-	-	-	-	-
-minecraft:jungle_stairs	-	-	-	-	-
-minecraft:jungle_trapdoor	-	-	-	-	-
-minecraft:jungle_wood	-	-	-	-	-
-minecraft:kelp	-	-	-	-	-
-minecraft:knowledge_book	-	-	-	-	-
-minecraft:ladder	-	-	-	-	-
-minecraft:lantern	-	-	-	-	-
-minecraft:lapis_block	-	-	-	-	-
-minecraft:lapis_lazuli	-	-	-	-	stable
-minecraft:lapis_ore	-	-	-	-	-
-minecraft:large_amethyst_bud	-	-	-	-	-
-minecraft:large_fern	-	-	-	-	-
-minecraft:lava_bucket	-	-	-	-	-
-minecraft:lead	-	-	-	-	stable
-minecraft:leaf_litter	-	-	-	-	-
-minecraft:leather	-	-	-	-	stable
-minecraft:leather_boots	-	-	feet	-	-
-minecraft:leather_chestplate	-	-	chest	-	-
-minecraft:leather_helmet	-	-	head	-	-
-minecraft:leather_horse_armor	-	-	-	-	stable
-minecraft:leather_leggings	-	-	legs	-	-
-minecraft:lectern	-	-	-	-	-
-minecraft:lever	-	-	-	-	-
-minecraft:light	-	-	-	-	-
-minecraft:light_blue_banner	-	-	-	-	-
-minecraft:light_blue_bed	-	-	-	-	-
-minecraft:light_blue_bundle	-	-	-	-	-
-minecraft:light_blue_candle	-	-	-	-	-
-minecraft:light_blue_carpet	-	-	-	-	-
-minecraft:light_blue_concrete	-	-	-	-	-
-minecraft:light_blue_concrete_powder	-	-	-	-	-
-minecraft:light_blue_dye	-	-	-	-	stable
-minecraft:light_blue_glazed_terracotta	-	-	-	-	-
-minecraft:light_blue_harness	-	-	-	-	stable
-minecraft:light_blue_shulker_box	-	-	-	-	-
-minecraft:light_blue_stained_glass	-	-	-	-	-
-minecraft:light_blue_stained_glass_pane	-	-	-	-	-
-minecraft:light_blue_terracotta	-	-	-	-	-
-minecraft:light_blue_wool	-	-	-	-	-
-minecraft:light_gray_banner	-	-	-	-	-
-minecraft:light_gray_bed	-	-	-	-	-
-minecraft:light_gray_bundle	-	-	-	-	-
-minecraft:light_gray_candle	-	-	-	-	-
-minecraft:light_gray_carpet	-	-	-	-	-
-minecraft:light_gray_concrete	-	-	-	-	-
-minecraft:light_gray_concrete_powder	-	-	-	-	-
-minecraft:light_gray_dye	-	-	-	-	stable
-minecraft:light_gray_glazed_terracotta	-	-	-	-	-
-minecraft:light_gray_harness	-	-	-	-	stable
-minecraft:light_gray_shulker_box	-	-	-	-	-
-minecraft:light_gray_stained_glass	-	-	-	-	-
-minecraft:light_gray_stained_glass_pane	-	-	-	-	-
-minecraft:light_gray_terracotta	-	-	-	-	-
-minecraft:light_gray_wool	-	-	-	-	-
-minecraft:light_weighted_pressure_plate	-	-	-	-	-
-minecraft:lightning_rod	-	-	-	-	-
-minecraft:lilac	-	-	-	-	-
-minecraft:lily_of_the_valley	-	-	-	-	-
-minecraft:lily_pad	-	-	-	-	-
-minecraft:lime_banner	-	-	-	-	-
-minecraft:lime_bed	-	-	-	-	-
-minecraft:lime_bundle	-	-	-	-	-
-minecraft:lime_candle	-	-	-	-	-
-minecraft:lime_carpet	-	-	-	-	-
-minecraft:lime_concrete	-	-	-	-	-
-minecraft:lime_concrete_powder	-	-	-	-	-
-minecraft:lime_dye	-	-	-	-	stable
-minecraft:lime_glazed_terracotta	-	-	-	-	-
-minecraft:lime_harness	-	-	-	-	stable
-minecraft:lime_shulker_box	-	-	-	-	-
-minecraft:lime_stained_glass	-	-	-	-	-
-minecraft:lime_stained_glass_pane	-	-	-	-	-
-minecraft:lime_terracotta	-	-	-	-	-
-minecraft:lime_wool	-	-	-	-	-
-minecraft:lingering_potion	-	-	-	-	-
-minecraft:llama_spawn_egg	-	-	-	-	stable
-minecraft:lodestone	-	-	-	-	-
-minecraft:loom	-	-	-	-	-
-minecraft:mace	-	-	-	-	stable
-minecraft:magenta_banner	-	-	-	-	-
-minecraft:magenta_bed	-	-	-	-	-
-minecraft:magenta_bundle	-	-	-	-	-
-minecraft:magenta_candle	-	-	-	-	-
-minecraft:magenta_carpet	-	-	-	-	-
-minecraft:magenta_concrete	-	-	-	-	-
-minecraft:magenta_concrete_powder	-	-	-	-	-
-minecraft:magenta_dye	-	-	-	-	stable
-minecraft:magenta_glazed_terracotta	-	-	-	-	-
-minecraft:magenta_harness	-	-	-	-	stable
-minecraft:magenta_shulker_box	-	-	-	-	-
-minecraft:magenta_stained_glass	-	-	-	-	-
-minecraft:magenta_stained_glass_pane	-	-	-	-	-
-minecraft:magenta_terracotta	-	-	-	-	-
-minecraft:magenta_wool	-	-	-	-	-
-minecraft:magma_block	-	-	-	-	-
-minecraft:magma_cream	-	-	-	-	stable
-minecraft:magma_cube_spawn_egg	-	-	-	-	stable
-minecraft:mangrove_boat	-	-	-	-	stable
-minecraft:mangrove_button	-	-	-	-	-
-minecraft:mangrove_chest_boat	-	-	-	-	stable
-minecraft:mangrove_door	-	-	-	-	-
-minecraft:mangrove_fence	-	-	-	-	-
-minecraft:mangrove_fence_gate	-	-	-	-	-
-minecraft:mangrove_hanging_sign	-	-	-	-	-
-minecraft:mangrove_leaves	-	-	-	-	-
-minecraft:mangrove_log	-	-	-	-	-
-minecraft:mangrove_planks	-	-	-	-	-
-minecraft:mangrove_pressure_plate	-	-	-	-	-
-minecraft:mangrove_propagule	-	-	-	-	-
-minecraft:mangrove_roots	-	-	-	-	-
-minecraft:mangrove_shelf	-	-	-	-	-
-minecraft:mangrove_sign	-	-	-	-	-
-minecraft:mangrove_slab	-	-	-	-	-
-minecraft:mangrove_stairs	-	-	-	-	-
-minecraft:mangrove_trapdoor	-	-	-	-	-
-minecraft:mangrove_wood	-	-	-	-	-
-minecraft:map	-	-	-	-	stable
-minecraft:medium_amethyst_bud	-	-	-	-	-
-minecraft:melon	-	-	-	-	-
-minecraft:melon_seeds	-	-	-	-	-
-minecraft:melon_slice	-	-	-	-	-
-minecraft:milk_bucket	-	minecraft:bucket	-	-	-
-minecraft:minecart	-	-	-	-	-
-minecraft:miner_pottery_sherd	-	-	-	-	stable
-minecraft:mojang_banner_pattern	-	-	-	-	stable
-minecraft:mooshroom_spawn_egg	-	-	-	-	stable
-minecraft:moss_block	-	-	-	-	-
-minecraft:moss_carpet	-	-	-	-	-
-minecraft:mossy_cobblestone	-	-	-	-	-
-minecraft:mossy_cobblestone_slab	-	-	-	-	-
-minecraft:mossy_cobblestone_stairs	-	-	-	-	-
-minecraft:mossy_cobblestone_wall	-	-	-	-	-
-minecraft:mossy_stone_brick_slab	-	-	-	-	-
-minecraft:mossy_stone_brick_stairs	-	-	-	-	-
-minecraft:mossy_stone_brick_wall	-	-	-	-	-
-minecraft:mossy_stone_bricks	-	-	-	-	-
-minecraft:mourner_pottery_sherd	-	-	-	-	stable
-minecraft:mud	-	-	-	-	-
-minecraft:mud_brick_slab	-	-	-	-	-
-minecraft:mud_brick_stairs	-	-	-	-	-
-minecraft:mud_brick_wall	-	-	-	-	-
-minecraft:mud_bricks	-	-	-	-	-
-minecraft:muddy_mangrove_roots	-	-	-	-	-
-minecraft:mule_spawn_egg	-	-	-	-	stable
-minecraft:mushroom_stem	-	-	-	-	-
-minecraft:mushroom_stew	-	minecraft:bowl	-	-	-
-minecraft:music_disc_11	-	-	-	-	stable
-minecraft:music_disc_13	-	-	-	-	stable
-minecraft:music_disc_5	-	-	-	-	stable
-minecraft:music_disc_blocks	-	-	-	-	stable
-minecraft:music_disc_cat	-	-	-	-	stable
-minecraft:music_disc_chirp	-	-	-	-	stable
-minecraft:music_disc_creator	-	-	-	-	stable
-minecraft:music_disc_creator_music_box	-	-	-	-	stable
-minecraft:music_disc_far	-	-	-	-	stable
-minecraft:music_disc_lava_chicken	-	-	-	-	stable
-minecraft:music_disc_mall	-	-	-	-	stable
-minecraft:music_disc_mellohi	-	-	-	-	stable
-minecraft:music_disc_otherside	-	-	-	-	stable
-minecraft:music_disc_pigstep	-	-	-	-	stable
-minecraft:music_disc_precipice	-	-	-	-	stable
-minecraft:music_disc_relic	-	-	-	-	stable
-minecraft:music_disc_stal	-	-	-	-	stable
-minecraft:music_disc_strad	-	-	-	-	stable
-minecraft:music_disc_tears	-	-	-	-	stable
-minecraft:music_disc_wait	-	-	-	-	stable
-minecraft:music_disc_ward	-	-	-	-	stable
-minecraft:mutton	-	-	-	-	-
-minecraft:mycelium	-	-	-	-	-
-minecraft:name_tag	-	-	-	-	stable
-minecraft:nautilus_shell	-	-	-	-	stable
-minecraft:nautilus_spawn_egg	-	-	-	-	stable
-minecraft:nether_brick	-	-	-	-	stable
-minecraft:nether_brick_fence	-	-	-	-	-
-minecraft:nether_brick_slab	-	-	-	-	-
-minecraft:nether_brick_stairs	-	-	-	-	-
-minecraft:nether_brick_wall	-	-	-	-	-
-minecraft:nether_bricks	-	-	-	-	-
-minecraft:nether_gold_ore	-	-	-	-	-
-minecraft:nether_quartz_ore	-	-	-	-	-
-minecraft:nether_sprouts	-	-	-	-	-
-minecraft:nether_star	-	-	-	-	stable
-minecraft:nether_wart	-	-	-	-	-
-minecraft:nether_wart_block	-	-	-	-	-
-minecraft:netherite_axe	-	-	-	-	stable
-minecraft:netherite_block	-	-	-	-	-
-minecraft:netherite_boots	-	-	feet	-	-
-minecraft:netherite_chestplate	-	-	chest	-	-
-minecraft:netherite_helmet	-	-	head	-	-
-minecraft:netherite_hoe	-	-	-	-	stable
-minecraft:netherite_horse_armor	-	-	-	-	stable
-minecraft:netherite_ingot	-	-	-	-	stable
-minecraft:netherite_leggings	-	-	legs	-	-
-minecraft:netherite_nautilus_armor	-	-	-	-	stable
-minecraft:netherite_pickaxe	-	-	-	-	stable
-minecraft:netherite_scrap	-	-	-	-	stable
-minecraft:netherite_shovel	-	-	-	-	stable
-minecraft:netherite_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:netherite_sword	-	-	-	-	stable
-minecraft:netherite_upgrade_smithing_template	-	-	-	-	stable
-minecraft:netherrack	-	-	-	-	-
-minecraft:note_block	-	-	-	-	-
-minecraft:oak_boat	-	-	-	-	stable
-minecraft:oak_button	-	-	-	-	-
-minecraft:oak_chest_boat	-	-	-	-	stable
-minecraft:oak_door	-	-	-	-	-
-minecraft:oak_fence	-	-	-	-	-
-minecraft:oak_fence_gate	-	-	-	-	-
-minecraft:oak_hanging_sign	-	-	-	-	-
-minecraft:oak_leaves	-	-	-	-	-
-minecraft:oak_log	-	-	-	-	-
-minecraft:oak_planks	-	-	-	-	-
-minecraft:oak_pressure_plate	-	-	-	-	-
-minecraft:oak_sapling	-	-	-	-	-
-minecraft:oak_shelf	-	-	-	-	-
-minecraft:oak_sign	-	-	-	-	-
-minecraft:oak_slab	-	-	-	-	-
-minecraft:oak_stairs	-	-	-	-	-
-minecraft:oak_trapdoor	-	-	-	-	-
-minecraft:oak_wood	-	-	-	-	-
-minecraft:observer	-	-	-	-	-
-minecraft:obsidian	-	-	-	-	-
-minecraft:ocelot_spawn_egg	-	-	-	-	stable
-minecraft:ochre_froglight	-	-	-	-	-
-minecraft:ominous_bottle	-	-	-	-	-
-minecraft:ominous_trial_key	-	-	-	-	stable
-minecraft:open_eyeblossom	-	-	-	-	-
-minecraft:orange_banner	-	-	-	-	-
-minecraft:orange_bed	-	-	-	-	-
-minecraft:orange_bundle	-	-	-	-	-
-minecraft:orange_candle	-	-	-	-	-
-minecraft:orange_carpet	-	-	-	-	-
-minecraft:orange_concrete	-	-	-	-	-
-minecraft:orange_concrete_powder	-	-	-	-	-
-minecraft:orange_dye	-	-	-	-	stable
-minecraft:orange_glazed_terracotta	-	-	-	-	-
-minecraft:orange_harness	-	-	-	-	stable
-minecraft:orange_shulker_box	-	-	-	-	-
-minecraft:orange_stained_glass	-	-	-	-	-
-minecraft:orange_stained_glass_pane	-	-	-	-	-
-minecraft:orange_terracotta	-	-	-	-	-
-minecraft:orange_tulip	-	-	-	-	-
-minecraft:orange_wool	-	-	-	-	-
-minecraft:oxeye_daisy	-	-	-	-	-
-minecraft:oxidized_chiseled_copper	-	-	-	-	-
-minecraft:oxidized_copper	-	-	-	-	-
-minecraft:oxidized_copper_bars	-	-	-	-	-
-minecraft:oxidized_copper_bulb	-	-	-	-	-
-minecraft:oxidized_copper_chain	-	-	-	-	-
-minecraft:oxidized_copper_chest	-	-	-	-	-
-minecraft:oxidized_copper_door	-	-	-	-	-
-minecraft:oxidized_copper_golem_statue	-	-	-	-	-
-minecraft:oxidized_copper_grate	-	-	-	-	-
-minecraft:oxidized_copper_lantern	-	-	-	-	-
-minecraft:oxidized_copper_trapdoor	-	-	-	-	-
-minecraft:oxidized_cut_copper	-	-	-	-	-
-minecraft:oxidized_cut_copper_slab	-	-	-	-	-
-minecraft:oxidized_cut_copper_stairs	-	-	-	-	-
-minecraft:oxidized_lightning_rod	-	-	-	-	-
-minecraft:packed_ice	-	-	-	-	-
-minecraft:packed_mud	-	-	-	-	-
-minecraft:painting	-	-	-	-	-
-minecraft:pale_hanging_moss	-	-	-	-	-
-minecraft:pale_moss_block	-	-	-	-	-
-minecraft:pale_moss_carpet	-	-	-	-	-
-minecraft:pale_oak_boat	-	-	-	-	stable
-minecraft:pale_oak_button	-	-	-	-	-
-minecraft:pale_oak_chest_boat	-	-	-	-	stable
-minecraft:pale_oak_door	-	-	-	-	-
-minecraft:pale_oak_fence	-	-	-	-	-
-minecraft:pale_oak_fence_gate	-	-	-	-	-
-minecraft:pale_oak_hanging_sign	-	-	-	-	-
-minecraft:pale_oak_leaves	-	-	-	-	-
-minecraft:pale_oak_log	-	-	-	-	-
-minecraft:pale_oak_planks	-	-	-	-	-
-minecraft:pale_oak_pressure_plate	-	-	-	-	-
-minecraft:pale_oak_sapling	-	-	-	-	-
-minecraft:pale_oak_shelf	-	-	-	-	-
-minecraft:pale_oak_sign	-	-	-	-	-
-minecraft:pale_oak_slab	-	-	-	-	-
-minecraft:pale_oak_stairs	-	-	-	-	-
-minecraft:pale_oak_trapdoor	-	-	-	-	-
-minecraft:pale_oak_wood	-	-	-	-	-
-minecraft:panda_spawn_egg	-	-	-	-	stable
-minecraft:paper	-	-	-	-	stable
-minecraft:parched_spawn_egg	-	-	-	-	stable
-minecraft:parrot_spawn_egg	-	-	-	-	stable
-minecraft:pearlescent_froglight	-	-	-	-	-
-minecraft:peony	-	-	-	-	-
-minecraft:petrified_oak_slab	-	-	-	-	-
-minecraft:phantom_membrane	-	-	-	-	stable
-minecraft:phantom_spawn_egg	-	-	-	-	stable
-minecraft:pig_spawn_egg	-	-	-	-	stable
-minecraft:piglin_banner_pattern	-	-	-	-	stable
-minecraft:piglin_brute_spawn_egg	-	-	-	-	stable
-minecraft:piglin_head	-	-	-	-	-
-minecraft:piglin_spawn_egg	-	-	-	-	stable
-minecraft:pillager_spawn_egg	-	-	-	-	stable
-minecraft:pink_banner	-	-	-	-	-
-minecraft:pink_bed	-	-	-	-	-
-minecraft:pink_bundle	-	-	-	-	-
-minecraft:pink_candle	-	-	-	-	-
-minecraft:pink_carpet	-	-	-	-	-
-minecraft:pink_concrete	-	-	-	-	-
-minecraft:pink_concrete_powder	-	-	-	-	-
-minecraft:pink_dye	-	-	-	-	stable
-minecraft:pink_glazed_terracotta	-	-	-	-	-
-minecraft:pink_harness	-	-	-	-	stable
-minecraft:pink_petals	-	-	-	-	-
-minecraft:pink_shulker_box	-	-	-	-	-
-minecraft:pink_stained_glass	-	-	-	-	-
-minecraft:pink_stained_glass_pane	-	-	-	-	-
-minecraft:pink_terracotta	-	-	-	-	-
-minecraft:pink_tulip	-	-	-	-	-
-minecraft:pink_wool	-	-	-	-	-
-minecraft:piston	-	-	-	-	-
-minecraft:pitcher_plant	-	-	-	-	-
-minecraft:pitcher_pod	-	-	-	-	-
-minecraft:player_head	-	-	-	-	-
-minecraft:plenty_pottery_sherd	-	-	-	-	stable
-minecraft:podzol	-	-	-	-	-
-minecraft:pointed_dripstone	-	-	-	-	-
-minecraft:poisonous_potato	-	-	-	-	-
-minecraft:polar_bear_spawn_egg	-	-	-	-	stable
-minecraft:polished_andesite	-	-	-	-	-
-minecraft:polished_andesite_slab	-	-	-	-	-
-minecraft:polished_andesite_stairs	-	-	-	-	-
-minecraft:polished_basalt	-	-	-	-	-
-minecraft:polished_blackstone	-	-	-	-	-
-minecraft:polished_blackstone_brick_slab	-	-	-	-	-
-minecraft:polished_blackstone_brick_stairs	-	-	-	-	-
-minecraft:polished_blackstone_brick_wall	-	-	-	-	-
-minecraft:polished_blackstone_bricks	-	-	-	-	-
-minecraft:polished_blackstone_button	-	-	-	-	-
-minecraft:polished_blackstone_pressure_plate	-	-	-	-	-
-minecraft:polished_blackstone_slab	-	-	-	-	-
-minecraft:polished_blackstone_stairs	-	-	-	-	-
-minecraft:polished_blackstone_wall	-	-	-	-	-
-minecraft:polished_deepslate	-	-	-	-	-
-minecraft:polished_deepslate_slab	-	-	-	-	-
-minecraft:polished_deepslate_stairs	-	-	-	-	-
-minecraft:polished_deepslate_wall	-	-	-	-	-
-minecraft:polished_diorite	-	-	-	-	-
-minecraft:polished_diorite_slab	-	-	-	-	-
-minecraft:polished_diorite_stairs	-	-	-	-	-
-minecraft:polished_granite	-	-	-	-	-
-minecraft:polished_granite_slab	-	-	-	-	-
-minecraft:polished_granite_stairs	-	-	-	-	-
-minecraft:polished_tuff	-	-	-	-	-
-minecraft:polished_tuff_slab	-	-	-	-	-
-minecraft:polished_tuff_stairs	-	-	-	-	-
-minecraft:polished_tuff_wall	-	-	-	-	-
-minecraft:popped_chorus_fruit	-	-	-	-	stable
-minecraft:poppy	-	-	-	-	-
-minecraft:porkchop	-	-	-	-	-
-minecraft:potato	-	-	-	-	-
-minecraft:potion	-	minecraft:glass_bottle	-	-	-
-minecraft:powder_snow_bucket	-	-	-	-	-
-minecraft:powered_rail	-	-	-	-	-
-minecraft:prismarine	-	-	-	-	-
-minecraft:prismarine_brick_slab	-	-	-	-	-
-minecraft:prismarine_brick_stairs	-	-	-	-	-
-minecraft:prismarine_bricks	-	-	-	-	-
-minecraft:prismarine_crystals	-	-	-	-	stable
-minecraft:prismarine_shard	-	-	-	-	stable
-minecraft:prismarine_slab	-	-	-	-	-
-minecraft:prismarine_stairs	-	-	-	-	-
-minecraft:prismarine_wall	-	-	-	-	-
-minecraft:prize_pottery_sherd	-	-	-	-	stable
-minecraft:pufferfish	-	-	-	-	-
-minecraft:pufferfish_bucket	-	-	-	-	-
-minecraft:pufferfish_spawn_egg	-	-	-	-	stable
-minecraft:pumpkin	-	-	-	-	-
-minecraft:pumpkin_pie	-	-	-	-	-
-minecraft:pumpkin_seeds	-	-	-	-	-
-minecraft:purple_banner	-	-	-	-	-
-minecraft:purple_bed	-	-	-	-	-
-minecraft:purple_bundle	-	-	-	-	-
-minecraft:purple_candle	-	-	-	-	-
-minecraft:purple_carpet	-	-	-	-	-
-minecraft:purple_concrete	-	-	-	-	-
-minecraft:purple_concrete_powder	-	-	-	-	-
-minecraft:purple_dye	-	-	-	-	stable
-minecraft:purple_glazed_terracotta	-	-	-	-	-
-minecraft:purple_harness	-	-	-	-	stable
-minecraft:purple_shulker_box	-	-	-	-	-
-minecraft:purple_stained_glass	-	-	-	-	-
-minecraft:purple_stained_glass_pane	-	-	-	-	-
-minecraft:purple_terracotta	-	-	-	-	-
-minecraft:purple_wool	-	-	-	-	-
-minecraft:purpur_block	-	-	-	-	-
-minecraft:purpur_pillar	-	-	-	-	-
-minecraft:purpur_slab	-	-	-	-	-
-minecraft:purpur_stairs	-	-	-	-	-
-minecraft:quartz	-	-	-	-	stable
-minecraft:quartz_block	-	-	-	-	-
-minecraft:quartz_bricks	-	-	-	-	-
-minecraft:quartz_pillar	-	-	-	-	-
-minecraft:quartz_slab	-	-	-	-	-
-minecraft:quartz_stairs	-	-	-	-	-
-minecraft:rabbit	-	-	-	-	-
-minecraft:rabbit_foot	-	-	-	-	stable
-minecraft:rabbit_hide	-	-	-	-	stable
-minecraft:rabbit_spawn_egg	-	-	-	-	stable
-minecraft:rabbit_stew	-	minecraft:bowl	-	-	-
-minecraft:rail	-	-	-	-	-
-minecraft:raiser_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:ravager_spawn_egg	-	-	-	-	stable
-minecraft:raw_copper	-	-	-	-	stable
-minecraft:raw_copper_block	-	-	-	-	-
-minecraft:raw_gold	-	-	-	-	stable
-minecraft:raw_gold_block	-	-	-	-	-
-minecraft:raw_iron	-	-	-	-	stable
-minecraft:raw_iron_block	-	-	-	-	-
-minecraft:recovery_compass	-	-	-	-	stable
-minecraft:red_banner	-	-	-	-	-
-minecraft:red_bed	-	-	-	-	-
-minecraft:red_bundle	-	-	-	-	-
-minecraft:red_candle	-	-	-	-	-
-minecraft:red_carpet	-	-	-	-	-
-minecraft:red_concrete	-	-	-	-	-
-minecraft:red_concrete_powder	-	-	-	-	-
-minecraft:red_dye	-	-	-	-	stable
-minecraft:red_glazed_terracotta	-	-	-	-	-
-minecraft:red_harness	-	-	-	-	stable
-minecraft:red_mushroom	-	-	-	-	-
-minecraft:red_mushroom_block	-	-	-	-	-
-minecraft:red_nether_brick_slab	-	-	-	-	-
-minecraft:red_nether_brick_stairs	-	-	-	-	-
-minecraft:red_nether_brick_wall	-	-	-	-	-
-minecraft:red_nether_bricks	-	-	-	-	-
-minecraft:red_sand	-	-	-	-	-
-minecraft:red_sandstone	-	-	-	-	-
-minecraft:red_sandstone_slab	-	-	-	-	-
-minecraft:red_sandstone_stairs	-	-	-	-	-
-minecraft:red_sandstone_wall	-	-	-	-	-
-minecraft:red_shulker_box	-	-	-	-	-
-minecraft:red_stained_glass	-	-	-	-	-
-minecraft:red_stained_glass_pane	-	-	-	-	-
-minecraft:red_terracotta	-	-	-	-	-
-minecraft:red_tulip	-	-	-	-	-
-minecraft:red_wool	-	-	-	-	-
-minecraft:redstone	-	-	-	-	-
-minecraft:redstone_block	-	-	-	-	-
-minecraft:redstone_lamp	-	-	-	-	-
-minecraft:redstone_ore	-	-	-	-	-
-minecraft:redstone_torch	-	-	-	-	-
-minecraft:reinforced_deepslate	-	-	-	-	-
-minecraft:repeater	-	-	-	-	-
-minecraft:repeating_command_block	-	-	-	-	-
-minecraft:resin_block	-	-	-	-	-
-minecraft:resin_brick	-	-	-	-	stable
-minecraft:resin_brick_slab	-	-	-	-	-
-minecraft:resin_brick_stairs	-	-	-	-	-
-minecraft:resin_brick_wall	-	-	-	-	-
-minecraft:resin_bricks	-	-	-	-	-
-minecraft:resin_clump	-	-	-	-	-
-minecraft:respawn_anchor	-	-	-	-	-
-minecraft:rib_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:rooted_dirt	-	-	-	-	-
-minecraft:rose_bush	-	-	-	-	-
-minecraft:rotten_flesh	-	-	-	-	-
-minecraft:saddle	-	-	-	-	stable
-minecraft:salmon	-	-	-	-	-
-minecraft:salmon_bucket	-	-	-	-	-
-minecraft:salmon_spawn_egg	-	-	-	-	stable
-minecraft:sand	-	-	-	-	-
-minecraft:sandstone	-	-	-	-	-
-minecraft:sandstone_slab	-	-	-	-	-
-minecraft:sandstone_stairs	-	-	-	-	-
-minecraft:sandstone_wall	-	-	-	-	-
-minecraft:scaffolding	-	-	-	-	-
-minecraft:scrape_pottery_sherd	-	-	-	-	stable
-minecraft:sculk	-	-	-	-	-
-minecraft:sculk_catalyst	-	-	-	-	-
-minecraft:sculk_sensor	-	-	-	-	-
-minecraft:sculk_shrieker	-	-	-	-	-
-minecraft:sculk_vein	-	-	-	-	-
-minecraft:sea_lantern	-	-	-	-	-
-minecraft:sea_pickle	-	-	-	-	-
-minecraft:seagrass	-	-	-	-	-
-minecraft:sentry_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:shaper_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:sheaf_pottery_sherd	-	-	-	-	stable
-minecraft:shears	-	-	-	-	stable
-minecraft:sheep_spawn_egg	-	-	-	-	stable
-minecraft:shelter_pottery_sherd	-	-	-	-	stable
-minecraft:shield	-	-	-	-	stable
-minecraft:short_dry_grass	-	-	-	-	-
-minecraft:short_grass	-	-	-	-	-
-minecraft:shroomlight	-	-	-	-	-
-minecraft:shulker_box	-	-	-	-	-
-minecraft:shulker_shell	-	-	-	-	stable
-minecraft:shulker_spawn_egg	-	-	-	-	stable
-minecraft:silence_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:silverfish_spawn_egg	-	-	-	-	stable
-minecraft:skeleton_horse_spawn_egg	-	-	-	-	stable
-minecraft:skeleton_skull	-	-	-	-	-
-minecraft:skeleton_spawn_egg	-	-	-	-	stable
-minecraft:skull_banner_pattern	-	-	-	-	stable
-minecraft:skull_pottery_sherd	-	-	-	-	stable
-minecraft:slime_ball	-	-	-	-	stable
-minecraft:slime_block	-	-	-	-	-
-minecraft:slime_spawn_egg	-	-	-	-	stable
-minecraft:small_amethyst_bud	-	-	-	-	-
-minecraft:small_dripleaf	-	-	-	-	-
-minecraft:smithing_table	-	-	-	-	-
-minecraft:smoker	-	-	-	-	-
-minecraft:smooth_basalt	-	-	-	-	-
-minecraft:smooth_quartz	-	-	-	-	-
-minecraft:smooth_quartz_slab	-	-	-	-	-
-minecraft:smooth_quartz_stairs	-	-	-	-	-
-minecraft:smooth_red_sandstone	-	-	-	-	-
-minecraft:smooth_red_sandstone_slab	-	-	-	-	-
-minecraft:smooth_red_sandstone_stairs	-	-	-	-	-
-minecraft:smooth_sandstone	-	-	-	-	-
-minecraft:smooth_sandstone_slab	-	-	-	-	-
-minecraft:smooth_sandstone_stairs	-	-	-	-	-
-minecraft:smooth_stone	-	-	-	-	-
-minecraft:smooth_stone_slab	-	-	-	-	-
-minecraft:sniffer_egg	-	-	-	-	-
-minecraft:sniffer_spawn_egg	-	-	-	-	stable
-minecraft:snort_pottery_sherd	-	-	-	-	stable
-minecraft:snout_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:snow	-	-	-	-	-
-minecraft:snow_block	-	-	-	-	-
-minecraft:snow_golem_spawn_egg	-	-	-	-	stable
-minecraft:snowball	-	-	-	-	-
-minecraft:soul_campfire	-	-	-	-	-
-minecraft:soul_lantern	-	-	-	-	-
-minecraft:soul_sand	-	-	-	-	-
-minecraft:soul_soil	-	-	-	-	-
-minecraft:soul_torch	-	-	-	-	-
-minecraft:spawner	-	-	-	-	-
-minecraft:spectral_arrow	-	-	-	-	stable
-minecraft:spider_eye	-	-	-	-	-
-minecraft:spider_spawn_egg	-	-	-	-	stable
-minecraft:spire_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:splash_potion	-	-	-	-	-
-minecraft:sponge	-	-	-	-	-
-minecraft:spore_blossom	-	-	-	-	-
-minecraft:spruce_boat	-	-	-	-	stable
-minecraft:spruce_button	-	-	-	-	-
-minecraft:spruce_chest_boat	-	-	-	-	stable
-minecraft:spruce_door	-	-	-	-	-
-minecraft:spruce_fence	-	-	-	-	-
-minecraft:spruce_fence_gate	-	-	-	-	-
-minecraft:spruce_hanging_sign	-	-	-	-	-
-minecraft:spruce_leaves	-	-	-	-	-
-minecraft:spruce_log	-	-	-	-	-
-minecraft:spruce_planks	-	-	-	-	-
-minecraft:spruce_pressure_plate	-	-	-	-	-
-minecraft:spruce_sapling	-	-	-	-	-
-minecraft:spruce_shelf	-	-	-	-	-
-minecraft:spruce_sign	-	-	-	-	-
-minecraft:spruce_slab	-	-	-	-	-
-minecraft:spruce_stairs	-	-	-	-	-
-minecraft:spruce_trapdoor	-	-	-	-	-
-minecraft:spruce_wood	-	-	-	-	-
-minecraft:spyglass	-	-	-	-	stable
-minecraft:squid_spawn_egg	-	-	-	-	stable
-minecraft:stick	-	-	-	-	stable
-minecraft:sticky_piston	-	-	-	-	-
-minecraft:stone	-	-	-	-	-
-minecraft:stone_axe	-	-	-	-	stable
-minecraft:stone_brick_slab	-	-	-	-	-
-minecraft:stone_brick_stairs	-	-	-	-	-
-minecraft:stone_brick_wall	-	-	-	-	-
-minecraft:stone_bricks	-	-	-	-	-
-minecraft:stone_button	-	-	-	-	-
-minecraft:stone_hoe	-	-	-	-	stable
-minecraft:stone_pickaxe	-	-	-	-	stable
-minecraft:stone_pressure_plate	-	-	-	-	-
-minecraft:stone_shovel	-	-	-	-	stable
-minecraft:stone_slab	-	-	-	-	-
-minecraft:stone_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:stone_stairs	-	-	-	-	-
-minecraft:stone_sword	-	-	-	-	stable
-minecraft:stonecutter	-	-	-	-	-
-minecraft:stray_spawn_egg	-	-	-	-	stable
-minecraft:strider_spawn_egg	-	-	-	-	stable
-minecraft:string	-	-	-	-	-
-minecraft:stripped_acacia_log	-	-	-	-	-
-minecraft:stripped_acacia_wood	-	-	-	-	-
-minecraft:stripped_bamboo_block	-	-	-	-	-
-minecraft:stripped_birch_log	-	-	-	-	-
-minecraft:stripped_birch_wood	-	-	-	-	-
-minecraft:stripped_cherry_log	-	-	-	-	-
-minecraft:stripped_cherry_wood	-	-	-	-	-
-minecraft:stripped_crimson_hyphae	-	-	-	-	-
-minecraft:stripped_crimson_stem	-	-	-	-	-
-minecraft:stripped_dark_oak_log	-	-	-	-	-
-minecraft:stripped_dark_oak_wood	-	-	-	-	-
-minecraft:stripped_jungle_log	-	-	-	-	-
-minecraft:stripped_jungle_wood	-	-	-	-	-
-minecraft:stripped_mangrove_log	-	-	-	-	-
-minecraft:stripped_mangrove_wood	-	-	-	-	-
-minecraft:stripped_oak_log	-	-	-	-	-
-minecraft:stripped_oak_wood	-	-	-	-	-
-minecraft:stripped_pale_oak_log	-	-	-	-	-
-minecraft:stripped_pale_oak_wood	-	-	-	-	-
-minecraft:stripped_spruce_log	-	-	-	-	-
-minecraft:stripped_spruce_wood	-	-	-	-	-
-minecraft:stripped_warped_hyphae	-	-	-	-	-
-minecraft:stripped_warped_stem	-	-	-	-	-
-minecraft:structure_block	-	-	-	-	-
-minecraft:structure_void	-	-	-	-	-
-minecraft:sugar	-	-	-	-	stable
-minecraft:sugar_cane	-	-	-	-	-
-minecraft:sunflower	-	-	-	-	-
-minecraft:suspicious_gravel	-	-	-	-	-
-minecraft:suspicious_sand	-	-	-	-	-
-minecraft:suspicious_stew	-	minecraft:bowl	-	-	-
-minecraft:sweet_berries	-	-	-	-	-
-minecraft:tadpole_bucket	-	-	-	-	-
-minecraft:tadpole_spawn_egg	-	-	-	-	stable
-minecraft:tall_dry_grass	-	-	-	-	-
-minecraft:tall_grass	-	-	-	-	-
-minecraft:target	-	-	-	-	-
-minecraft:terracotta	-	-	-	-	-
-minecraft:test_block	-	-	-	-	-
-minecraft:test_instance_block	-	-	-	-	-
-minecraft:tide_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:tinted_glass	-	-	-	-	-
-minecraft:tipped_arrow	-	-	-	-	stable
-minecraft:tnt	-	-	-	-	-
-minecraft:tnt_minecart	-	-	-	-	-
-minecraft:torch	-	-	-	-	-
-minecraft:torchflower	-	-	-	-	-
-minecraft:torchflower_seeds	-	-	-	-	-
-minecraft:totem_of_undying	-	-	-	-	stable
-minecraft:trader_llama_spawn_egg	-	-	-	-	stable
-minecraft:trapped_chest	-	-	-	-	-
-minecraft:trial_key	-	-	-	-	stable
-minecraft:trial_spawner	-	-	-	-	-
-minecraft:trident	-	-	-	-	stable
-minecraft:tripwire_hook	-	-	-	-	-
-minecraft:tropical_fish	-	-	-	-	-
-minecraft:tropical_fish_bucket	-	-	-	-	-
-minecraft:tropical_fish_spawn_egg	-	-	-	-	stable
-minecraft:tube_coral	-	-	-	-	-
-minecraft:tube_coral_block	-	-	-	-	-
-minecraft:tube_coral_fan	-	-	-	-	-
-minecraft:tuff	-	-	-	-	-
-minecraft:tuff_brick_slab	-	-	-	-	-
-minecraft:tuff_brick_stairs	-	-	-	-	-
-minecraft:tuff_brick_wall	-	-	-	-	-
-minecraft:tuff_bricks	-	-	-	-	-
-minecraft:tuff_slab	-	-	-	-	-
-minecraft:tuff_stairs	-	-	-	-	-
-minecraft:tuff_wall	-	-	-	-	-
-minecraft:turtle_egg	-	-	-	-	-
-minecraft:turtle_helmet	-	-	head	-	-
-minecraft:turtle_scute	-	-	-	-	stable
-minecraft:turtle_spawn_egg	-	-	-	-	stable
-minecraft:twisting_vines	-	-	-	-	-
-minecraft:vault	-	-	-	-	-
-minecraft:verdant_froglight	-	-	-	-	-
-minecraft:vex_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:vex_spawn_egg	-	-	-	-	stable
-minecraft:villager_spawn_egg	-	-	-	-	stable
-minecraft:vindicator_spawn_egg	-	-	-	-	stable
-minecraft:vine	-	-	-	-	-
-minecraft:wandering_trader_spawn_egg	-	-	-	-	stable
-minecraft:ward_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:warden_spawn_egg	-	-	-	-	stable
-minecraft:warped_button	-	-	-	-	-
-minecraft:warped_door	-	-	-	-	-
-minecraft:warped_fence	-	-	-	-	-
-minecraft:warped_fence_gate	-	-	-	-	-
-minecraft:warped_fungus	-	-	-	-	-
-minecraft:warped_fungus_on_a_stick	-	-	-	-	stable
-minecraft:warped_hanging_sign	-	-	-	-	-
-minecraft:warped_hyphae	-	-	-	-	-
-minecraft:warped_nylium	-	-	-	-	-
-minecraft:warped_planks	-	-	-	-	-
-minecraft:warped_pressure_plate	-	-	-	-	-
-minecraft:warped_roots	-	-	-	-	-
-minecraft:warped_shelf	-	-	-	-	-
-minecraft:warped_sign	-	-	-	-	-
-minecraft:warped_slab	-	-	-	-	-
-minecraft:warped_stairs	-	-	-	-	-
-minecraft:warped_stem	-	-	-	-	-
-minecraft:warped_trapdoor	-	-	-	-	-
-minecraft:warped_wart_block	-	-	-	-	-
-minecraft:water_bucket	-	-	-	-	-
-minecraft:waxed_chiseled_copper	-	-	-	-	-
-minecraft:waxed_copper_bars	-	-	-	-	-
-minecraft:waxed_copper_block	-	-	-	-	-
-minecraft:waxed_copper_bulb	-	-	-	-	-
-minecraft:waxed_copper_chain	-	-	-	-	-
-minecraft:waxed_copper_chest	-	-	-	-	-
-minecraft:waxed_copper_door	-	-	-	-	-
-minecraft:waxed_copper_golem_statue	-	-	-	-	-
-minecraft:waxed_copper_grate	-	-	-	-	-
-minecraft:waxed_copper_lantern	-	-	-	-	-
-minecraft:waxed_copper_trapdoor	-	-	-	-	-
-minecraft:waxed_cut_copper	-	-	-	-	-
-minecraft:waxed_cut_copper_slab	-	-	-	-	-
-minecraft:waxed_cut_copper_stairs	-	-	-	-	-
-minecraft:waxed_exposed_chiseled_copper	-	-	-	-	-
-minecraft:waxed_exposed_copper	-	-	-	-	-
-minecraft:waxed_exposed_copper_bars	-	-	-	-	-
-minecraft:waxed_exposed_copper_bulb	-	-	-	-	-
-minecraft:waxed_exposed_copper_chain	-	-	-	-	-
-minecraft:waxed_exposed_copper_chest	-	-	-	-	-
-minecraft:waxed_exposed_copper_door	-	-	-	-	-
-minecraft:waxed_exposed_copper_golem_statue	-	-	-	-	-
-minecraft:waxed_exposed_copper_grate	-	-	-	-	-
-minecraft:waxed_exposed_copper_lantern	-	-	-	-	-
-minecraft:waxed_exposed_copper_trapdoor	-	-	-	-	-
-minecraft:waxed_exposed_cut_copper	-	-	-	-	-
-minecraft:waxed_exposed_cut_copper_slab	-	-	-	-	-
-minecraft:waxed_exposed_cut_copper_stairs	-	-	-	-	-
-minecraft:waxed_exposed_lightning_rod	-	-	-	-	-
-minecraft:waxed_lightning_rod	-	-	-	-	-
-minecraft:waxed_oxidized_chiseled_copper	-	-	-	-	-
-minecraft:waxed_oxidized_copper	-	-	-	-	-
-minecraft:waxed_oxidized_copper_bars	-	-	-	-	-
-minecraft:waxed_oxidized_copper_bulb	-	-	-	-	-
-minecraft:waxed_oxidized_copper_chain	-	-	-	-	-
-minecraft:waxed_oxidized_copper_chest	-	-	-	-	-
-minecraft:waxed_oxidized_copper_door	-	-	-	-	-
-minecraft:waxed_oxidized_copper_golem_statue	-	-	-	-	-
-minecraft:waxed_oxidized_copper_grate	-	-	-	-	-
-minecraft:waxed_oxidized_copper_lantern	-	-	-	-	-
-minecraft:waxed_oxidized_copper_trapdoor	-	-	-	-	-
-minecraft:waxed_oxidized_cut_copper	-	-	-	-	-
-minecraft:waxed_oxidized_cut_copper_slab	-	-	-	-	-
-minecraft:waxed_oxidized_cut_copper_stairs	-	-	-	-	-
-minecraft:waxed_oxidized_lightning_rod	-	-	-	-	-
-minecraft:waxed_weathered_chiseled_copper	-	-	-	-	-
-minecraft:waxed_weathered_copper	-	-	-	-	-
-minecraft:waxed_weathered_copper_bars	-	-	-	-	-
-minecraft:waxed_weathered_copper_bulb	-	-	-	-	-
-minecraft:waxed_weathered_copper_chain	-	-	-	-	-
-minecraft:waxed_weathered_copper_chest	-	-	-	-	-
-minecraft:waxed_weathered_copper_door	-	-	-	-	-
-minecraft:waxed_weathered_copper_golem_statue	-	-	-	-	-
-minecraft:waxed_weathered_copper_grate	-	-	-	-	-
-minecraft:waxed_weathered_copper_lantern	-	-	-	-	-
-minecraft:waxed_weathered_copper_trapdoor	-	-	-	-	-
-minecraft:waxed_weathered_cut_copper	-	-	-	-	-
-minecraft:waxed_weathered_cut_copper_slab	-	-	-	-	-
-minecraft:waxed_weathered_cut_copper_stairs	-	-	-	-	-
-minecraft:waxed_weathered_lightning_rod	-	-	-	-	-
-minecraft:wayfinder_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:weathered_chiseled_copper	-	-	-	-	-
-minecraft:weathered_copper	-	-	-	-	-
-minecraft:weathered_copper_bars	-	-	-	-	-
-minecraft:weathered_copper_bulb	-	-	-	-	-
-minecraft:weathered_copper_chain	-	-	-	-	-
-minecraft:weathered_copper_chest	-	-	-	-	-
-minecraft:weathered_copper_door	-	-	-	-	-
-minecraft:weathered_copper_golem_statue	-	-	-	-	-
-minecraft:weathered_copper_grate	-	-	-	-	-
-minecraft:weathered_copper_lantern	-	-	-	-	-
-minecraft:weathered_copper_trapdoor	-	-	-	-	-
-minecraft:weathered_cut_copper	-	-	-	-	-
-minecraft:weathered_cut_copper_slab	-	-	-	-	-
-minecraft:weathered_cut_copper_stairs	-	-	-	-	-
-minecraft:weathered_lightning_rod	-	-	-	-	-
-minecraft:weeping_vines	-	-	-	-	-
-minecraft:wet_sponge	-	-	-	-	-
-minecraft:wheat	-	-	-	-	stable
-minecraft:wheat_seeds	-	-	-	-	-
-minecraft:white_banner	-	-	-	-	-
-minecraft:white_bed	-	-	-	-	-
-minecraft:white_bundle	-	-	-	-	-
-minecraft:white_candle	-	-	-	-	-
-minecraft:white_carpet	-	-	-	-	-
-minecraft:white_concrete	-	-	-	-	-
-minecraft:white_concrete_powder	-	-	-	-	-
-minecraft:white_dye	-	-	-	-	stable
-minecraft:white_glazed_terracotta	-	-	-	-	-
-minecraft:white_harness	-	-	-	-	stable
-minecraft:white_shulker_box	-	-	-	-	-
-minecraft:white_stained_glass	-	-	-	-	-
-minecraft:white_stained_glass_pane	-	-	-	-	-
-minecraft:white_terracotta	-	-	-	-	-
-minecraft:white_tulip	-	-	-	-	-
-minecraft:white_wool	-	-	-	-	-
-minecraft:wild_armor_trim_smithing_template	-	-	-	-	stable
-minecraft:wildflowers	-	-	-	-	-
-minecraft:wind_charge	-	-	-	-	-
-minecraft:witch_spawn_egg	-	-	-	-	stable
-minecraft:wither_rose	-	-	-	-	-
-minecraft:wither_skeleton_skull	-	-	-	-	-
-minecraft:wither_skeleton_spawn_egg	-	-	-	-	stable
-minecraft:wither_spawn_egg	-	-	-	-	stable
-minecraft:wolf_armor	-	-	-	-	stable
-minecraft:wolf_spawn_egg	-	-	-	-	stable
-minecraft:wooden_axe	-	-	-	-	stable
-minecraft:wooden_hoe	-	-	-	-	stable
-minecraft:wooden_pickaxe	-	-	-	-	stable
-minecraft:wooden_shovel	-	-	-	-	stable
-minecraft:wooden_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable
-minecraft:wooden_sword	-	-	-	-	stable
-minecraft:writable_book	-	-	-	-	stable
-minecraft:written_book	-	-	-	-	stable
-minecraft:yellow_banner	-	-	-	-	-
-minecraft:yellow_bed	-	-	-	-	-
-minecraft:yellow_bundle	-	-	-	-	-
-minecraft:yellow_candle	-	-	-	-	-
-minecraft:yellow_carpet	-	-	-	-	-
-minecraft:yellow_concrete	-	-	-	-	-
-minecraft:yellow_concrete_powder	-	-	-	-	-
-minecraft:yellow_dye	-	-	-	-	stable
-minecraft:yellow_glazed_terracotta	-	-	-	-	-
-minecraft:yellow_harness	-	-	-	-	stable
-minecraft:yellow_shulker_box	-	-	-	-	-
-minecraft:yellow_stained_glass	-	-	-	-	-
-minecraft:yellow_stained_glass_pane	-	-	-	-	-
-minecraft:yellow_terracotta	-	-	-	-	-
-minecraft:yellow_wool	-	-	-	-	-
-minecraft:zoglin_spawn_egg	-	-	-	-	stable
-minecraft:zombie_head	-	-	-	-	-
-minecraft:zombie_horse_spawn_egg	-	-	-	-	stable
-minecraft:zombie_nautilus_spawn_egg	-	-	-	-	stable
-minecraft:zombie_spawn_egg	-	-	-	-	stable
-minecraft:zombie_villager_spawn_egg	-	-	-	-	stable
-minecraft:zombified_piglin_spawn_egg	-	-	-	-	stable
+minecraft:acacia_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:acacia_button	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:acacia_door	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_fence	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_log	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_planks	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_sign	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_slab	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:acacia_wood	-	-	-	-	-	slow:0.2	-
+minecraft:activator_rail	-	-	-	-	-	slow:0.2	-
+minecraft:air	-	-	-	-	stable	slow:0.2	-
+minecraft:allay_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:allium	-	-	-	-	-	slow:0.2	-
+minecraft:amethyst_block	-	-	-	-	-	slow:0.2	-
+minecraft:amethyst_cluster	-	-	-	-	-	slow:0.2	-
+minecraft:amethyst_shard	-	-	-	-	stable	slow:0.2	-
+minecraft:ancient_debris	-	-	-	-	-	slow:0.2	-
+minecraft:andesite	-	-	-	-	-	slow:0.2	-
+minecraft:andesite_slab	-	-	-	-	-	slow:0.2	-
+minecraft:andesite_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:andesite_wall	-	-	-	-	-	slow:0.2	-
+minecraft:angler_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:anvil	-	-	-	-	-	slow:0.2	-
+minecraft:apple	-	-	-	-	-	slow:0.2	-
+minecraft:archer_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:armadillo_scute	-	-	-	-	stable	slow:0.2	-
+minecraft:armadillo_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:armor_stand	-	-	-	-	-	slow:0.2	-
+minecraft:arms_up_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:arrow	-	-	-	-	stable	slow:0.2	-
+minecraft:axolotl_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:axolotl_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:azalea	-	-	-	-	-	slow:0.2	-
+minecraft:azalea_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:azure_bluet	-	-	-	-	-	slow:0.2	-
+minecraft:baked_potato	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_block	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_button	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_chest_raft	-	-	-	-	stable	slow:0.2	-
+minecraft:bamboo_door	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_fence	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_mosaic	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_mosaic_slab	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_mosaic_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_planks	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_raft	-	-	-	-	stable	slow:0.2	-
+minecraft:bamboo_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_sign	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_slab	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:bamboo_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:barrel	-	-	-	-	-	slow:0.2	-
+minecraft:barrier	-	-	-	-	-	slow:0.2	-
+minecraft:basalt	-	-	-	-	-	slow:0.2	-
+minecraft:bat_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:beacon	-	-	-	-	-	slow:0.2	-
+minecraft:bedrock	-	-	-	-	-	slow:0.2	-
+minecraft:bee_nest	-	-	-	-	-	slow:0.2	-
+minecraft:bee_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:beef	-	-	-	-	-	slow:0.2	-
+minecraft:beehive	-	-	-	-	-	slow:0.2	-
+minecraft:beetroot	-	-	-	-	-	slow:0.2	-
+minecraft:beetroot_seeds	-	-	-	-	-	slow:0.2	-
+minecraft:beetroot_soup	-	minecraft:bowl	-	-	-	slow:0.2	-
+minecraft:bell	-	-	-	-	-	slow:0.2	-
+minecraft:big_dripleaf	-	-	-	-	-	slow:0.2	-
+minecraft:birch_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:birch_button	-	-	-	-	-	slow:0.2	-
+minecraft:birch_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:birch_door	-	-	-	-	-	slow:0.2	-
+minecraft:birch_fence	-	-	-	-	-	slow:0.2	-
+minecraft:birch_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:birch_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:birch_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:birch_log	-	-	-	-	-	slow:0.2	-
+minecraft:birch_planks	-	-	-	-	-	slow:0.2	-
+minecraft:birch_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:birch_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:birch_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:birch_sign	-	-	-	-	-	slow:0.2	-
+minecraft:birch_slab	-	-	-	-	-	slow:0.2	-
+minecraft:birch_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:birch_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:birch_wood	-	-	-	-	-	slow:0.2	-
+minecraft:black_banner	-	-	-	-	-	slow:0.2	-
+minecraft:black_bed	-	-	-	-	-	slow:0.2	-
+minecraft:black_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:black_candle	-	-	-	-	-	slow:0.2	-
+minecraft:black_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:black_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:black_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:black_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:black_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:black_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:black_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:black_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:black_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:black_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:black_wool	-	-	-	-	-	slow:0.2	-
+minecraft:blackstone	-	-	-	-	-	slow:0.2	-
+minecraft:blackstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:blackstone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:blackstone_wall	-	-	-	-	-	slow:0.2	-
+minecraft:blade_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:blast_furnace	-	-	-	-	-	slow:0.2	-
+minecraft:blaze_powder	-	-	-	-	stable	slow:0.2	-
+minecraft:blaze_rod	-	-	-	-	stable	slow:0.2	-
+minecraft:blaze_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:blue_banner	-	-	-	-	-	slow:0.2	-
+minecraft:blue_bed	-	-	-	-	-	slow:0.2	-
+minecraft:blue_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:blue_candle	-	-	-	-	-	slow:0.2	-
+minecraft:blue_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:blue_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:blue_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:blue_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:blue_egg	-	-	-	-	-	slow:0.2	-
+minecraft:blue_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:blue_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:blue_ice	-	-	-	-	-	slow:0.2	-
+minecraft:blue_orchid	-	-	-	-	-	slow:0.2	-
+minecraft:blue_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:blue_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:blue_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:blue_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:blue_wool	-	-	-	-	-	slow:0.2	-
+minecraft:bogged_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:bolt_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:bone	-	-	-	-	stable	slow:0.2	-
+minecraft:bone_block	-	-	-	-	-	slow:0.2	-
+minecraft:bone_meal	-	-	-	-	-	slow:0.2	-
+minecraft:book	-	-	-	-	stable	slow:0.2	-
+minecraft:bookshelf	-	-	-	-	-	slow:0.2	-
+minecraft:bordure_indented_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:bow	-	-	-	-	stable	slow:0.2	-
+minecraft:bowl	-	-	-	-	stable	slow:0.2	-
+minecraft:brain_coral	-	-	-	-	-	slow:0.2	-
+minecraft:brain_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:brain_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:bread	-	-	-	-	-	slow:0.2	-
+minecraft:breeze_rod	-	-	-	-	stable	slow:0.2	-
+minecraft:breeze_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:brewer_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:brewing_stand	-	-	-	-	-	slow:0.2	-
+minecraft:brick	-	-	-	-	stable	slow:0.2	-
+minecraft:brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:bricks	-	-	-	-	-	slow:0.2	-
+minecraft:brown_banner	-	-	-	-	-	slow:0.2	-
+minecraft:brown_bed	-	-	-	-	-	slow:0.2	-
+minecraft:brown_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:brown_candle	-	-	-	-	-	slow:0.2	-
+minecraft:brown_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:brown_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:brown_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:brown_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:brown_egg	-	-	-	-	-	slow:0.2	-
+minecraft:brown_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:brown_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:brown_mushroom	-	-	-	-	-	slow:0.2	-
+minecraft:brown_mushroom_block	-	-	-	-	-	slow:0.2	-
+minecraft:brown_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:brown_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:brown_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:brown_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:brown_wool	-	-	-	-	-	slow:0.2	-
+minecraft:brush	-	-	-	-	stable	slow:0.2	self-ending
+minecraft:bubble_coral	-	-	-	-	-	slow:0.2	-
+minecraft:bubble_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:bubble_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:budding_amethyst	-	-	-	-	-	slow:0.2	-
+minecraft:bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:burn_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:bush	-	-	-	-	-	slow:0.2	-
+minecraft:cactus	-	-	-	-	-	slow:0.2	-
+minecraft:cactus_flower	-	-	-	-	-	slow:0.2	-
+minecraft:cake	-	-	-	-	-	slow:0.2	-
+minecraft:calcite	-	-	-	-	-	slow:0.2	-
+minecraft:calibrated_sculk_sensor	-	-	-	-	-	slow:0.2	-
+minecraft:camel_husk_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:camel_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:campfire	-	-	-	-	-	slow:0.2	-
+minecraft:candle	-	-	-	-	-	slow:0.2	-
+minecraft:carrot	-	-	-	-	-	slow:0.2	-
+minecraft:carrot_on_a_stick	-	-	-	-	stable	slow:0.2	-
+minecraft:cartography_table	-	-	-	-	-	slow:0.2	-
+minecraft:carved_pumpkin	-	-	-	-	-	slow:0.2	-
+minecraft:cat_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:cauldron	-	-	-	-	-	slow:0.2	-
+minecraft:cave_spider_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:chain_command_block	-	-	-	-	-	slow:0.2	-
+minecraft:chainmail_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:chainmail_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:chainmail_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:chainmail_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:charcoal	-	-	-	-	stable	slow:0.2	-
+minecraft:cherry_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:cherry_button	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:cherry_door	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_fence	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_log	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_planks	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_sign	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_slab	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:cherry_wood	-	-	-	-	-	slow:0.2	-
+minecraft:chest	-	-	-	-	-	slow:0.2	-
+minecraft:chest_minecart	-	-	-	-	-	slow:0.2	-
+minecraft:chicken	-	-	-	-	-	slow:0.2	-
+minecraft:chicken_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:chipped_anvil	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_bookshelf	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_deepslate	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_nether_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_polished_blackstone	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_quartz_block	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_red_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_resin_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_tuff	-	-	-	-	-	slow:0.2	-
+minecraft:chiseled_tuff_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:chorus_flower	-	-	-	-	-	slow:0.2	-
+minecraft:chorus_fruit	-	-	-	-	-	slow:0.2	-
+minecraft:chorus_plant	-	-	-	-	-	slow:0.2	-
+minecraft:clay	-	-	-	-	-	slow:0.2	-
+minecraft:clay_ball	-	-	-	-	stable	slow:0.2	-
+minecraft:clock	-	-	-	-	stable	slow:0.2	-
+minecraft:closed_eyeblossom	-	-	-	-	-	slow:0.2	-
+minecraft:coal	-	-	-	-	stable	slow:0.2	-
+minecraft:coal_block	-	-	-	-	-	slow:0.2	-
+minecraft:coal_ore	-	-	-	-	-	slow:0.2	-
+minecraft:coarse_dirt	-	-	-	-	-	slow:0.2	-
+minecraft:coast_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:cobbled_deepslate	-	-	-	-	-	slow:0.2	-
+minecraft:cobbled_deepslate_slab	-	-	-	-	-	slow:0.2	-
+minecraft:cobbled_deepslate_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:cobbled_deepslate_wall	-	-	-	-	-	slow:0.2	-
+minecraft:cobblestone	-	-	-	-	-	slow:0.2	-
+minecraft:cobblestone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:cobblestone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:cobblestone_wall	-	-	-	-	-	slow:0.2	-
+minecraft:cobweb	-	-	-	-	-	slow:0.2	-
+minecraft:cocoa_beans	-	-	-	-	-	slow:0.2	-
+minecraft:cod	-	-	-	-	-	slow:0.2	-
+minecraft:cod_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:cod_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:command_block	-	-	-	-	-	slow:0.2	-
+minecraft:command_block_minecart	-	-	-	-	-	slow:0.2	-
+minecraft:comparator	-	-	-	-	-	slow:0.2	-
+minecraft:compass	-	-	-	-	-	slow:0.2	-
+minecraft:composter	-	-	-	-	-	slow:0.2	-
+minecraft:conduit	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_beef	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_chicken	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_cod	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_mutton	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_porkchop	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_rabbit	-	-	-	-	-	slow:0.2	-
+minecraft:cooked_salmon	-	-	-	-	-	slow:0.2	-
+minecraft:cookie	-	-	-	-	-	slow:0.2	-
+minecraft:copper_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:copper_block	-	-	-	-	-	slow:0.2	-
+minecraft:copper_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:copper_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:copper_golem_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:copper_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:copper_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_horse_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_ingot	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:copper_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:copper_nautilus_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_nugget	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_ore	-	-	-	-	-	slow:0.2	-
+minecraft:copper_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:copper_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:copper_torch	-	-	-	-	-	slow:0.2	-
+minecraft:copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:cornflower	-	-	-	-	-	slow:0.2	-
+minecraft:cow_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:cracked_deepslate_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:cracked_deepslate_tiles	-	-	-	-	-	slow:0.2	-
+minecraft:cracked_nether_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:cracked_polished_blackstone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:cracked_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:crafter	-	-	-	-	-	slow:0.2	-
+minecraft:crafting_table	-	-	-	-	-	slow:0.2	-
+minecraft:creaking_heart	-	-	-	-	-	slow:0.2	-
+minecraft:creaking_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:creeper_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:creeper_head	-	-	-	-	-	slow:0.2	-
+minecraft:creeper_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:crimson_button	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_door	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_fence	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_fungus	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_hyphae	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_nylium	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_planks	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_roots	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_sign	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_slab	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_stem	-	-	-	-	-	slow:0.2	-
+minecraft:crimson_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:crossbow	-	-	-	-	stable	slow:0.2	-
+minecraft:crying_obsidian	-	-	-	-	-	slow:0.2	-
+minecraft:cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:cut_red_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:cut_red_sandstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:cut_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:cut_sandstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_banner	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_bed	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:cyan_candle	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:cyan_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:cyan_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:cyan_wool	-	-	-	-	-	slow:0.2	-
+minecraft:damaged_anvil	-	-	-	-	-	slow:0.2	-
+minecraft:dandelion	-	-	-	-	-	slow:0.2	-
+minecraft:danger_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:dark_oak_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:dark_oak_button	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:dark_oak_door	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_fence	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_log	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_planks	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_sign	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_slab	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:dark_oak_wood	-	-	-	-	-	slow:0.2	-
+minecraft:dark_prismarine	-	-	-	-	-	slow:0.2	-
+minecraft:dark_prismarine_slab	-	-	-	-	-	slow:0.2	-
+minecraft:dark_prismarine_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:daylight_detector	-	-	-	-	-	slow:0.2	-
+minecraft:dead_brain_coral	-	-	-	-	-	slow:0.2	-
+minecraft:dead_brain_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:dead_brain_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:dead_bubble_coral	-	-	-	-	-	slow:0.2	-
+minecraft:dead_bubble_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:dead_bubble_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:dead_bush	-	-	-	-	-	slow:0.2	-
+minecraft:dead_fire_coral	-	-	-	-	-	slow:0.2	-
+minecraft:dead_fire_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:dead_fire_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:dead_horn_coral	-	-	-	-	-	slow:0.2	-
+minecraft:dead_horn_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:dead_horn_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:dead_tube_coral	-	-	-	-	-	slow:0.2	-
+minecraft:dead_tube_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:dead_tube_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:debug_stick	-	-	-	-	stable	slow:0.2	-
+minecraft:decorated_pot	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_coal_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_copper_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_diamond_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_emerald_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_gold_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_iron_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_lapis_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_redstone_ore	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_tile_slab	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_tile_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_tile_wall	-	-	-	-	-	slow:0.2	-
+minecraft:deepslate_tiles	-	-	-	-	-	slow:0.2	-
+minecraft:detector_rail	-	-	-	-	-	slow:0.2	-
+minecraft:diamond	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_block	-	-	-	-	-	slow:0.2	-
+minecraft:diamond_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:diamond_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:diamond_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:diamond_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_horse_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:diamond_nautilus_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_ore	-	-	-	-	-	slow:0.2	-
+minecraft:diamond_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:diamond_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:diamond_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:diorite	-	-	-	-	-	slow:0.2	-
+minecraft:diorite_slab	-	-	-	-	-	slow:0.2	-
+minecraft:diorite_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:diorite_wall	-	-	-	-	-	slow:0.2	-
+minecraft:dirt	-	-	-	-	-	slow:0.2	-
+minecraft:dirt_path	-	-	-	-	-	slow:0.2	-
+minecraft:disc_fragment_5	-	-	-	-	stable	slow:0.2	-
+minecraft:dispenser	-	-	-	-	-	slow:0.2	-
+minecraft:dolphin_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:donkey_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:dragon_breath	-	-	-	-	stable	slow:0.2	-
+minecraft:dragon_egg	-	-	-	-	-	slow:0.2	-
+minecraft:dragon_head	-	-	-	-	-	slow:0.2	-
+minecraft:dried_ghast	-	-	-	-	-	slow:0.2	-
+minecraft:dried_kelp	-	-	-	-	-	slow:0.2	-
+minecraft:dried_kelp_block	-	-	-	-	-	slow:0.2	-
+minecraft:dripstone_block	-	-	-	-	-	slow:0.2	-
+minecraft:dropper	-	-	-	-	-	slow:0.2	-
+minecraft:drowned_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:dune_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:echo_shard	-	-	-	-	stable	slow:0.2	-
+minecraft:egg	-	-	-	-	-	slow:0.2	-
+minecraft:elder_guardian_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:elytra	-	-	chest	-	-	slow:0.2	-
+minecraft:emerald	-	-	-	-	stable	slow:0.2	-
+minecraft:emerald_block	-	-	-	-	-	slow:0.2	-
+minecraft:emerald_ore	-	-	-	-	-	slow:0.2	-
+minecraft:enchanted_book	-	-	-	-	stable	slow:0.2	-
+minecraft:enchanted_golden_apple	-	-	-	-	-	slow:0.2	-
+minecraft:enchanting_table	-	-	-	-	-	slow:0.2	-
+minecraft:end_crystal	-	-	-	-	-	slow:0.2	-
+minecraft:end_portal_frame	-	-	-	-	-	slow:0.2	-
+minecraft:end_rod	-	-	-	-	-	slow:0.2	-
+minecraft:end_stone	-	-	-	-	-	slow:0.2	-
+minecraft:end_stone_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:end_stone_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:end_stone_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:end_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:ender_chest	-	-	-	-	-	slow:0.2	-
+minecraft:ender_dragon_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:ender_eye	-	-	-	-	stable	slow:0.2	-
+minecraft:ender_pearl	-	-	-	-	-	slow:0.2	-
+minecraft:enderman_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:endermite_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:evoker_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:experience_bottle	-	-	-	-	-	slow:0.2	-
+minecraft:explorer_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:exposed_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:exposed_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:eye_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:farmland	-	-	-	-	-	slow:0.2	-
+minecraft:feather	-	-	-	-	stable	slow:0.2	-
+minecraft:fermented_spider_eye	-	-	-	-	stable	slow:0.2	-
+minecraft:fern	-	-	-	-	-	slow:0.2	-
+minecraft:field_masoned_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:filled_map	-	-	-	-	stable	slow:0.2	-
+minecraft:fire_charge	-	-	-	-	-	slow:0.2	-
+minecraft:fire_coral	-	-	-	-	-	slow:0.2	-
+minecraft:fire_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:fire_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:firefly_bush	-	-	-	-	-	slow:0.2	-
+minecraft:firework_rocket	-	-	-	-	stable	slow:0.2	-
+minecraft:firework_star	-	-	-	-	stable	slow:0.2	-
+minecraft:fishing_rod	-	-	-	-	stable	slow:0.2	-
+minecraft:fletching_table	-	-	-	-	-	slow:0.2	-
+minecraft:flint	-	-	-	-	stable	slow:0.2	-
+minecraft:flint_and_steel	-	-	-	-	stable	slow:0.2	-
+minecraft:flow_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:flow_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:flow_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:flower_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:flower_pot	-	-	-	-	-	slow:0.2	-
+minecraft:flowering_azalea	-	-	-	-	-	slow:0.2	-
+minecraft:flowering_azalea_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:fox_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:friend_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:frog_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:frogspawn	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:furnace	-	-	-	-	-	slow:0.2	-
+minecraft:furnace_minecart	-	-	-	-	-	slow:0.2	-
+minecraft:ghast_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:ghast_tear	-	-	-	-	stable	slow:0.2	-
+minecraft:gilded_blackstone	-	-	-	-	-	slow:0.2	-
+minecraft:glass	-	-	-	-	-	slow:0.2	-
+minecraft:glass_bottle	-	-	-	-	-	slow:0.2	-
+minecraft:glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:glistering_melon_slice	-	-	-	-	stable	slow:0.2	-
+minecraft:globe_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:glow_berries	-	-	-	-	-	slow:0.2	-
+minecraft:glow_ink_sac	-	-	-	-	stable	slow:0.2	-
+minecraft:glow_item_frame	-	-	-	-	-	slow:0.2	-
+minecraft:glow_lichen	-	-	-	-	-	slow:0.2	-
+minecraft:glow_squid_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:glowstone	-	-	-	-	-	slow:0.2	-
+minecraft:glowstone_dust	-	-	-	-	stable	slow:0.2	-
+minecraft:goat_horn	-	-	-	-	stable	slow:0.2	-
+minecraft:goat_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:gold_block	-	-	-	-	-	slow:0.2	-
+minecraft:gold_ingot	-	-	-	-	stable	slow:0.2	-
+minecraft:gold_nugget	-	-	-	-	stable	slow:0.2	-
+minecraft:gold_ore	-	-	-	-	-	slow:0.2	-
+minecraft:golden_apple	-	-	-	-	-	slow:0.2	-
+minecraft:golden_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:golden_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:golden_carrot	-	-	-	-	-	slow:0.2	-
+minecraft:golden_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:golden_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:golden_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:golden_horse_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:golden_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:golden_nautilus_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:golden_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:golden_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:golden_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:golden_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:granite	-	-	-	-	-	slow:0.2	-
+minecraft:granite_slab	-	-	-	-	-	slow:0.2	-
+minecraft:granite_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:granite_wall	-	-	-	-	-	slow:0.2	-
+minecraft:grass_block	-	-	-	-	-	slow:0.2	-
+minecraft:gravel	-	-	-	-	-	slow:0.2	-
+minecraft:gray_banner	-	-	-	-	-	slow:0.2	-
+minecraft:gray_bed	-	-	-	-	-	slow:0.2	-
+minecraft:gray_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:gray_candle	-	-	-	-	-	slow:0.2	-
+minecraft:gray_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:gray_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:gray_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:gray_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:gray_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:gray_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:gray_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:gray_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:gray_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:gray_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:gray_wool	-	-	-	-	-	slow:0.2	-
+minecraft:green_banner	-	-	-	-	-	slow:0.2	-
+minecraft:green_bed	-	-	-	-	-	slow:0.2	-
+minecraft:green_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:green_candle	-	-	-	-	-	slow:0.2	-
+minecraft:green_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:green_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:green_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:green_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:green_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:green_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:green_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:green_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:green_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:green_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:green_wool	-	-	-	-	-	slow:0.2	-
+minecraft:grindstone	-	-	-	-	-	slow:0.2	-
+minecraft:guardian_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:gunpowder	-	-	-	-	stable	slow:0.2	-
+minecraft:guster_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:guster_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:hanging_roots	-	-	-	-	-	slow:0.2	-
+minecraft:happy_ghast_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:hay_block	-	-	-	-	-	slow:0.2	-
+minecraft:heart_of_the_sea	-	-	-	-	stable	slow:0.2	-
+minecraft:heart_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:heartbreak_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:heavy_core	-	-	-	-	-	slow:0.2	-
+minecraft:heavy_weighted_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:hoglin_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:honey_block	-	-	-	-	-	slow:0.2	-
+minecraft:honey_bottle	-	minecraft:glass_bottle	-	-	-	slow:0.2	-
+minecraft:honeycomb	-	-	-	-	-	slow:0.2	-
+minecraft:honeycomb_block	-	-	-	-	-	slow:0.2	-
+minecraft:hopper	-	-	-	-	-	slow:0.2	-
+minecraft:hopper_minecart	-	-	-	-	-	slow:0.2	-
+minecraft:horn_coral	-	-	-	-	-	slow:0.2	-
+minecraft:horn_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:horn_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:horse_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:host_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:howl_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:husk_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:ice	-	-	-	-	-	slow:0.2	-
+minecraft:infested_chiseled_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:infested_cobblestone	-	-	-	-	-	slow:0.2	-
+minecraft:infested_cracked_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:infested_deepslate	-	-	-	-	-	slow:0.2	-
+minecraft:infested_mossy_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:infested_stone	-	-	-	-	-	slow:0.2	-
+minecraft:infested_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:ink_sac	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_bars	-	-	-	-	-	slow:0.2	-
+minecraft:iron_block	-	-	-	-	-	slow:0.2	-
+minecraft:iron_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:iron_chain	-	-	-	-	-	slow:0.2	-
+minecraft:iron_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:iron_door	-	-	-	-	-	slow:0.2	-
+minecraft:iron_golem_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:iron_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_horse_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_ingot	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:iron_nautilus_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_nugget	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_ore	-	-	-	-	-	slow:0.2	-
+minecraft:iron_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:iron_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:iron_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:item_frame	-	-	-	-	-	slow:0.2	-
+minecraft:jack_o_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:jigsaw	-	-	-	-	-	slow:0.2	-
+minecraft:jukebox	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:jungle_button	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:jungle_door	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_fence	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_log	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_planks	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_sign	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_slab	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:jungle_wood	-	-	-	-	-	slow:0.2	-
+minecraft:kelp	-	-	-	-	-	slow:0.2	-
+minecraft:knowledge_book	-	-	-	-	-	slow:0.2	-
+minecraft:ladder	-	-	-	-	-	slow:0.2	-
+minecraft:lantern	-	-	-	-	-	slow:0.2	-
+minecraft:lapis_block	-	-	-	-	-	slow:0.2	-
+minecraft:lapis_lazuli	-	-	-	-	stable	slow:0.2	-
+minecraft:lapis_ore	-	-	-	-	-	slow:0.2	-
+minecraft:large_amethyst_bud	-	-	-	-	-	slow:0.2	-
+minecraft:large_fern	-	-	-	-	-	slow:0.2	-
+minecraft:lava_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:lead	-	-	-	-	stable	slow:0.2	-
+minecraft:leaf_litter	-	-	-	-	-	slow:0.2	-
+minecraft:leather	-	-	-	-	stable	slow:0.2	-
+minecraft:leather_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:leather_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:leather_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:leather_horse_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:leather_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:lectern	-	-	-	-	-	slow:0.2	-
+minecraft:lever	-	-	-	-	-	slow:0.2	-
+minecraft:light	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_banner	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_bed	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:light_blue_candle	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:light_blue_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:light_blue_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:light_blue_wool	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_banner	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_bed	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:light_gray_candle	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:light_gray_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:light_gray_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:light_gray_wool	-	-	-	-	-	slow:0.2	-
+minecraft:light_weighted_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:lilac	-	-	-	-	-	slow:0.2	-
+minecraft:lily_of_the_valley	-	-	-	-	-	slow:0.2	-
+minecraft:lily_pad	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:lime_banner	-	-	-	-	-	slow:0.2	-
+minecraft:lime_bed	-	-	-	-	-	slow:0.2	-
+minecraft:lime_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:lime_candle	-	-	-	-	-	slow:0.2	-
+minecraft:lime_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:lime_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:lime_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:lime_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:lime_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:lime_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:lime_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:lime_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:lime_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:lime_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:lime_wool	-	-	-	-	-	slow:0.2	-
+minecraft:lingering_potion	-	-	-	-	-	slow:0.2	-
+minecraft:llama_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:lodestone	-	-	-	-	-	slow:0.2	-
+minecraft:loom	-	-	-	-	-	slow:0.2	-
+minecraft:mace	-	-	-	-	stable	slow:0.2	-
+minecraft:magenta_banner	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_bed	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:magenta_candle	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:magenta_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:magenta_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:magenta_wool	-	-	-	-	-	slow:0.2	-
+minecraft:magma_block	-	-	-	-	-	slow:0.2	-
+minecraft:magma_cream	-	-	-	-	stable	slow:0.2	-
+minecraft:magma_cube_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:mangrove_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:mangrove_button	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:mangrove_door	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_fence	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_log	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_planks	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_propagule	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_roots	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_sign	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_slab	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:mangrove_wood	-	-	-	-	-	slow:0.2	-
+minecraft:map	-	-	-	-	stable	slow:0.2	-
+minecraft:medium_amethyst_bud	-	-	-	-	-	slow:0.2	-
+minecraft:melon	-	-	-	-	-	slow:0.2	-
+minecraft:melon_seeds	-	-	-	-	-	slow:0.2	-
+minecraft:melon_slice	-	-	-	-	-	slow:0.2	-
+minecraft:milk_bucket	-	minecraft:bucket	-	-	-	slow:0.2	-
+minecraft:minecart	-	-	-	-	-	slow:0.2	-
+minecraft:miner_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:mojang_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:mooshroom_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:moss_block	-	-	-	-	-	slow:0.2	-
+minecraft:moss_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_cobblestone	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_cobblestone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_cobblestone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_cobblestone_wall	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_stone_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_stone_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_stone_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:mossy_stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:mourner_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:mud	-	-	-	-	-	slow:0.2	-
+minecraft:mud_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:mud_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:mud_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:mud_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:muddy_mangrove_roots	-	-	-	-	-	slow:0.2	-
+minecraft:mule_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:mushroom_stem	-	-	-	-	-	slow:0.2	-
+minecraft:mushroom_stew	-	minecraft:bowl	-	-	-	slow:0.2	-
+minecraft:music_disc_11	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_13	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_5	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_blocks	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_cat	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_chirp	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_creator	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_creator_music_box	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_far	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_lava_chicken	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_mall	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_mellohi	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_otherside	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_pigstep	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_precipice	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_relic	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_stal	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_strad	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_tears	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_wait	-	-	-	-	stable	slow:0.2	-
+minecraft:music_disc_ward	-	-	-	-	stable	slow:0.2	-
+minecraft:mutton	-	-	-	-	-	slow:0.2	-
+minecraft:mycelium	-	-	-	-	-	slow:0.2	-
+minecraft:name_tag	-	-	-	-	stable	slow:0.2	-
+minecraft:nautilus_shell	-	-	-	-	stable	slow:0.2	-
+minecraft:nautilus_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:nether_brick	-	-	-	-	stable	slow:0.2	-
+minecraft:nether_brick_fence	-	-	-	-	-	slow:0.2	-
+minecraft:nether_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:nether_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:nether_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:nether_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:nether_gold_ore	-	-	-	-	-	slow:0.2	-
+minecraft:nether_quartz_ore	-	-	-	-	-	slow:0.2	-
+minecraft:nether_sprouts	-	-	-	-	-	slow:0.2	-
+minecraft:nether_star	-	-	-	-	stable	slow:0.2	-
+minecraft:nether_wart	-	-	-	-	-	slow:0.2	-
+minecraft:nether_wart_block	-	-	-	-	-	slow:0.2	-
+minecraft:netherite_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_block	-	-	-	-	-	slow:0.2	-
+minecraft:netherite_boots	-	-	feet	-	-	slow:0.2	-
+minecraft:netherite_chestplate	-	-	chest	-	-	slow:0.2	-
+minecraft:netherite_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:netherite_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_horse_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_ingot	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_leggings	-	-	legs	-	-	slow:0.2	-
+minecraft:netherite_nautilus_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_scrap	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:netherite_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:netherite_upgrade_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:netherrack	-	-	-	-	-	slow:0.2	-
+minecraft:note_block	-	-	-	-	-	slow:0.2	-
+minecraft:oak_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:oak_button	-	-	-	-	-	slow:0.2	-
+minecraft:oak_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:oak_door	-	-	-	-	-	slow:0.2	-
+minecraft:oak_fence	-	-	-	-	-	slow:0.2	-
+minecraft:oak_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:oak_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:oak_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:oak_log	-	-	-	-	-	slow:0.2	-
+minecraft:oak_planks	-	-	-	-	-	slow:0.2	-
+minecraft:oak_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:oak_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:oak_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:oak_sign	-	-	-	-	-	slow:0.2	-
+minecraft:oak_slab	-	-	-	-	-	slow:0.2	-
+minecraft:oak_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:oak_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:oak_wood	-	-	-	-	-	slow:0.2	-
+minecraft:observer	-	-	-	-	-	slow:0.2	-
+minecraft:obsidian	-	-	-	-	-	slow:0.2	-
+minecraft:ocelot_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:ochre_froglight	-	-	-	-	-	slow:0.2	-
+minecraft:ominous_bottle	-	-	-	-	-	slow:0.2	-
+minecraft:ominous_trial_key	-	-	-	-	stable	slow:0.2	-
+minecraft:open_eyeblossom	-	-	-	-	-	slow:0.2	-
+minecraft:orange_banner	-	-	-	-	-	slow:0.2	-
+minecraft:orange_bed	-	-	-	-	-	slow:0.2	-
+minecraft:orange_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:orange_candle	-	-	-	-	-	slow:0.2	-
+minecraft:orange_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:orange_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:orange_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:orange_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:orange_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:orange_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:orange_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:orange_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:orange_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:orange_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:orange_tulip	-	-	-	-	-	slow:0.2	-
+minecraft:orange_wool	-	-	-	-	-	slow:0.2	-
+minecraft:oxeye_daisy	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:oxidized_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:packed_ice	-	-	-	-	-	slow:0.2	-
+minecraft:packed_mud	-	-	-	-	-	slow:0.2	-
+minecraft:painting	-	-	-	-	-	slow:0.2	-
+minecraft:pale_hanging_moss	-	-	-	-	-	slow:0.2	-
+minecraft:pale_moss_block	-	-	-	-	-	slow:0.2	-
+minecraft:pale_moss_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:pale_oak_button	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:pale_oak_door	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_fence	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_log	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_planks	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_sign	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_slab	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:pale_oak_wood	-	-	-	-	-	slow:0.2	-
+minecraft:panda_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:paper	-	-	-	-	stable	slow:0.2	-
+minecraft:parched_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:parrot_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:pearlescent_froglight	-	-	-	-	-	slow:0.2	-
+minecraft:peony	-	-	-	-	-	slow:0.2	-
+minecraft:petrified_oak_slab	-	-	-	-	-	slow:0.2	-
+minecraft:phantom_membrane	-	-	-	-	stable	slow:0.2	-
+minecraft:phantom_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:pig_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:piglin_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:piglin_brute_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:piglin_head	-	-	-	-	-	slow:0.2	-
+minecraft:piglin_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:pillager_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:pink_banner	-	-	-	-	-	slow:0.2	-
+minecraft:pink_bed	-	-	-	-	-	slow:0.2	-
+minecraft:pink_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:pink_candle	-	-	-	-	-	slow:0.2	-
+minecraft:pink_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:pink_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:pink_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:pink_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:pink_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:pink_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:pink_petals	-	-	-	-	-	slow:0.2	-
+minecraft:pink_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:pink_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:pink_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:pink_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:pink_tulip	-	-	-	-	-	slow:0.2	-
+minecraft:pink_wool	-	-	-	-	-	slow:0.2	-
+minecraft:piston	-	-	-	-	-	slow:0.2	-
+minecraft:pitcher_plant	-	-	-	-	-	slow:0.2	-
+minecraft:pitcher_pod	-	-	-	-	-	slow:0.2	-
+minecraft:player_head	-	-	-	-	-	slow:0.2	-
+minecraft:plenty_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:podzol	-	-	-	-	-	slow:0.2	-
+minecraft:pointed_dripstone	-	-	-	-	-	slow:0.2	-
+minecraft:poisonous_potato	-	-	-	-	-	slow:0.2	-
+minecraft:polar_bear_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:polished_andesite	-	-	-	-	-	slow:0.2	-
+minecraft:polished_andesite_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_andesite_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_basalt	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_button	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_blackstone_wall	-	-	-	-	-	slow:0.2	-
+minecraft:polished_deepslate	-	-	-	-	-	slow:0.2	-
+minecraft:polished_deepslate_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_deepslate_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_deepslate_wall	-	-	-	-	-	slow:0.2	-
+minecraft:polished_diorite	-	-	-	-	-	slow:0.2	-
+minecraft:polished_diorite_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_diorite_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_granite	-	-	-	-	-	slow:0.2	-
+minecraft:polished_granite_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_granite_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_tuff	-	-	-	-	-	slow:0.2	-
+minecraft:polished_tuff_slab	-	-	-	-	-	slow:0.2	-
+minecraft:polished_tuff_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:polished_tuff_wall	-	-	-	-	-	slow:0.2	-
+minecraft:popped_chorus_fruit	-	-	-	-	stable	slow:0.2	-
+minecraft:poppy	-	-	-	-	-	slow:0.2	-
+minecraft:porkchop	-	-	-	-	-	slow:0.2	-
+minecraft:potato	-	-	-	-	-	slow:0.2	-
+minecraft:potion	-	minecraft:glass_bottle	-	-	-	slow:0.2	-
+minecraft:powder_snow_bucket	-	-	-	-	-	slow:0.2	-
+minecraft:powered_rail	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine_crystals	-	-	-	-	stable	slow:0.2	-
+minecraft:prismarine_shard	-	-	-	-	stable	slow:0.2	-
+minecraft:prismarine_slab	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:prismarine_wall	-	-	-	-	-	slow:0.2	-
+minecraft:prize_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:pufferfish	-	-	-	-	-	slow:0.2	-
+minecraft:pufferfish_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:pufferfish_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:pumpkin	-	-	-	-	-	slow:0.2	-
+minecraft:pumpkin_pie	-	-	-	-	-	slow:0.2	-
+minecraft:pumpkin_seeds	-	-	-	-	-	slow:0.2	-
+minecraft:purple_banner	-	-	-	-	-	slow:0.2	-
+minecraft:purple_bed	-	-	-	-	-	slow:0.2	-
+minecraft:purple_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:purple_candle	-	-	-	-	-	slow:0.2	-
+minecraft:purple_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:purple_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:purple_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:purple_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:purple_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:purple_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:purple_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:purple_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:purple_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:purple_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:purple_wool	-	-	-	-	-	slow:0.2	-
+minecraft:purpur_block	-	-	-	-	-	slow:0.2	-
+minecraft:purpur_pillar	-	-	-	-	-	slow:0.2	-
+minecraft:purpur_slab	-	-	-	-	-	slow:0.2	-
+minecraft:purpur_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:quartz	-	-	-	-	stable	slow:0.2	-
+minecraft:quartz_block	-	-	-	-	-	slow:0.2	-
+minecraft:quartz_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:quartz_pillar	-	-	-	-	-	slow:0.2	-
+minecraft:quartz_slab	-	-	-	-	-	slow:0.2	-
+minecraft:quartz_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:rabbit	-	-	-	-	-	slow:0.2	-
+minecraft:rabbit_foot	-	-	-	-	stable	slow:0.2	-
+minecraft:rabbit_hide	-	-	-	-	stable	slow:0.2	-
+minecraft:rabbit_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:rabbit_stew	-	minecraft:bowl	-	-	-	slow:0.2	-
+minecraft:rail	-	-	-	-	-	slow:0.2	-
+minecraft:raiser_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:ravager_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:raw_copper	-	-	-	-	stable	slow:0.2	-
+minecraft:raw_copper_block	-	-	-	-	-	slow:0.2	-
+minecraft:raw_gold	-	-	-	-	stable	slow:0.2	-
+minecraft:raw_gold_block	-	-	-	-	-	slow:0.2	-
+minecraft:raw_iron	-	-	-	-	stable	slow:0.2	-
+minecraft:raw_iron_block	-	-	-	-	-	slow:0.2	-
+minecraft:recovery_compass	-	-	-	-	stable	slow:0.2	-
+minecraft:red_banner	-	-	-	-	-	slow:0.2	-
+minecraft:red_bed	-	-	-	-	-	slow:0.2	-
+minecraft:red_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:red_candle	-	-	-	-	-	slow:0.2	-
+minecraft:red_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:red_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:red_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:red_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:red_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:red_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:red_mushroom	-	-	-	-	-	slow:0.2	-
+minecraft:red_mushroom_block	-	-	-	-	-	slow:0.2	-
+minecraft:red_nether_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:red_nether_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:red_nether_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:red_nether_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:red_sand	-	-	-	-	-	slow:0.2	-
+minecraft:red_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:red_sandstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:red_sandstone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:red_sandstone_wall	-	-	-	-	-	slow:0.2	-
+minecraft:red_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:red_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:red_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:red_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:red_tulip	-	-	-	-	-	slow:0.2	-
+minecraft:red_wool	-	-	-	-	-	slow:0.2	-
+minecraft:redstone	-	-	-	-	-	slow:0.2	-
+minecraft:redstone_block	-	-	-	-	-	slow:0.2	-
+minecraft:redstone_lamp	-	-	-	-	-	slow:0.2	-
+minecraft:redstone_ore	-	-	-	-	-	slow:0.2	-
+minecraft:redstone_torch	-	-	-	-	-	slow:0.2	-
+minecraft:reinforced_deepslate	-	-	-	-	-	slow:0.2	-
+minecraft:repeater	-	-	-	-	-	slow:0.2	-
+minecraft:repeating_command_block	-	-	-	-	-	slow:0.2	-
+minecraft:resin_block	-	-	-	-	-	slow:0.2	-
+minecraft:resin_brick	-	-	-	-	stable	slow:0.2	-
+minecraft:resin_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:resin_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:resin_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:resin_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:resin_clump	-	-	-	-	-	slow:0.2	-
+minecraft:respawn_anchor	-	-	-	-	-	slow:0.2	-
+minecraft:rib_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:rooted_dirt	-	-	-	-	-	slow:0.2	-
+minecraft:rose_bush	-	-	-	-	-	slow:0.2	-
+minecraft:rotten_flesh	-	-	-	-	-	slow:0.2	-
+minecraft:saddle	-	-	-	-	stable	slow:0.2	-
+minecraft:salmon	-	-	-	-	-	slow:0.2	-
+minecraft:salmon_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:salmon_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:sand	-	-	-	-	-	slow:0.2	-
+minecraft:sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:sandstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:sandstone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:sandstone_wall	-	-	-	-	-	slow:0.2	-
+minecraft:scaffolding	-	-	-	-	-	slow:0.2	-
+minecraft:scrape_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:sculk	-	-	-	-	-	slow:0.2	-
+minecraft:sculk_catalyst	-	-	-	-	-	slow:0.2	-
+minecraft:sculk_sensor	-	-	-	-	-	slow:0.2	-
+minecraft:sculk_shrieker	-	-	-	-	-	slow:0.2	-
+minecraft:sculk_vein	-	-	-	-	-	slow:0.2	-
+minecraft:sea_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:sea_pickle	-	-	-	-	-	slow:0.2	-
+minecraft:seagrass	-	-	-	-	-	slow:0.2	-
+minecraft:sentry_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:shaper_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:sheaf_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:shears	-	-	-	-	stable	slow:0.2	-
+minecraft:sheep_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:shelter_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:shield	-	-	-	-	stable	slow:0.2	-
+minecraft:short_dry_grass	-	-	-	-	-	slow:0.2	-
+minecraft:short_grass	-	-	-	-	-	slow:0.2	-
+minecraft:shroomlight	-	-	-	-	-	slow:0.2	-
+minecraft:shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:shulker_shell	-	-	-	-	stable	slow:0.2	-
+minecraft:shulker_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:silence_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:silverfish_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:skeleton_horse_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:skeleton_skull	-	-	-	-	-	slow:0.2	-
+minecraft:skeleton_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:skull_banner_pattern	-	-	-	-	stable	slow:0.2	-
+minecraft:skull_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:slime_ball	-	-	-	-	stable	slow:0.2	-
+minecraft:slime_block	-	-	-	-	-	slow:0.2	-
+minecraft:slime_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:small_amethyst_bud	-	-	-	-	-	slow:0.2	-
+minecraft:small_dripleaf	-	-	-	-	-	slow:0.2	-
+minecraft:smithing_table	-	-	-	-	-	slow:0.2	-
+minecraft:smoker	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_basalt	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_quartz	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_quartz_slab	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_quartz_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_red_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_red_sandstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_red_sandstone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_sandstone	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_sandstone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_sandstone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_stone	-	-	-	-	-	slow:0.2	-
+minecraft:smooth_stone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:sniffer_egg	-	-	-	-	-	slow:0.2	-
+minecraft:sniffer_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:snort_pottery_sherd	-	-	-	-	stable	slow:0.2	-
+minecraft:snout_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:snow	-	-	-	-	-	slow:0.2	-
+minecraft:snow_block	-	-	-	-	-	slow:0.2	-
+minecraft:snow_golem_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:snowball	-	-	-	-	-	slow:0.2	-
+minecraft:soul_campfire	-	-	-	-	-	slow:0.2	-
+minecraft:soul_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:soul_sand	-	-	-	-	-	slow:0.2	-
+minecraft:soul_soil	-	-	-	-	-	slow:0.2	-
+minecraft:soul_torch	-	-	-	-	-	slow:0.2	-
+minecraft:spawner	-	-	-	-	-	slow:0.2	-
+minecraft:spectral_arrow	-	-	-	-	stable	slow:0.2	-
+minecraft:spider_eye	-	-	-	-	-	slow:0.2	-
+minecraft:spider_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:spire_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:splash_potion	-	-	-	-	-	slow:0.2	-
+minecraft:sponge	-	-	-	-	-	slow:0.2	-
+minecraft:spore_blossom	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:spruce_button	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_chest_boat	-	-	-	-	stable	slow:0.2	-
+minecraft:spruce_door	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_fence	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_leaves	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_log	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_planks	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_sapling	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_sign	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_slab	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:spruce_wood	-	-	-	-	-	slow:0.2	-
+minecraft:spyglass	-	-	-	-	stable	slow:0.2	-
+minecraft:squid_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:stick	-	-	-	-	stable	slow:0.2	-
+minecraft:sticky_piston	-	-	-	-	-	slow:0.2	-
+minecraft:stone	-	-	-	-	-	slow:0.2	-
+minecraft:stone_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:stone_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:stone_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:stone_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:stone_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:stone_button	-	-	-	-	-	slow:0.2	-
+minecraft:stone_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:stone_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:stone_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:stone_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:stone_slab	-	-	-	-	-	slow:0.2	-
+minecraft:stone_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:stone_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:stone_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:stonecutter	-	-	-	-	-	slow:0.2	-
+minecraft:stray_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:strider_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:string	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_acacia_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_acacia_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_bamboo_block	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_birch_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_birch_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_cherry_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_cherry_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_crimson_hyphae	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_crimson_stem	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_dark_oak_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_dark_oak_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_jungle_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_jungle_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_mangrove_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_mangrove_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_oak_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_oak_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_pale_oak_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_pale_oak_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_spruce_log	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_spruce_wood	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_warped_hyphae	-	-	-	-	-	slow:0.2	-
+minecraft:stripped_warped_stem	-	-	-	-	-	slow:0.2	-
+minecraft:structure_block	-	-	-	-	-	slow:0.2	-
+minecraft:structure_void	-	-	-	-	-	slow:0.2	-
+minecraft:sugar	-	-	-	-	stable	slow:0.2	-
+minecraft:sugar_cane	-	-	-	-	-	slow:0.2	-
+minecraft:sunflower	-	-	-	-	-	slow:0.2	-
+minecraft:suspicious_gravel	-	-	-	-	-	slow:0.2	-
+minecraft:suspicious_sand	-	-	-	-	-	slow:0.2	-
+minecraft:suspicious_stew	-	minecraft:bowl	-	-	-	slow:0.2	-
+minecraft:sweet_berries	-	-	-	-	-	slow:0.2	-
+minecraft:tadpole_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:tadpole_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:tall_dry_grass	-	-	-	-	-	slow:0.2	-
+minecraft:tall_grass	-	-	-	-	-	slow:0.2	-
+minecraft:target	-	-	-	-	-	slow:0.2	-
+minecraft:terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:test_block	-	-	-	-	-	slow:0.2	-
+minecraft:test_instance_block	-	-	-	-	-	slow:0.2	-
+minecraft:tide_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:tinted_glass	-	-	-	-	-	slow:0.2	-
+minecraft:tipped_arrow	-	-	-	-	stable	slow:0.2	-
+minecraft:tnt	-	-	-	-	-	slow:0.2	-
+minecraft:tnt_minecart	-	-	-	-	-	slow:0.2	-
+minecraft:torch	-	-	-	-	-	slow:0.2	-
+minecraft:torchflower	-	-	-	-	-	slow:0.2	-
+minecraft:torchflower_seeds	-	-	-	-	-	slow:0.2	-
+minecraft:totem_of_undying	-	-	-	-	stable	slow:0.2	-
+minecraft:trader_llama_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:trapped_chest	-	-	-	-	-	slow:0.2	-
+minecraft:trial_key	-	-	-	-	stable	slow:0.2	-
+minecraft:trial_spawner	-	-	-	-	-	slow:0.2	-
+minecraft:trident	-	-	-	-	stable	slow:0.2	release-moves
+minecraft:tripwire_hook	-	-	-	-	-	slow:0.2	-
+minecraft:tropical_fish	-	-	-	-	-	slow:0.2	-
+minecraft:tropical_fish_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:tropical_fish_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:tube_coral	-	-	-	-	-	slow:0.2	-
+minecraft:tube_coral_block	-	-	-	-	-	slow:0.2	-
+minecraft:tube_coral_fan	-	-	-	-	-	slow:0.2	-
+minecraft:tuff	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_brick_slab	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_brick_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_brick_wall	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_bricks	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_slab	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:tuff_wall	-	-	-	-	-	slow:0.2	-
+minecraft:turtle_egg	-	-	-	-	-	slow:0.2	-
+minecraft:turtle_helmet	-	-	head	-	-	slow:0.2	-
+minecraft:turtle_scute	-	-	-	-	stable	slow:0.2	-
+minecraft:turtle_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:twisting_vines	-	-	-	-	-	slow:0.2	-
+minecraft:vault	-	-	-	-	-	slow:0.2	-
+minecraft:verdant_froglight	-	-	-	-	-	slow:0.2	-
+minecraft:vex_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:vex_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:villager_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:vindicator_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:vine	-	-	-	-	-	slow:0.2	-
+minecraft:wandering_trader_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:ward_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:warden_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:warped_button	-	-	-	-	-	slow:0.2	-
+minecraft:warped_door	-	-	-	-	-	slow:0.2	-
+minecraft:warped_fence	-	-	-	-	-	slow:0.2	-
+minecraft:warped_fence_gate	-	-	-	-	-	slow:0.2	-
+minecraft:warped_fungus	-	-	-	-	-	slow:0.2	-
+minecraft:warped_fungus_on_a_stick	-	-	-	-	stable	slow:0.2	-
+minecraft:warped_hanging_sign	-	-	-	-	-	slow:0.2	-
+minecraft:warped_hyphae	-	-	-	-	-	slow:0.2	-
+minecraft:warped_nylium	-	-	-	-	-	slow:0.2	-
+minecraft:warped_planks	-	-	-	-	-	slow:0.2	-
+minecraft:warped_pressure_plate	-	-	-	-	-	slow:0.2	-
+minecraft:warped_roots	-	-	-	-	-	slow:0.2	-
+minecraft:warped_shelf	-	-	-	-	-	slow:0.2	-
+minecraft:warped_sign	-	-	-	-	-	slow:0.2	-
+minecraft:warped_slab	-	-	-	-	-	slow:0.2	-
+minecraft:warped_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:warped_stem	-	-	-	-	-	slow:0.2	-
+minecraft:warped_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:warped_wart_block	-	-	-	-	-	slow:0.2	-
+minecraft:water_bucket	-	-	-	-	-	slow:0.2	changes-blocks
+minecraft:waxed_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_block	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_exposed_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_oxidized_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:waxed_weathered_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:wayfinder_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:weathered_chiseled_copper	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_bars	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_bulb	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_chain	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_chest	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_door	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_golem_statue	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_grate	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_lantern	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_copper_trapdoor	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_cut_copper	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_cut_copper_slab	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_cut_copper_stairs	-	-	-	-	-	slow:0.2	-
+minecraft:weathered_lightning_rod	-	-	-	-	-	slow:0.2	-
+minecraft:weeping_vines	-	-	-	-	-	slow:0.2	-
+minecraft:wet_sponge	-	-	-	-	-	slow:0.2	-
+minecraft:wheat	-	-	-	-	stable	slow:0.2	-
+minecraft:wheat_seeds	-	-	-	-	-	slow:0.2	-
+minecraft:white_banner	-	-	-	-	-	slow:0.2	-
+minecraft:white_bed	-	-	-	-	-	slow:0.2	-
+minecraft:white_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:white_candle	-	-	-	-	-	slow:0.2	-
+minecraft:white_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:white_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:white_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:white_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:white_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:white_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:white_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:white_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:white_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:white_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:white_tulip	-	-	-	-	-	slow:0.2	-
+minecraft:white_wool	-	-	-	-	-	slow:0.2	-
+minecraft:wild_armor_trim_smithing_template	-	-	-	-	stable	slow:0.2	-
+minecraft:wildflowers	-	-	-	-	-	slow:0.2	-
+minecraft:wind_charge	-	-	-	-	-	slow:0.2	-
+minecraft:witch_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:wither_rose	-	-	-	-	-	slow:0.2	-
+minecraft:wither_skeleton_skull	-	-	-	-	-	slow:0.2	-
+minecraft:wither_skeleton_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:wither_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:wolf_armor	-	-	-	-	stable	slow:0.2	-
+minecraft:wolf_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:wooden_axe	-	-	-	-	stable	slow:0.2	-
+minecraft:wooden_hoe	-	-	-	-	stable	slow:0.2	-
+minecraft:wooden_pickaxe	-	-	-	-	stable	slow:0.2	-
+minecraft:wooden_shovel	-	-	-	-	stable	slow:0.2	-
+minecraft:wooden_spear	2.0:4.5:2.0:6.5:0.125:0.5	-	-	piercing	stable	sprint:1.0	-
+minecraft:wooden_sword	-	-	-	-	stable	slow:0.2	-
+minecraft:writable_book	-	-	-	-	stable	slow:0.2	-
+minecraft:written_book	-	-	-	-	stable	slow:0.2	-
+minecraft:yellow_banner	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_bed	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_bundle	-	-	-	-	-	slow:0.2	self-ending
+minecraft:yellow_candle	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_carpet	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_concrete	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_concrete_powder	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_dye	-	-	-	-	stable	slow:0.2	-
+minecraft:yellow_glazed_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_harness	-	-	-	-	stable	slow:0.2	-
+minecraft:yellow_shulker_box	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_stained_glass	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_stained_glass_pane	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_terracotta	-	-	-	-	-	slow:0.2	-
+minecraft:yellow_wool	-	-	-	-	-	slow:0.2	-
+minecraft:zoglin_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:zombie_head	-	-	-	-	-	slow:0.2	-
+minecraft:zombie_horse_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:zombie_nautilus_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:zombie_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:zombie_villager_spawn_egg	-	-	-	-	stable	slow:0.2	-
+minecraft:zombified_piglin_spawn_egg	-	-	-	-	stable	slow:0.2	-

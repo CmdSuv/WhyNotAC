@@ -12,7 +12,7 @@ import java.util.List;
  * gravity and drag) and the pose for the next tick ({@code Player.updatePlayerPose}).
  *
  * <p>The scope is a survival player on foot with default attributes but the speed ({@link Speed}) and the
- * effects the step reads ({@link Effects}), not using an item,
+ * effects the step reads ({@link Effects}), using an item or not ({@link ItemUse}),
  * not riding, flying, gliding or swimming, on blocks without side effects and away from solid entities and
  * the world border. Outside it, or where the client's world is not known, {@link Colliders.Unknown} is
  * thrown: no claim can rest on that tick. Sources: the decompiled client, {@code LocalPlayer},
@@ -49,17 +49,34 @@ public final class OnFoot {
      * @param autoJumpEnabled  {@code LocalPlayer.autoJumpEnabled}: the option, but true during a new player's first tick
      * @param speed            the movement speed attribute's value ({@code AttributeInstance.getValue})
      * @param effects          the player's active effects the step reads
+     * @param use              the item the player is using during the tick, or null
      */
-    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects) {
-        public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE);
+    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use) {
+        public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE, null);
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
-            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, Speed.VANILLA, Effects.NONE);
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, Speed.VANILLA, Effects.NONE, null);
         }
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed) {
-            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, Effects.NONE);
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, Effects.NONE, null);
         }
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, null);
+        }
+    }
+
+    /**
+     * The item in use ({@code LocalPlayer.isUsingItem}): its {@code minecraft:use_effects}.
+     *
+     * @param canSprint       {@code UseEffects.canSprint}; false makes the use slow ({@code isSlowDueToUsingItem}): no
+     *                        sprint starts and the double-tap window closes (a sprint already on goes on)
+     * @param speedMultiplier {@code UseEffects.speedMultiplier}: the input is scaled by it ({@code modifyInput})
+     */
+    public record ItemUse(boolean canSprint, float speedMultiplier) {
+        /** {@code UseEffects.DEFAULT}: what an item without its own {@code use_effects} has. */
+        public static final ItemUse DEFAULT = new ItemUse(false, 0.2F);
     }
 
     /**
@@ -216,13 +233,14 @@ public final class OnFoot {
             keys = keys.withJump(); // input.makeJump(): the vector stays
         }
         requireNoSuffocation();
-        if (previousShift || keys.backward()) {
+        boolean slowDueToUse = conditions.use() != null && !conditions.use().canSprint(); // isSlowDueToUsingItem
+        if (previousShift || slowDueToUse || keys.backward()) {
             sprintTriggerTime = 0;
         }
         boolean forward = moveY > 1.0E-5F;
         boolean movingSlowly = crouching;
         boolean sprintPossible = !conditions.effects().blindness() && conditions.foodAllowsSprint(); // isSprintingPossible
-        if (!sprinting && forward && sprintPossible && !movingSlowly) { // canStartSprinting
+        if (!sprinting && forward && sprintPossible && !slowDueToUse && !movingSlowly) { // canStartSprinting
             if (!previousForward) {
                 readSprintTrigger = true;
                 if (sprintTriggerTime > 0) {
@@ -311,6 +329,10 @@ public final class OnFoot {
         if (vx * vx + vy * vy != 0.0F) {
             vx *= 0.98F;
             vy *= 0.98F;
+            if (conditions.use() != null) {
+                vx *= conditions.use().speedMultiplier();
+                vy *= conditions.use().speedMultiplier();
+            }
             if (movingSlowly) {
                 vx *= SNEAKING_SPEED;
                 vy *= SNEAKING_SPEED;

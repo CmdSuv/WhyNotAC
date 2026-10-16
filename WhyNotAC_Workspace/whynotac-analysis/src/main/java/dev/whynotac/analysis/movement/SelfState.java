@@ -22,11 +22,13 @@ import java.util.TreeSet;
  *                        not followed (a table past its size, an unknown operation)
  * @param otherAttributes the other attributes on-foot movement reads whose value is not the default
  * @param vehicle         the entity the player rides ({@code -1}: none)
+ * @param using           the item the client is using, or null ({@code LocalPlayer.isUsingItem}: the client's own, which
+ *                        the server's living-entity flags start or stop when they differ)
  * @param border          the world border
  */
 public record SelfState(boolean ticking, boolean positionKnown, boolean firstTick, int food, float health, int gameMode, boolean flying, boolean mayFly,
         OnFoot.Effects effects, SpeedAttribute speed, Set<String> otherAttributes, boolean camera, int vehicle, boolean noGravity,
-        boolean usingItem, boolean frozen, Border border) {
+        Using using, boolean frozen, Border border) {
 
     static final String MOVEMENT_SPEED = "minecraft:movement_speed";
     /** Attributes the on-foot step reads, with the client's default value (decompiled {@code Attributes}). */
@@ -58,7 +60,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
 
     /** A new player's own state before any packet about it: the client's defaults. */
     static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, Border border) {
-        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, false, false,
+        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, null, false,
                 border);
     }
 
@@ -88,9 +90,6 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
         if (noGravity) {
             return "no gravity";
         }
-        if (usingItem) {
-            return "using an item";
-        }
         if (frozen) {
             return "freezing";
         }
@@ -109,34 +108,34 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
 
     SelfState withTicking(boolean value) {
         return new SelfState(value, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, usingItem, frozen, border);
+                noGravity, using, frozen, border);
     }
 
     SelfState withPositionKnown() {
         return new SelfState(ticking, true, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, usingItem, frozen, border);
+                noGravity, using, frozen, border);
     }
 
     SelfState afterFirstTick() {
         return firstTick ? new SelfState(ticking, positionKnown, false, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, usingItem, frozen, border) : this;
+                vehicle, noGravity, using, frozen, border) : this;
     }
 
     SelfState withHealth(float newHealth, int newFood) {
         return new SelfState(ticking, positionKnown, firstTick, newFood, newHealth, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, usingItem, frozen, border);
+                vehicle, noGravity, using, frozen, border);
     }
 
     SelfState withAbilities(boolean newFlying, boolean newMayFly) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, newFlying, newMayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, usingItem, frozen, border);
+                vehicle, noGravity, using, frozen, border);
     }
 
     /** {@code MultiPlayerGameMode.setLocalMode}: the mode's abilities ({@code GameType.updatePlayerAbilities}). */
     SelfState withGameMode(int mode) {
         boolean creativeOrSpectator = mode == 1 || mode == 3;
         return new SelfState(ticking, positionKnown, firstTick, food, health, mode, mode == 3, creativeOrSpectator, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, usingItem, frozen, border);
+                vehicle, noGravity, using, frozen, border);
     }
 
     /**
@@ -159,7 +158,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             return this;
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, next, speed, otherAttributes, camera, vehicle,
-                noGravity, usingItem, frozen, border);
+                noGravity, using, frozen, border);
     }
 
     /** {@code handleUpdateAttributes}: each attribute's base and modifiers are replaced. */
@@ -180,31 +179,38 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             }
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, other, camera, vehicle,
-                noGravity, usingItem, frozen, border);
+                noGravity, using, frozen, border);
     }
 
     SelfState withSpeed(SpeedAttribute newSpeed) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, otherAttributes, camera,
-                vehicle, noGravity, usingItem, frozen, border);
+                vehicle, noGravity, using, frozen, border);
     }
 
     SelfState withCamera(boolean self) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, self, vehicle,
-                noGravity, usingItem, frozen, border);
+                noGravity, using, frozen, border);
     }
 
     SelfState withVehicle(int value) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, value,
-                noGravity, usingItem, frozen, border);
+                noGravity, using, frozen, border);
     }
 
-    SelfState withFlags(boolean newNoGravity, boolean newUsingItem, boolean newFrozen) {
+    SelfState withFlags(boolean newNoGravity, boolean newFrozen) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                newNoGravity, newUsingItem, newFrozen, border);
+                newNoGravity, using, newFrozen, border);
+    }
+
+    /** The item in use: {@code startUsingItem}, {@code stopUsingItem}, or the use going on with the hand's stack. */
+    SelfState withUsing(Using newUsing) {
+        return java.util.Objects.equals(newUsing, using) ? this
+                : new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
+                        vehicle, noGravity, newUsing, frozen, border);
     }
 
     SelfState withBorder(Border newBorder) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, usingItem, frozen, newBorder);
+                noGravity, using, frozen, newBorder);
     }
 }

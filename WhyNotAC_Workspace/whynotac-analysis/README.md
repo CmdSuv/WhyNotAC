@@ -37,7 +37,18 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   ister. Tabloyu büyütecek (25.) değiştirici ve bilinmeyen işlem iddia dışıdır.
 - **Görünmeyen seçenekler:** çift W penceresi (0..10) ve otomatik zıplama maske olarak taşınır, yalnızca
   okunduklarında dallanır; maskeleri dışında aynı durumlar birleşir.
-- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, tırmanma...), eşya kullanımı, itebilecek ya da
+- **Eşya kullanımı (`Using`):** client'ın kendi kullanımı (`LocalPlayer.startedUsingItem`), elindeki yığının
+  `use_effects`'iyle (`ItemPrototypes`: oyunun tablosu; varsayılan 0.2 yavaşlatma, koşma başlamaz; mızraklar koşar,
+  yavaşlamaz). Tuş eylemleri oyuncunun tick'inden önce: `UseItem` kullanımı başlatabilir ya da başlatmayabilir
+  (kullanımı olmayan eşya, bekleme süresi, tokken yemek), ikisi de izlenir; bırakma durdurur. Tick başında
+  `updatingUsingItem`: el aynı eşyayı tutuyorsa sürer (etkileri elin şimdiki yığınından), tutmuyorsa durur;
+  client o tick elleriyle bir şey yaptıysa (seçim, tık, bırakma, etkileşim) durmuş da olabilir. Sunucunun
+  canlı varlık bayrakları client'ın kullanımını eşitler (`onSyncedDataUpdated`); bayrakla başlayan kullanım
+  elin o anki yığınını alır. Bitiş olayı (9) kullanımı bitirir (aç karnına yemek iddiayı bitirir: client'ın kendi
+  açlığı koşmayı sunucudan önce belirler). Çapa her olası kullanımı dener: hiçbiri ya da ellerdeki her yığın.
+  İddia yok: blok değiştirebilen kullanım (kova, nilüfer), kendi kendine bitebilen kullanım (fırça, kese),
+  bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
+- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, tırmanma...), itebilecek ya da
   çarpışan bir varlık yakında (canlılar, tekneler, vagonlar), yerleşmemiş blok, piston, dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
@@ -46,14 +57,15 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   çalıştırılarak doğrulanır.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
-  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık, efekt bacaklarıyla): 2576 tikin 2301'i
-  iddia edildi, 0 açıklanamayan, 1028/1028 tick'te client'ın durumu kümede. Efekt modellerinin bilinçli
+  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık, efekt ve eşya kullanımı bacaklarıyla):
+  3176 tikin 2862'si iddia edildi, 0 açıklanamayan, 1398/1398 tick'te client'ın durumu kümede. Efekt modellerinin bilinçli
   hataları (zıplama gücü, yavaş düşüş, havada süzülme, körlük) takipçide de açıklanamayan tik ya da kümede
   bulunmayan client durumu verir. `MovementCheckTest` aynı adımı koşan sentetik bir
   client'la (hız değiştiricileri gerçek fastutil tablosunda): dürüst hareket, belirsiz pencerede savrulma, çift
-  W, hız ve yavaşlık efektiyle koşma, zıplama gücü, yavaş düşüş, havada süzülme ve körlük açıklanır; 0.01 blok
-  fazla hareket, havada asılı kalma, uygulanmayan savrulma, yok sayılan yavaşlık, verilmemiş zıplama gücüyle
-  zıplama ve körken koşma kanıttır.
+  W, hız ve yavaşlık efektiyle koşma, zıplama gücü, yavaş düşüş, havada süzülme, körlük, yemek (sonuna kadar),
+  kılıcın arkasından kalkan ve bırakması, mızrakla koşma ve çapadan önce kaldırılmış kalkanla yürüme açıklanır;
+  0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma, yok sayılan yavaşlık, verilmemiş zıplama
+  gücüyle zıplama, körken koşma ve yerken tam hızla yürüme kanıttır.
 - **Maliyet:** gerçek client oturumunda tick başına ortalama 1.33 hipotez, ≈ 60 µs.
 
 ## Planlanan aileler

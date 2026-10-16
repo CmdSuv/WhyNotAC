@@ -13,8 +13,12 @@ import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
+import dev.whynotac.protocol.packet.BlockFace;
+import dev.whynotac.protocol.packet.BlockPosition;
 import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.protocol.session.TimelineEvent;
@@ -98,6 +102,9 @@ class MovementCheckTest {
     private PlayerState.Keys sentInput = NONE;
     private final ClientSpeed speed = new ClientSpeed();
     private OnFoot.Effects effects = OnFoot.Effects.NONE;
+    /** The item the synthetic client uses (null: none), and what it sends from its keybinds at the start of the next tick. */
+    private OnFoot.ItemUse use;
+    private final List<ServerboundPacket> keybinds = new ArrayList<>();
     // the server: its movement speed modifiers in its own order (an Object2ObjectArrayMap, insertion order), and
     // whether it sends them again when sprinting starts or stops (as it does: the modifier set changed)
     private final List<ClientboundPacket.UpdateAttributes.Modifier> serverModifiers = new ArrayList<>();
@@ -175,7 +182,7 @@ class MovementCheckTest {
         }, replicas));
         MovementTracker tracker = new MovementTracker();
         registry.addListener((s, event) -> {
-            MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(s), replicas.entities().entities(s));
+            MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(s), replicas.entities().entities(s), replicas.inventory().inventory(s));
             if (tick != null) {
                 ticks.add(tick);
                 outcomes.merge(tick.outcome(), 1, Integer::sum);
@@ -219,8 +226,10 @@ class MovementCheckTest {
 
     /** One client tick with these keys and this rotation; {@code cheat} moves the result before it is sent. */
     private void tick(PlayerState.Keys keys, float yRot, float xRot, Vec3d cheat) throws Colliders.Unknown {
+        keybinds.forEach(this::in); // Minecraft.handleKeybinds, before the player's tick
+        keybinds.clear();
         PlayerState pre = rotate(player, yRot, xRot);
-        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects));
+        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects, use));
         firstTick = false;
         if (!cheat.equals(Vec3d.ZERO)) {
             post = move(post, cheat);
@@ -299,6 +308,36 @@ class MovementCheckTest {
             };
         }
     }
+
+    /** The server fills the first hotbar slot (selected) and the off hand: the player's InventoryMenu, hotbar 36..44, off hand 45. */
+    private void hold(String mainHand, String offHand) {
+        List<Stack> items = new ArrayList<>();
+        for (int i = 0; i < 46; i++) {
+            items.add(Stack.EMPTY);
+        }
+        if (mainHand != null) {
+            items.set(36, new Stack(mainHand, 1, List.of(), List.of(), null, false));
+        }
+        if (offHand != null) {
+            items.set(45, new Stack(offHand, 1, List.of(), List.of(), null, false));
+        }
+        out(new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY));
+        sync();
+    }
+
+    /** The server's living-entity flags (1: using, 2: the off hand), handled before the client's next tick. */
+    private void livingFlags(int flags) {
+        out(new ClientboundPacket.SetEntityData(SELF, List.of(new ClientboundPacket.SetEntityData.DataEntry(8, ClientboundPacket.SetEntityData.Kind.BYTE,
+                flags)), 0));
+        sync();
+    }
+
+    private static ServerboundPacket.UseItem useItem(Hand hand) {
+        return new ServerboundPacket.UseItem(hand, 1, 30.0F, 0.0F);
+    }
+
+    private static final ServerboundPacket.PlayerAction RELEASE = new ServerboundPacket.PlayerAction(
+            ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, new BlockPosition(0, 0, 0), BlockFace.DOWN, 0);
 
     /** A potion effect whose attribute modifier multiplies the speed's total, as the server adds it. */
     private void effect(String effect, String modifier, double amount, boolean handled) {
@@ -486,7 +525,9 @@ class MovementCheckTest {
     @Test
     void aPlayerStandingStillIsTrackedAgainAfterAnUnmodelledTick() throws Exception {
         ticks(10, FORWARD, 30.0F);
-        in(new ServerboundPacket.UseItem(dev.whynotac.protocol.packet.Hand.MAIN_HAND, 1, 30.0F, 0.0F)); // not modelled: no claim
+        // a block used far away: not modelled, no claim
+        in(new ServerboundPacket.UseItemOn(dev.whynotac.protocol.packet.Hand.MAIN_HAND, new dev.whynotac.protocol.packet.BlockPosition(-40, 63, -40),
+                dev.whynotac.protocol.packet.BlockFace.UP, new Vec3d(-39.5, 64.0, -39.5), false, false, 1));
         tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
         assertEquals(1, count(MovementTracker.Outcome.NO_CLAIM));
         ticks(50, NONE, 30.0F); // standing still: two identical position reminders, 20 ticks apart
@@ -562,6 +603,97 @@ class MovementCheckTest {
         effects = OnFoot.Effects.NONE; // the client drops the effect on its own
         ticks(10, SPRINT, 30.0F);
         assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void eatingSlowsThePlayerAndIsFollowedToItsEnd() throws Exception {
+        hold("minecraft:golden_apple", "minecraft:shield");
+        ticks(5, NONE, 30.0F);
+        ticks(15, SPRINT, 30.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = OnFoot.ItemUse.DEFAULT; // the client starts eating: slowed, and the sprint goes on (shouldStopRunSprinting does not ask)
+        tick(SPRINT, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1); // the server's use, echoed
+        ticks(31, SPRINT, 30.0F);
+        assertTrue(player.sprinting());
+        // the server finishes it: the entity event (completeUsingItem on the client), then the flags
+        out(new ClientboundPacket.EntityEvent(SELF, ClientboundPacket.EntityEvent.FINISH_USING_ITEM));
+        use = null;
+        livingFlags(0);
+        ticks(20, SPRINT, 30.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+        assertEquals(72, count(MovementTracker.Outcome.EXPLAINED));
+    }
+
+    @Test
+    void walkingAtFullSpeedWhileEatingIsAFinding() throws Exception {
+        hold("minecraft:golden_apple", null);
+        ticks(5, NONE, 30.0F);
+        ticks(10, FORWARD, 30.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND)); // the client uses the apple but moves as if it did not
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        ticks(10, FORWARD, 30.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void blockingWithTheShieldAfterTheSwordPassesIsFollowedAndReleased() throws Exception {
+        hold("minecraft:diamond_sword", "minecraft:shield");
+        ticks(5, NONE, 30.0F);
+        ticks(10, FORWARD, 30.0F);
+        // Minecraft.startUseItem: the sword has no use (PASS), so the off hand's shield is used
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        keybinds.add(useItem(Hand.OFF_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(3);
+        ticks(25, STRAFE_SNEAK, 40.0F);
+        ticks(10, FORWARD, 40.0F);
+        keybinds.add(RELEASE);
+        use = null;
+        tick(FORWARD, 40.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(0);
+        ticks(20, SPRINT, 40.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+        assertEquals(72, count(MovementTracker.Outcome.EXPLAINED));
+    }
+
+    @Test
+    void aSpearInUseLetsThePlayerSprintAtFullSpeed() throws Exception {
+        hold("minecraft:iron_spear", null);
+        ticks(5, NONE, 30.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = new OnFoot.ItemUse(true, 1.0F); // a spear's use_effects: sprinting allowed, no slowdown
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        ticks(10, FORWARD, 30.0F);
+        ticks(20, SPRINT_JUMP, 30.0F);
+        assertTrue(player.sprinting());
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aPlayerBlockingSinceBeforeTheAnchorIsSlowedWhenItWalks() throws Exception {
+        hold("minecraft:diamond_sword", "minecraft:shield");
+        ticks(10, FORWARD, 30.0F);
+        // a block used far away: no claim, the set is dropped
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(-40, 63, -40), BlockFace.UP, new Vec3d(-39.5, 64.0, -39.5), false, false, 1));
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        // untracked, the client raises its shield and stands; the anchor cannot see the use
+        keybinds.add(useItem(Hand.OFF_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(3);
+        ticks(50, NONE, 30.0F);
+        int anchoredAt = ticks.size();
+        ticks(30, FORWARD, 30.0F); // still blocking
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(anchoredAt - 5, ticks.size())));
+        assertTrue(ticks.subList(anchoredAt, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(anchoredAt - 30, ticks.size())));
     }
 
     @Test

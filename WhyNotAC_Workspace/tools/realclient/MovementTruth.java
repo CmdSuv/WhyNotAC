@@ -107,7 +107,8 @@ public class MovementTruth {
                 afterAccept[0] = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
                 moved[0] |= in.packet() instanceof ServerboundPacket.MovePlayer && !reply;
             }
-            MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session));
+            MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session),
+                    replicas.inventory().inventory(session));
             if (tick == null) {
                 return;
             }
@@ -187,6 +188,7 @@ public class MovementTruth {
         long matched;
         long mismatched;
         long effectTicks;
+        long useTicks;
         final Map<String, Long> unknown = new TreeMap<>();
         final Map<String, Long> differingFields = new TreeMap<>();
         final List<String> examples = new ArrayList<>();
@@ -256,8 +258,12 @@ public class MovementTruth {
                 effectTicks++;
             }
             try {
+                OnFoot.ItemUse use = use(pre);
+                if (use != null) {
+                    useTicks++;
+                }
                 PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use));
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
                     matched++;
@@ -282,6 +288,7 @@ public class MovementTruth {
             out.put("matched", matched);
             out.put("mismatched", mismatched);
             out.put("withEffects", effectTicks);
+            out.put("usingItem", useTicks);
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
             out.put("examples", examples);
@@ -364,6 +371,23 @@ public class MovementTruth {
             }
         }
         return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness);
+    }
+
+    /**
+     * The item in use at the tick's start ({@code startedUsingItem}, after the tick's own keybinds), its prototype's
+     * {@code use_effects} (the session's items have no patch); null when none (older truth files: none).
+     */
+    private static OnFoot.ItemUse use(Map<String, Object> r) {
+        if (!Boolean.TRUE.equals(r.get("usingItem"))) {
+            return null;
+        }
+        String stack = (String) r.get("useItem");
+        String item = stack.substring(stack.lastIndexOf(' ') + 1);
+        dev.whynotac.world.ItemPrototypes.Prototype p = dev.whynotac.world.ItemPrototypes.vanilla().get(item);
+        if (p == null) {
+            throw new IllegalStateException("an item in use the table does not know: " + stack);
+        }
+        return new OnFoot.ItemUse(p.useCanSprint(), p.useSpeed());
     }
 
     /** The recorder's key string: W S A D J H R or '-' per key, in {@code Input}'s order. */

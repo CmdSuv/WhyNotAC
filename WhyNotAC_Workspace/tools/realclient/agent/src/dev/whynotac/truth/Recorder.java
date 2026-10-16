@@ -39,6 +39,8 @@ public final class Recorder {
     private static Field posX, posY, posZ, vec2X, vec2Y;
     // the active effects (the client keeps each until the server removes it) and their amplifiers
     private static Field activeEffects, amplifier;
+    // the item in use (LocalPlayer.startedUsingItem, LivingEntity.useItem)
+    private static Field startedUsingItem, useItem;
     private static Method isSprinting, isShiftKeyDown, getPose, isPassenger;
 
     private Recorder() {}
@@ -105,6 +107,9 @@ public final class Recorder {
             line.append(",\"autoJumpTime\":").append(autoJumpTime.getInt(player));
             bool(line, "autoJumpEnabled", autoJumpEnabled.getBoolean(player));
             effects(line, (java.util.Map<?, ?>) activeEffects.get(player));
+            bool(line, "usingItem", startedUsingItem.getBoolean(player));
+            // ItemStack.toString: "<count> <item key>"
+            line.append(",\"useItem\":\"").append(String.valueOf(useItem.get(player)).replaceAll("[^A-Za-z0-9_.: -]", "_")).append('"');
             Object move = moveVector.get(input.get(player));
             line.append(",\"moveVector\":[\"").append(Integer.toHexString(Float.floatToRawIntBits(vec2X.getFloat(move)))).append("\",\"")
                     .append(Integer.toHexString(Float.floatToRawIntBits(vec2Y.getFloat(move)))).append("\"]");
@@ -196,6 +201,8 @@ public final class Recorder {
         vec2X = field(loader, "net.minecraft.world.phys.Vec2", "x");
         vec2Y = field(loader, "net.minecraft.world.phys.Vec2", "y");
         activeEffects = field(loader, living, "activeEffects");
+        startedUsingItem = field(loader, local, "startedUsingItem");
+        useItem = field(loader, living, "useItem");
         amplifier = field(loader, "net.minecraft.world.effect.MobEffectInstance", "amplifier");
         isSprinting = method(loader, entity, "isSprinting()");
         isShiftKeyDown = method(loader, entity, "isShiftKeyDown()");

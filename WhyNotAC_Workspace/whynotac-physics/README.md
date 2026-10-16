@@ -81,12 +81,20 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     **Son oturum:** 2557 tikin 2553'ü bit bit eşit, 0 fark; 504 tik efekt altında. Negatif kontroller (hepsi
     yakalandı): zıplama gücü `0.1F` → `0.11F` (3 fark), yavaş düşüş sınırı `0.01` → `0.02` (177), havada süzülme
     `0.05` → `0.06` (20), körlüğü yok saymak (22), düşüş mesafesini sıfırlamamak (55).
+  - **Eşya kullanımı (`OnFoot.ItemUse`):** kullanılan eşyanın `use_effects`'i: girdi `speedMultiplier` ile
+    çarpılır (`modifyInput`, 0.98'den sonra, eğilmeden önce); `canSprint` değilse koşma başlamaz ve çift W penceresi
+    kapanır (`isSlowDueToUsingItem`), süren koşma sürer. Gerçek client oturumu sağ tuşla dört bacak koşar: koşarken
+    ve yürürken yenen altın elma, kılıcın arkasından kaldırılan kalkan (koşma tuşu, çift W ve eğilme kalkan
+    kalkıkken; W'ye dokunup kısa bir kalkan, sonra pencere içinde yine W), koşma başlarken şarj edilen mızrak, yürürken
+    çekilen yay. **Son oturum:** 3163 tikin 3153'ü bit bit eşit, 0 fark; 200 tik eşya kullanılırken. Negatif
+    kontroller (hepsi yakalandı): çarpan ×1.05 (197 fark), kullanırken koşma başlatabilmek (21), pencereyi
+    kapatmamak (1), kullanımı yok saymak (156); çarpanın eğilmeyle sırası bu veride ayırt edilmez.
   - **Hız özniteliği:** `OnFoot.Speed` ile dışarıdan verilir (sunucunun gönderdiği taban ve değiştiriciler); tick
     içindeki `setSprinting` çağrıları onu da değiştirir (`Speed.setSprinting`, sonucu `Step.speed`).
     Koşma değiştiricisinin özniteliğde olup olmadığı (`PlayerState.sprintModifier`) bayraktan ayrı izlenir: sunucu
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
-    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504 tik.
+    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200 tik.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı, tırmanma ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar);
     - slime ve yatak sekmesi; çit ve duvar üstü;

@@ -41,6 +41,32 @@ class ItemPrototypesDataTest {
             "FoodOnAStickItem", "DebugStickItem", "WrittenBookItem", "WritableBookItem", "LeadItem", "NameTagItem", "DyeItem", "SpawnEggItem",
             "BoatItem", "FireworkRocketItem", "EmptyMapItem", "EnderEyeItem");
 
+    /**
+     * What a use does on the client beyond use_effects (decompiled 1.21.11): BrushItem.onUseTick releases the use when the
+     * brush is not aimed at a block and BundleItem.onUseTick drops the contents, both without a packet; TridentItem.releaseUsing
+     * pushes the player for riptide. No other item class overrides onUseTick or releaseUsing with a client-side effect on
+     * the player (BowItem, CrossbowItem and SpyglassItem act in ServerLevel guards or play sounds). Of the classes that
+     * override use, BucketItem (MobBucketItem too) and PlaceOnWaterBlockItem change blocks on the client where its ray
+     * hits; the others act on the server, on the inventory, or start using the item.
+     */
+    private static String useKind(Item item) {
+        for (Class<?> k = item.getClass(); k != Item.class; k = k.getSuperclass()) {
+            switch (k.getSimpleName()) {
+                case "BrushItem", "BundleItem" -> {
+                    return "self-ending";
+                }
+                case "TridentItem" -> {
+                    return "release-moves";
+                }
+                case "BucketItem", "PlaceOnWaterBlockItem" -> {
+                    return "changes-blocks";
+                }
+                default -> { }
+            }
+        }
+        return "-";
+    }
+
     /** True if no class between the item's and Item declares one of the use methods, other than the client-stable ones. */
     private static boolean stable(Item item) {
         for (Class<?> k = item.getClass(); k != Item.class; k = k.getSuperclass()) {
@@ -76,7 +102,12 @@ class ItemPrototypesDataTest {
             // Minecraft.startAttack: a piercing weapon in the main hand stabs (ServerboundPlayerAction STAB), it never attacks an entity
             String piercing = item.components().has(DataComponents.PIERCING_WEAPON) ? "piercing" : "-";
             String stable = stable(item) && !item.components().has(DataComponents.CONSUMABLE) && remainder == null && swap.equals("-") ? "stable" : "-";
-            lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap + "\t" + piercing + "\t" + stable);
+            // LocalPlayer.isSlowDueToUsingItem / itemUseSpeedMultiplier: the stack's use_effects, UseEffects.DEFAULT without one
+            net.minecraft.world.item.component.UseEffects use = item.components().getOrDefault(DataComponents.USE_EFFECTS,
+                    net.minecraft.world.item.component.UseEffects.DEFAULT);
+            String useEffects = (use.canSprint() ? "sprint" : "slow") + ":" + use.speedMultiplier();
+            lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap + "\t" + piercing + "\t" + stable + "\t" + useEffects
+                    + "\t" + useKind(item));
         }
         lines.sort(null);
         String table = String.join("\n", lines) + "\n";

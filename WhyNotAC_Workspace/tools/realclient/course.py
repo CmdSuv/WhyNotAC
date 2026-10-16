@@ -4,7 +4,8 @@ One leg of the movement course for the real client, through OS-level input (XTes
 course and places the player at the start of each leg (run_realclient.sh); this presses the keys.
 
 Each step is KEYS/SECONDS: hold the comma-separated keys together for that long, then release them.
-KEYS "-" waits. KEYS/SECONDS/TAP also taps the key TAP every 0.6 s while holding.
+KEYS "-" waits. KEYS/SECONDS/TAP also taps the key TAP every 0.6 s while holding. A key "Button1".."Button3" is a
+mouse button (Button3: use).
 
 usage: course.py DISPLAY STEP...     e.g. course.py :99 w/2.0 w,Control_L/1.5/space -/0.5
 """
@@ -24,14 +25,21 @@ def main():
         seconds = float(parts[1])
         tap = parts[2] if len(parts) > 2 else None
         for key in keys:
-            i.key(key, True)
+            press(i, key, True)
         end = time.monotonic() + seconds
         while tap and time.monotonic() + 0.1 < end:
             i.tap(tap, 0.1)
             time.sleep(min(0.5, max(0.0, end - time.monotonic())))
         time.sleep(max(0.0, end - time.monotonic()))
         for key in reversed(keys):
-            i.key(key, False)
+            press(i, key, False)
+
+
+def press(i, key, down):
+    if key.startswith("Button"):
+        i.button(int(key[len("Button"):]), down)
+    else:
+        i.key(key, down)
 
 
 if __name__ == "__main__":

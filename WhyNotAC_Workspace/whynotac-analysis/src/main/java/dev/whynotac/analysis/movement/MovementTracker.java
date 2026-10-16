@@ -7,12 +7,16 @@ import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientEntities;
+import dev.whynotac.world.ClientInventory;
 import dev.whynotac.world.ClientWorld;
+import dev.whynotac.world.ItemPrototypes;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -116,6 +120,18 @@ public final class MovementTracker {
     private final List<TimelineEvent.Inbound> inbound = new ArrayList<>();
     private long ticks;
 
+    // --- the items in the player's hands (the inventory replica, after the event being handled) ------------------------
+    static final String USE_EFFECTS = "minecraft:use_effects";
+    private static final ItemPrototypes PROTOTYPES = ItemPrototypes.vanilla();
+    private ClientInventory inventory;
+    /**
+     * The hands' stacks at the last tracked tick's end (null: not known): a use the server's flags start may predate a
+     * change. Taken at every tracked tick: the flags may come ticks after the use they echo.
+     */
+    private Map<Hand, List<HandItem>> lastHands;
+    /** This tick's {@link #handItems}, by hand. */
+    private final Map<Hand, List<HandItem>> handsNow = new java.util.EnumMap<>(Hand.class);
+
     // --- tracking ---------------------------------------------------------------------------------------------------
     private List<Hypothesis> hypotheses;
     private long since = Long.MIN_VALUE;
@@ -154,6 +170,15 @@ public final class MovementTracker {
      * {@code ClientTickEnd} closed, null for other events.
      */
     public Tick onEvent(TimelineEvent event, ClientWorld world, ClientEntities entities) {
+        return onEvent(event, world, entities, null);
+    }
+
+    /**
+     * {@link #onEvent(TimelineEvent, ClientWorld, ClientEntities)} with the client's inventory as the replica holds it
+     * after the same event (null: not followed, so no claim while an item is used).
+     */
+    public Tick onEvent(TimelineEvent event, ClientWorld world, ClientEntities entities, ClientInventory inventory) {
+        this.inventory = inventory;
         switch (event) {
             case TimelineEvent.Outbound out -> onOutbound(out.sequence(), out.packet());
             case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.transactionId());
@@ -314,7 +339,27 @@ public final class MovementTracker {
         int attacks;
         boolean loaded;
         String unmodelled;
+        /** {@code handleKeybinds}' item actions in order: a {@link Hand} for each {@code UseItem}, {@link #RELEASE} for a release. */
+        final List<Object> itemActions = new ArrayList<>();
+        /**
+         * The client changed what its hands hold in this tick, or may have: a selected slot sent (the selection changed
+         * since the last one), a click in a menu, a creative edit, a drop, an interaction.
+         */
+        boolean handsTouched;
     }
+
+    /**
+     * Entity events that change nothing the step reads on the client's own player (decompiled {@code LocalPlayer},
+     * {@code Player}, {@code LivingEntity}, {@code Entity} and {@code ClientPacketListener.handleEntityEvent}): a
+     * kinetic hit's feedback (2), the death sound (3), shield sounds (29, 30), the totem (35), teleport particles
+     * (46), items breaking (47 to 52, 65, 68), honey particles (53, 54), poof and drown particles (60, 67),
+     * reduced debug info and permission levels (22 to 28).
+     */
+    private static final Set<Integer> NEUTRAL_ENTITY_EVENTS = Set.of(2, 3, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 46, 47, 48, 49, 50, 51, 52, 53,
+            54, 60, 65, 67, 68);
+
+    /** {@code MultiPlayerGameMode.releaseUsingItem}: {@code PlayerAction RELEASE_USE_ITEM}. */
+    private static final Object RELEASE = new Object();
 
     private TickInput sortOut() {
         TickInput t = new TickInput();
@@ -347,18 +392,26 @@ public final class MovementTracker {
                 case ServerboundPacket.InteractEntity interact -> {
                     if (interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK) {
                         t.attacks++;
+                    } else {
+                        t.handsTouched = true; // an interaction may use up or fill the stack in its hand
                     }
                 }
                 case ServerboundPacket.PlayerLoaded ignored -> t.loaded = true;
-                case ServerboundPacket.UseItem ignored -> t.unmodelled = "item use";
+                case ServerboundPacket.UseItem use -> t.itemActions.add(use.hand());
                 case ServerboundPacket.UseItemOn ignored -> t.unmodelled = "item use on a block";
                 case ServerboundPacket.PlayerAction action -> {
-                    if (action.action() == ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM
-                            || action.action() == ServerboundPacket.PlayerAction.Action.STAB
-                            || action.action() == ServerboundPacket.PlayerAction.Action.UNKNOWN) {
-                        t.unmodelled = "player action " + action.action();
+                    switch (action.action()) {
+                        case RELEASE_USE_ITEM -> t.itemActions.add(RELEASE);
+                        case DROP_ITEM, DROP_ALL_ITEMS -> t.handsTouched = true;
+                        case UNKNOWN -> t.unmodelled = "player action " + action.action();
+                        // digging (the world replica follows the client's predictions), drops and swaps (the inventory
+                        // replica), a stab (Player.onAttack only resets the attack strength): nothing on the movement
+                        default -> { }
                     }
                 }
+                case ServerboundPacket.SetCarriedItem ignored -> t.handsTouched = true;
+                case ServerboundPacket.ContainerClick ignored -> t.handsTouched = true;
+                case ServerboundPacket.SetCreativeModeSlot ignored -> t.handsTouched = true;
                 case ServerboundPacket.PlayerAbilities ignored -> t.unmodelled = "flying toggled";
                 case ServerboundPacket.MoveVehicle ignored -> t.unmodelled = "vehicle";
                 case ServerboundPacket.PaddleBoat ignored -> t.unmodelled = "vehicle";
@@ -371,6 +424,7 @@ public final class MovementTracker {
 
     private Tick closeTick(TimelineEvent.Inbound end, ClientWorld world, ClientEntities entities) {
         long number = ticks++;
+        handsNow.clear();
         TickInput in = sortOut();
         inbound.clear();
         long[] w = window();
@@ -421,6 +475,7 @@ public final class MovementTracker {
                     closest(predictions, in.move), in.move);
         }
         hypotheses = merged(next);
+        lastHands = hands();
         return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, hypotheses.size(), since, null, null);
     }
 
@@ -457,12 +512,21 @@ public final class MovementTracker {
         return List.copyOf(out);
     }
 
-    /** A state a tick may start from, with the speed attribute it holds then. */
-    private record Start(PlayerState player, SpeedAttribute speed) {}
+    /** A state a tick may start from, with the speed attribute it holds then and the item it uses. */
+    private record Start(PlayerState player, SpeedAttribute speed, Using using) {
+        Start withUsing(Using u) {
+            return new Start(player, speed, u);
+        }
+    }
+
+    /** One stack a hand may hold, as far as using it goes: the item (null: none), its use effects and what its use does. */
+    private record HandItem(String item, OnFoot.ItemUse effects, ItemPrototypes.UseKind kind) {
+        static final HandItem NONE = new HandItem(null, null, null);
+    }
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
     private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, OnFoot.Effects effects,
-            int window) {}
+            OnFoot.ItemUse use, int window) {}
 
     private void lose(String reason) {
         hypotheses = null; // the base goes on from what the server knows for certain
@@ -542,8 +606,22 @@ public final class MovementTracker {
                     b.size())));
             case ClientboundPacket.EntityEvent event -> {
                 int e = event.event();
-                if (e >= 22 && e <= 28) {
-                    yield h; // reduced debug info, permission levels
+                if (e == ClientboundPacket.EntityEvent.FINISH_USING_ITEM) {
+                    // Player.handleEntityEvent: completeUsingItem, then stopUsingItem (or releaseUsingItem when the hand changed)
+                    Using u = s.using();
+                    if (u == null) {
+                        yield h;
+                    }
+                    if (u.kind() == ItemPrototypes.UseKind.RELEASE_MOVES) {
+                        throw new Lose("a trident's use completed (a release may move the player on the client)");
+                    }
+                    if (s.food() <= 6 && !s.mayFly()) {
+                        throw new Lose("eaten while hungry (the client's own food decides sprinting before the server's)");
+                    }
+                    yield h.withSelf(s.withUsing(null));
+                }
+                if (NEUTRAL_ENTITY_EVENTS.contains(e)) {
+                    yield h;
                 }
                 throw new Lose("entity event " + e + " on the player");
             }
@@ -577,7 +655,7 @@ public final class MovementTracker {
         PlayerState p = h.player();
         SelfState s = h.self();
         boolean noGravity = s.noGravity();
-        boolean using = s.usingItem();
+        Using using = s.using();
         boolean frozen = s.frozen();
         for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
             switch (e.index()) {
@@ -600,11 +678,18 @@ public final class MovementTracker {
                     };
                 }
                 case 7 -> frozen = e.value() != 0; // DATA_TICKS_FROZEN
-                case 8 -> using = (e.value() & 1) != 0; // LivingEntity.DATA_LIVING_ENTITY_FLAGS: LocalPlayer starts or stops using
+                case 8 -> { // LivingEntity.DATA_LIVING_ENTITY_FLAGS: LocalPlayer.onSyncedDataUpdated starts or stops its own use to match
+                    boolean flag = (e.value() & 1) != 0;
+                    if (flag && using == null) {
+                        using = Using.fromServer((e.value() & 2) != 0 ? Hand.OFF_HAND : Hand.MAIN_HAND);
+                    } else if (!flag) {
+                        using = null;
+                    }
+                }
                 default -> { }
             }
         }
-        return h.withPlayer(p).withSelf(s.withFlags(noGravity, using, frozen));
+        return h.withPlayer(p).withSelf(s.withFlags(noGravity, frozen).withUsing(using));
     }
 
     /** A new {@code LocalPlayer} (login or respawn): the client's defaults, its rotation {@code -180, 0}, not ticking until loaded. */
@@ -709,7 +794,7 @@ public final class MovementTracker {
             }
         }
         PlayerState pre = rotated(h.player(), yRot, xRot);
-        List<Start> starts = new ArrayList<>(List.of(new Start(pre, self.speed())));
+        List<Start> starts = itemActions(new Start(pre, self.speed(), self.using()), in);
         for (int i = 0; i < in.attacks; i++) {
             // Player.causeExtraKnockback, when the client's own simulation of the hit knocks back: slowed, not sprinting
             List<Start> more = new ArrayList<>();
@@ -719,32 +804,36 @@ public final class MovementTracker {
                     throw new Lose("more speed modifiers than the client's table holds unresized");
                 }
                 Start slowed = new Start(withSprinting(withSprintModifier(withDelta(s.player(), s.player().deltaMovement().multiply(0.6, 1.0, 0.6)),
-                        false), false), speed);
+                        false), false), speed, s.using());
                 if (!starts.contains(slowed) && !more.contains(slowed)) {
                     more.add(slowed);
                 }
             }
             starts.addAll(more);
         }
+        starts = updatingUsingItem(starts, in);
         boolean autoJump = self.firstTick() || (h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON) != 0;
         int window = Integer.numberOfTrailingZeros(h.windowMask());
         for (Start begin : starts) {
             PlayerState start = begin.player();
-            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), window);
+            OnFoot.ItemUse use = begin.using() == null ? null : begin.using().effects();
+            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), use, window);
             OnFoot.Step step = steps.get(key);
             if (step != null && !step.readSprintTrigger()) {
                 // the same step: only this state's own counter counted down (or was cleared by shift or backward)
-                int counter = start.keys().shift() || keys.backward() ? 0 : Math.max(start.sprintTriggerTime() - 1, 0);
+                boolean slowDueToUse = use != null && !use.canSprint();
+                int counter = start.keys().shift() || slowDueToUse || keys.backward() ? 0 : Math.max(start.sprintTriggerTime() - 1, 0);
                 step = new OnFoot.Step(withSprintTrigger(step.state(), counter), false, false, step.autoJumpTriggered(), step.speed());
             } else {
                 try {
-                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects()));
+                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects(),
+                            use));
                 } catch (Colliders.Unknown e) {
                     throw new Lose(e.getMessage());
                 }
                 steps.putIfAbsent(key, step);
             }
-            SelfState after = self.afterFirstTick().withSpeed((SpeedAttribute) step.speed());
+            SelfState after = self.afterFirstTick().withSpeed((SpeedAttribute) step.speed()).withUsing(begin.using());
             List<Hypothesis> variants = new ArrayList<>();
             int jumpMask = self.firstTick() ? h.autoJumpMask() : step.autoJumpTriggered() ? h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON : h.autoJumpMask();
             PlayerState s = step.state();
@@ -772,6 +861,146 @@ public final class MovementTracker {
                 }
             }
         }
+    }
+
+    /**
+     * {@code Minecraft.handleKeybinds}' item actions, before the player's tick: an item use may start using the stack in
+     * its hand ({@code Item.use}: a consumable the player can eat, a shield, a spear, a bow with ammunition...) or not
+     * (an item without a use, a cooldown, food when full), both are followed; a release stops the use. A use that may
+     * change blocks where the client's ray hits (buckets, lily pads) ends the claim: the world replica cannot place it.
+     */
+    private List<Start> itemActions(Start first, TickInput in) throws Lose {
+        List<Start> starts = new ArrayList<>(List.of(first));
+        for (Object action : in.itemActions) {
+            List<Start> next = new ArrayList<>();
+            if (action instanceof Hand hand) {
+                List<HandItem> items = handItems(hand);
+                for (HandItem item : items) {
+                    if (item.kind() == ItemPrototypes.UseKind.CHANGES_BLOCKS) {
+                        throw new Lose("an item use that may change a block where WhyNotAC cannot place it");
+                    }
+                }
+                for (Start s : starts) {
+                    addIfNew(next, s);
+                    if (s.using() == null) { // LocalPlayer.startUsingItem: not while using, not with an empty hand
+                        for (HandItem item : items) {
+                            if (item.item() != null) {
+                                addIfNew(next, s.withUsing(new Using(hand, item.item(), item.effects(), item.kind())));
+                            }
+                        }
+                    }
+                }
+            } else {
+                for (Start s : starts) {
+                    if (s.using() != null && s.using().kind() == ItemPrototypes.UseKind.RELEASE_MOVES) {
+                        throw new Lose("a trident released (its riptide moves the player on the client)");
+                    }
+                    addIfNew(next, s.withUsing(null)); // LivingEntity.releaseUsingItem, then stopUsingItem
+                }
+            }
+            starts = next;
+        }
+        return starts;
+    }
+
+    /**
+     * {@code LivingEntity.updatingUsingItem}, at the start of the player's tick: the use goes on with the hand's stack
+     * while it is the same item ({@code ItemStack.isSameItem}: the item alone), else it stops; where the client touched
+     * its hands in this tick, it may have stopped too. A use the server's flags started takes the hand's stack as it
+     * was then: the hand's now, or none as well where it may have changed since.
+     */
+    private List<Start> updatingUsingItem(List<Start> starts, TickInput in) throws Lose {
+        List<Start> out = new ArrayList<>(starts.size());
+        for (Start s : starts) {
+            Using u = s.using();
+            if (u == null) {
+                addIfNew(out, s);
+                continue;
+            }
+            List<HandItem> items = handItems(u.hand());
+            for (HandItem item : items) {
+                boolean goesOn = item.item() != null && (!u.resolved() || item.item().equals(u.item()));
+                addIfNew(out, s.withUsing(goesOn ? new Using(u.hand(), item.item(), item.effects(), item.kind()) : null));
+            }
+            if (in.handsTouched || !u.resolved() && (items.size() > 1 || lastHands == null || !items.equals(lastHands.get(u.hand())))) {
+                addIfNew(out, s.withUsing(null));
+            }
+        }
+        for (Start s : out) {
+            if (s.using() != null && s.using().kind() == ItemPrototypes.UseKind.SELF_ENDING) {
+                throw new Lose("a use the client may end by itself (a brush, a bundle)");
+            }
+        }
+        return out;
+    }
+
+    private static <T> void addIfNew(List<T> list, T value) {
+        if (!list.contains(value)) {
+            list.add(value);
+        }
+    }
+
+    /**
+     * Every stack the hand may hold now, from the inventory replica's states: the selected hotbar slot's or the off
+     * hand's. Where the replica says a stack may have been used up, it is still the stack for a use: what uses it up
+     * on the client either ends the use (the finished use's entity event, followed apart) or is one of this tick's
+     * own actions ({@link TickInput#handsTouched}); a use started on a stack already gone is only a hypothesis more.
+     */
+    private List<HandItem> handItems(Hand hand) throws Lose {
+        List<HandItem> known = handsNow.get(hand);
+        if (known != null) {
+            return known;
+        }
+        if (inventory == null) {
+            throw new Lose("held items not followed");
+        }
+        List<HandItem> out = new ArrayList<>();
+        for (ClientInventory.View v : inventory.views()) {
+            int slot = hand == Hand.MAIN_HAND ? v.selected() : ClientInventory.HOTBAR;
+            if (slot < 0) {
+                throw new Lose("the selected hotbar slot is not known");
+            }
+            Stack stack = hand == Hand.MAIN_HAND ? v.hotbar().get(slot) : v.offhand();
+            if (stack == null) {
+                throw new Lose("a held item is not known");
+            }
+            addIfNew(out, handItem(stack));
+        }
+        if (out.isEmpty()) {
+            throw new Lose("no inventory state");
+        }
+        List<HandItem> items = List.copyOf(out);
+        handsNow.put(hand, items);
+        return items;
+    }
+
+    /** The stack's {@code use_effects} ({@code UseEffects.DEFAULT} where its patch removes them) and use kind. */
+    private static HandItem handItem(Stack stack) throws Lose {
+        if (stack.isEmpty()) {
+            return HandItem.NONE;
+        }
+        ItemPrototypes.Prototype p = PROTOTYPES.get(stack.item());
+        if (p == null) {
+            throw new Lose("an item this build does not know");
+        }
+        if (stack.added().contains(USE_EFFECTS)) {
+            throw new Lose("an item with use effects of its own");
+        }
+        OnFoot.ItemUse effects = stack.removed().contains(USE_EFFECTS) ? OnFoot.ItemUse.DEFAULT : new OnFoot.ItemUse(p.useCanSprint(), p.useSpeed());
+        return new HandItem(stack.item(), effects, p.useKind());
+    }
+
+    /** The hands' stacks now, for the next tick's check of a use the server's flags start (null where not known). */
+    private Map<Hand, List<HandItem>> hands() {
+        Map<Hand, List<HandItem>> out = new java.util.EnumMap<>(Hand.class);
+        for (Hand hand : Hand.values()) {
+            try {
+                out.put(hand, handItems(hand));
+            } catch (Lose e) {
+                return null;
+            }
+        }
+        return out;
     }
 
     /** What {@code LocalPlayer.tick} sends after the tick ended in {@code s}, against what was sent; the new record, or null if it differs. */
@@ -820,14 +1049,46 @@ public final class MovementTracker {
 
     private Tick untracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         Hypothesis settled = baseReliable ? settleAnchor(number, in, w, world, entities) : null;
-        if (settled != null) {
+        List<Hypothesis> uses = settled == null ? null : usesAtAnchor(settled);
+        if (uses != null) {
             boolean present = settled.self().speed().holdsSprinting();
             SpeedAttribute other = settled.self().speed().setSprinting(!present);
-            hypotheses = List.of(settled, settled.withPlayer(withSprintModifier(settled.player(), !present)).withSelf(settled.self().withSpeed(other)));
+            List<Hypothesis> anchored = new ArrayList<>();
+            for (Hypothesis u : uses) {
+                anchored.add(u);
+                anchored.add(u.withPlayer(withSprintModifier(u.player(), !present)).withSelf(u.self().withSpeed(other)));
+            }
+            hypotheses = List.copyOf(anchored);
+            lastHands = hands();
             since = end.sequence();
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: standing still", hypotheses.size(), since, null, null);
         }
         return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, lostReason, 0, since, null, null);
+    }
+
+    /**
+     * The anchor with every use the client may have going on: none, or one of each stack the hands may hold (a use
+     * started while untracked still slows the player once it walks). Null where a hand is not known, or holds an item
+     * whose use the client may end by itself.
+     */
+    private List<Hypothesis> usesAtAnchor(Hypothesis settled) {
+        List<Hypothesis> out = new ArrayList<>(List.of(settled.withSelf(settled.self().withUsing(null))));
+        try {
+            for (Hand hand : Hand.values()) {
+                for (HandItem item : handItems(hand)) {
+                    if (item.item() == null) {
+                        continue;
+                    }
+                    if (item.kind() == ItemPrototypes.UseKind.SELF_ENDING) {
+                        return null;
+                    }
+                    out.add(settled.withSelf(settled.self().withUsing(new Using(hand, item.item(), item.effects(), item.kind()))));
+                }
+            }
+        } catch (Lose e) {
+            return null;
+        }
+        return out;
     }
 
     /**
@@ -901,17 +1162,15 @@ public final class MovementTracker {
             case ClientboundPacket.SetEntityData data -> {
                 quietSincePosition = false;
                 boolean noGravity = b.self().noGravity();
-                boolean using = b.self().usingItem();
                 boolean frozen = b.self().frozen();
                 for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
                     switch (e.index()) {
                         case 5 -> noGravity = e.value() != 0;
                         case 7 -> frozen = e.value() != 0;
-                        case 8 -> using = (e.value() & 1) != 0;
-                        default -> { }
+                        default -> { } // the living flags: an anchor tries every use the hands allow
                     }
                 }
-                yield b.withSelf(b.self().withFlags(noGravity, using, frozen));
+                yield b.withSelf(b.self().withFlags(noGravity, frozen));
             }
             case ClientboundPacket.GameEvent event -> {
                 if (event.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE) {

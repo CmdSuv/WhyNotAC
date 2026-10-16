@@ -24,7 +24,9 @@ import org.junit.jupiter.api.Test;
  * sprint and stairs. {@code truth-autojump.jsonl.gz} holds one-block steps walked into head on and at an angle with
  * the client's auto-jump option on. {@code truth-effects.jsonl.gz} holds the ticks under effects the step reads: jump
  * boost II (sprint jumps, auto-jump at a two-block wall), slow falling (jumps, a six-block drop), levitation II and
- * blindness (sprint key and a double tap). Each tick, run from its start in the same world (rebuilt here from the
+ * blindness (sprint key and a double tap). {@code truth-use.jsonl.gz} holds the ticks with an item in use: a golden apple
+ * eaten while sprinting and walking, a shield raised behind a sword (the sprint key, a double tap and sneaking while
+ * blocking), a spear charged while a sprint starts, a bow drawn. Each tick, run from its start in the same world (rebuilt here from the
  * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -134,9 +136,15 @@ class OnFootTruthTest {
                 java.util.Arrays.toString(counts));
     }
 
+    @Test
+    void itemUseIsTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
+        assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
+    }
+
     /**
      * {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered, then ticks under jump
-     * boost, slow falling, levitation, blindness}.
+     * boost, slow falling, levitation, blindness, then ticks with an item in use, and with one in use while sprinting}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -146,7 +154,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[11];
+        int[] counts = new int[13];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -158,8 +166,11 @@ class OnFootTruthTest {
                 // LocalPlayer.autoJumpEnabled (recorded in newer files; the older ones were recorded with the option off)
                 boolean autoJump = pre.contains("\"autoJumpEnabled\":true");
                 OnFoot.Effects effects = effects(pre);
+                OnFoot.ItemUse use = use(pre);
                 predicted = OnFoot.tick(before, keys(text(post, "keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use));
+                counts[11] += use != null ? 1 : 0;
+                counts[12] += use != null && predicted.sprinting() ? 1 : 0;
                 counts[7] += effects.jumpBoost() > 0 ? 1 : 0;
                 counts[8] += effects.slowFalling() ? 1 : 0;
                 counts[9] += effects.levitation() > 0 ? 1 : 0;
@@ -212,11 +223,21 @@ class OnFootTruthTest {
                     case "minecraft:levitation" -> levitation = level;
                     case "minecraft:slow_falling" -> slowFalling = true;
                     case "minecraft:blindness" -> blindness = true;
-                    default -> throw new AssertionError("effect " + key);
+                    default -> { } // not read by the step (a golden apple's absorption and regeneration): the ticks show it
                 }
             }
         }
         return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness);
+    }
+
+    /** The item in use at the tick's start (newer files only): its prototype's {@code use_effects}; null when none. */
+    private static OnFoot.ItemUse use(String line) {
+        if (!line.contains("\"usingItem\":true")) {
+            return null;
+        }
+        String stack = text(line, "useItem");
+        dev.whynotac.world.ItemPrototypes.Prototype p = dev.whynotac.world.ItemPrototypes.vanilla().get(stack.substring(stack.lastIndexOf(' ') + 1));
+        return new OnFoot.ItemUse(p.useCanSprint(), p.useSpeed());
     }
 
     /** {@code LivingEntity.speed} (the attribute as a float, set in the last tick's aiStep) holds the sprinting modifier or not. */

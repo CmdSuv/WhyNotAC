@@ -23,7 +23,7 @@ import java.util.TreeMap;
  * the server sends it (teleports, knockback, explosions, attributes, effects, food, its own flags), each in the client
  * tick the transactions place it in or, where they cannot, in every tick it may be in. A tick is a finding
  * when no state the client may have been in sends what it sent: the position to the bit, the flags, the
- * sprint and input packets. Whatever the step does not model (fluids, climbing, items in use,
+ * sprint and input packets. Items in use slow it as their use effects say. Whatever the step does not model (fluids, climbing, a use on a block,
  * vehicles, pushing entities, blocks still changing, the world border) ends the claim until the next anchor.
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
@@ -57,7 +57,8 @@ public final class MovementCheck implements TimelineListener {
     public void onEvent(PlayerSession session, TimelineEvent event) {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
-        MovementTracker.Tick tick = state.tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session));
+        MovementTracker.Tick tick = state.tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session),
+                replicas.inventory().inventory(session));
         if (tick != null && tick.outcome() == MovementTracker.Outcome.UNEXPLAINED) {
             report(session, state, tick);
         }

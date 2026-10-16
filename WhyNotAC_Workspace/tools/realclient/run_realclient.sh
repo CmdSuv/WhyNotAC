@@ -195,6 +195,21 @@ effect give $NAME minecraft:levitation 1 1 true
 effect give $NAME minecraft:blindness 60 0 true
 leg 152.5 -60 -90 w,Control_L/1.0 -/0.3 w/0.1 -/0.1 w/1.0
 effect clear $NAME minecraft:blindness
+# Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
+# use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
+# sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap
+# window), a spear charged while a sprint starts (its use_effects let it), and a bow drawn while walking and released.
+lane() { echo "tp $NAME $1 -60 10.5 -90 0" > "$FIFO"; sleep 1.5; shift; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+echo "item replace entity $NAME weapon.mainhand with minecraft:golden_apple 8" > "$FIFO"; sleep 0.5
+lane 40.5 w,Control_L/0.8 w,Control_L,Button3/1.2 w,Button3/1.2 w/1.0
+echo "item replace entity $NAME weapon.mainhand with minecraft:diamond_sword" > "$FIFO"; sleep 0.5
+lane 40.5 w/0.5 w,Button3/1.0 w,Button3,Control_L/1.0 w,Button3/0.1 Button3/0.1 w,Button3/0.8 Shift_L,w,Button3/1.0 w/1.0
+lane 40.5 w/0.1 Button3/0.1 w/1.0
+echo "item replace entity $NAME weapon.mainhand with minecraft:iron_spear" > "$FIFO"; sleep 0.5
+lane 40.5 w/0.5 w,Button3/0.5 w,Button3,Control_L/1.5 w/0.5
+echo "item replace entity $NAME weapon.mainhand with minecraft:bow" > "$FIFO"
+echo "give $NAME minecraft:arrow 16" > "$FIFO"; sleep 0.5
+lane 40.5 w/0.5 w,Button3/1.5 w/1.0
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=
 sleep 2
