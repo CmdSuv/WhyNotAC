@@ -214,10 +214,9 @@ public final class OnFoot {
     }
 
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
-        // baseTick's fluid checks use the box deflated by 0.001; the feet block decides climbing
+        // baseTick's fluid checks use the box deflated by 0.001
         Box start = pose.box(x, y, z);
         requireNoEffects(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
-        requireNotClimbing();
         // --- LocalPlayer.aiStep ---
         if (sprintTriggerTime > 0) {
             sprintTriggerTime--;
@@ -232,7 +231,7 @@ public final class OnFoot {
             autoJumpTime--;
             keys = keys.withJump(); // input.makeJump(): the vector stays
         }
-        requireNoSuffocation();
+        moveTowardsClosestSpace(); // !noPhysics
         boolean slowDueToUse = conditions.use() != null && !conditions.use().canSprint(); // isSlowDueToUsingItem
         if (previousShift || slowDueToUse || keys.backward()) {
             sprintTriggerTime = 0;
@@ -385,14 +384,17 @@ public final class OnFoot {
         BlockPos below = onPos(0.500001F);
         float friction = onGround ? states.friction(state(below)) : 1.0F;
         float drag = friction * 0.91F;
-        // handleRelativeFrictionAndCalculateMovement (not climbing: the box is in air)
+        // handleRelativeFrictionAndCalculateMovement
         delta = delta.add(Vec3d.inputVector(input, frictionInfluencedSpeed(friction), yRot));
+        delta = handleOnClimbable(delta);
         Box before = pose.box(x, y, z);
         move(delta);
-        requireNotClimbing(); // handleRelativeFrictionAndCalculateMovement asks again after the move
         // checkInsideBlocks sweeps the box (deflated by 1.0E-5F) along the move
         requireNoEffects(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
         Vec3d moved = delta;
+        if ((horizontalCollision || jumping) && onClimbable()) { // asked again after the move, at the new feet block
+            moved = new Vec3d(moved.x(), 0.2, moved.z());
+        }
         double vy = moved.y();
         int levitation = conditions.effects().levitation();
         if (levitation > 0) {
@@ -718,17 +720,47 @@ public final class OnFoot {
     }
 
     /** {@code moveTowardsClosestSpace} at the four corners: modelled only when no block could suffocate there. */
-    private void requireNoSuffocation() throws Colliders.Unknown {
-        Box box = pose.box(x, y, z);
+    /**
+     * {@code LocalPlayer.moveTowardsClosestSpace} at the box's four corners (0.35 of the width out), in the client's
+     * order: a corner whose column suffocates pushes the player 0.1 toward the nearest free side.
+     */
+    private void moveTowardsClosestSpace() throws Colliders.Unknown {
         double w = pose.width * 0.35;
-        double[][] corners = {{x - w, z + w}, {x - w, z - w}, {x + w, z - w}, {x + w, z + w}};
-        for (double[] c : corners) {
-            BlockPos p = BlockPos.containing(c[0], y, c[1]);
-            Box column = Box.of(p.x(), box.minY(), p.z(), p.x() + 1.0, box.maxY(), p.z() + 1.0).inflate(-1.0E-7, -1.0E-7, -1.0E-7);
-            if (!Colliders.noCollision(world, column)) {
-                throw new Colliders.Unknown("a block where the player could suffocate (not modelled)");
+        moveTowardsClosestSpace(x - w, z + w);
+        moveTowardsClosestSpace(x - w, z - w);
+        moveTowardsClosestSpace(x + w, z - w);
+        moveTowardsClosestSpace(x + w, z + w);
+    }
+
+    private void moveTowardsClosestSpace(double px, double pz) throws Colliders.Unknown {
+        BlockPos pos = BlockPos.containing(px, y, pz);
+        if (!suffocatesAt(pos.x(), pos.z())) {
+            return;
+        }
+        double dx = px - pos.x();
+        double dz = pz - pos.z();
+        // Direction.WEST, EAST, NORTH, SOUTH: the distance to that side of the cell, if the cell beyond is free
+        int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+        int[] best = null;
+        double min = Double.MAX_VALUE;
+        for (int[] d : directions) {
+            double v = d[0] != 0 ? dx : dz;
+            double distance = d[0] + d[1] > 0 ? 1.0 - v : v;
+            if (distance < min && !suffocatesAt(pos.x() + d[0], pos.z() + d[1])) {
+                min = distance;
+                best = d;
             }
         }
+        if (best != null) {
+            delta = best[0] != 0 ? new Vec3d(0.1 * best[0], delta.y(), delta.z()) : new Vec3d(delta.x(), delta.y(), 0.1 * best[1]);
+        }
+    }
+
+    /** {@code LocalPlayer.suffocatesAt}: the cell's column, the box's height, deflated by {@code 1.0E-7}. */
+    private boolean suffocatesAt(int cx, int cz) throws Colliders.Unknown {
+        Box box = pose.box(x, y, z);
+        Box column = Box.of(cx, box.minY(), cz, cx + 1.0, box.maxY(), cz + 1.0).inflate(-1.0E-7, -1.0E-7, -1.0E-7);
+        return Colliders.collidesWithSuffocatingBlock(world, column);
     }
 
     /** {@code Entity.getOnPos(offset)}: the supporting block's column at the offset below the feet. */
@@ -767,12 +799,51 @@ public final class OnFoot {
         }
     }
 
-    /** {@code onClimbable()}: the feet block is climbable (a trapdoor might be). */
-    private void requireNotClimbing() throws Colliders.Unknown {
-        String block = states.block(state(BlockPos.containing(x, y, z)));
-        if (CLIMBABLE.contains(block) || block.endsWith("_trapdoor")) {
-            throw new Colliders.Unknown("climbing " + block + " (not modelled)");
+    /**
+     * {@code LivingEntity.onClimbable} for a player neither flying nor a spectator: the block at the feet
+     * ({@code getInBlockState}) is climbable, or an open trapdoor over a ladder facing the same way
+     * ({@code trapdoorUsableAsLadder}). Scaffolding is not followed: its shape depends on the player.
+     */
+    private boolean onClimbable() throws Colliders.Unknown {
+        BlockPos feet = BlockPos.containing(x, y, z);
+        int s = state(feet);
+        String block = states.block(s);
+        if (block.equals("minecraft:scaffolding")) {
+            throw new Colliders.Unknown("scaffolding at the feet (not modelled)");
         }
+        if (CLIMBABLE.contains(block)) {
+            return true;
+        }
+        if (block.endsWith("_trapdoor") && property(s, "open").equals("true")) {
+            int below = state(new BlockPos(feet.x(), feet.y() - 1, feet.z()));
+            return states.block(below).equals("minecraft:ladder") && property(below, "facing").equals(property(s, "facing"));
+        }
+        return false;
+    }
+
+    /** {@code handleOnClimbable}: on a climbable block the motion is held to 0.15 a tick, and shift holds the player still. */
+    private Vec3d handleOnClimbable(Vec3d d) throws Colliders.Unknown {
+        if (!onClimbable()) {
+            return d;
+        }
+        fallDistance = 0.0; // resetFallDistance
+        double cx = VanillaMath.clamp(d.x(), -0.15F, 0.15F);
+        double cz = VanillaMath.clamp(d.z(), -0.15F, 0.15F);
+        double cy = Math.max(d.y(), -0.15F);
+        if (cy < 0.0 && keys.shift()) { // isSuppressingSlidingDownLadder: isShiftKeyDown (scaffolding excluded above)
+            cy = 0.0;
+        }
+        return new Vec3d(cx, cy, cz);
+    }
+
+    /** A block state's property value ({@code key=value,...}), or empty. */
+    private String property(int state, String key) {
+        for (String kv : states.properties(state).split(",")) {
+            if (kv.startsWith(key + "=")) {
+                return kv.substring(key.length() + 1);
+            }
+        }
+        return "";
     }
 
     private int state(BlockPos pos) throws Colliders.Unknown {

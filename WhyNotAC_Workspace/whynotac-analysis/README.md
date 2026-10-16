@@ -48,7 +48,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   açlığı koşmayı sunucudan önce belirler). Çapa her olası kullanımı dener: hiçbiri ya da ellerdeki her yığın.
   İddia yok: blok değiştirebilen kullanım (kova, nilüfer), kendi kendine bitebilen kullanım (fırça, kese),
   bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
-- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, tırmanma...), itebilecek ya da
+- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, iskele...), itebilecek ya da
   çarpışan bir varlık yakında (canlılar, tekneler, vagonlar), yerleşmemiş blok, piston, dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
@@ -57,8 +57,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   çalıştırılarak doğrulanır.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
-  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık, efekt ve eşya kullanımı bacaklarıyla):
-  3176 tikin 2862'si iddia edildi, 0 açıklanamayan, 1398/1398 tick'te client'ın durumu kümede. Efekt modellerinin bilinçli
+  durumu hipotezlerden biri olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı
+  ve tırmanma bacaklarıyla): 3659 tikin 3237'si iddia edildi, 0 açıklanamayan, 1686/1686 tick'te client'ın durumu
+  kümede. Efekt modellerinin bilinçli
   hataları (zıplama gücü, yavaş düşüş, havada süzülme, körlük) takipçide de açıklanamayan tik ya da kümede
   bulunmayan client durumu verir. `MovementCheckTest` aynı adımı koşan sentetik bir
   client'la (hız değiştiricileri gerçek fastutil tablosunda): dürüst hareket, belirsiz pencerede savrulma, çift

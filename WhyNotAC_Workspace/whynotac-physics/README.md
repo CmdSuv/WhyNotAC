@@ -94,11 +94,22 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     Koşma değiştiricisinin özniteliğde olup olmadığı (`PlayerState.sprintModifier`) bayraktan ayrı izlenir: sunucu
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
-    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200 tik.
+    yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200,
+    tırmanma alanında 499 tik.
+  - **Tırmanma (`onClimbable`, `handleOnClimbable`):** ayaktaki blok tırmanılabilir (merdiven, sarmaşıklar) ya da
+    aynı yöne bakan bir merdivenin üstünde açık bir tuzak kapı: hareket tik başına 0.15'e tutulur, düşüş mesafesi
+    sıfırlanır, shift aşağı kaymayı durdurur; hareketten sonra yatay çarpışma ya da zıplama dikey hızı 0.2 yapar.
+    İskele kapsam dışı (şekli oyuncuya bağlı).
+  - **Bloktan itilme (`LocalPlayer.moveTowardsClosestSpace`):** kutunun dört köşesinden (genişliğin 0.35'i) biri
+    boğan bir bloğun sütunundaysa (`collidesWithSuffocatingBlock`; blok verisindeki `SUFFOCATING`, client'ın kendi
+    kaydından) oyuncu en yakın boş yana 0.1 itilir. Merdiven ve tuzak kapı boğmaz: onlara yaslanmak itilme değildir.
+  - **Son oturum (tırmanma ve itilme bacaklarıyla):** 3635 tikin 3617'si bit bit eşit, 0 fark. Negatif kontroller
+    (hepsi yakalandı): 0.15 → 0.16 (7 fark), tırmanışta 0.2'yi yok saymak (120), shift'le tutunmayı yok saymak (44),
+    itilme 0.1 → 0.11 (1), merdiven üstü tuzak kapıyı yok saymak (18).
   - **Kapsam dışında `Colliders.Unknown`:**
-    - sıvı, tırmanma ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar);
+    - sıvı ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar), iskele;
     - slime ve yatak sekmesi; çit ve duvar üstü;
-    - boğulma itmesi, yüklenmemiş chunk, sürünme;
+    - yüklenmemiş chunk, sürünme;
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 
     Varsayılan öznitelikler (hız dışında) varsayılır; adımın okuduğu efektler (`OnFoot.Effects`: zıplama gücü,

@@ -49,6 +49,16 @@ public final class Colliders {
     }
 
     /**
+     * {@code CollisionGetter.collidesWithSuffocatingBlock(player, box)}: {@code BlockCollisions} keeping only the
+     * blocks that suffocate ({@link BlockStates#SUFFOCATING}). A block whose shape depends on the world is not known.
+     */
+    public static boolean collidesWithSuffocatingBlock(World world, Box box) throws Unknown {
+        List<Voxels> shapes = new ArrayList<>();
+        blocks(world, box, shapes, null, true);
+        return !shapes.isEmpty();
+    }
+
+    /**
      * {@code CollisionGetter.findSupportingBlock(player, box)}: of the blocks colliding with the box, the one
      * whose centre is nearest to {@code (px, py, pz)}; on a tie the greatest by {@code Vec3i.compareTo}
      * (y, then z, then x). Null if none.
@@ -78,6 +88,10 @@ public final class Colliders {
 
     /** As {@link #blocks(World, Box, List)}, also collecting each shape's block position when {@code positions} is not null. */
     static void blocks(World world, Box box, List<Voxels> out, List<BlockPos> positions) throws Unknown {
+        blocks(world, box, out, positions, false);
+    }
+
+    private static void blocks(World world, Box box, List<Voxels> out, List<BlockPos> positions, boolean onlySuffocating) throws Unknown {
         BlockStates states = world.states();
         int x0 = floor(box.minX() - VoxelCollisions.EPSILON) - 1;
         int x1 = floor(box.maxX() + VoxelCollisions.EPSILON) + 1;
@@ -100,6 +114,14 @@ public final class Colliders {
                     }
                     Shape shape = states.collisionShape(state);
                     boolean dynamic = states.has(state, BlockStates.DYNAMIC_SHAPE);
+                    if (onlySuffocating) {
+                        if (dynamic) {
+                            throw new Unknown(states.block(state) + " (whether it suffocates depends on the world) at " + x + " " + y + " " + z);
+                        }
+                        if (!states.has(state, BlockStates.SUFFOCATING)) {
+                            continue;
+                        }
+                    }
                     // hasLargeCollisionShape(): true without a shape cache (dynamic shapes), else beyond the unit cube
                     if (type == 1 && !(dynamic || isLarge(shape))) {
                         continue;

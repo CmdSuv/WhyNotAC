@@ -26,7 +26,9 @@ import org.junit.jupiter.api.Test;
  * boost II (sprint jumps, auto-jump at a two-block wall), slow falling (jumps, a six-block drop), levitation II and
  * blindness (sprint key and a double tap). {@code truth-use.jsonl.gz} holds the ticks with an item in use: a golden apple
  * eaten while sprinting and walking, a shield raised behind a sword (the sprint key, a double tap and sneaking while
- * blocking), a spear charged while a sprint starts, a bow drawn. Each tick, run from its start in the same world (rebuilt here from the
+ * blocking), a spear charged while a sprint starts, a bow drawn. {@code truth-climb.jsonl.gz} holds a ladder, vines and an
+ * open trapdoor over a ladder, climbed by walking into them, held with shift, jumped on and slid down, and the client
+ * pushing itself out of a wall it was placed 0.15 into. Each tick, run from its start in the same world (rebuilt here from the
  * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -77,6 +79,13 @@ class OnFootTruthTest {
         {136, -60, -1, 139, -60, 1, blockState("minecraft:stone")},
         {143, -60, -3, 146, -60, 3, blockState("minecraft:stone")},
         {170, -60, -1, 170, -59, 1, blockState("minecraft:stone")},
+        {62, -60, -11, 62, -55, -9, blockState("minecraft:stone")},
+        {61, -60, -10, 61, -57, -10, blockState("minecraft:ladder", "facing=west", "waterlogged=false")},
+        {67, -60, -11, 67, -55, -9, blockState("minecraft:stone")},
+        {66, -60, -10, 66, -57, -10, blockState("minecraft:vine", "east=true", "north=false", "south=false", "up=false", "west=false")},
+        {72, -60, -11, 72, -58, -9, blockState("minecraft:stone")},
+        {71, -60, -10, 71, -60, -10, blockState("minecraft:ladder", "facing=west", "waterlogged=false")},
+        {71, -59, -10, 71, -59, -10, blockState("minecraft:oak_trapdoor", "facing=west", "half=bottom", "open=true", "powered=false", "waterlogged=false")},
     };
 
     private static final Colliders.World COURSE_WORLD = new Colliders.World() {
@@ -137,6 +146,12 @@ class OnFootTruthTest {
     }
 
     @Test
+    void climbingIsTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-climb.jsonl.gz", COURSE_WORLD);
+        assertTrue(counts[0] > 150 && counts[13] > 100 && counts[14] >= 1, java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -144,7 +159,8 @@ class OnFootTruthTest {
 
     /**
      * {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered, then ticks under jump
-     * boost, slow falling, levitation, blindness, then ticks with an item in use, and with one in use while sprinting}.
+     * boost, slow falling, levitation, blindness, then ticks with an item in use, and with one in use while sprinting, then
+     * ticks ending in a climbable column, and ticks after a push out of a block}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -154,7 +170,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[13];
+        int[] counts = new int[15];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -171,6 +187,11 @@ class OnFootTruthTest {
                         new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use));
                 counts[11] += use != null ? 1 : 0;
                 counts[12] += use != null && predicted.sprinting() ? 1 : 0;
+                // on a climbable block at the end (the ladder, vine and trapdoor columns), and pushed out of a block
+                int fx = (int) Math.floor(expected.x());
+                int fz = (int) Math.floor(expected.z());
+                counts[13] += fz == -10 && (fx == 61 || fx == 66 || fx == 71) && expected.y() < -56.0 ? 1 : 0;
+                counts[14] += before.x() + 0.3 > 72.0 && before.z() > -11.0 && before.z() < -9.0 ? 1 : 0; // the box inside the wall at x 72
                 counts[7] += effects.jumpBoost() > 0 ? 1 : 0;
                 counts[8] += effects.slowFalling() ? 1 : 0;
                 counts[9] += effects.levitation() > 0 ? 1 : 0;

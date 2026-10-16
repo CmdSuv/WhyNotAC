@@ -84,6 +84,7 @@ public final class BlockDataDump {
         Method replaceable = method(STATE, "canBeReplaced()");
         Method blocksMotion = method(STATE, "blocksMotion()");
         Method tool = method(STATE, "requiresCorrectToolForDrops()");
+        Method suffocating = method(STATE, "isSuffocating(" + GETTER + "," + POS + ")");
         Method destroySpeed = method(STATE, "getDestroySpeed(" + GETTER + "," + POS + ")");
         Method fluidState = method(STATE, "getFluidState()");
         Method values = method(HOLDER, "getValues()");
@@ -116,6 +117,7 @@ public final class BlockDataDump {
             flags |= (boolean) tool.invoke(state) ? BlockStates.TOOL_REQUIRED : 0;
             Object collisionShape = collision.invoke(state, emptyGetter, zero, emptyContext);
             flags |= collisionShape == fullBlock ? BlockStates.FULL_BLOCK : 0;
+            flags |= (boolean) suffocating.invoke(state, emptyGetter, zero) ? BlockStates.SUFFOCATING : 0;
 
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {

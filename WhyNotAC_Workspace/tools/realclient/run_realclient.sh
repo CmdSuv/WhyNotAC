@@ -82,7 +82,11 @@ for c in "forceload add 32 -16 191 16" \
   "fill 52 -61 -1 62 -61 1 minecraft:ice" "fill 70 -61 -1 74 -61 1 minecraft:soul_sand" "fill 82 -60 -2 82 -59 2 minecraft:stone" \
   "fill 88 -60 -1 91 -60 1 minecraft:stone" "fill 98 -58 -1 101 -58 1 minecraft:stone" \
   "fill 124 -60 -1 124 -60 1 minecraft:oak_stairs[facing=east]" "fill 125 -60 -1 127 -60 1 minecraft:stone" \
-  "fill 136 -60 -1 139 -60 1 minecraft:stone" "fill 143 -60 -3 146 -60 3 minecraft:stone" "fill 170 -60 -1 170 -59 1 minecraft:stone"; do
+  "fill 136 -60 -1 139 -60 1 minecraft:stone" "fill 143 -60 -3 146 -60 3 minecraft:stone" "fill 170 -60 -1 170 -59 1 minecraft:stone" \
+  "fill 62 -60 -11 62 -55 -9 minecraft:stone" "fill 61 -60 -10 61 -57 -10 minecraft:ladder[facing=west]" \
+  "fill 67 -60 -11 67 -55 -9 minecraft:stone" "fill 66 -60 -10 66 -57 -10 minecraft:vine[east=true]" \
+  "fill 72 -60 -11 72 -58 -9 minecraft:stone" "setblock 71 -60 -10 minecraft:ladder[facing=west]" \
+  "setblock 71 -59 -10 minecraft:oak_trapdoor[facing=west,open=true,half=bottom]"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -122,6 +126,10 @@ for _ in $(seq 1 180); do
 done
 grep -q "$NAME joined the game" "$WORK_DIR/server.log" || { echo "client never joined"; tail -40 "$WORK_DIR/client.log"; exit 1; }
 sleep 5 # let the world render and the player land
+# The world spawn is random within its radius: place the player where everything below expects it (the entities are
+# summoned around it, and the reach stage's line to its husk must stay clear of them).
+echo "tp $NAME 0.5 -60 0.5 0 0" > "$FIFO"
+sleep 2
 # Entities the real client must hold exactly as the server tracks them (no AI: only the commands move them).
 # Hostile mobs cannot be summoned on peaceful. Natural monster spawning is a game rule in 1.21.11 (the
 # server property no longer applies): off first, or a slime from a slime chunk may kill the player.
@@ -195,6 +203,15 @@ effect give $NAME minecraft:levitation 1 1 true
 effect give $NAME minecraft:blindness 60 0 true
 leg 152.5 -60 -90 w,Control_L/1.0 -/0.3 w/0.1 -/0.1 w/1.0
 effect clear $NAME minecraft:blindness
+# Climbing, at z = -9.5: a ladder on a wall walked into, held with shift, jumped on and slid down; vines likewise; an
+# open trapdoor over a ladder facing its way (a ladder too). Ladders and trapdoors do not suffocate: walking against
+# them is no push.
+climb() { echo "tp $NAME $1 -60 -9.5 -90 0" > "$FIFO"; sleep 1.5; shift; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+climb 59.5 w/2.0 Shift_L,w/0.6 Shift_L/1.0 -/1.5 w/0.3 space/1.0 -/1.0
+climb 64.5 w/2.0 Shift_L/0.8 -/1.5
+climb 69.5 w/1.5 -/1.0
+# Placed 0.15 into a wall: the client pushes itself out (moveTowardsClosestSpace), then walks back into it.
+climb 71.85 -/1.0 w/1.0
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap

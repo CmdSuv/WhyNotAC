@@ -93,6 +93,9 @@ class BlockStatesDataTest {
             if (collision == Shapes.block()) {
                 flags |= BlockStates.FULL_BLOCK;
             }
+            if (state.isSuffocating(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) {
+                flags |= BlockStates.SUFFOCATING;
+            }
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), flags, block.getFriction(), block.getSpeedFactor(),
                     block.getJumpFactor(), state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO), fluid(state.getFluidState()));

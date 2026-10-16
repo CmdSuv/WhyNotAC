@@ -59,7 +59,13 @@ public final class BlockStates {
      * shape ({@code BlockCollisions.computeNext}).
      */
     public static final int FULL_BLOCK = 1 << 7;
-    private static final String FLAG_LETTERS = "adcormtf";
+    /**
+     * {@code isSuffocating(level, pos)} for an empty world: what {@code collidesWithSuffocatingBlock} keeps (the client's
+     * push out of a block, {@code LocalPlayer.moveTowardsClosestSpace}). The default is a full-block shape that blocks
+     * motion; glass, leaves and others never suffocate, mud and soul sand always do.
+     */
+    public static final int SUFFOCATING = 1 << 8;
+    private static final String FLAG_LETTERS = "adcormtfs";
 
     private static volatile BlockStates vanilla;
 
