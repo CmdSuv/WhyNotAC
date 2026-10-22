@@ -15,14 +15,21 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Attack grammar (P-M): the vanilla 1.21.11 client attacks early in its tick, and swings right after.
+ * Action grammar (P-M): the vanilla 1.21.11 client acts (attacks, uses items, digs, drops, swaps hands, picks a
+ * hotbar slot) early in its tick, before its movement, and swings right after an attack.
  *
  * <p>Soundness (decompiled 1.21.11 client):
  * <ul>
- *   <li>{@code ServerboundInteractPacket} ATTACK comes only from {@code MultiPlayerGameMode.attack}, and
- *       {@code ServerboundPlayerActionPacket} STAB only from {@code MultiPlayerGameMode.piercingAttack}; both
- *       are called only from {@code Minecraft.startAttack}, which runs only in {@code handleKeybinds} (the attack
- *       key's queued clicks).</li>
+ *   <li>Each of these packets has one sender, and each sender runs only in {@code Minecraft.handleKeybinds} (the
+ *       keys' queued clicks and the held use key) or, for the hotbar slot, also at the very start of the tick
+ *       ({@code MultiPlayerGameMode.tick}): {@code ServerboundInteractPacket} (ATTACK from {@code attack}, INTERACT and
+ *       INTERACT_AT from {@code interact}/{@code interactAt}), {@code ServerboundUseItemOnPacket} and
+ *       {@code ServerboundUseItemPacket} ({@code useItemOn}, {@code useItem}; all four called only from
+ *       {@code Minecraft.startAttack} and {@code startUseItem}), {@code ServerboundPlayerActionPacket} (digging from
+ *       {@code startDestroyBlock}, {@code continueDestroyBlock} and {@code stopDestroyBlock}, called from
+ *       {@code startAttack} and {@code continueAttack}; RELEASE_USE_ITEM from {@code releaseUsingItem}; STAB from
+ *       {@code piercingAttack}; the drops from {@code LocalPlayer.drop}; SWAP_ITEM_WITH_OFFHAND from the swap key) and
+ *       {@code ServerboundSetCarriedItemPacket} ({@code ensureHasSentCarriedItem}).</li>
  *   <li>{@code Minecraft.tick} runs {@code handleKeybinds} before {@code level.tickEntities()}, where
  *       {@code LocalPlayer.tick} (riding too) sends the tick's movement packet, and ends with
  *       {@code ServerboundClientTickEndPacket}. Packet handlers (teleport, rotation and vehicle-teleport replies)
@@ -36,7 +43,7 @@ import java.util.TreeMap;
  * <ol>
  *   <li>after a STAB, or an ATTACK while the player cannot be a spectator ({@code ClientSelf#mayBeSpectator}),
  *       the next packet other than {@code KeepAlive} and {@code ChunkBatchReceived} is the main hand's swing;</li>
- *   <li>no ATTACK or STAB follows, in the same client tick, a movement packet that can only be the tick's own:
+ *   <li>none of these actions follows, in the same client tick, a movement packet that can only be the tick's own:
  *       not the reply to an accepted teleport, nor a packet a rotation or entity teleport the client may have
  *       handled could explain ({@link MoveReplies}, the tick-framing allowances).</li>
  * </ol>
@@ -46,20 +53,20 @@ import java.util.TreeMap;
  * <p>At most one finding per {@link #REPORT_INTERVAL_NANOS} per session; the next one counts what broke the
  * grammar in between.
  */
-public final class AttackGrammarCheck implements TimelineListener {
+public final class ActionGrammarCheck implements TimelineListener {
 
-    public static final String ID = "attack-grammar";
+    public static final String ID = "action-grammar";
     public static final int VERSION = 1;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final String NO_SWING = "attacksWithoutSwing";
-    static final String AFTER_MOVEMENT = "attacksAfterMovement";
+    static final String AFTER_MOVEMENT = "actionsAfterMovement";
 
     private static final Object STATE = new Object();
 
     private final EvidenceSink sink;
     private final Replicas replicas;
 
-    public AttackGrammarCheck(EvidenceSink sink, Replicas replicas) {
+    public ActionGrammarCheck(EvidenceSink sink, Replicas replicas) {
         this.sink = sink;
         this.replicas = replicas;
     }
@@ -121,12 +128,48 @@ public final class AttackGrammarCheck implements TimelineListener {
                 state.tickStartNanos = in.nanoTime();
                 state.ownMove = Long.MIN_VALUE;
             }
-            case ServerboundPacket.InteractEntity interact when interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK ->
-                    onAttack(session, state, in, "attack on entity " + interact.entityId(), !replicas.self().self(session).mayBeSpectator());
-            case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.STAB ->
-                    onAttack(session, state, in, "stab", true);
-            default -> { }
+            default -> {
+                String action = action(packet);
+                if (action == null) {
+                    return;
+                }
+                if (state.ownMove != Long.MIN_VALUE) {
+                    state.afterMovement++;
+                    report(session, state, state.tickStart, state.tickStartNanos, in,
+                            action + " after the tick's own movement packet (" + state.ownMove + ")");
+                }
+                boolean attack = packet instanceof ServerboundPacket.InteractEntity interact
+                        && interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK;
+                boolean stab = packet instanceof ServerboundPacket.PlayerAction a && a.action() == ServerboundPacket.PlayerAction.Action.STAB;
+                if (stab || attack && !replicas.self().self(session).mayBeSpectator()) {
+                    state.swingDue = in.sequence();
+                    state.swingDueNanos = in.nanoTime();
+                    state.swingFor = action;
+                }
+            }
         }
+    }
+
+    /** What the client did, if this packet is one only {@code handleKeybinds} (or the tick's start) sends; else null. */
+    static String action(ServerboundPacket packet) {
+        return switch (packet) {
+            case ServerboundPacket.InteractEntity interact -> switch (interact.kind()) {
+                case ATTACK -> "attack on entity " + interact.entityId();
+                case INTERACT, INTERACT_AT -> "interaction with entity " + interact.entityId();
+            };
+            case ServerboundPacket.UseItemOn ignored -> "use of the item on a block";
+            case ServerboundPacket.UseItem ignored -> "use of the item";
+            case ServerboundPacket.SetCarriedItem ignored -> "hotbar selection";
+            case ServerboundPacket.PlayerAction action -> switch (action.action()) {
+                case START_DESTROY_BLOCK, ABORT_DESTROY_BLOCK, STOP_DESTROY_BLOCK -> "digging (" + action.action() + ")";
+                case RELEASE_USE_ITEM -> "release of the item in use";
+                case DROP_ITEM, DROP_ALL_ITEMS -> "item drop";
+                case SWAP_ITEM_WITH_OFFHAND -> "hand swap";
+                case STAB -> "stab";
+                case UNKNOWN -> null;
+            };
+            default -> null;
+        };
     }
 
     /** A rotation-only or position-and-rotation packet that a rotation or entity teleport the client may have handled explains. */
@@ -138,18 +181,6 @@ public final class AttackGrammarCheck implements TimelineListener {
             return replies.vehicleTokens() > 0;
         }
         return move.hasRotation() && replies.rotationTokens() > 0;
-    }
-
-    private void onAttack(PlayerSession session, State state, TimelineEvent.Inbound in, String what, boolean swings) {
-        if (state.ownMove != Long.MIN_VALUE) {
-            state.afterMovement++;
-            report(session, state, state.tickStart, state.tickStartNanos, in, what + " after the tick's own movement packet (" + state.ownMove + ")");
-        }
-        if (swings) {
-            state.swingDue = in.sequence();
-            state.swingDueNanos = in.nanoTime();
-            state.swingFor = what;
-        }
     }
 
     private void report(PlayerSession session, State state, long from, long fromNanos, TimelineEvent.Inbound at, String summary) {

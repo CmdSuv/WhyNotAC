@@ -240,7 +240,7 @@ def verify_cases(probe, log, work_dir, check):
           and attacks["husk without swing"]["distance"] < 2.9,
           f"the probe attacked a husk next to it, a sheep 7 blocks away and the husk without a swing: {probe.get('attacks')}")
     check(len(dossiers) == 4 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
-          and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("attack-grammar", [])) == 1,
+          and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("action-grammar", [])) == 1,
           f"exactly four cases opened, one per violation (none for the attacks in reach): {sorted((d['check'], d['summary']) for d in dossiers)}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
@@ -258,13 +258,13 @@ def verify_cases(probe, log, work_dir, check):
         check(reach["evidenceClass"] == "P-A" and dd.get("targetType") == "minecraft:sheep"
               and dd.get("target") == str(attacks.get("sheep", {}).get("target")) and float(dd.get("distance", "0")) > float(dd.get("allowed", "99")),
               f"the attack-reach case is the sheep, beyond every reach the client may have had (P-A): {reach['summary']}")
-    grammar = by_check.get("attack-grammar", [None])[0]
+    grammar = by_check.get("action-grammar", [None])[0]
     if grammar:
         dd = grammar["details"]
         target = attacks.get("husk without swing", {}).get("target")
-        check(grammar["evidenceClass"] == "P-M" and dd.get("attacksWithoutSwing") == "1" and dd.get("attacksAfterMovement") == "0"
+        check(grammar["evidenceClass"] == "P-M" and dd.get("attacksWithoutSwing") == "1" and dd.get("actionsAfterMovement") == "0"
               and grammar["summary"].startswith(f"attack on entity {target} not followed by the main hand's swing"),
-              f"the attack-grammar case is the husk attacked without a swing, the probe's other attacks in the client's order (P-M): {grammar['summary']}")
+              f"the action-grammar case is the husk attacked without a swing, the probe's other actions in the client's order (P-M): {grammar['summary']}")
     for d in dossiers:
         check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
               f"the {d['check']} case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")

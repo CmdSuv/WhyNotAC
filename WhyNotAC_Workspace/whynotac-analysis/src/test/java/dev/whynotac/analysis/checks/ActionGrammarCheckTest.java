@@ -29,7 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** The check over the replicas it reads, fed a timeline as the plugin would. */
-class AttackGrammarCheckTest {
+class ActionGrammarCheckTest {
 
     private static final ClientboundPacket.Dimension OVERWORLD = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384);
     private static final UUID ME = new UUID(7, 7);
@@ -50,7 +50,7 @@ class AttackGrammarCheckTest {
         registry = new SessionRegistry(Runnable::run, 1, (s, e, t) -> { throw new AssertionError(t); });
         Replicas replicas = Replicas.vanilla();
         replicas.listeners().forEach(registry::addListener);
-        registry.addListener(new AttackGrammarCheck(new EvidenceSink() {
+        registry.addListener(new ActionGrammarCheck(new EvidenceSink() {
             @Override
             public void accept(PlayerSession s, Evidence e) {
                 evidence.add(e);
@@ -125,6 +125,21 @@ class AttackGrammarCheckTest {
         in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
     }
 
+    /** Every other action handleKeybinds sends: an interaction, block uses, digging, a release, a drop, a swap, the hotbar. */
+    private void otherActions() {
+        in(new ServerboundPacket.SetCarriedItem(2));
+        in(new ServerboundPacket.InteractEntity(TARGET, ServerboundPacket.InteractEntity.Kind.INTERACT_AT, Hand.MAIN_HAND, Vec3d.ZERO, false));
+        in(new ServerboundPacket.InteractEntity(TARGET, ServerboundPacket.InteractEntity.Kind.INTERACT, Hand.MAIN_HAND, null, false));
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(0, 63, 0), BlockFace.UP, new Vec3d(0.5, 64.0, 0.5), false, false, 1));
+        in(new ServerboundPacket.UseItem(Hand.OFF_HAND, 2, 0F, 0F));
+        for (ServerboundPacket.PlayerAction.Action action : List.of(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK,
+                ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, ServerboundPacket.PlayerAction.Action.ABORT_DESTROY_BLOCK,
+                ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, ServerboundPacket.PlayerAction.Action.DROP_ITEM,
+                ServerboundPacket.PlayerAction.Action.DROP_ALL_ITEMS, ServerboundPacket.PlayerAction.Action.SWAP_ITEM_WITH_OFFHAND)) {
+            in(new ServerboundPacket.PlayerAction(action, new BlockPosition(0, 63, 0), BlockFace.UP, 3));
+        }
+    }
+
     private void keepAlive() {
         in(new ServerboundPacket.KeepAlive(42));
     }
@@ -154,6 +169,9 @@ class AttackGrammarCheckTest {
             }
             if (t % 11 == 0) {
                 swing(); // a miss, or an attack the range component did not let through
+            }
+            if (t % 13 == 0) {
+                otherActions();
             }
             move();
             keepAlive();
@@ -194,11 +212,11 @@ class AttackGrammarCheckTest {
         move();
         Evidence e = evidence.getFirst();
         assertEquals(1, evidence.size());
-        assertEquals(AttackGrammarCheck.ID, e.check());
+        assertEquals(ActionGrammarCheck.ID, e.check());
         assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
         assertEquals("attack on entity 20 not followed by the main hand's swing (next: MovePlayer)", e.summary());
-        assertEquals("1", e.details().get(AttackGrammarCheck.NO_SWING));
-        assertEquals("0", e.details().get(AttackGrammarCheck.AFTER_MOVEMENT));
+        assertEquals("1", e.details().get(ActionGrammarCheck.NO_SWING));
+        assertEquals("0", e.details().get(ActionGrammarCheck.AFTER_MOVEMENT));
         assertTrue(e.admissibility().admissible());
         tickEnd();
         now += SECOND;
@@ -211,7 +229,7 @@ class AttackGrammarCheckTest {
         now += SECOND;
         attack();
         attack(); // the first one's swing never came
-        assertEquals("2", evidence.get(2).details().get(AttackGrammarCheck.NO_SWING));
+        assertEquals("2", evidence.get(2).details().get(ActionGrammarCheck.NO_SWING));
     }
 
     @Test
@@ -225,14 +243,48 @@ class AttackGrammarCheckTest {
         assertEquals(1, evidence.size());
         Evidence e = evidence.getFirst();
         assertTrue(e.summary().startsWith("attack on entity 20 after the tick's own movement packet"), e.summary());
-        assertEquals("1", e.details().get(AttackGrammarCheck.AFTER_MOVEMENT));
-        assertEquals("0", e.details().get(AttackGrammarCheck.NO_SWING));
+        assertEquals("1", e.details().get(ActionGrammarCheck.AFTER_MOVEMENT));
+        assertEquals("0", e.details().get(ActionGrammarCheck.NO_SWING));
         now += SECOND;
         move();
         stab();
         swing();
         assertEquals(2, evidence.size());
         assertTrue(evidence.get(1).summary().startsWith("stab after the tick's own movement packet"), evidence.get(1).summary());
+    }
+
+    @Test
+    void everyOtherActionAfterTheTicksOwnMovementIsProvenToo() {
+        tickEnd();
+        otherActions(); // before the movement: the client's order
+        move();
+        tickEnd();
+        assertEquals(List.of(), evidence);
+        List<String> found = new ArrayList<>();
+        for (int i = 0; i < 11; i++) {
+            now += SECOND;
+            move();
+            int before = evidence.size();
+            switch (i) {
+                case 0 -> in(new ServerboundPacket.SetCarriedItem(3));
+                case 1 -> in(new ServerboundPacket.InteractEntity(TARGET, ServerboundPacket.InteractEntity.Kind.INTERACT, Hand.MAIN_HAND, null, false));
+                case 2 -> in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(0, 63, 0), BlockFace.UP, Vec3d.ZERO, false, false, 1));
+                case 3 -> in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 2, 0F, 0F));
+                default -> in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.values()[i - 4], new BlockPosition(0, 63, 0),
+                        BlockFace.UP, 3));
+            }
+            assertEquals(before + 1, evidence.size(), "action " + i);
+            found.add(evidence.getLast().summary().replaceAll(" after the tick's own movement packet.*", ""));
+            tickEnd();
+        }
+        assertEquals(List.of("hotbar selection", "interaction with entity 20", "use of the item on a block", "use of the item",
+                "digging (START_DESTROY_BLOCK)", "digging (ABORT_DESTROY_BLOCK)", "digging (STOP_DESTROY_BLOCK)", "item drop", "item drop",
+                "release of the item in use", "hand swap"), found);
+        now += SECOND;
+        move();
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.UNKNOWN, new BlockPosition(0, 0, 0), BlockFace.DOWN, 0));
+        tickEnd(); // a constant this build does not know: no claim
+        assertEquals(11, evidence.size());
     }
 
     @Test
@@ -286,7 +338,7 @@ class AttackGrammarCheckTest {
 
     @Test
     void theCheckIsShipped() {
-        assertEquals(AttackGrammarCheck.VERSION, Checks.version(AttackGrammarCheck.ID));
-        assertTrue(Checks.all((s, e) -> { }, Replicas.vanilla()).stream().anyMatch(AttackGrammarCheck.class::isInstance));
+        assertEquals(ActionGrammarCheck.VERSION, Checks.version(ActionGrammarCheck.ID));
+        assertTrue(Checks.all((s, e) -> { }, Replicas.vanilla()).stream().anyMatch(ActionGrammarCheck.class::isInstance));
     }
 }

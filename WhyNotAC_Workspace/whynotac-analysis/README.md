@@ -10,28 +10,35 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
-| `attack-grammar` | P-M | Ardından ana elin sallanması gelmeyen ya da tikin kendi hareket paketinden sonra gelen saldırı |
+| `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi |
 
-### `attack-grammar` (`AttackGrammarCheck`)
+### `action-grammar` (`ActionGrammarCheck`)
 
-- **Client'ın kuralı (1.21.11, decompile edilmiş client):** saldırı (`ServerboundInteractPacket` ATTACK) ve mızrak
-  dürtmesi (`PlayerAction` STAB) yalnızca `Minecraft.startAttack`'tan gelir; o da yalnızca `handleKeybinds`'te,
-  tikin hareket paketini gönderen `tickEntities`'ten önce çalışır. Saldırıdan hemen sonra ana el sallanır
-  (`Swing(MAIN_HAND)`; saldırıda oyuncu izleyiciyse sallanmaz, dürtmede hep sallanır). Arada yalnızca client'ın ağ
-  iş parçacığının kendi yanıtları (`KeepAlive`, `ChunkBatchReceived`) olabilir.
+- **Client'ın kuralı (1.21.11, decompile edilmiş client):** client'ın eylemleri tikin başında gelir. Saldırı ve
+  varlıkla etkileşim (`ServerboundInteractPacket`), bloğa ve havaya eşya kullanma (`UseItemOn`, `UseItem`), blok kırma,
+  kullanılan eşyayı bırakma, eşya atma, el değiştirme ve mızrak dürtmesi (`PlayerAction`) ile hotbar seçimi
+  (`SetCarriedItem`): her birinin tek göndericisi var. Her gönderici yalnızca `Minecraft.handleKeybinds`'te (tuşların
+  sıradaki tıkları, basılı tutulan kullanma tuşu), hotbar seçimi ayrıca tikin en başında çalışır. Bunların hepsi tikin
+  hareket paketini gönderen `tickEntities`'ten önce gelir.
+- **Saldırıdan sonra el sallama:** saldırıdan hemen sonra ana el sallanır (`Swing(MAIN_HAND)`; saldırıda oyuncu
+  izleyiciyse sallanmaz, dürtmede hep sallanır). Arada yalnızca client'ın ağ iş parçacığının kendi yanıtları
+  (`KeepAlive`, `ChunkBatchReceived`) olabilir.
 - **İki kanıt:** dürtmeden ya da izleyici olamayan oyuncunun saldırısından sonraki ilk paket ana elin sallanması
-  değil; ya da aynı tikte, yalnızca tikin kendisinin olabilecek bir hareket paketinden sonra saldırı. Işınlama,
-  döndürme ve varlık ışınlaması yanıtları tick-framing'in haklarıyla (`MoveReplies`) ayrılır. İkinci kural tikin
-  başlangıcını ister: ilk `ClientTickEnd`'den önce iddia yoktur.
+  değil; ya da aynı tikte, yalnızca tikin kendisinin olabilecek bir hareket paketinden sonra bu eylemlerden biri
+  (hareketten sonra saldıran ya da blok koyan, yani "post" sırasıyla çalışan bir client). Işınlama, döndürme ve varlık
+  ışınlaması yanıtları tick-framing'in haklarıyla (`MoveReplies`) ayrılır. İkinci kural tikin başlangıcını ister: ilk
+  `ClientTickEnd`'den önce iddia yoktur. Bu build'in tanımadığı bir `PlayerAction` iddia dışıdır.
 - **İzleyici:** `Player.isSpectator()` oyuncunun önbelleğe aldığı oyuncu listesi girdisinin modunu okur
   (`ClientSelf.mayBeSpectator`); client'ın işleyip işlemediği belli olmayan bir değişiklik ya da bilinmeyen mod
   sallanma kuralını kapatır.
-- **Sınamalar:** `AttackGrammarCheckTest` vanilla dizilerinin (ağ iş parçacığının araya giren yanıtları, bir tikte
-  iki tık, ışınlama ve döndürme yanıtlarından sonra saldırı) hiç kanıt üretmediğini ve her kuralın ihlalini ister;
-  her kural ve istisnası için negatif kontrol yakalanır. Gerçek client oturumunun kaydı 0 kanıt, 0 ret verir; E2E
-  sondası el sallamadan bir saldırıyla vakayı açar. Botlar saldırı ile sallamayı tek yazımda gönderir (vanilla'da
-  pong da ana iş parçacığındandır, araya giremez).
+- **Sınamalar:** `ActionGrammarCheckTest` vanilla dizilerinin (ağ iş parçacığının araya giren yanıtları, bir tikte
+  iki tık, ışınlama ve döndürme yanıtlarından sonra saldırı, hareketten önce her eylem) hiç kanıt üretmediğini ve her
+  kuralın, her eylemin ihlalini ister; her kural ve istisnası için negatif kontrol yakalanır. Gerçek client
+  oturumunun kaydı (2 saldırı, 8 eşya kullanımı, 5 bırakma, 5 hotbar seçimi) ve yük testinin bot kayıtları 0 kanıt,
+  0 ret verir; gerçek client doğrulayıcısı aynı sırayı ayrıca kendisi de denetler. E2E sondası el sallamadan bir
+  saldırıyla vakayı açar. Botlar saldırı ile sallamayı tek yazımda gönderir (vanilla'da pong da ana iş
+  parçacığındandır, araya giremez); sonda hotbar seçimini ve tıklarını tikin hareketinden önce gönderir.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 

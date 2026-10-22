@@ -13,7 +13,7 @@ can be verified live:
   * one transaction is answered twice                         -> DUPLICATE_TRANSACTION
   * two movement packets in one client tick (tick 200)        -> a tick-framing case (P-M, shadow)
   * an attack on a sheep 7 blocks away (tick 330)             -> an attack-reach case (P-A, shadow)
-  * an attack on the husk with no swing after it (tick 345)    -> an attack-grammar case (P-M, shadow)
+  * an attack on the husk with no swing after it (tick 345)    -> an action-grammar case (P-M, shadow)
 
 It also attacks the nearest husk (tick 300), well within reach, which must open nothing.
 
@@ -322,7 +322,7 @@ def server_list_ping(host, port):
     return b"version" in data
 
 
-# Violation 6, an attack without its swing (1.5 s after the sheep: attack-reach and attack-grammar each report once).
+# Violation 6, an attack without its swing (1.5 s after the sheep: attack-reach and action-grammar each report once).
 GRAMMAR_VIOLATION_TICK = 345
 # Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
 CLOCK_BURST = 40
@@ -393,11 +393,23 @@ def main():
                 attacks.append({"tick": tick, "target": target, "type": "husk" if tick == 300 else "sheep", "distance": distance})
         if tick == GRAMMAR_VIOLATION_TICK:
             # Violation 6: the husk again, in reach, without the swing every vanilla attack is followed by. WhyNotAC's
-            # attack-grammar check must open a case (and attack-reach none).
+            # action-grammar check must open a case (and attack-reach none).
             target, distance = nearest(client, ENTITY_HUSK)
             if target is not None:
                 attack(client, target, swing=False)
                 attacks.append({"tick": tick, "target": target, "type": "husk without swing", "distance": distance})
+        # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
+        # to hotbar 4 with two clicks, each listing the slots it changed as the vanilla client hashes them. As the
+        # client: the hotbar slot goes out at the tick's start, the clicks between ticks, both before the movement.
+        if inventory_step == 0 and client.slots.get(36, (0, 0))[1] == ITEM_DIAMOND_SWORD and client.slots.get(38, (0, 0))[1] == ITEM_STICK:
+            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 2))
+            inventory_step = 1
+        elif inventory_step == 1:
+            client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 36, {36: None}, (ITEM_DIAMOND_SWORD, 1)))
+            inventory_step = 2
+        elif inventory_step == 2:
+            client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 40, {40: (ITEM_DIAMOND_SWORD, 1)}, None))
+            inventory_step = 3
         forward = (tick // 40) % 2 == 0  # toggle W every 2 seconds
         flags = 0x01 if forward else 0x00
         if flags != sent_input:
@@ -415,17 +427,6 @@ def main():
             # Violation 3: a second movement packet in the same client tick (what mace-damage and click-teleport
             # hacks do). The vanilla client never sends one outside a reply: WhyNotAC's tick-framing check must open a case.
             client.send(PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))  # position only: the rotation trace stays the probe's own
-        # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from
-        # hotbar 0 to hotbar 4 with two clicks, each listing the slots it changed as the vanilla client hashes them.
-        if inventory_step == 0 and client.slots.get(36, (0, 0))[1] == ITEM_DIAMOND_SWORD and client.slots.get(38, (0, 0))[1] == ITEM_STICK:
-            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 2))
-            inventory_step = 1
-        elif inventory_step == 1:
-            client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 36, {36: None}, (ITEM_DIAMOND_SWORD, 1)))
-            inventory_step = 2
-        elif inventory_step == 2:
-            client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 40, {40: (ITEM_DIAMOND_SWORD, 1)}, None))
-            inventory_step = 3
         client.send(PLAY_S_TICK_END)
         if tick == 240:
             # Violation 4: a burst of extra ClientTickEnd (a timer, or hiding extra movement packets from the tick

@@ -94,10 +94,12 @@ def main():
         check(any(p[key] for p in inputs), f"key '{key}' pressed with real input reached the server")
     swings = [p for p in inbound if p["type"] == "Swing"]
     check(len(swings) >= 5, f"left clicks became swings ({len(swings)})")
-    # The attack grammar, read independently of the attack-grammar check: each attack is followed by the main hand's
-    # swing (the network thread's keep-alive and chunk-batch answers aside) and comes before the tick's own movement
-    # packet (the reply right after a teleport's accept aside; this session is sent no rotation or entity teleport).
-    attacks, broken, due, moved, accepted = 0, [], None, False, False
+    # The action grammar, read independently of the action-grammar check: each attack is followed by the main hand's
+    # swing (the network thread's keep-alive and chunk-batch answers aside), and every action handleKeybinds sends
+    # comes before the tick's own movement packet (the reply right after a teleport's accept aside; this session is
+    # sent no rotation or entity teleport).
+    keybind = ("InteractEntity", "UseItemOn", "UseItem", "SetCarriedItem", "PlayerAction")
+    attacks, actions, broken, due, moved, accepted = 0, {}, [], None, False, False
     for i, p in enumerate(inbound):
         if p["type"] in ("KeepAlive", "ChunkBatchReceived"):
             continue
@@ -111,14 +113,17 @@ def main():
             accepted = False
         elif p["type"] == "ClientTickEnd":
             moved = False
-        elif p["type"] == "InteractEntity" and p["kind"] == "ATTACK":
-            attacks += 1
-            due = i
+        elif p["type"] in keybind and p.get("action") != "UNKNOWN":
+            actions[p["type"]] = actions.get(p["type"], 0) + 1
             if moved:
                 broken.append((i, "after the tick's movement", p["type"]))
+            if p["type"] == "InteractEntity" and p["kind"] == "ATTACK":
+                attacks += 1
+                due = i
     rotations = sum(1 for e in events if e["type"] == "Outbound" and e["packet"]["type"] in ("PlayerRotation", "TeleportEntity"))
-    check(attacks >= 2 and not broken and rotations == 0,
-          f"each of the client's {attacks} attacks came before its tick's movement and was followed by the main hand's swing: {broken}")
+    check(attacks >= 2 and actions.get("UseItem", 0) >= 3 and actions.get("SetCarriedItem", 0) >= 3 and not broken and rotations == 0,
+          f"the client's actions all came before its tick's movement, each of its {attacks} attacks followed by the main hand's swing "
+          f"({actions}): {broken}")
     slots = [p["slot"] for p in inbound if p["type"] == "SetCarriedItem"]
     check(slots[-5:] == [1, 2, 0, 4, 0], f"hotbar keys 2, 3, 1, 5 (the drive) and 1 (the reach stage) selected slots 1, 2, 0, 4, 0: {slots}")
     clicks = [p for p in inbound if p["type"] == "ContainerClick"]
