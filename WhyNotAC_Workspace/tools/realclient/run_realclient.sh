@@ -105,6 +105,9 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "fill 163 -60 12 164 -57 16 minecraft:bubble_column[drag=false]" "fill 167 -60 12 168 -57 16 minecraft:bubble_column[drag=true]" \
   "fill 100 -64 24 110 -61 29 minecraft:glass" "fill 101 -63 25 109 -61 28 minecraft:lava" \
   "fill 113 -61 26 118 -61 26 minecraft:air" "setblock 113 -61 26 minecraft:lava" \
+  "fill 132 -60 26 132 -56 26 minecraft:scaffolding[distance=0,bottom=false]" \
+  "setblock 133 -56 26 minecraft:scaffolding[distance=1,bottom=true]" "setblock 134 -56 26 minecraft:scaffolding[distance=2,bottom=true]" \
+  "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
   "execute in minecraft:the_nether run fill -1 99 -1 21 108 21 minecraft:glass hollow" \
   "execute in minecraft:the_nether run fill 0 100 0 20 102 20 minecraft:glass" \
@@ -311,6 +314,15 @@ lava() { echo "tp $NAME $1 $2 26.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 
 lava 98.5 -60 -90 w/2.0 -/1.0 w/1.5/space -/0.5 Shift_L/1.0 -/0.5
 lava 104.5 -62 -90 space/2.0 -/1.0 w,Control_L/1.5 -/1.0
 lava 119.5 -60 90 w/3.0 -/1.5 space/1.0 -/0.5
+# Scaffolding, at z = 26.5: a tower five high (x 132) walked into and climbed jumping, stood on (its stable top), with a
+# bridge of three hanging off its top eastward (unsupported: each the slab of its floor below whoever is inside it);
+# the bridge walked along on top, sunk into holding shift (no stable top while descending: onto the floor's slab), stood
+# in, and the tower sunk through holding shift.
+scaff() { echo "tp $NAME $1 $2 26.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+scaff 130.5 -60 w/0.6 space/3.0 -/1.0 w/0.5 -/1.0
+scaff 133.5 -55 Shift_L/1.5 -/1.0 w/0.5 -/1.0
+scaff 134.5 -55.5 -/1.0 Shift_L/1.0 d/0.4 -/1.0
+scaff 132.5 -55 Shift_L/3.0 -/1.0
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap

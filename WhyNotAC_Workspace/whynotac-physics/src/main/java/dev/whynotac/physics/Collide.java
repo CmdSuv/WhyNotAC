@@ -12,9 +12,9 @@ public final class Collide {
      * {@code Entity.collide(movement)} for the box {@code box}. {@code entityColliders} are the solid entities
      * near the box ({@code level.getEntityCollisions(this, box.expandTowards(movement))}).
      */
-    public static Vec3d collide(Colliders.World world, Box box, Vec3d movement, boolean onGround, float maxUpStep, List<Voxels> entityColliders)
-            throws Colliders.Unknown {
-        Vec3d collided = movement.lengthSqr() == 0.0 ? movement : collideBoundingBox(world, movement, box, entityColliders);
+    public static Vec3d collide(Colliders.World world, Colliders.Context context, Box box, Vec3d movement, boolean onGround, float maxUpStep,
+            List<Voxels> entityColliders) throws Colliders.Unknown {
+        Vec3d collided = movement.lengthSqr() == 0.0 ? movement : collideBoundingBox(world, context, movement, box, entityColliders);
         boolean xCollided = movement.x() != collided.x();
         boolean yCollided = movement.y() != collided.y();
         boolean zCollided = movement.z() != collided.z();
@@ -25,7 +25,7 @@ public final class Collide {
             if (!landed) {
                 stepBox = stepBox.expandTowards(0.0, -1.0E-5F, 0.0);
             }
-            List<Voxels> colliders = Colliders.collect(world, entityColliders, stepBox);
+            List<Voxels> colliders = Colliders.collect(world, context, entityColliders, stepBox);
             float collidedY = (float) collided.y();
             for (float height : candidateStepUpHeights(base, colliders, maxUpStep, collidedY)) {
                 Vec3d step = collideWithShapes(new Vec3d(movement.x(), height, movement.z()), base, colliders);
@@ -39,8 +39,9 @@ public final class Collide {
     }
 
     /** {@code Entity.collideBoundingBox}. */
-    public static Vec3d collideBoundingBox(Colliders.World world, Vec3d movement, Box box, List<Voxels> entityColliders) throws Colliders.Unknown {
-        List<Voxels> colliders = Colliders.collect(world, entityColliders, box.expandTowards(movement.x(), movement.y(), movement.z()));
+    public static Vec3d collideBoundingBox(Colliders.World world, Colliders.Context context, Vec3d movement, Box box, List<Voxels> entityColliders)
+            throws Colliders.Unknown {
+        List<Voxels> colliders = Colliders.collect(world, context, entityColliders, box.expandTowards(movement.x(), movement.y(), movement.z()));
         return collideWithShapes(movement, box, colliders);
     }
 

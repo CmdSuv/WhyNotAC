@@ -38,8 +38,8 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
   vakalarda bit bit karşılaştırır. Yerelde 200.000 denemede 3,4 milyon karşılaştırma yapıldı, 0 fark çıktı.
   Toleransa iki bilinçli hata eklendiğinde test 409 ve 234 fark buldu.
 - **Bilinmeyen şekiller iddia üretmez:** dünyaya bağlı şekiller (hareketli piston, shulker kutusu),
-  oyuncuya bağlı şekiller (toz kar, iskele), kaydırılmış şekiller ve bilinmeyen bloklar `Colliders.Unknown`
-  fırlatır. Sıvılar oyuncu için boş şekildir.
+  oyuncuya bağlı şekiller (toz kar; iskele yalnızca oyuncunun bağlamı verilmezse), kaydırılmış şekiller ve
+  bilinmeyen bloklar `Colliders.Unknown` fırlatır. Sıvılar oyuncu için boş şekildir.
 - **Yaya hareket adımı (`OnFoot`, tamam):** bir `LocalPlayer.tick()` bit bit. Girdi vektörü ve kare düzeltmesi,
   eğilme (önceki tikin shift'i) ve kenardan geri çekilme (bu tikin shift'i), koşma başlatma ve durdurma, zıplama
   ve `noJumpDelay`, sürtünme bloğu (destek bloğundan), dürtü, `Entity.move` (çarpışma, basamak, bayraklar,
@@ -95,11 +95,27 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
     yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200,
-    tırmanma alanında 499, sekme alanında 756, iç-blok şeritlerinde 1588, lav şeritlerinde 494, Nether'de 396 tik.
+    tırmanma alanında 499, sekme alanında 756, iç-blok şeritlerinde 1588, lav şeritlerinde 494, Nether'de 396,
+    iskele şeridinde 491 tik.
   - **Tırmanma (`onClimbable`, `handleOnClimbable`):** ayaktaki blok tırmanılabilir (merdiven, sarmaşıklar) ya da
     aynı yöne bakan bir merdivenin üstünde açık bir tuzak kapı: hareket tik başına 0.15'e tutulur, düşüş mesafesi
     sıfırlanır, shift aşağı kaymayı durdurur; hareketten sonra yatay çarpışma ya da zıplama dikey hızı 0.2 yapar.
-    İskele kapsam dışı (şekli oyuncuya bağlı).
+  - **İskele (`ScaffoldingBlock.getCollisionShape`):** şekli oyuncunun bağlamından gelir (`Colliders.Context`: bağlamın
+    kurulduğu andaki, yani hareketten önceki ayak yüksekliği ve shift). Ayaklar bloğun tepesinin 1.0E-5F altından
+    yüksekse ve shift basılı değilse kararlı şekil (tablodaki: boş bağlam "üstte" sayılır); değilse, desteklenmeyen
+    bir alt blokta (`distance` 0 değil, `bottom`) ayaklar tabanın 1.0E-5F altından yüksekse tabanın levhası
+    (`Block.column(16, 0, 2)`, iki katlı karın çarpışmasıyla aynı çağrı); değilse boş. Çarpışma, destek bloğu ve
+    `noCollision` aynı bağlamı okur. İskele tırmanılabilir; içinde shift aşağı kaymayı durdurmaz, oyuncu shift ile
+    iner. Boğma denetimi iskeleyi atlar (boş bağlamdaki şekli tam blok değildir). **Son oturum (yerde beş blokluk bir
+    kule ve tepesinden asılı üç blokluk bir köprü: kuleye yürüyüp içinde zıplayarak tepesine tırmanma; köprünün
+    üstünden shift ile asılı bloğun tabanına inip orada yürüme; asılı bir bloğun içinden tabanına düşme, orada shift
+    ile durma ve yana yürüyüp düşme; kulenin tepesinden shift ile yere kadar inme):** şeridin 491 tikinin hepsi bit
+    bit eşit: 303'ü iskelenin içinde, 119'u kulenin tepesinde, 159'u asılı bir bloğun tabanında, 34'ü tırmanma, 39'u
+    shift ile iniş. Tüm oturum: 9467 tikin 9408'i eşit, 0 fark. Negatif kontroller (hepsi yakalandı): inerken de
+    kararlı şekil, levhayı yok saymak, levhayı her blokta vermek (desteklenen ya da `bottom` olmayan), levhayı aşağıdan
+    da vermek, tepe eşiğinden 1.0E-5F'yi düşürmek, iskelede shift ile kaymayı durdurmak, iskeleyi tırmanılmaz saymak,
+    iskeleyi hep kararlı saymak, bağlama shift'i vermemek. Tepe eşiğinde `>` ile `>=` bu veride ayırt edilmez (ayaklar
+    tepe ile onun 1.0E-5F altı arasında hiç durmaz).
   - **Bloktan itilme (`LocalPlayer.moveTowardsClosestSpace`):** kutunun dört köşesinden (genişliğin 0.35'i) biri
     boğan bir bloğun sütunundaysa (`collidesWithSuffocatingBlock`; blok verisindeki `SUFFOCATING`, client'ın kendi
     kaydından) oyuncu en yakın boş yana 0.1 itilir. Merdiven ve tuzak kapı boğmaz: onlara yaslanmak itilme değildir.
@@ -192,7 +208,7 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     düşebilir. Destek bloğu hâlâ eski, yüklü chunk'ta olduğu için yerçekimi normaldir. Motor bu tick'i artık
     kanıtsız karşılaştırmaz.
   - **Kapsam dışında `Colliders.Unknown`:**
-    - su ve lav dışındaki sıvılar, toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), iskele, düşen
+    - su ve lav dışındaki sıvılar, toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), düşen
       bir sıvının ya da bir kabarcık sütununun yanında/üstünde şekli dünyaya bağlı bir blok, hızı bilinmeyen bir boyutta
       lav akıntısı;
     - yüklenmemiş chunk (suyun yakınında, client'ın tutup tutmadığı kesin olmayan chunk da), su hareket verimliliği

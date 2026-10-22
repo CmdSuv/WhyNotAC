@@ -606,7 +606,7 @@ public final class OnFoot {
     /** {@code Entity.isFree}: the box moved collides with no block and holds no fluid ({@code containsAnyLiquid}). */
     private boolean isFree(double dx, double dy, double dz) throws Colliders.Unknown {
         Box box = pose.box(x, y, z).move(dx, dy, dz);
-        if (!Colliders.noCollision(world, box)) {
+        if (!Colliders.noCollision(world, context(), box)) {
             return false;
         }
         for (int bx = Colliders.floor(box.minX()); bx < VanillaMath.ceil(box.maxX()); bx++) {
@@ -891,7 +891,7 @@ public final class OnFoot {
         Vec3d rightTo = to.add(half);
         float top = Float.MIN_VALUE;
         List<Voxels> colliders = new java.util.ArrayList<>();
-        Colliders.blocks(world, area, colliders); // level.getCollisions: no solid entity in scope
+        Colliders.blocks(world, context(), area, colliders); // level.getCollisions: no solid entity in scope
         search:
         for (Voxels shape : colliders) {
             for (int i = 0; i < shape.boxCount(); i++) { // VoxelShape.toAabbs
@@ -929,9 +929,17 @@ public final class OnFoot {
         }
     }
 
+    /**
+     * {@code CollisionContext.of(player)} made now: the feet's height and the shift key as they are at this point of the
+     * tick (before the input is polled, the last tick's keys).
+     */
+    private Colliders.Context context() {
+        return new Colliders.Context(y, keys.shift());
+    }
+
     /** {@code blockState.getCollisionShape(level, pos, CollisionContext.of(player))}, unmoved. */
     private Voxels collisionShape(BlockPos pos) throws Colliders.Unknown {
-        return Voxels.of(Colliders.playerShape(states, state(pos), pos.x(), pos.y(), pos.z()));
+        return Voxels.of(Colliders.playerShape(states, state(pos), context(), pos.x(), pos.y(), pos.z()));
     }
 
     /** {@code Entity.move(MoverType.SELF, movement)} for the local player. */
@@ -943,7 +951,7 @@ public final class OnFoot {
         }
         movement = maybeBackOffFromEdge(movement);
         Box box = pose.box(x, y, z);
-        Vec3d collided = Collide.collide(world, box, movement, onGround, STEP_HEIGHT, List.of());
+        Vec3d collided = Collide.collide(world, context(), box, movement, onGround, STEP_HEIGHT, List.of());
         double length = collided.lengthSqr();
         if (length > 1.0E-7 || movement.lengthSqr() - length < 1.0E-7) {
             if (fallDistance != 0.0 && length >= 1.0) {
@@ -1053,7 +1061,7 @@ public final class OnFoot {
     /** {@code Player.canFallAtLeast}: nothing below the box, moved by (dx, dz), down to {@code height}. */
     private boolean canFallAtLeast(double dx, double dz, double height) throws Colliders.Unknown {
         Box box = pose.box(x, y, z);
-        return Colliders.noCollision(world, Box.of(box.minX() + 1.0E-7 + dx, box.minY() - height - 1.0E-7, box.minZ() + 1.0E-7 + dz,
+        return Colliders.noCollision(world, context(), Box.of(box.minX() + 1.0E-7 + dx, box.minY() - height - 1.0E-7, box.minZ() + 1.0E-7 + dz,
                 box.maxX() - 1.0E-7 + dx, box.minY(), box.maxZ() - 1.0E-7 + dz));
     }
 
@@ -1062,11 +1070,11 @@ public final class OnFoot {
         if (onGround) {
             Box box = pose.box(x, y, z);
             Box below = Box.of(box.minX(), box.minY() - 1.0E-6, box.minZ(), box.maxX(), box.minY(), box.maxZ());
-            BlockPos found = Colliders.supportingBlock(world, below, x, y, z);
+            BlockPos found = Colliders.supportingBlock(world, context(), below, x, y, z);
             if (found != null || onGroundNoBlocks) {
                 support = found;
             } else {
-                found = Colliders.supportingBlock(world, below.move(-movement.x(), 0.0, -movement.z()), x, y, z);
+                found = Colliders.supportingBlock(world, context(), below.move(-movement.x(), 0.0, -movement.z()), x, y, z);
                 support = found;
             }
             onGroundNoBlocks = found == null;
@@ -1264,7 +1272,7 @@ public final class OnFoot {
 
     /** {@code canPlayerFitWithinBlocksAndEntitiesWhen(pose)}. */
     private boolean fits(PlayerState.Pose candidate) throws Colliders.Unknown {
-        return Colliders.noCollision(world, candidate.box(x, y, z).inflate(-1.0E-7, -1.0E-7, -1.0E-7));
+        return Colliders.noCollision(world, context(), candidate.box(x, y, z).inflate(-1.0E-7, -1.0E-7, -1.0E-7));
     }
 
     /** {@code moveTowardsClosestSpace} at the four corners: modelled only when no block could suffocate there. */
@@ -1352,16 +1360,13 @@ public final class OnFoot {
 
     /**
      * {@code LivingEntity.onClimbable} for a player neither flying nor a spectator: the block at the feet
-     * ({@code getInBlockState}) is climbable, or an open trapdoor over a ladder facing the same way
-     * ({@code trapdoorUsableAsLadder}). Scaffolding is not followed: its shape depends on the player.
+     * ({@code getInBlockState}) is climbable (scaffolding too), or an open trapdoor over a ladder facing the same way
+     * ({@code trapdoorUsableAsLadder}).
      */
     private boolean onClimbable() throws Colliders.Unknown {
         BlockPos feet = BlockPos.containing(x, y, z);
         int s = state(feet);
         String block = states.block(s);
-        if (block.equals("minecraft:scaffolding")) {
-            throw new Colliders.Unknown("scaffolding at the feet (not modelled)");
-        }
         if (CLIMBABLE.contains(block)) {
             return true;
         }
@@ -1372,7 +1377,10 @@ public final class OnFoot {
         return false;
     }
 
-    /** {@code handleOnClimbable}: on a climbable block the motion is held to 0.15 a tick, and shift holds the player still. */
+    /**
+     * {@code handleOnClimbable}: on a climbable block the motion is held to 0.15 a tick, and shift holds the player still,
+     * but in scaffolding (which shift lets the player sink through).
+     */
     private Vec3d handleOnClimbable(Vec3d d) throws Colliders.Unknown {
         if (!onClimbable()) {
             return d;
@@ -1381,7 +1389,7 @@ public final class OnFoot {
         double cx = VanillaMath.clamp(d.x(), -0.15F, 0.15F);
         double cz = VanillaMath.clamp(d.z(), -0.15F, 0.15F);
         double cy = Math.max(d.y(), -0.15F);
-        if (cy < 0.0 && keys.shift()) { // isSuppressingSlidingDownLadder: isShiftKeyDown (scaffolding excluded above)
+        if (cy < 0.0 && !states.block(state(BlockPos.containing(x, y, z))).equals(Colliders.SCAFFOLDING) && keys.shift()) { // isSuppressingSlidingDownLadder
             cy = 0.0;
         }
         return new Vec3d(cx, cy, cz);

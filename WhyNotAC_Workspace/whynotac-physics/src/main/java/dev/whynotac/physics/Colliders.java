@@ -32,6 +32,12 @@ public final class Colliders {
         }
     }
 
+    /**
+     * {@code EntityCollisionContext} for the player, as far as block shapes read it: the feet's height when the context
+     * was made ({@code getY()}) and whether the player descends ({@code isDescending}: the shift key). Null: not known.
+     */
+    public record Context(double entityBottom, boolean descending) {}
+
     /** A collision shape the client has that WhyNotAC cannot reproduce. */
     public static final class Unknown extends Exception {
         public Unknown(String reason) {
@@ -42,17 +48,17 @@ public final class Colliders {
     private Colliders() {}
 
     /** {@code Entity.collectColliders(player, level, entityColliders, box)}. The world border must be far (not modelled yet). */
-    public static List<Voxels> collect(World world, List<Voxels> entityColliders, Box box) throws Unknown {
+    public static List<Voxels> collect(World world, Context context, List<Voxels> entityColliders, Box box) throws Unknown {
         List<Voxels> colliders = new ArrayList<>(entityColliders.size() + 8);
         colliders.addAll(entityColliders);
-        blocks(world, box, colliders);
+        blocks(world, context, box, colliders);
         return colliders;
     }
 
     /** {@code CollisionGetter.noCollision(player, box)} with no solid entity near and the world border far: no block shape in the box. */
-    public static boolean noCollision(World world, Box box) throws Unknown {
+    public static boolean noCollision(World world, Context context, Box box) throws Unknown {
         List<Voxels> shapes = new ArrayList<>();
-        blocks(world, box, shapes, null);
+        blocks(world, context, box, shapes, null);
         return shapes.isEmpty();
     }
 
@@ -62,7 +68,7 @@ public final class Colliders {
      */
     public static boolean collidesWithSuffocatingBlock(World world, Box box) throws Unknown {
         List<Voxels> shapes = new ArrayList<>();
-        blocks(world, box, shapes, null, true);
+        blocks(world, null, box, shapes, null, true);
         return !shapes.isEmpty();
     }
 
@@ -71,9 +77,9 @@ public final class Colliders {
      * whose centre is nearest to {@code (px, py, pz)}; on a tie the greatest by {@code Vec3i.compareTo}
      * (y, then z, then x). Null if none.
      */
-    public static BlockPos supportingBlock(World world, Box box, double px, double py, double pz) throws Unknown {
+    public static BlockPos supportingBlock(World world, Context context, Box box, double px, double py, double pz) throws Unknown {
         List<BlockPos> positions = new ArrayList<>();
-        blocks(world, box, new ArrayList<>(), positions);
+        blocks(world, context, box, new ArrayList<>(), positions);
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos pos : positions) {
@@ -90,16 +96,17 @@ public final class Colliders {
     }
 
     /** {@code Level.getBlockCollisions(player, box)}: {@code BlockCollisions}, cell by cell in {@code Cursor3D} order. */
-    static void blocks(World world, Box box, List<Voxels> out) throws Unknown {
-        blocks(world, box, out, null);
+    static void blocks(World world, Context context, Box box, List<Voxels> out) throws Unknown {
+        blocks(world, context, box, out, null);
     }
 
-    /** As {@link #blocks(World, Box, List)}, also collecting each shape's block position when {@code positions} is not null. */
-    static void blocks(World world, Box box, List<Voxels> out, List<BlockPos> positions) throws Unknown {
-        blocks(world, box, out, positions, false);
+    /** As {@link #blocks(World, Context, Box, List)}, also collecting each shape's block position when {@code positions} is not null. */
+    static void blocks(World world, Context context, Box box, List<Voxels> out, List<BlockPos> positions) throws Unknown {
+        blocks(world, context, box, out, positions, false);
     }
 
-    private static void blocks(World world, Box box, List<Voxels> out, List<BlockPos> positions, boolean onlySuffocating) throws Unknown {
+    private static void blocks(World world, Context context, Box box, List<Voxels> out, List<BlockPos> positions, boolean onlySuffocating)
+            throws Unknown {
         BlockStates states = world.states();
         int x0 = floor(box.minX() - VoxelCollisions.EPSILON) - 1;
         int x1 = floor(box.maxX() + VoxelCollisions.EPSILON) + 1;
@@ -123,7 +130,7 @@ public final class Colliders {
                     Shape shape = states.collisionShape(state);
                     boolean dynamic = states.has(state, BlockStates.DYNAMIC_SHAPE);
                     if (onlySuffocating) {
-                        if (dynamic) {
+                        if (dynamic && !states.block(state).equals(SCAFFOLDING)) { // scaffolding's empty-context shape never is a full block
                             throw new Unknown(states.block(state) + " (whether it suffocates depends on the world) at " + x + " " + y + " " + z);
                         }
                         if (!states.has(state, BlockStates.SUFFOCATING)) {
@@ -137,7 +144,7 @@ public final class Colliders {
                     if (type == 2 && !states.block(state).equals("minecraft:moving_piston")) {
                         continue;
                     }
-                    shape = playerShape(states, state, shape, x, y, z);
+                    shape = playerShape(states, state, shape, context, x, y, z);
                     if (shape.isEmpty()) {
                         continue;
                     }
@@ -163,12 +170,17 @@ public final class Colliders {
     }
 
     /** {@code state.getCollisionShape(level, pos, CollisionContext.of(player))}: the table's shape where it is the client's. */
-    static Shape playerShape(BlockStates states, int state, int x, int y, int z) throws Unknown {
-        return playerShape(states, state, states.collisionShape(state), x, y, z);
+    static Shape playerShape(BlockStates states, int state, Context context, int x, int y, int z) throws Unknown {
+        return playerShape(states, state, states.collisionShape(state), context, x, y, z);
     }
 
+    static final String SCAFFOLDING = "minecraft:scaffolding";
+
     /** {@code EntityCollisionContext.getCollisionShape} for a player: the table's shape where it is the client's. */
-    private static Shape playerShape(BlockStates states, int state, Shape shape, int x, int y, int z) throws Unknown {
+    private static Shape playerShape(BlockStates states, int state, Shape shape, Context context, int x, int y, int z) throws Unknown {
+        if (states.block(state).equals(SCAFFOLDING)) {
+            return scaffolding(states, state, shape, context, x, y, z);
+        }
         if (states.has(state, BlockStates.DYNAMIC_SHAPE)) {
             throw new Unknown(states.block(state) + " (shape depends on the world) at " + x + " " + y + " " + z);
         }
@@ -183,6 +195,36 @@ public final class Colliders {
             throw new Unknown(states.block(state) + " (offset shape) at " + x + " " + y + " " + z);
         }
         return shape;
+    }
+
+    /**
+     * {@code ScaffoldingBlock.getCollisionShape}: above the block's top and not descending, its stable shape (the table's:
+     * the empty context counts as above); else, for an unsupported bottom block ({@code distance} not 0, {@code bottom})
+     * with the feet above its floor, the floor's slab ({@code Block.column(16, 0, 2)}, built as a two-layer snow block's
+     * collision is); else nothing. {@code isAbove}: {@code entityBottom > y + shape.max(Y) - 1.0E-5F}.
+     */
+    private static Shape scaffolding(BlockStates states, int state, Shape stable, Context context, int x, int y, int z) throws Unknown {
+        if (context == null) {
+            throw new Unknown("scaffolding (its shape depends on the player) at " + x + " " + y + " " + z);
+        }
+        if (context.entityBottom() > y + 1.0 - 1.0E-5F && !context.descending()) {
+            return stable;
+        }
+        String p = states.properties(state);
+        if (!p.contains("distance=0") && p.contains("bottom=true") && context.entityBottom() > y + 0.0 - 1.0E-5F) {
+            return unstableBottom(states);
+        }
+        return Shape.EMPTY;
+    }
+
+    /** {@code ScaffoldingBlock.SHAPE_UNSTABLE_BOTTOM}: {@code SnowLayerBlock.SHAPES[1]} is the very same call. */
+    private static Shape unstableBottom(BlockStates states) {
+        for (int s = states.firstStateOf("minecraft:snow"); s >= 0 && s < states.size() && states.block(s).equals("minecraft:snow"); s++) {
+            if (states.properties(s).equals("layers=2")) {
+                return states.collisionShape(s);
+            }
+        }
+        throw new IllegalStateException("no two-layer snow in the block data");
     }
 
     private static boolean isLarge(Shape shape) {

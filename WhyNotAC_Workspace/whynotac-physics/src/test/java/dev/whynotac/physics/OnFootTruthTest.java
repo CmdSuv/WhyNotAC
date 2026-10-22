@@ -40,7 +40,9 @@ import org.junit.jupiter.api.Test;
  * down and jumped against, a bubble column rising over soul sand (out of its open top and back, shift, jumps) and one
  * dragging down over magma. {@code truth-lava.jsonl.gz} holds a lava pool walked into, crossed jumping, jumped and
  * sprinted in, and a channel's slow current walked against and stood in; {@code truth-nether.jsonl.gz} the same in the
- * nether, where lava is fast. Each tick, run from its start in the same world (rebuilt here from the commands that built
+ * nether, where lava is fast. {@code truth-scaffolding.jsonl.gz} holds a scaffolding tower climbed from the ground and
+ * jumped in, its top stood on and gone down through with shift, and a bridge hanging off it walked onto, stood on with
+ * shift and left to the side. Each tick, run from its start in the same world (rebuilt here from the commands that built
  * the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -127,7 +129,16 @@ class OnFootTruthTest {
         {167, -61, 12, 168, -61, 16, blockState("minecraft:magma_block")},
         {160, -60, 12, 170, -57, 16, blockState("minecraft:water", "level=0")},
         {159, -61, 11, 171, -57, 17, blockState("minecraft:glass")},
+        // a scaffolding tower on the ground, and a bridge hanging off its top
+        {132, -60, 26, 132, -56, 26, scaffolding("bottom=false", "distance=0")},
+        {133, -56, 26, 133, -56, 26, scaffolding("bottom=true", "distance=1")},
+        {134, -56, 26, 134, -56, 26, scaffolding("bottom=true", "distance=2")},
+        {135, -56, 26, 135, -56, 26, scaffolding("bottom=true", "distance=3")},
     };
+
+    private static int scaffolding(String bottom, String distance) {
+        return blockState("minecraft:scaffolding", bottom, distance, "waterlogged=false");
+    }
 
     private static int fence(String east, String west) {
         return blockState("minecraft:oak_fence", east, "north=false", "south=false", "waterlogged=false", west);
@@ -327,6 +338,14 @@ class OnFootTruthTest {
     }
 
     @Test
+    void scaffoldingIsTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-scaffolding.jsonl.gz", COURSE_WORLD);
+        // ticks in scaffolding, standing on the tower's top and on a hanging block's floor, climbing it, going down it with shift
+        assertTrue(counts[0] > 450 && counts[37] > 250 && counts[38] > 100 && counts[39] > 100 && counts[40] > 25 && counts[41] > 30,
+                java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -340,7 +359,8 @@ class OnFootTruthTest {
      * fence, a wall or a fence gate, then ticks in water, swimming, with the eye under water, in the channel's current and in
      * the waterfall, and crawling, then ticks held back by a cobweb, by one under weaving and by a berry bush, honey slides,
      * ticks in the rising bubble column, above it, in the dragging one, and among the pool's columns, then ticks touching
-     * lava, in a lava channel's current, and jumping out of lava at a wall}.
+     * lava, in a lava channel's current, and jumping out of lava at a wall, then ticks in scaffolding, standing on its top,
+     * standing on a hanging block's floor, climbing it, and going down it with shift}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -350,7 +370,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[37];
+        int[] counts = new int[42];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -420,18 +440,34 @@ class OnFootTruthTest {
             counts[34] += inLava ? 1 : 0;
             counts[35] += inLava && inChannel ? 1 : 0;
             counts[36] += inLava && expected.deltaMovement().y() == 0.3F ? 1 : 0;
+            boolean inScaffolding = touches(world, expected.box(), "minecraft:scaffolding");
+            boolean onScaffolding = expected.onGround() && on != null && STATES.block(world.blockState(on.x(), on.y(), on.z())).equals("minecraft:scaffolding");
+            counts[37] += inScaffolding ? 1 : 0;
+            counts[38] += onScaffolding && expected.y() == on.y() + 1.0 ? 1 : 0;
+            counts[39] += onScaffolding && expected.y() == on.y() + 0.125 ? 1 : 0;
+            counts[40] += inScaffolding && expected.deltaMovement().y() > 0.0 ? 1 : 0;
+            counts[41] += inScaffolding && expected.keys().shift() && expected.deltaMovement().y() < 0.0 && !expected.onGround() ? 1 : 0;
         }
         return counts;
     }
 
     /** Whether a cell of the box, deflated by 0.001, holds this kind of fluid (as far as the world is known). */
     private static boolean touches(Colliders.World world, Box box, byte kind) {
+        return touches(world, box, s -> STATES.fluidKind(s) == kind);
+    }
+
+    /** Whether a cell of the box, deflated by 0.001, holds this block. */
+    private static boolean touches(Colliders.World world, Box box, String block) {
+        return touches(world, box, s -> STATES.block(s).equals(block));
+    }
+
+    private static boolean touches(Colliders.World world, Box box, java.util.function.IntPredicate holds) {
         Box b = box.inflate(-0.001, -0.001, -0.001);
         for (int x = Colliders.floor(b.minX()); x <= Colliders.floor(b.maxX()); x++) {
             for (int y = Colliders.floor(b.minY()); y <= Colliders.floor(b.maxY()); y++) {
                 for (int z = Colliders.floor(b.minZ()); z <= Colliders.floor(b.maxZ()); z++) {
                     int s = world.blockState(x, y, z);
-                    if (s != dev.whynotac.world.ClientWorld.UNKNOWN && STATES.fluidKind(s) == kind) {
+                    if (s != dev.whynotac.world.ClientWorld.UNKNOWN && holds.test(s)) {
                         return true;
                     }
                 }
