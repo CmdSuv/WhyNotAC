@@ -9,6 +9,12 @@ import sys
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
+
+def bot_artefact(case):
+    """What the bots do unlike a vanilla client, not a false finding: they walk without vanilla physics, and they attack
+    a cow in reach without picking it (on real terrain, through leaves and hills)."""
+    return case.get("check") == "movement" or (case.get("check") == "attack-aim" and case.get("details", {}).get("reason") == "blocks")
+
 def main():
     (variant, layout, bots, measure, cpu_start, cpu_end, t_start, t_end, clk_tck,
      server_log, jfr_json, histogram, out_prefix) = sys.argv[1:14]
@@ -91,10 +97,13 @@ def main():
         "botSide": bot_summary,
         "serverMovementCorrections": moved_wrongly,
         "attackReach": attack_reach,
-        "casesOpened": sum(1 for c in cases if c.get("check") != "movement"),
+        "casesOpened": sum(1 for c in cases if not bot_artefact(c)),
         "caseSummaries": [c.get("playerName", "?") + " " + c.get("check", "?") + ": " + c.get("summary", "") for c in cases
-                          if c.get("check") != "movement"][:10],
+                          if not bot_artefact(c)][:10],
         "movementCases": sum(1 for c in cases if c.get("check") == "movement"),
+        # the bots attack a cow in reach whatever is between: on real terrain through leaves and hills (they do not pick)
+        "throughBlocksCases": [c.get("playerName", "?") + ": " + c.get("summary", "") for c in cases
+                               if c.get("check") == "attack-aim" and c.get("details", {}).get("reason") == "blocks"][:10],
     }, indent=1))
 
 

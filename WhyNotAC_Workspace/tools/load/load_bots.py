@@ -31,6 +31,7 @@ PLAY_S_SWING = 0x3C
 ENTITY_COW = 30
 ATTACK_DISTANCE = 2.95  # from the standing eye to the cow's box (0.9 wide, 1.4 high), just inside vanilla's 3
 EYE_HEIGHT = 1.62
+COW_HEIGHT = 1.4
 
 
 def box_distance(eye, cow):
@@ -108,7 +109,9 @@ def run_bot(host, port, name, seconds, results, start_gate, stop_file):
                         pc.attack(bot, near[0])  # the attack and its swing back to back, as the client's main thread sends them
                         bot.attacks += 1
                         # the look that met it: the mouse turned to the cow in the frame before; this tick's packet carries it
-                        yaw = pc.turn_towards(yaw, eye, cows[near[0]], multiplier)
+                        cow = cows[near[0]]
+                        yaw = pc.turn_towards(yaw, eye, cow, multiplier)
+                        pitch = pc.turn_pitch_towards(pitch, eye, (cow[0], cow[1] + COW_HEIGHT / 2, cow[2]), multiplier)
                 if bot.teleports != seen_teleports:  # moved by the server (spreadplayers): walk around the new spot
                     seen_teleports = bot.teleports
                     x0, y0, z0, _, _ = bot.position

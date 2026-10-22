@@ -52,6 +52,10 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > outline'a çarptığı bloktan uzaktaki varlığı seçmez; bloklar client'ın saldırı anında tutabileceklerinden,
 > outline'lar resmi client'tan) kanıttır. Gerçek client'ın iki saldırısı ve yük testinde 20 botun 1829 saldırısı vaka
 > açmadı; E2E'de bakışını çevirip vuran ve taş duvarın arkasındaki lamaya vuran sonda açtı.
+>
+> **Kullanım bakışı (`use-aim`, P-M):** client eşyayı oyuncunun o anki dönüşüyle kullanır ve bu, tikin bakışıyla bit
+> bit aynıdır. Yalnızca sunucu için dönüp nişan alan (inci, iksir, ok) client'ı yakalar. Gerçek client'ın 10 kullanımı
+> vaka açmadı; E2E'de bakışından 45° sapmış dönüşle kullanan sonda açtı.
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md) · [Faz 2b-8](docs/phases/PHASE-2B-8-REPORT.md)
 
 ## Belgeler
@@ -81,7 +85,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 490 test
+./gradlew build                       # tüm modüller + 500 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

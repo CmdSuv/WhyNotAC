@@ -16,6 +16,7 @@ can be verified live:
   * an attack on the husk with no swing after it (tick 345)    -> an action-grammar case (P-M, shadow)
   * an attack on the husk with the look turned away (tick 365) -> an attack-aim case (P-M, shadow)
   * an attack on the llama behind a wall, empty-handed (tick 315) -> an attack-aim case through blocks (P-M, shadow)
+  * a use of the stick with a rotation 45 degrees off the look (tick 374) -> a use-aim case (P-M, shadow)
 
 It also attacks the nearest husk (tick 300), well within reach, which must open nothing. Before each attack its
 mouse turns its look to the target, as a player does.
@@ -59,6 +60,7 @@ PLAY_C_SET_ENTITY_MOTION = 0x63
 PLAY_C_CONTAINER_SET_CONTENT, PLAY_C_CONTAINER_SET_SLOT = 0x12, 0x14
 PLAY_S_CONTAINER_CLICK, PLAY_S_SET_CARRIED_ITEM = 0x11, 0x34
 PLAY_C_ADD_ENTITY, PLAY_S_INTERACT, PLAY_S_SWING = 0x01, 0x19, 0x3C
+PLAY_S_USE_ITEM = 0x40
 PLAY_C_TELEPORT_ENTITY, PLAY_C_ENTITY_POSITION_SYNC, PLAY_C_MOVE_ENTITY_POS, PLAY_C_MOVE_ENTITY_POS_ROT = 0x7B, 0x23, 0x33, 0x34
 # item registry ids (1.21.11, reports/registries.json)
 ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
@@ -349,6 +351,9 @@ GRAMMAR_VIOLATION_TICK = 345
 AIM_VIOLATION_TICK = 365
 # Violation 8, an attack on the llama behind the wall: the empty hand selected the tick before, the stick again after.
 WALL_VIOLATION_TICK = 315
+# An honest use of the stick, then violation 9: a use whose rotation is not the look (ticks without a mouse turn). After
+# the attacks: the server's BlockChangedAck for a use may roll the player back, and the probe sends no position after.
+USE_TICK, USE_AIM_VIOLATION_TICK = 367, 374
 # Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
 CLOCK_BURST = 40
 
@@ -388,6 +393,15 @@ def turn_towards(yaw, eye, target, multiplier, away=0.0):
     return f32(yaw + f32(f32(counts * multiplier) * f32(0.15)))
 
 
+def turn_pitch_towards(pitch, eye, target, multiplier):
+    """The pitch after the mouse turned towards the target point in whole cursor counts, as Entity.turn computes it (then
+    clamped to [-90, 90]): positive looks down."""
+    horizontal = math.hypot(target[0] - eye[0], target[2] - eye[2])
+    wanted = math.degrees(math.atan2(-(target[1] - eye[1]), horizontal))
+    counts = round((wanted - pitch) / (multiplier * 0.15))
+    return min(90.0, max(-90.0, f32(pitch + f32(f32(counts * multiplier) * f32(0.15)))))
+
+
 def attack(client, entity_id, swing=True):
     """As MultiPlayerGameMode.attack then startAttack's swing: ServerboundInteractPacket ATTACK, then the main hand's swing.
 
@@ -418,6 +432,7 @@ def main():
     inputs_sent = []
     inventory_step = 0
     attacks = []
+    uses, use_sequence = [], 0
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets. The client
@@ -457,6 +472,13 @@ def main():
                 attack(client, target)
                 aim = (client.entities[target][1:], 0.0)
                 attacks.append({"tick": tick, "target": target, "type": "llama behind the wall", "distance": distance})
+        if inventory_step == 3 and tick in (USE_TICK, USE_AIM_VIOLATION_TICK):
+            # As MultiPlayerGameMode.useItem: the held item (the stick) used with the player's rotation, before the tick's
+            # movement, which turns nothing (no cursor counts on these ticks). Violation 9: 45 degrees off it, a silent aim.
+            use_sequence += 1
+            used_yaw = yaw if tick == USE_TICK else f32(yaw + 45.0)
+            client.send(PLAY_S_USE_ITEM, varint(0) + varint(use_sequence) + struct.pack(">ff", used_yaw, pitch))
+            uses.append({"tick": tick, "yaw": used_yaw, "look": yaw})
         if inventory_step == 3 and tick in (WALL_VIOLATION_TICK - 1, WALL_VIOLATION_TICK + 1):
             client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick < WALL_VIOLATION_TICK else 2))
         # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
@@ -521,6 +543,7 @@ def main():
         "tick_ends_sent": tick + extra_tick_ends,
         "inventory_steps": inventory_step,
         "attacks": attacks,
+        "uses": uses,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,

@@ -445,6 +445,11 @@ public final class ClientSelf {
         return "known";
     }
 
+    /** Whether the player may be riding now (a passenger's rotation and position follow its vehicle). */
+    public boolean mayRide() {
+        return vehicle.mayBeOtherThan(certain, windowEnd(), NONE);
+    }
+
     /** {@code [low, high]} of the {@code entity_interaction_range} the client may have now. */
     public double[] interactionRangeBounds() {
         return interactionRange.hull(certain, windowEnd());

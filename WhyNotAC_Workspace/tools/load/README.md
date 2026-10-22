@@ -10,7 +10,10 @@ not show up in the server's numbers. `spread` places the bots far apart (per-pla
 keeps them together (every bot sees every other one).
 
 Every bot behaves like a vanilla client and never breaks a rule. Under load, **any** WhyNotAC anomaly,
-divergence or lost event for these bots is a false positive, and the test reports it.
+divergence or lost event for these bots is a false positive, and the test reports it. Two exceptions, counted apart:
+the bots walk without vanilla physics (`movementCases`), and they attack a cow in reach without picking it, so on real
+terrain (`LOAD_LEVEL_TYPE=normal`) some attacks go through leaves and hills (`throughBlocksCases`: attack-aim findings
+for blocks, each one real). The flat default world has nothing between a bot and its cow.
 
 | Measured | How |
 |---|---|

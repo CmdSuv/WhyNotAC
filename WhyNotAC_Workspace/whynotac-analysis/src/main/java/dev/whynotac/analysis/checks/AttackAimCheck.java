@@ -5,7 +5,6 @@ import dev.whynotac.analysis.evidence.AdmissibilityTracker;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
-import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
@@ -29,18 +28,9 @@ import java.util.TreeMap;
  * pose: {@code ClientSelf#eyes}, so the pitch counts too), for any box the entity may have had, proves a modified client: one that attacks what it is not looking at (a kill aura
  * that turns only some of the time, or hits several entities with one look).
  *
- * <p>Which look (decompiled 1.21.11 client): {@code LocalPlayer.getViewXRot}/{@code getViewYRot} are the player's
- * current rotation off a vehicle. Nothing between the pick and the tick's {@code LocalPlayer.sendPosition} turns it
- * (the mouse turns it per frame, packets between frames; the actions of {@code handleKeybinds} do not). So the
- * look of the pick is the rotation the tick's own movement packet carries, which is the next movement packet after
- * the attack in that tick; without rotation in it, or without such a packet, the rotation is unchanged since the
- * last packet {@code sendPosition} sent with one ({@code yRotLast}: replies to the server's teleports and
- * rotations do not change it, and when they turned the player {@code sendPosition} sends the new rotation). This
- * check keeps every rotation that last one may have carried ({@link MoveReplies} says which packets may be
- * replies). The head's yaw ({@code attack_range} items) is the yaw at the previous tick's {@code aiStep}, which is
- * {@code yRotLast} after that tick (teleports set the view's yaw, not the head's): one of the same rotations. After a login or respawn nothing is claimed until the client says it has loaded
- * ({@code PlayerLoaded}: the new player sends no movement before), and the last sent rotation is not known again
- * until the client sends one of its own; nor while it may ride (a passenger's rotation packets do not set it).
+ * <p>Which look: the tick's, as {@link TickLook} follows it. The head's yaw ({@code attack_range} items) is the yaw at
+ * the previous tick's {@code aiStep}, which is {@code yRotLast} after that tick (teleports set the view's yaw, not the
+ * head's): one of the same rotations.
  *
  * <p>Nor does it attack an entity behind a block (the pick, {@code GameRenderer.pick}: the entity only if the look meets it
  * nearer than the block its clip hit). Without an {@code attack_range} item, a look that meets the entity only past a block
@@ -57,8 +47,6 @@ public final class AttackAimCheck implements TimelineListener {
     public static final String ID = "attack-aim";
     public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
-    /** Rotations the last sent one may be; past this many it is not known until the client certainly sends its own. */
-    static final int MAX_ROTATIONS = 8;
     /** How far along the look a report measures the miss. */
     static final double REPORT_LENGTH = 64.0;
 
@@ -71,9 +59,6 @@ public final class AttackAimCheck implements TimelineListener {
         this.sink = sink;
         this.replicas = replicas;
     }
-
-    /** A rotation the client sent, and the sequence and time of the packet that carried it. */
-    record Rotation(float yRot, float xRot, long sequence, long nanoTime) {}
 
     /**
      * An attack waiting for the look of its tick: every box of offsets from an eye to the target, state by state and in
@@ -88,17 +73,7 @@ public final class AttackAimCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
-        final MoveReplies replies = new MoveReplies();
-        /** The client said it loaded the level since the last login or respawn sent. */
-        boolean loaded;
-        /** The rotations {@code yRotLast} may be; null: not known. */
-        List<Rotation> lastSent;
-        /** The interval's last movement packet: its rotation (null: none, or no rotation), and what it may be. */
-        Rotation lastMove;
-        boolean lastMoveOwn;
-        boolean lastMoveReply;
-        /** An action of the tick was sent in this interval: movement packets after it are the tick's own. */
-        boolean acted;
+        final TickLook look = new TickLook();
         final List<Pending> pending = new ArrayList<>();
         /** Acknowledgements seen: after one the world may hold less than the client may have had at an earlier attack. */
         long acknowledgements;
@@ -112,15 +87,9 @@ public final class AttackAimCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
-            case TimelineEvent.Outbound out -> {
-                state.replies.onOutbound(out);
-                if (out.packet() instanceof ClientboundPacket.Login || out.packet() instanceof ClientboundPacket.Respawn) {
-                    state.loaded = false; // a new player: yRotLast is its own, and it sends nothing until it has loaded
-                    state.lastSent = null;
-                }
-            }
+            case TimelineEvent.Outbound out -> state.look.onOutbound(out);
             case TimelineEvent.Acknowledged ack -> {
-                state.replies.onAcknowledged(ack);
+                state.look.onAcknowledged(ack);
                 state.acknowledgements++;
             }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
@@ -130,17 +99,17 @@ public final class AttackAimCheck implements TimelineListener {
 
     private void onInbound(PlayerSession session, State state, TimelineEvent.Inbound in) {
         switch (in.packet()) {
-            case ServerboundPacket.PlayerLoaded ignored -> state.loaded = true;
-            case ServerboundPacket.AcceptTeleportation accept -> state.replies.onAccept(accept);
+            case ServerboundPacket.PlayerLoaded ignored -> state.look.onLoaded();
+            case ServerboundPacket.AcceptTeleportation accept -> state.look.onAccept(accept);
             case ServerboundPacket.InteractEntity interact when interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK -> {
-                state.acted = true;
+                state.look.onAction();
                 onAttack(session, state, in, interact.entityId());
             }
             case ServerboundPacket.MovePlayer move -> onMove(session, state, in, move);
             case ServerboundPacket.ClientTickEnd ignored -> onTickEnd(session, state, in);
             default -> {
                 if (ActionGrammarCheck.action(in.packet()) != null || in.packet() instanceof ServerboundPacket.Swing) {
-                    state.acted = true;
+                    state.look.onAction();
                 }
             }
         }
@@ -148,7 +117,7 @@ public final class AttackAimCheck implements TimelineListener {
 
     private void onAttack(PlayerSession session, State state, TimelineEvent.Inbound in, int target) {
         ClientSelf self = replicas.self().self(session);
-        if (!state.loaded || target == self.selfId() || self.mayBeSpectator()) {
+        if (!state.look.loaded() || target == self.selfId() || self.mayBeSpectator()) {
             return;
         }
         ClientSelf.Eye own = self.eye();
@@ -200,75 +169,28 @@ public final class AttackAimCheck implements TimelineListener {
     }
 
     private void onMove(PlayerSession session, State state, TimelineEvent.Inbound in, ServerboundPacket.MovePlayer move) {
-        boolean reply = state.replies.takeTeleportReply();
-        Rotation rotation = move.hasRotation() ? new Rotation(move.yaw(), move.pitch(), in.sequence(), in.nanoTime()) : null;
+        TickLook.Rotation rotation = state.look.onMove(in, move);
         if (!state.pending.isEmpty()) {
             // the tick's own packet: its rotation is the pick's, or the last sent one is
-            judge(session, state, in, rotation != null ? List.of(rotation) : candidates(state));
+            judge(session, state, in, rotation != null ? List.of(rotation) : state.look.candidates());
         }
-        state.lastMove = rotation;
-        state.lastMoveOwn = state.acted || !reply && !mayBeReply(state.replies, move);
-        state.lastMoveReply = reply;
     }
 
     private void onTickEnd(PlayerSession session, State state, TimelineEvent.Inbound in) {
         if (!state.pending.isEmpty()) {
-            judge(session, state, in, candidates(state)); // no movement packet after the attack: the rotation is unchanged
+            judge(session, state, in, state.look.candidates()); // no movement packet after the attack: the rotation is unchanged
         }
-        // the tick's own packet is the interval's last movement packet, if it is not a reply
-        if (state.lastMove != null && state.loaded) {
-            if (state.lastMoveOwn) {
-                state.lastSent = new ArrayList<>(List.of(state.lastMove));
-            } else if (!state.lastMoveReply && state.lastSent != null) {
-                add(state, state.lastMove); // the tick's own or a reply
-            }
-        }
-        if (replicas.self().self(session).eyeState().equals("vehicle")) {
-            state.lastSent = null; // a passenger's rotation packets do not set yRotLast
-        }
-        state.replies.closeInterval();
-        state.lastMove = null;
-        state.lastMoveOwn = false;
-        state.lastMoveReply = false;
-        state.acted = false;
+        state.look.onTickEnd(replicas.self().self(session).mayRide());
     }
 
-    private static void add(State state, Rotation rotation) {
-        for (Rotation r : state.lastSent) {
-            if (Float.compare(r.yRot(), rotation.yRot()) == 0 && Float.compare(r.xRot(), rotation.xRot()) == 0) {
-                return;
-            }
-        }
-        state.lastSent.add(rotation);
-        if (state.lastSent.size() > MAX_ROTATIONS) {
-            state.lastSent = null;
-        }
-    }
-
-    /** The rotations the pick may have had when the tick sent none after the attack: the last sent ones (null: not known). */
-    private static List<Rotation> candidates(State state) {
-        return state.lastSent == null ? null : new ArrayList<>(state.lastSent);
-    }
-
-    /** A rotation-only or position-and-rotation packet that a rotation or entity teleport the client may have handled explains. */
-    private static boolean mayBeReply(MoveReplies replies, ServerboundPacket.MovePlayer move) {
-        if (replies.saturated()) {
-            return true;
-        }
-        if (move.hasRotation() && move.hasPosition()) {
-            return replies.vehicleTokens() > 0;
-        }
-        return move.hasRotation() && replies.rotationTokens() > 0;
-    }
-
-    private void judge(PlayerSession session, State state, TimelineEvent.Inbound at, List<Rotation> looks) {
+    private void judge(PlayerSession session, State state, TimelineEvent.Inbound at, List<TickLook.Rotation> looks) {
         List<Pending> pending = new ArrayList<>(state.pending);
         state.pending.clear();
         if (looks == null) {
             return; // the rotation is not known
         }
         // the head's yaw: yRotLast before this tick's own packet
-        List<Rotation> heads = candidates(state);
+        List<TickLook.Rotation> heads = state.look.candidates();
         ClientWorld world = replicas.world().world(session);
         for (Pending p : pending) {
             Wall wall = null;
@@ -295,10 +217,10 @@ public final class AttackAimCheck implements TimelineListener {
      * The block every look of {@code looks} certainly stops at before it could meet the target, from every eye where it
      * meets one of the target's boxes; null if some look may reach the target first.
      */
-    private static Wall throughBlocks(ClientWorld world, Pending p, List<Rotation> looks) {
+    private static Wall throughBlocks(ClientWorld world, Pending p, List<TickLook.Rotation> looks) {
         Wall weakest = null;
         int poses = p.eyes().size();
-        for (Rotation look : looks) {
+        for (TickLook.Rotation look : looks) {
             double[] v = AttackAim.view(look.xRot(), look.yRot());
             for (int i = 0; i < p.picked().size(); i++) {
                 double target = AttackAim.enter(v, p.picked().get(i));
@@ -323,9 +245,9 @@ public final class AttackAimCheck implements TimelineListener {
     }
 
     /** Whether some look, with the pitch of one of {@code pitches} and the yaw of one of {@code yaws}, meets some box. */
-    private static boolean meets(List<AttackReach.Box> boxes, List<Rotation> pitches, List<Rotation> yaws) {
-        for (Rotation pitch : pitches) {
-            for (Rotation yaw : yaws) {
+    private static boolean meets(List<AttackReach.Box> boxes, List<TickLook.Rotation> pitches, List<TickLook.Rotation> yaws) {
+        for (TickLook.Rotation pitch : pitches) {
+            for (TickLook.Rotation yaw : yaws) {
                 double[] v = AttackAim.view(pitch.xRot(), yaw.yRot());
                 for (AttackReach.Box d : boxes) {
                     if (AttackAim.meets(v, d)) {
@@ -337,7 +259,7 @@ public final class AttackAimCheck implements TimelineListener {
         return false;
     }
 
-    private void report(PlayerSession session, State state, Pending p, List<Rotation> looks, Wall wall, TimelineEvent.Inbound at) {
+    private void report(PlayerSession session, State state, Pending p, List<TickLook.Rotation> looks, Wall wall, TimelineEvent.Inbound at) {
         TimelineEvent.Inbound attack = p.attack();
         if (state.lastReportNanos != Long.MIN_VALUE && attack.nanoTime() - state.lastReportNanos < REPORT_INTERVAL_NANOS) {
             return;
@@ -345,7 +267,7 @@ public final class AttackAimCheck implements TimelineListener {
         long from = p.eyeSequence();
         long fromNanos = p.eyeNanos();
         double miss = Double.POSITIVE_INFINITY;
-        for (Rotation look : looks) {
+        for (TickLook.Rotation look : looks) {
             if (look.sequence() < from) {
                 from = look.sequence();
                 fromNanos = look.nanoTime();
@@ -362,7 +284,7 @@ public final class AttackAimCheck implements TimelineListener {
             return;
         }
         List<String> rotations = new ArrayList<>();
-        for (Rotation look : looks) {
+        for (TickLook.Rotation look : looks) {
             rotations.add(format(look.yRot()) + "/" + format(look.xRot()));
         }
         Map<String, String> details = new TreeMap<>();

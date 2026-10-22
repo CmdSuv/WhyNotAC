@@ -242,10 +242,13 @@ def verify_cases(probe, log, work_dir, check):
           and 3.1 < attacks["llama behind the wall"]["distance"] < 3.3,
           f"the probe attacked a husk next to it, a sheep 7 blocks away, the husk without a swing and off its look, the llama behind the wall: "
           f"{probe.get('attacks')}")
-    check(len(dossiers) == 6 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+    uses = probe.get("uses", [])
+    check(len(uses) == 2 and uses[0]["yaw"] == uses[0]["look"] and uses[1]["yaw"] != uses[1]["look"],
+          f"the probe used the stick with its look, then with a rotation 45 degrees off it: {uses}")
+    check(len(dossiers) == 7 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
           and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("action-grammar", [])) == 1
-          and len(by_check.get("attack-aim", [])) == 2,
-          f"exactly six cases opened, one per violation (none for the attacks in reach and in the look): "
+          and len(by_check.get("attack-aim", [])) == 2 and len(by_check.get("use-aim", [])) == 1,
+          f"exactly seven cases opened, one per violation (none for the attacks in reach and in the look, nor the honest use): "
           f"{sorted((d['check'], d['summary']) for d in dossiers)}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
@@ -287,6 +290,13 @@ def verify_cases(probe, log, work_dir, check):
         check(wall["evidenceClass"] == "P-M" and dd.get("targetType") == "minecraft:llama" and dd.get("target") == str(target)
               and float(dd.get("stoppedBefore", "0")) > 1.0 and dd.get("throughBlocksAttacks") == "1" and dd.get("offAimAttacks") == "0",
               f"the attack-aim case through blocks is the llama behind the wall, its look stopped by the stone (P-M): {wall['summary']}")
+    use = by_check.get("use-aim", [None])[0]
+    if use and len(uses) == 2:
+        dd = use["details"]
+        f32 = lambda text: struct.unpack(">f", struct.pack(">f", float(text)))[0]  # the shortest decimal of the float, read back
+        check(use["evidenceClass"] == "P-M" and dd.get("reason") == "rotation" and f32(dd.get("used", "0/0").split("/")[0]) == uses[1]["yaw"]
+              and f32(dd.get("looks", "0/0").split("/")[0]) == uses[1]["look"] and dd.get("rotationUses") == "1",
+              f"the use-aim case is the use 45 degrees off the look, the honest use not counted (P-M): {use['summary']}")
     for d in dossiers:
         check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
               f"the {d['check']} case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")
@@ -298,13 +308,13 @@ def verify_cases(probe, log, work_dir, check):
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
     # a re-run finds every finding of the dossier's check in the recording: attack-aim has two
-    check(len(verified) == len(dossiers) == 6 and all(v["verified"] is True
+    check(len(verified) == len(dossiers) == 7 and all(v["verified"] is True
                                                       and v["evidenceInRecording"] == len(by_check.get(v["expected"].split("@")[0], [])) for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
-    check(re.search(r"WhyNotAC cases \(newest first\): 6", log) is not None
+    check(re.search(r"WhyNotAC cases \(newest first\): 7", log) is not None
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
                   for d in dossiers),
-          "/whynotac cases lists all six")
+          "/whynotac cases lists all seven")
 
 
 def verify_self(log, check):

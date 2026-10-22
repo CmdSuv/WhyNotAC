@@ -10,6 +10,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
+| `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) |
 | `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
@@ -60,7 +61,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   bakış vektörüyle (`getViewVector(1)`: güncel eğim ve yön), kutu seçme yarıçapı kadar büyütülmüş ya da göz kutunun
   içinde; `attack_range` bileşenli eşyada önce kafanın bakışıyla (`getHeadLookAngle`: güncel eğim ve kafanın yönü),
   kutu `hitbox_margin` kadar büyütülmüş.
-- **Hangi bakış:** client dışarıdan bir araç değilse seçim ile tikin `sendPosition`'ı arasında hiçbir şey onu
+- **Hangi bakış (`TickLook`, `use-aim` ile ortak):** client dışarıdan bir araç değilse seçim ile tikin `sendPosition`'ı arasında hiçbir şey onu
   döndürmez: fare her karede, paketler karelerin arasında döndürür. Bu yüzden seçimin bakışı, tikin kendi hareket
   paketinin taşıdığı dönüştür; bu paket, saldırıdan sonra aynı tikteki ilk hareket paketidir. Pakette dönüş ya da
   böyle bir paket yoksa dönüş, `sendPosition`'ın en son dönüşle gönderdiği paketten beri değişmemiştir
@@ -107,7 +108,24 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   hücre, ışının içinden başladığı kutu. Her kural için negatif kontrol yakalanır (11 mutasyon). E2E sondası her
   saldırısında faresini hedefe döndürür (tam fare adımlarıyla) ve bakışını bir tik önceden çevirip husk'a vurarak vakayı
   açar; boş elle, iki blok yüksekliğindeki taş duvarın arkasındaki lamaya bakıp vurarak ikinci vakayı (`reason=blocks`)
-  açar; yük botları da saldırdıkları ineğe döner.
+  açar; yük botları da saldırdıkları ineğe (yönü ve eğimiyle) döner. Gerçek arazide botlar seçim yapmadan menzildeki
+  ineğe vurduğu (yaprakların ve tepelerin ardındakine de) için yük özeti onların `reason=blocks` bulgularını ayrı sayar
+  (`throughBlocksCases`); üç tanesi kayıttan tek tek doğrulandı (bakış ile inek arasında akasya ve meşe yaprağı, toprak).
+
+### `use-aim` (`UseAimCheck`)
+
+- **Client'ın kuralı (1.21.11):** `MultiPlayerGameMode.useItem` (tek çağıranı `handleKeybinds`'teki
+  `Minecraft.startUseItem`) `ServerboundUseItemPacket`'i oyuncunun o anki `getYRot()` ve `getXRot()`'u ile gönderir. Bu
+  ile tikin `sendPosition`'ı arasında oyuncuyu hiçbir şey döndürmez; dönüş, tikin bakışıdır (`TickLook`: tikin kendi
+  hareket paketininki, yoksa en son gönderilen), bit bit aynı. Başka bir dönüşle kullanım kanıttır: yalnızca sunucu
+  için dönen (atışı, inci ya da iksiri oyuncunun bakışı dönmeden nişanlayan) ya da pakete sahte dönüş yazan client.
+- **İddia yok:** tikin bakışı bilinmiyorsa (`TickLook`) ve oyuncu binekte olabilirse (araç tik içinde onu döndürebilir;
+  kullanım anında da, bakışın bilindiği anda da sorulur).
+- **Sınamalar:** `UseAimCheckTest` son gönderilen ve tikin kendi dönüşünü, başka dönüşü, tikin kullanımdan sonra
+  döndüğü durumu, bit bit karşılaştırmayı, yanıt olabilecek paketi, bilinmeyen bakışı, iki binek durumunu, saniyede
+  bir bulguyu ve reddi sınar; her kural için negatif kontrol yakalanır. Gerçek client oturumunun 10 kullanımı (kalkan,
+  yiyecek, yay) vaka açmadı; E2E sondası çubuğu önce bakışıyla, sonra bakışından 45° sapmış bir dönüşle kullanır ve
+  yalnızca ikincisi vaka açar.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 
