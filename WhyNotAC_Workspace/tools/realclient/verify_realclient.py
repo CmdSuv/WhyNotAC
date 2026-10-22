@@ -144,6 +144,23 @@ def main():
           and after is not None and after["left"],
           f"under the chest's screen the client sent no movement key and no action although W was held, and A walked after it "
           f"closed: {menu} {under} {after}")
+    # The shield: from its use (the off hand's, behind the sword) to its release the client sent no swing, no attack, no
+    # interaction and no other use, though the last block was clicked under three times; that block's release is
+    # followed by the one click's swing.
+    blocks, current, after_last = [], None, None
+    for p in inbound:
+        if p["type"] == "UseItem" and p["hand"] == "OFF_HAND" and current is None:
+            current = []
+        elif current is not None and p["type"] == "PlayerAction" and p["action"] == "RELEASE_USE_ITEM":
+            blocks.append(current)
+            current, after_last = None, []
+        elif current is not None and p["type"] in ("Swing", "InteractEntity", "UseItem", "UseItemOn"):
+            current.append(p["type"])
+        elif after_last is not None and p["type"] in ("Swing", "UseItem"):
+            after_last.append(p["type"])
+    check(len(blocks) >= 3 and not any(blocks) and after_last and after_last[0] == "Swing",
+          f"while the shield was up the client sent no swing, attack or use though the attack button was clicked, and the "
+          f"click after the release swung: {blocks} then {after_last}")
     rotations = sum(1 for e in events if e["type"] == "Outbound" and e["packet"]["type"] in ("PlayerRotation", "TeleportEntity"))
     check(attacks >= 2 and actions.get("UseItem", 0) >= 3 and actions.get("SetCarriedItem", 0) >= 3 and not broken and rotations == 0,
           f"the client's actions all came before its tick's movement, each of its {attacks} attacks followed by the main hand's swing "

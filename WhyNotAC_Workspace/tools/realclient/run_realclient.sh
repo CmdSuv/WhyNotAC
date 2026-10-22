@@ -333,6 +333,9 @@ lane 40.5 w,Control_L/0.8 w,Control_L,Button3/1.2 w,Button3/1.2 w/1.0
 echo "item replace entity $NAME weapon.mainhand with minecraft:diamond_sword" > "$FIFO"; sleep 0.5
 lane 40.5 w/0.5 w,Button3/1.0 w,Button3,Control_L/1.0 w,Button3/0.1 Button3/0.1 w,Button3/0.8 Shift_L,w,Button3/1.0 w/1.0
 lane 40.5 w/0.1 Button3/0.1 w/1.0
+# The shield up and the attack button clicked under it: handleKeybinds consumes the clicks while the item is in use (no
+# attack, no swing); after the release one click swings.
+lane 40.5 Button3/2.6/Button1/0.6 -/0.8 Button1/0.1 -/0.8
 echo "item replace entity $NAME weapon.mainhand with minecraft:iron_spear" > "$FIFO"; sleep 0.5
 lane 40.5 w/0.5 w,Button3/0.5 w,Button3,Control_L/1.5 w/0.5
 echo "item replace entity $NAME weapon.mainhand with minecraft:bow" > "$FIFO"

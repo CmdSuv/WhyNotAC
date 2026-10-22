@@ -97,7 +97,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   bir tick, tikin başında eşya kullanan hipotezlerle açıklanmaz; hepsi kullanıyorsa tick kanıttır ("eşya
   kullanırken saldırdı, etkileşti ya da yeni bir kullanım başlattı": kalkanla bloklarken ya da yerken vuran client).
   Bırakmayla saldırı aynı tikte de kanıttır (bırakan tik tıkları yine harcar); bırakmadan sonraki tikte saldırı
-  vanilla'dır. Bulgunun özeti nedeni söyler (`reason`).
+  vanilla'dır. Bulgunun özeti nedeni söyler (`reason`). Gerçek client'ın kalkan şeridi client'ın bu davranışını sınar:
+  kalkan kalkıkken saldırı tuşuna üç kez basılır, client ne sallama ne saldırı ne de kullanım gönderir; bıraktıktan
+  sonraki tık sallar.
 - **Varlık itmeleri (`ClientEntities.pushers`, `ClientTeams`):** client'ta oyuncuyu yalnızca başka canlıların
   tick'i iter (`LivingEntity.pushEntities`; client'ta `pushableBy` yalnız yerel oyuncuyu kabul eder): kutusu
   oyuncununkiyle kesişen canlı, `Entity.push(Entity)` ile hareketine en çok 0.05 ekler. Yarasa, zırh askısı,
