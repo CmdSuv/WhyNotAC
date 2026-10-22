@@ -88,7 +88,9 @@ for c in "forceload add 32 -16 191 16" \
   "fill 72 -60 -11 72 -58 -9 minecraft:stone" "setblock 71 -60 -10 minecraft:ladder[facing=west]" \
   "setblock 71 -59 -10 minecraft:oak_trapdoor[facing=west,open=true,half=bottom]" \
   "fill 80 -61 -16 85 -61 -13 minecraft:slime_block" "setblock 91 -60 -15 minecraft:red_bed[facing=east,part=head]" \
-  "setblock 90 -60 -15 minecraft:red_bed[facing=east,part=foot]"; do
+  "setblock 90 -60 -15 minecraft:red_bed[facing=east,part=foot]" \
+  "fill 100 -60 5 106 -60 5 minecraft:oak_fence" "setblock 109 -60 5 minecraft:oak_fence" \
+  "fill 100 -60 8 106 -60 8 minecraft:cobblestone_wall" "fill 100 -60 11 104 -60 11 minecraft:oak_fence_gate[facing=north]"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -228,6 +230,15 @@ bounce 83.5 -55 Shift_L/2.0 -/0.5
 bounce 87.5 -60 w/0.6/space -/1.5
 bounce 90.5 -55 -/2.5
 bounce 91.5 -55 Shift_L/2.0 -/0.5
+# Fences, walls and fence gates, 1.5 high, at x 100..106: a fence line (z 5), a lone post (x 109), a wall line (z 8) and
+# closed gates (z 11) walked along on top, sneaking to their edge and jumped along until the player drops off; the fence
+# walked into from the ground and jumped against (too high to climb, to auto-jump or to step up).
+fences() { echo "tp $NAME $1 $2 $3 -90 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+fences 100.5 -58.5 5.5 w/1.0 -/0.3 Shift_L,w/1.5 -/0.3 w/1.5/space -/1.0
+fences 109.5 -58.5 5.5 -/0.5 Shift_L,w/0.8 -/0.5
+fences 100.5 -58.5 8.5 w/1.0 -/0.3 Shift_L,w/1.5 -/0.3 w/1.5/space -/1.0
+fences 100.5 -58.5 11.5 w/0.8 -/0.3 Shift_L,w/1.2 -/0.3 w/1.0/space -/1.0
+fences 97.5 -60 5.5 w/1.0 w/1.0/space -/0.5
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap

@@ -830,17 +830,20 @@ public final class OnFoot {
         return Colliders.collidesWithSuffocatingBlock(world, column);
     }
 
-    /** {@code Entity.getOnPos(offset)}: the supporting block's column at the offset below the feet. */
+    /**
+     * {@code Entity.getOnPos(offset)}: the supporting block's column at the offset below the feet; the supporting block
+     * itself where it is a fence and the offset at most 0.5, a wall or a fence gate ({@code BlockTags.FENCES},
+     * {@code BlockTags.WALLS}, {@code FenceGateBlock}: in 1.21.11 exactly the blocks named so).
+     */
     private BlockPos onPos(float offset) throws Colliders.Unknown {
         if (support != null) {
             if (!(offset > 1.0E-5F)) {
                 return support;
             }
             String block = states.block(state(support));
-            if (block.endsWith("_wall") || block.endsWith("_fence") || block.endsWith("_fence_gate")) {
-                throw new Colliders.Unknown("standing on " + block + " (not modelled)");
-            }
-            return support.atY(Colliders.floor(y - offset));
+            boolean fence = block.endsWith("_fence");
+            boolean wallOrGate = block.endsWith("_wall") || block.endsWith("_fence_gate");
+            return (!((double) offset <= 0.5) || !fence) && !wallOrGate ? support.atY(Colliders.floor(y - offset)) : support;
         }
         return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
     }

@@ -117,6 +117,14 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     dışındadır: `MovementTracker` uygular (bkz. whynotac-analysis). Kayıt cihazı oyuncunun durumunu kendi tick'inin
     başında alır, itmeler dahil; adım bu yüzden onlarla da bit bit aynıdır. **Son oturum (köylülere yürüyen itme
     şeridiyle):** 4110 tikin 4093'ü bit bit eşit, 0 fark.
+  - **Çit, duvar ve çit kapısı üstü (`getOnPos`):** destek bloğu çitse ve uzaklık en çok 0.5'se, duvar ya da çit
+    kapısıysa her uzaklıkta, altındaki blok olarak bloğun kendisi okunur (`BlockTags.FENCES`, `BlockTags.WALLS`,
+    `FenceGateBlock`; 1.21.11'de tam olarak bu adlarla biten bloklar, istemcinin etiket dosyalarıyla karşılaştırıldı).
+    1.5 yüksekliğindeki şekiller çarpışma çekirdeğinin "büyük şekil" yolundan geçer. **Son oturum (sunucunun bağladığı
+    çit hattı, tek direk, alçak duvar hattı ve kapalı kapılar; üstünde yürüme, kenara sinsi yürüme, zıplayarak düşme,
+    yerden çite yürüyüp zıplama):** şeridin 590 tikinin hepsi bit bit eşit, 318'i bir çitin, duvarın ya da kapının
+    üstünde biter. Tüm oturum: 5458 tikin 5440'ı eşit, 0 fark. Eski davranış (bu bloklarda `Unknown`) testi düşürür:
+    268 tik, üstte hiç.
   - **Eşdeğer durumlar (`OnFoot.sameForMovement`):** adımın her yerde aynı okuduğu blok durumları: aynı çarpışma
     geometrisi, bayraklar, sürtünme, hız ve zıplama çarpanları, hiçbirinde sıvı yok. Adımın ya da `Colliders`'ın adıyla
     okuduğu bloklar (tırmanılabilir, içinde etkili, slime, yatak, tuzak kapı, çit, duvar, su, lav, hareketli piston)
@@ -130,7 +138,6 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     kanıtsız karşılaştırmaz.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar), iskele;
-    - çit ve duvar üstü;
     - yüklenmemiş chunk, sürünme;
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 

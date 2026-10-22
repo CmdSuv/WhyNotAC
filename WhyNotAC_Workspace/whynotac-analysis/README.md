@@ -76,8 +76,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
   durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
   az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
-  köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri): 4877 tikin
-  4854'ü iddia edildi, 0 açıklanamayan, 2413/2413 tick'te client'ın durumu kümede, 24 itme izlendi. Kalan 22 tik,
+  köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
+  ve kapı üstü): 5478 tikin 5455'i iddia edildi, 0 açıklanamayan, 2767/2767 tick'te client'ın durumu kümede, 24
+  itme izlendi. Kalan 22 tik,
   uzak bir ışınlamadan sonra yeniden gönderilen ve client'ın henüz işlemediği chunk'tır. Eşdeğer durumlar
   izlenmeden önce buz pistinin altında çimenin yayılması da 98 tik daha iddiasız bırakıyordu. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
   da 0.05'i float yerine double alan model açıklanamayan tick verir. Efekt modellerinin bilinçli

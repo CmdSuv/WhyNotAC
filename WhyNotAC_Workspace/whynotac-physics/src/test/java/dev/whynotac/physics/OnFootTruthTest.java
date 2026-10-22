@@ -29,7 +29,10 @@ import org.junit.jupiter.api.Test;
  * blocking), a spear charged while a sprint starts, a bow drawn. {@code truth-climb.jsonl.gz} holds a ladder, vines and an
  * open trapdoor over a ladder, climbed by walking into them, held with shift, jumped on and slid down, and the client
  * pushing itself out of a wall it was placed 0.15 into. {@code truth-bounce.jsonl.gz} holds a slime pad walked across
- * (sneaking too), jumped across and dropped onto (with shift held too), and a bed jumped and dropped onto. Each tick, run from its start in the same world (rebuilt here from the
+ * (sneaking too), jumped across and dropped onto (with shift held too), and a bed jumped and dropped onto.
+ * {@code truth-fence.jsonl.gz} holds a fence line, a lone fence post, a low wall line and closed fence gates walked along
+ * on top (sneaking to their edges too) and jumped along until the player drops off, and the fence walked and jumped
+ * into from the ground. Each tick, run from its start in the same world (rebuilt here from the
  * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -90,7 +93,24 @@ class OnFootTruthTest {
         {80, -61, -16, 85, -61, -13, blockState("minecraft:slime_block")},
         {90, -60, -15, 90, -60, -15, blockState("minecraft:red_bed", "facing=east", "occupied=false", "part=foot")},
         {91, -60, -15, 91, -60, -15, blockState("minecraft:red_bed", "facing=east", "occupied=false", "part=head")},
+        // the fence, wall and gate lines as the server connected them
+        {100, -60, 5, 100, -60, 5, fence("east=true", "west=false")},
+        {101, -60, 5, 105, -60, 5, fence("east=true", "west=true")},
+        {106, -60, 5, 106, -60, 5, fence("east=false", "west=true")},
+        {109, -60, 5, 109, -60, 5, fence("east=false", "west=false")},
+        {100, -60, 8, 100, -60, 8, wall("east=low", "up=true", "west=none")},
+        {101, -60, 8, 105, -60, 8, wall("east=low", "up=false", "west=low")},
+        {106, -60, 8, 106, -60, 8, wall("east=none", "up=true", "west=low")},
+        {100, -60, 11, 104, -60, 11, blockState("minecraft:oak_fence_gate", "facing=north", "in_wall=false", "open=false", "powered=false")},
     };
+
+    private static int fence(String east, String west) {
+        return blockState("minecraft:oak_fence", east, "north=false", "south=false", "waterlogged=false", west);
+    }
+
+    private static int wall(String east, String up, String west) {
+        return blockState("minecraft:cobblestone_wall", east, "north=none", "south=none", up, "waterlogged=false", west);
+    }
 
     private static final Colliders.World COURSE_WORLD = new Colliders.World() {
         @Override
@@ -163,6 +183,13 @@ class OnFootTruthTest {
     }
 
     @Test
+    void standingOnFencesWallsAndGatesIsTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-fence.jsonl.gz", COURSE_WORLD);
+        // ticks ending on top of the fence line, the lone post, the wall line and the gates, sneaking at their edges among them
+        assertTrue(counts[0] > 500 && counts[19] > 250 && counts[3] > 30, java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -172,7 +199,8 @@ class OnFootTruthTest {
      * {ticks, jumps, sprinting, crouching, horizontal collisions, ceiling hits, auto-jumps triggered, then ticks under jump
      * boost, slow falling, levitation, blindness, then ticks with an item in use, and with one in use while sprinting, then
      * ticks ending in a climbable column, and ticks after a push out of a block, then landings that bounce on the slime
-     * pad and on the bed, ticks walking on the slime pad, and landings on it with shift held}.
+     * pad and on the bed, ticks walking on the slime pad, and landings on it with shift held, then ticks ending on top of a
+     * fence, a wall or a fence gate}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -182,7 +210,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[19];
+        int[] counts = new int[20];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -226,6 +254,9 @@ class OnFootTruthTest {
             counts[16] += landed && overBed && expected.deltaMovement().y() > 0.0 ? 1 : 0;
             counts[17] += expected.onGround() && overSlime && expected.deltaMovement().horizontalDistanceSqr() > 0.0 ? 1 : 0;
             counts[18] += landed && overSlime && expected.keys().shift() ? 1 : 0;
+            BlockPos on = expected.support();
+            counts[19] += expected.onGround() && on != null && on.y() == -60 && on.x() >= 100 && on.x() <= 109 && (on.z() == 5 || on.z() == 8 || on.z() == 11)
+                    ? 1 : 0;
         }
         return counts;
     }
