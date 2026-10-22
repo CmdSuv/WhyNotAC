@@ -15,7 +15,10 @@ import java.nio.file.Path;
  * floats as their raw bits (hex), so nothing is rounded on the way.
  *
  * <p>Runs on the client's main thread only. Never throws into the game: a failure disables recording
- * and is reported once.
+ * and is reported once. When the JVM shuts down (the run ends the client with SIGTERM), the game thread
+ * keeps ticking until the JVM halts: the shutdown hook waits for a tick in progress to write its end, and
+ * no tick starts after it (the game thread waits in {@link #pre} until the halt), so every movement packet
+ * the client sent has its tick on record.
  */
 public final class Recorder {
 
@@ -25,6 +28,9 @@ public final class Recorder {
     private static boolean failed;
     private static long calls;
     private static Object ticking;   // the player whose tick() is running (set by pre, read by post)
+    private static final Object LOCK = new Object();
+    private static boolean inTick;   // between pre and post
+    private static boolean closing;  // the shutdown hook has run: no tick may start
 
     // resolved on first use (the classes are loaded by then)
     private static Field position, deltaMovement, yRot, xRot, onGround, horizontalCollision, verticalCollision,
@@ -53,13 +59,27 @@ public final class Recorder {
     }
 
     public static void pre(Object player) {
-        ticking = player;
-        write("pre", player);
+        synchronized (LOCK) {
+            while (closing) {
+                try {
+                    LOCK.wait(); // until the JVM halts: a tick run now would send its packet with nothing on record
+                } catch (InterruptedException e) {
+                    // keep waiting (the wait cleared the flag)
+                }
+            }
+            inTick = true;
+            ticking = player;
+            write("pre", player);
+        }
     }
 
     /** Takes no argument: the client is ProGuard-processed, and its frames mark {@code this} dead before the return. */
     public static void post() {
-        write("post", ticking);
+        synchronized (LOCK) {
+            write("post", ticking);
+            inTick = false;
+            LOCK.notifyAll();
+        }
     }
 
     private static void write(String hook, Object player) {
@@ -280,13 +300,29 @@ public final class Recorder {
     }
 
     private static void close() {
-        try {
-            if (out != null) {
-                out.flush();
-                out.close();
+        synchronized (LOCK) {
+            closing = true;
+            long deadline = System.nanoTime() + 2_000_000_000L; // a tick that threw never reaches post
+            try {
+                for (long left = deadline - System.nanoTime(); inTick && left > 0; left = deadline - System.nanoTime()) {
+                    LOCK.wait(Math.max(1, left / 1_000_000));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            try {
+                if (out != null) {
+                    out.flush();
+                    out.close();
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        try {
+            Thread.sleep(200); // the connection's event loop writes the last tick's packet before the JVM halts
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
