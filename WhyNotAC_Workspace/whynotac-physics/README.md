@@ -117,6 +117,17 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     dışındadır: `MovementTracker` uygular (bkz. whynotac-analysis). Kayıt cihazı oyuncunun durumunu kendi tick'inin
     başında alır, itmeler dahil; adım bu yüzden onlarla da bit bit aynıdır. **Son oturum (köylülere yürüyen itme
     şeridiyle):** 4110 tikin 4093'ü bit bit eşit, 0 fark.
+  - **Eşdeğer durumlar (`OnFoot.sameForMovement`):** adımın her yerde aynı okuduğu blok durumları: aynı çarpışma
+    geometrisi, bayraklar, sürtünme, hız ve zıplama çarpanları, hiçbirinde sıvı yok. Adımın ya da `Colliders`'ın adıyla
+    okuduğu bloklar (tırmanılabilir, içinde etkili, slime, yatak, tuzak kapı, çit, duvar, su, lav, hareketli piston)
+    yalnızca aynı durumla eşdeğerdir. Client'ın henüz işlemediği bir değişiklik eşdeğer durumlar arasındaysa blok
+    bilinir. `SameForMovementTest` çimen/toprak, tarla nemi ve yaprak mesafesi gibi eşdeğerleri ister; delik, yol
+    bloğu, çiğnenen tarla, buz, eriyen buz, sarmaşık ve sıvı tutan yaprak eşdeğer değildir. `MovementTruth` de
+    yalnızca client'ın işlediği kanıtlanmış dünyayı okur: paketi gönderen tick'te takipçinin okuduğu gibi; ondan
+    önceki gönderimsiz tick'lerde ise, önceki paketin geldiği anda yanıtlanmış son transaction'dan sonra değişen
+    blok, chunk ya da görüş aralığı bilinmez. Uzak bir ışınlamadan sonra client chunk'ı işlemeden bir tick
+    düşebilir. Destek bloğu hâlâ eski, yüklü chunk'ta olduğu için yerçekimi normaldir. Motor bu tick'i artık
+    kanıtsız karşılaştırmaz.
   - **Kapsam dışında `Colliders.Unknown`:**
     - sıvı ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar), iskele;
     - çit ve duvar üstü;

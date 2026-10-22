@@ -1509,9 +1509,14 @@ public final class MovementTracker {
             return world.states();
         }
 
+        /** A block that may still change reads as it is where every state it may hold moves the player alike. */
         @Override
         public int blockState(int x, int y, int z) {
-            return world.settled(x, y, z) ? world.blockState(x, y, z) : ClientWorld.UNKNOWN;
+            if (world.settled(x, y, z)) {
+                return world.blockState(x, y, z);
+            }
+            int[] possible = world.possibleStates(x, y, z);
+            return possible != null && OnFoot.sameForMovement(world.states(), possible) ? world.blockState(x, y, z) : ClientWorld.UNKNOWN;
         }
 
         @Override

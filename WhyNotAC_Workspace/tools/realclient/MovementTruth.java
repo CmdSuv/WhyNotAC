@@ -17,6 +17,7 @@ import dev.whynotac.world.Replicas;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,11 @@ import java.util.TreeMap;
  *
  * <p>Each tick is evaluated in the world the replica holds when the client's movement packet of that tick (or of
  * the next tick that sent one) arrives in the replay: the k-th packet the client sent, rebuilt from its own
- * tick states as verify_truth.py does, is the k-th one the server recorded (teleport replies aside).
+ * tick states as verify_truth.py does, is the k-th one the server recorded (teleport replies aside). Only what a
+ * transaction proves the client had handled is read: at the tick that sent the packet, a block the client may not
+ * hold yet is unknown unless every state it may hold moves the player alike (as the tracker reads it); at the
+ * ticks before it, which ran before the transactions answered since the previous packet, so is any block, chunk
+ * or view the server changed after the last transaction answered by then.
  *
  * <p>Then the movement check's tracker ({@code MovementTracker}) runs over the same recording as the server
  * would: at every tick whose movement packet it explained, the client's own state after the tick must be one of
@@ -56,15 +61,19 @@ public class MovementTruth {
         long[] blockChanges = {0};
         boolean[] played = {false};
         boolean[] afterAccept = {false};
+        Handled handled = new Handled();
         List<TimelineListener> chain = new ArrayList<>();
         // First in the chain: the replicas hold the world as it was before this event.
         chain.add((session, event) -> {
+            handled.onEvent(event);
             if (event instanceof TimelineEvent.Inbound in) {
                 boolean reply = afterAccept[0] && in.packet() instanceof ServerboundPacket.MovePlayer;
                 afterAccept[0] = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
                 if (in.packet() instanceof ServerboundPacket.MovePlayer && !reply) {
                     played[0] = true;
-                    comparison.packetArrived(view(replicas.world().world(session)));
+                    ClientWorld world = replicas.world().world(session);
+                    comparison.packetArrived(view(world, handled, handled.previous), view(world, handled, Long.MAX_VALUE));
+                    handled.previous = handled.answered;
                 }
             }
             if (played[0] && event instanceof TimelineEvent.Outbound out
@@ -72,7 +81,8 @@ public class MovementTruth {
                 blockChanges[0]++;
             }
             if (event instanceof TimelineEvent.Disconnected) {
-                comparison.packetArrived(view(replicas.world().world(session))); // the ticks after the last packet
+                ClientWorld world = replicas.world().world(session);
+                comparison.packetArrived(view(world, handled, handled.previous), view(world, handled, handled.previous)); // the ticks after the last packet
             }
         });
         chain.addAll(replicas.listeners());
@@ -163,7 +173,13 @@ public class MovementTruth {
         return out;
     }
 
-    private static Colliders.World view(ClientWorld world) {
+    /**
+     * The replica's world as the client certainly held it: a block that may still change reads as it is only where
+     * every state it may hold moves the player alike, and a chunk in flight as not loaded (the step then has no claim).
+     * Below {@code Long.MAX_VALUE}, {@code handledBefore} is the last transaction the client had answered before the
+     * tick: what the server changed after it reads as unknown too.
+     */
+    private static Colliders.World view(ClientWorld world, Handled handled, long handledBefore) {
         return new Colliders.World() {
             @Override
             public BlockStates states() {
@@ -172,14 +188,123 @@ public class MovementTruth {
 
             @Override
             public int blockState(int x, int y, int z) {
-                return world.blockState(x, y, z);
+                if (handledBefore != Long.MAX_VALUE && handled.changedAfter(x, y, z, handledBefore)) {
+                    return ClientWorld.UNKNOWN;
+                }
+                if (world.settled(x, y, z)) {
+                    return world.blockState(x, y, z);
+                }
+                int[] possible = world.possibleStates(x, y, z);
+                return possible != null && OnFoot.sameForMovement(world.states(), possible) ? world.blockState(x, y, z) : ClientWorld.UNKNOWN;
             }
 
             @Override
             public boolean isLoaded(int chunkX, int chunkZ) {
-                return world.isLoaded(chunkX, chunkZ);
+                if (handledBefore != Long.MAX_VALUE && handled.chunkChangedAfter(chunkX, chunkZ, handledBefore)) {
+                    return false;
+                }
+                return world.isLoaded(chunkX, chunkZ) && world.settled(chunkX << 4, world.minY(), chunkZ << 4);
             }
         };
+    }
+
+    /**
+     * When the server last changed each block and chunk, how it moved the view, and the newest transaction the client
+     * answered (by the sequence the server sent it at): the client handled everything sent before that transaction.
+     */
+    private static final class Handled {
+        private final Map<Long, Long> blocks = new HashMap<>();
+        private final Map<Long, Long> chunks = new HashMap<>();
+        private final Map<Integer, Long> pings = new HashMap<>();
+        /** Each view change: its sequence, then the range's centre and radius before and after it ({@code ClientChunkCache.Storage}). */
+        private final List<long[]> views = new ArrayList<>();
+        private int centerX;
+        private int centerZ;
+        private int radius;
+        /** False after a respawn, which keeps the old range or not (a new dimension's starts at 0, 0): its next move changes all. */
+        private boolean centerKnown = true;
+        /** The last change that made the whole world new (a login, a respawn, an unreadable world packet, lost events). */
+        private long world = Long.MIN_VALUE;
+        long answered = Long.MIN_VALUE;
+        /** {@link #answered} when the previous movement packet arrived. */
+        long previous = Long.MIN_VALUE;
+
+        void onEvent(TimelineEvent event) {
+            if (event instanceof TimelineEvent.Acknowledged ack) {
+                Long sent = pings.remove(ack.transactionId());
+                if (sent != null) {
+                    answered = Math.max(answered, sent);
+                }
+            } else if (event instanceof TimelineEvent.Outbound out) {
+                long seq = out.sequence();
+                switch (out.packet()) {
+                    case ClientboundPacket.Ping ping -> pings.put(ping.id(), seq);
+                    case ClientboundPacket.BlockUpdate update -> blocks.put(key(update.position().x(), update.position().y(), update.position().z()), seq);
+                    case ClientboundPacket.SectionBlocksUpdate update -> {
+                        for (int i = 0; i < update.size(); i++) {
+                            int local = (int) (update.entry(i) & 0xFFF); // x << 8 | z << 4 | y on the wire
+                            blocks.put(key(update.sectionX() << 4 | local >>> 8 & 15, update.sectionY() << 4 | local & 15,
+                                    update.sectionZ() << 4 | local >>> 4 & 15), seq);
+                        }
+                    }
+                    case ClientboundPacket.LevelChunk chunk -> chunks.put(ClientWorld.chunkKey(chunk.x(), chunk.z()), seq);
+                    case ClientboundPacket.ForgetLevelChunk forget -> chunks.put(ClientWorld.chunkKey(forget.x(), forget.z()), seq);
+                    case ClientboundPacket.ChunkCacheCenter center -> moveView(seq, center.x(), center.z(), radius);
+                    case ClientboundPacket.ChunkCacheRadius r -> moveView(seq, centerX, centerZ, Math.max(2, r.radius()) + 3);
+                    case ClientboundPacket.Login login -> {
+                        world = seq;
+                        centerX = 0;
+                        centerZ = 0;
+                        radius = Math.max(2, login.chunkRadius()) + 3;
+                        centerKnown = true;
+                    }
+                    case ClientboundPacket.Respawn ignored -> {
+                        world = seq;
+                        centerKnown = false;
+                    }
+                    case ClientboundPacket.Untranslatable u when u.type().contains("chunk") || u.type().contains("block") || u.type().equals("minecraft:login")
+                            || u.type().equals("minecraft:respawn") -> world = seq;
+                    default -> { }
+                }
+            } else if (event instanceof TimelineEvent.Gap) {
+                world = Long.MAX_VALUE; // nothing is known for certain any more
+            }
+        }
+
+        private void moveView(long seq, int x, int z, int r) {
+            if (!centerKnown) {
+                world = seq;
+                centerKnown = true;
+            }
+            views.add(new long[] {seq, centerX, centerZ, radius, x, z, r});
+            centerX = x;
+            centerZ = z;
+            radius = r;
+        }
+
+        /** The chunk changed, or a view change since moved it into or out of the client's range. */
+        boolean chunkChangedAfter(int chunkX, int chunkZ, long handledBefore) {
+            if (world >= handledBefore || chunks.getOrDefault(ClientWorld.chunkKey(chunkX, chunkZ), Long.MIN_VALUE) >= handledBefore) {
+                return true;
+            }
+            for (int i = views.size() - 1; i >= 0 && views.get(i)[0] >= handledBefore; i--) {
+                long[] v = views.get(i);
+                boolean before = Math.abs(chunkX - v[1]) <= v[3] && Math.abs(chunkZ - v[2]) <= v[3];
+                boolean after = Math.abs(chunkX - v[4]) <= v[6] && Math.abs(chunkZ - v[5]) <= v[6];
+                if (before != after) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        boolean changedAfter(int x, int y, int z, long handledBefore) {
+            return chunkChangedAfter(x >> 4, z >> 4, handledBefore) || blocks.getOrDefault(key(x, y, z), Long.MIN_VALUE) >= handledBefore;
+        }
+
+        private static long key(int x, int y, int z) {
+            return ((long) x & 0x3FFFFFF) << 38 | ((long) z & 0x3FFFFFF) << 12 | y & 0xFFF;
+        }
     }
 
     /** The recorded ticks in order, each compared when its movement packet (or the next one) arrives. */
@@ -228,13 +353,16 @@ public class MovementTruth {
             return out;
         }
 
-        /** A movement packet arrived: the ticks up to the one that sent it are compared in {@code world}. */
-        void packetArrived(Colliders.World world) {
+        /**
+         * A movement packet arrived: the ticks up to the one that sent it are compared, those before it in
+         * {@code before} and that one in {@code sending}.
+         */
+        void packetArrived(Colliders.World before, Colliders.World sending) {
             while (next < ticks.size()) {
                 Map<String, Object>[] tick = ticks.get(next);
                 boolean sentHere = sent.get(next);
                 next++;
-                compare(tick[0], tick[1], world);
+                compare(tick[0], tick[1], sentHere ? sending : before);
                 if (sentHere) {
                     return;
                 }

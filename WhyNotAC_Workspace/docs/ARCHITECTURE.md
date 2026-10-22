@@ -207,8 +207,12 @@ okuduğu sırayla yeniden kurulur:
 - **Belirsizlik:** bir blok, son değişikliğinden sonra gönderilmiş bir transaction onaylanana kadar
   "settled" değildir (client eski ya da yeni durumu tutuyor olabilir). Client'ın kendi tahminleri,
   sunucunun `block_changed_ack`'i client'a ulaşana kadar belirsizdir. Olay kaybı (`Gap`) ya da
-  okunamayan bir dünya paketi dünyayı "stale" yapar. Bir kontrol, settled olmayan bir bloğu asla
-  biliniyor saymaz.
+  okunamayan bir dünya paketi dünyayı "stale" yapar. Bir kontrol, settled olmayan bir bloğu ancak
+  tutabileceği her durum (bekleyen her değişiklikten önceki ve şimdiki, `possibleStates`) onun için aynıysa
+  biliniyor sayar: hareket için aynı çarpışma geometrisi, bayraklar, sürtünme, hız ve zıplama çarpanları, sıvı
+  yok; adımın adıyla okuduğu bloklar yalnızca aynı durum olarak (`OnFoot.sameForMovement`). Çimenin yayıldığı
+  toprak, nemi değişen tarla, mesafesi değişen yaprak böyledir; delik, çiğnenen tarla, eriyen buz, büyüyen
+  sarmaşık değildir.
 - **Doğrulama:** `/whynotac world <oyuncu>` replikayı sunucunun dünyasıyla bölüm bölüm (4096 blok
   durumunun 64 bit özeti) karşılaştırır. E2E ve gerçek client'ta 1944/1944 bölüm birebir eşittir.
 

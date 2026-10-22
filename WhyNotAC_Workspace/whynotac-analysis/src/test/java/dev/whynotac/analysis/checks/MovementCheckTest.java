@@ -814,4 +814,28 @@ class MovementCheckTest {
         acknowledge(unanswered);
         assertEquals(List.of(), evidence);
     }
+
+    @Test
+    void aBlockBelowThatMayStillChangeIsFollowedWhereEachStateMovesThePlayerAlike() throws Exception {
+        BlockPosition below = new BlockPosition(0, 63, 0);
+        out(new ClientboundPacket.BlockUpdate(below, STATES.firstStateOf("minecraft:dirt")));
+        sync();
+        ticks(5, NONE, 30.0F);
+        int from = ticks.size();
+        // grass spreads to the dirt below the player: the client may hold either while the change is in flight
+        out(new ClientboundPacket.BlockUpdate(below, STATES.firstStateOf("minecraft:grass_block")));
+        int unanswered = ping();
+        ticks(10, NONE, 30.0F);
+        acknowledge(unanswered);
+        ticks(5, NONE, 30.0F);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+        // a change that would let the player fall: no claim while the client may not hold it
+        out(new ClientboundPacket.BlockUpdate(below, AIR));
+        ping();
+        ticks(2, NONE, 30.0F);
+        assertTrue(ticks.subList(ticks.size() - 2, ticks.size()).stream()
+                .allMatch(t -> t.outcome() != MovementTracker.Outcome.EXPLAINED && t.reason().contains("unknown block at 0 63 0")), String.valueOf(ticks));
+        assertEquals(List.of(), evidence);
+    }
 }

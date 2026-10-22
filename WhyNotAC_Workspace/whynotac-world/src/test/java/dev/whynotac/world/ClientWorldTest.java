@@ -1,5 +1,6 @@
 package dev.whynotac.world;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -205,6 +206,33 @@ class ClientWorldTest {
         ack(late);
         assertTrue(world.settled(5, 10, 5));
         assertEquals(DIRT, world.blockState(5, 10, 5));
+    }
+
+    @Test
+    void anUnsettledBlockMayHoldEachStateBeforeItsPendingChanges() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        assertEquals(null, world.possibleStates(5, 10, 5)); // the chunk itself is not settled
+        sync();
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 10, 5));
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(5, 10, 5), DIRT));
+        int first = ping();
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(5, 10, 5), AIR));
+        int second = ping();
+        assertArrayEquals(new int[] {STONE, DIRT, AIR}, world.possibleStates(5, 10, 5));
+        ack(first);
+        assertArrayEquals(new int[] {DIRT, AIR}, world.possibleStates(5, 10, 5));
+        ack(second);
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(5, 10, 5));
+        // the client's own prediction: not known which state it holds
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(6, 10, 5), BlockFace.UP, 3));
+        assertEquals(null, world.possibleStates(6, 10, 5));
+        // a change in a chunk sent again later: the chunk decides
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(7, 10, 5), DIRT));
+        loadStone(0, 0);
+        assertEquals(null, world.possibleStates(7, 10, 5));
+        sync();
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(7, 10, 5));
     }
 
     @Test

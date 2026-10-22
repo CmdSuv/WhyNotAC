@@ -64,7 +64,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, iskele...), çarpışan ya da kendi yoluyla iten bir
   varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
   boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
-  böyle), itip itmediğine takımlar kesin karar vermiyor, yerleşmemiş blok, piston, dünya sınırı yakın,
+  böyle), itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
+  her durum adım için aynıysa, ör. çimenin yayıldığı toprak, blok bilinir: `ClientWorld.possibleStates`,
+  `OnFoot.sameForMovement`), piston, dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
   duran oyuncu: 12 tik tuşsuz, en az 3 tik arayla bit bit aynı iki konum paketi, arada gönderim yok, sonda yerde.
@@ -73,10 +75,11 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
   durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
-  az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma ve köylülere
-  yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri): 4131 tikin 4108'i
-  iddia edildi, 0 açıklanamayan, 1978/1978 tick'te client'ın durumu kümede, 24 itme izlendi; kalan 23 tik
-  yüklenmemiş chunk. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
+  az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
+  köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri): 4877 tikin
+  4854'ü iddia edildi, 0 açıklanamayan, 2413/2413 tick'te client'ın durumu kümede, 24 itme izlendi. Kalan 22 tik,
+  uzak bir ışınlamadan sonra yeniden gönderilen ve client'ın henüz işlemediği chunk'tır. Eşdeğer durumlar
+  izlenmeden önce buz pistinin altında çimenin yayılması da 98 tik daha iddiasız bırakıyordu. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
   da 0.05'i float yerine double alan model açıklanamayan tick verir. Efekt modellerinin bilinçli
   hataları (zıplama gücü, yavaş düşüş, havada süzülme, körlük) takipçide de açıklanamayan tik ya da kümede
   bulunmayan client durumu verir. `MovementCheckTest` aynı adımı koşan sentetik bir
@@ -84,7 +87,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   W, hız ve yavaşlık efektiyle koşma, zıplama gücü, yavaş düşüş, havada süzülme, körlük, yemek (sonuna kadar),
   kılıcın arkasından kalkan ve bırakması, mızrakla koşma, çapadan önce kaldırılmış kalkanla yürüme, bir köylünün ve
   iki köylünün itmesi ve hiç çarpışmayan takımda itilmemek açıklanır; client'ın belki işlemediği bir takım değişikliği
-  iddiayı yalnızca karar verdiği yerde bitirir. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
+  iddiayı yalnızca karar verdiği yerde bitirir; altındaki toprak çimene dönerken (iki durum adım için aynı) izlenir,
+  havaya dönebilecek blokta iddia yoktur. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
   yok sayılan yavaşlık, verilmemiş zıplama gücüyle zıplama, körken koşma, yerken tam hızla yürüme ve itmeye karşı
   durmak kanıttır. `ClientPushersTest` ve `ClientTeamsTest` itici sorgusunu (sıra, tick, belirsizlik) ve takım
   kurallarını tek tek sınar.

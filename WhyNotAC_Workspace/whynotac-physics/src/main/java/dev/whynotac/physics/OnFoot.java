@@ -215,6 +215,42 @@ public final class OnFoot {
         return new OnFoot(p, world, Conditions.VANILLA_DEFAULTS).onClimbable();
     }
 
+    /**
+     * Whether the step reads every one of these block states alike wherever it meets them: the same collision geometry,
+     * flags and friction, speed and jump factors, none holding a fluid; a block the step or {@link Colliders} tells
+     * apart by its name ({@link #namedInMovement}) only as the very same state. A block that may hold any of them then
+     * moves the player as the one it holds.
+     */
+    public static boolean sameForMovement(BlockStates states, int[] ids) {
+        int first = ids[0];
+        for (int id : ids) {
+            if (id == first) {
+                continue;
+            }
+            if (namedInMovement(states.block(first)) || namedInMovement(states.block(id)) || holdsFluid(states, id)
+                    || holdsFluid(states, first) || states.flags(id) != states.flags(first)
+                    || !states.collisionShape(id).sameGeometry(states.collisionShape(first))
+                    || Float.floatToIntBits(states.friction(id)) != Float.floatToIntBits(states.friction(first))
+                    || Float.floatToIntBits(states.speedFactor(id)) != Float.floatToIntBits(states.speedFactor(first))
+                    || Float.floatToIntBits(states.jumpFactor(id)) != Float.floatToIntBits(states.jumpFactor(first))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean holdsFluid(BlockStates states, int id) {
+        String fluid = states.fluid(id);
+        return fluid != null && !fluid.isEmpty();
+    }
+
+    /** The blocks the step and {@link Colliders} look up by name (or name and properties): keep in step with them. */
+    static boolean namedInMovement(String block) {
+        return MOVING_INSIDE.contains(block) || CLIMBABLE.contains(block) || block.equals("minecraft:slime_block") || block.endsWith("_bed")
+                || block.endsWith("_trapdoor") || block.endsWith("_wall") || block.endsWith("_fence") || block.endsWith("_fence_gate")
+                || block.equals("minecraft:water") || block.equals("minecraft:lava") || block.equals("minecraft:moving_piston");
+    }
+
     private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,

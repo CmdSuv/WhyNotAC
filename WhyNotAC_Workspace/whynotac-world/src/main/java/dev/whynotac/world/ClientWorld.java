@@ -71,6 +71,8 @@ public final class ClientWorld {
     };
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final Map<Long, Integer> unsettledBlocks = new HashMap<>();
+    /** For each unsettled block, the state before each of its pending changes, oldest first (INVALID: not known). */
+    private final Map<Long, ArrayDeque<Integer>> previousStates = new HashMap<>();
     private final Map<Long, Integer> unsettledChunks = new HashMap<>();
     private final List<View> pendingViews = new ArrayList<>();
     /** Client predictions by position: the highest block-action sequence that touched it. */
@@ -264,6 +266,12 @@ public final class ClientWorld {
             Pending p = pending.pollFirst();
             Map<Long, Integer> counts = p.kind == Pending.BLOCK ? unsettledBlocks : unsettledChunks;
             counts.computeIfPresent(p.key, (k, n) -> n > 1 ? n - 1 : null);
+            if (p.kind == Pending.BLOCK) {
+                previousStates.computeIfPresent(p.key, (k, before) -> {
+                    before.pollFirst();
+                    return before.isEmpty() ? null : before;
+                });
+            }
         }
         pendingViews.removeIf(view -> view.sequence < pingSeq);
         while (!pendingBlockAcks.isEmpty() && pendingBlockAcks.peekFirst()[0] < pingSeq) {
@@ -294,6 +302,7 @@ public final class ClientWorld {
         storage = new Storage(Storage.range(chunkRadius));
         // Everything known about the old world is gone; what is in flight belongs to the new one.
         unsettledBlocks.clear();
+        previousStates.clear();
         unsettledChunks.clear();
         pending.clear();
         pendingViews.clear();
@@ -357,8 +366,10 @@ public final class ClientWorld {
             return; // the client ignores a block in a chunk it does not hold
         }
         blockUpdates += indices.length;
+        int[] befores = new int[indices.length];
         for (int i = 0; i < indices.length; i++) {
             int before = column.sections != null ? column.sections[sectionIndex].get(indices[i]) : Section.INVALID;
+            befores[i] = before;
             if (mover(before) || mover(values[i])) {
                 long x = sectionX << 4 | indices[i] & 15;
                 long y = sectionY << 4 | indices[i] >>> 8;
@@ -373,8 +384,11 @@ public final class ClientWorld {
             pool.release(old);
             column.sections[sectionIndex] = changed;
         }
-        for (int index : indices) {
-            pend(sequence, Pending.BLOCK, blockKey(sectionX << 4 | index & 15, sectionY << 4 | index >>> 8, sectionZ << 4 | index >>> 4 & 15));
+        for (int i = 0; i < indices.length; i++) {
+            int index = indices[i];
+            long key = blockKey(sectionX << 4 | index & 15, sectionY << 4 | index >>> 8, sectionZ << 4 | index >>> 4 & 15);
+            pend(sequence, Pending.BLOCK, key);
+            previousStates.computeIfAbsent(key, k -> new ArrayDeque<>(1)).add(befores[i]);
         }
     }
 
@@ -462,6 +476,46 @@ public final class ClientWorld {
         }
         long key = blockKey(x, y, z);
         return !unsettledBlocks.containsKey(key) && !predictions.containsKey(key);
+    }
+
+    /**
+     * Every state the client may hold at the block now: the one {@link #blockState} gives and, for each change sent that
+     * it may not have processed yet, the one before it. Null where not known that way: the chunk may still change, the
+     * client's own prediction may hold it, or a state is not known.
+     */
+    public int[] possibleStates(int x, int y, int z) {
+        int now = blockState(x, y, z);
+        if (now == UNKNOWN) {
+            return null;
+        }
+        if (settled(x, y, z)) {
+            return new int[] {now};
+        }
+        int cx = x >> 4;
+        int cz = z >> 4;
+        if (unsettledChunks.containsKey(chunkKey(cx, cz))) {
+            return null;
+        }
+        for (View view : pendingViews) {
+            if (view.inRange(cx, cz) != storage.inRange(cx, cz)) {
+                return null;
+            }
+        }
+        long key = blockKey(x, y, z);
+        ArrayDeque<Integer> before = previousStates.get(key);
+        if (predictions.containsKey(key) || before == null) {
+            return null;
+        }
+        int[] out = new int[before.size() + 1];
+        int i = 0;
+        for (int state : before) {
+            if (state == Section.INVALID || state == UNKNOWN) {
+                return null;
+            }
+            out[i++] = state;
+        }
+        out[i] = now;
+        return out;
     }
 
     /**
