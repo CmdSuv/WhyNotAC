@@ -236,11 +236,12 @@ def verify_cases(probe, log, work_dir, check):
     for d in dossiers:
         by_check.setdefault(d["check"], []).append(d)
     attacks = {a["type"]: a for a in probe.get("attacks", [])}
-    check(set(attacks) == {"husk", "sheep"} and attacks["husk"]["distance"] < 2.9 and attacks["sheep"]["distance"] > 6.5,
-          f"the probe attacked a husk next to it and a sheep 7 blocks away: {probe.get('attacks')}")
-    check(len(dossiers) == 3 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
-          and len(by_check.get("attack-reach", [])) == 1,
-          f"exactly three cases opened, one per violation (none for the attack in reach): {sorted((d['check'], d['summary']) for d in dossiers)}")
+    check(set(attacks) == {"husk", "sheep", "husk without swing"} and attacks["husk"]["distance"] < 2.9 and attacks["sheep"]["distance"] > 6.5
+          and attacks["husk without swing"]["distance"] < 2.9,
+          f"the probe attacked a husk next to it, a sheep 7 blocks away and the husk without a swing: {probe.get('attacks')}")
+    check(len(dossiers) == 4 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+          and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("attack-grammar", [])) == 1,
+          f"exactly four cases opened, one per violation (none for the attacks in reach): {sorted((d['check'], d['summary']) for d in dossiers)}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
         check(framing["evidenceClass"] == "P-M" and framing["details"].get("movePackets") == "2"
@@ -257,6 +258,13 @@ def verify_cases(probe, log, work_dir, check):
         check(reach["evidenceClass"] == "P-A" and dd.get("targetType") == "minecraft:sheep"
               and dd.get("target") == str(attacks.get("sheep", {}).get("target")) and float(dd.get("distance", "0")) > float(dd.get("allowed", "99")),
               f"the attack-reach case is the sheep, beyond every reach the client may have had (P-A): {reach['summary']}")
+    grammar = by_check.get("attack-grammar", [None])[0]
+    if grammar:
+        dd = grammar["details"]
+        target = attacks.get("husk without swing", {}).get("target")
+        check(grammar["evidenceClass"] == "P-M" and dd.get("attacksWithoutSwing") == "1" and dd.get("attacksAfterMovement") == "0"
+              and grammar["summary"].startswith(f"attack on entity {target} not followed by the main hand's swing"),
+              f"the attack-grammar case is the husk attacked without a swing, the probe's other attacks in the client's order (P-M): {grammar['summary']}")
     for d in dossiers:
         check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
               f"the {d['check']} case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")
@@ -267,12 +275,12 @@ def verify_cases(probe, log, work_dir, check):
               f"a shadow alert for {d['check']} went to the console (and to whynotac.alerts.shadow)")
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
-    check(len(verified) == len(dossiers) == 3 and all(v["verified"] is True and v["evidenceInRecording"] == 1 for v in verified),
+    check(len(verified) == len(dossiers) == 4 and all(v["verified"] is True and v["evidenceInRecording"] == 1 for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
-    check(re.search(r"WhyNotAC cases \(newest first\): 3", log) is not None
+    check(re.search(r"WhyNotAC cases \(newest first\): 4", log) is not None
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
                   for d in dossiers),
-          "/whynotac cases lists all three")
+          "/whynotac cases lists all four")
 
 
 def verify_self(log, check):

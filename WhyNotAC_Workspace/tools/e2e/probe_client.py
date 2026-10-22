@@ -13,6 +13,7 @@ can be verified live:
   * one transaction is answered twice                         -> DUPLICATE_TRANSACTION
   * two movement packets in one client tick (tick 200)        -> a tick-framing case (P-M, shadow)
   * an attack on a sheep 7 blocks away (tick 330)             -> an attack-reach case (P-A, shadow)
+  * an attack on the husk with no swing after it (tick 345)    -> an attack-grammar case (P-M, shadow)
 
 It also attacks the nearest husk (tick 300), well within reach, which must open nothing.
 
@@ -156,7 +157,7 @@ class Client:
         self.entities = {}  # entity id -> (type id, x, y, z) as added
 
     # --- framing -------------------------------------------------------------------------------
-    def send(self, packet_id, payload=b""):
+    def frame(self, packet_id, payload=b""):
         data = varint(packet_id) + payload
         if self.threshold >= 0:
             if len(data) >= self.threshold:
@@ -165,8 +166,16 @@ class Client:
                 body = varint(0) + data
         else:
             body = data
+        return varint(len(body)) + body
+
+    def send(self, packet_id, payload=b""):
+        self.send_all([(packet_id, payload)])
+
+    def send_all(self, packets):
+        """Packets the client's main thread sends back to back: no answer from the reader thread lands between them."""
+        frames = b"".join(self.frame(packet_id, payload) for packet_id, payload in packets)
         with self.lock:
-            self.sock.sendall(varint(len(body)) + body)
+            self.sock.sendall(frames)
 
     def _read_exact(self, n):
         while len(self.buffer) < n:
@@ -313,6 +322,8 @@ def server_list_ping(host, port):
     return b"version" in data
 
 
+# Violation 6, an attack without its swing (1.5 s after the sheep: attack-reach and attack-grammar each report once).
+GRAMMAR_VIOLATION_TICK = 345
 # Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
 CLOCK_BURST = 40
 
@@ -341,10 +352,15 @@ def nearest(client, entity_type):
     return (min(found)[1], min(found)[0]) if found else (None, None)
 
 
-def attack(client, entity_id):
-    """As MultiPlayerGameMode.attack then startAttack's swing: ServerboundInteractPacket ATTACK, then the main hand's swing."""
-    client.send(PLAY_S_INTERACT, varint(entity_id) + varint(1) + b"\x00")
-    client.send(PLAY_S_SWING, varint(0))
+def attack(client, entity_id, swing=True):
+    """As MultiPlayerGameMode.attack then startAttack's swing: ServerboundInteractPacket ATTACK, then the main hand's swing.
+
+    Both from the client's main thread, early in the tick (handleKeybinds), before the tick's movement packet; the
+    vanilla client answers pings on that thread too, so nothing but a keep-alive could come between them."""
+    packets = [(PLAY_S_INTERACT, varint(entity_id) + varint(1) + b"\x00")]
+    if swing:
+        packets.append((PLAY_S_SWING, varint(0)))
+    client.send_all(packets)
 
 
 def main():
@@ -368,6 +384,20 @@ def main():
     attacks = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
+        # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets.
+        if tick in (300, 330):
+            # An attack in reach (the husk next to the probe), then violation 5: a sheep 7 blocks away.
+            target, distance = nearest(client, ENTITY_HUSK if tick == 300 else ENTITY_SHEEP)
+            if target is not None:
+                attack(client, target)
+                attacks.append({"tick": tick, "target": target, "type": "husk" if tick == 300 else "sheep", "distance": distance})
+        if tick == GRAMMAR_VIOLATION_TICK:
+            # Violation 6: the husk again, in reach, without the swing every vanilla attack is followed by. WhyNotAC's
+            # attack-grammar check must open a case (and attack-reach none).
+            target, distance = nearest(client, ENTITY_HUSK)
+            if target is not None:
+                attack(client, target, swing=False)
+                attacks.append({"tick": tick, "target": target, "type": "husk without swing", "distance": distance})
         forward = (tick // 40) % 2 == 0  # toggle W every 2 seconds
         flags = 0x01 if forward else 0x00
         if flags != sent_input:
@@ -396,12 +426,6 @@ def main():
         elif inventory_step == 2:
             client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 40, {40: (ITEM_DIAMOND_SWORD, 1)}, None))
             inventory_step = 3
-        if tick in (300, 330):
-            # An attack in reach (the husk next to the probe), then violation 5: a sheep 7 blocks away.
-            target, distance = nearest(client, ENTITY_HUSK if tick == 300 else ENTITY_SHEEP)
-            if target is not None:
-                attack(client, target)
-                attacks.append({"tick": tick, "target": target, "type": "husk" if tick == 300 else "sheep", "distance": distance})
         client.send(PLAY_S_TICK_END)
         if tick == 240:
             # Violation 4: a burst of extra ClientTickEnd (a timer, or hiding extra movement packets from the tick

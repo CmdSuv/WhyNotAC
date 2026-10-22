@@ -470,6 +470,14 @@ public final class ClientSelf {
                 || localMode.mayBeAnyOf(certain, end, CREATIVE, SPECTATOR, UNKNOWN);
     }
 
+    /**
+     * Whether {@code Player.isSpectator()} may hold now (the mode of the player-list entry the player cached), or
+     * WhyNotAC does not know.
+     */
+    public boolean mayBeSpectator() {
+        return listMode.mayBeAnyOf(certain, windowEnd(), SPECTATOR, MODE_UNKNOWN);
+    }
+
     /** The player's entity id, or -1 before the login. */
     public int selfId() {
         return selfId;

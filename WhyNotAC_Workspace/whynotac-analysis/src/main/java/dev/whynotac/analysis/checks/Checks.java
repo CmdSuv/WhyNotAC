@@ -20,18 +20,21 @@ public final class Checks {
             TickFramingCheck.ID, (sink, replicas) -> new TickFramingCheck(sink),
             ClientClockCheck.ID, (sink, replicas) -> new ClientClockCheck(sink),
             AttackReachCheck.ID, AttackReachCheck::new,
+            AttackGrammarCheck.ID, AttackGrammarCheck::new,
             MovementCheck.ID, MovementCheck::new);
     private static final Map<String, Integer> VERSIONS = Map.of(
             TickFramingCheck.ID, TickFramingCheck.VERSION,
             ClientClockCheck.ID, ClientClockCheck.VERSION,
             AttackReachCheck.ID, AttackReachCheck.VERSION,
+            AttackGrammarCheck.ID, AttackGrammarCheck.VERSION,
             MovementCheck.ID, MovementCheck.VERSION);
 
     private Checks() {}
 
     /** Every check, in a fixed order, reporting to {@code sink}; register them after {@code replicas}' trackers. */
     public static List<TimelineListener> all(EvidenceSink sink, Replicas replicas) {
-        return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink), new AttackReachCheck(sink, replicas), new MovementCheck(sink, replicas));
+        return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink), new AttackReachCheck(sink, replicas), new AttackGrammarCheck(sink, replicas),
+                new MovementCheck(sink, replicas));
     }
 
     /** The check with this id, behind a fresh set of the replicas it may read, or null. */

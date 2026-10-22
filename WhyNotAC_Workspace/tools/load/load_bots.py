@@ -106,8 +106,7 @@ def run_bot(host, port, name, seconds, results, start_gate, stop_file):
                     eye = (sent[0], sent[1] + EYE_HEIGHT, sent[2])
                     near = [i for i, cow in list(bot.cows.items()) if box_distance(eye, cow) <= ATTACK_DISTANCE]
                     if near:
-                        bot.send(pc.PLAY_S_INTERACT, pc.varint(near[0]) + pc.varint(1) + b"\x00")
-                        bot.send(PLAY_S_SWING, pc.varint(0))
+                        pc.attack(bot, near[0])  # the attack and its swing back to back, as the client's main thread sends them
                         bot.attacks += 1
                 if bot.teleports != seen_teleports:  # moved by the server (spreadplayers): walk around the new spot
                     seen_teleports = bot.teleports
