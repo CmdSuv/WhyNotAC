@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.PowderSnowBlock;
 import net.minecraft.world.level.block.ScaffoldingBlock;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.material.FlowingFluid;
@@ -68,6 +69,7 @@ class BlockStatesDataTest {
             }
             Block block = state.getBlock();
             VoxelShape collision = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, CollisionContext.empty());
+            VoxelShape outline = state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, CollisionContext.empty());
             int flags = 0;
             if (state.isAir()) {
                 flags |= BlockStates.AIR;
@@ -101,7 +103,8 @@ class BlockStatesDataTest {
             flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.WEST) ? BlockStates.STURDY_WEST : 0;
             flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.EAST) ? BlockStates.STURDY_EAST : 0;
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
-                    shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), flags, block.getFriction(), block.getSpeedFactor(),
+                    shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), shape(outline, (DiscreteVoxelShape) discreteField.get(outline)),
+                    flags, block.getFriction(), block.getSpeedFactor(),
                     block.getJumpFactor(), state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO), fluid(state.getFluidState()));
         }
         return builder.build();
@@ -173,6 +176,7 @@ class BlockStatesDataTest {
             assertEquals(server.jumpFactor(id), shipped.jumpFactor(id), where);
             assertEquals(server.destroySpeed(id), shipped.destroySpeed(id), where);
             assertEquals(server.fluid(id), shipped.fluid(id), where);
+            assertTrue(shipped.outlineShape(id).sameGeometry(server.outlineShape(id)), where + ": outline geometry differs");
             Shape ours = shipped.collisionShape(id);
             Shape theirs = server.collisionShape(id);
             assertTrue(ours.sameGeometry(theirs), where + ": collision geometry differs");
@@ -186,6 +190,26 @@ class BlockStatesDataTest {
             }
         }
         assertTrue(kindOnly > 0, "Paper builds cube shapes as array shapes; if that changed, update this test and its note");
+    }
+
+    @Test
+    void theOutlinesLeavingTheirCellAreKnown() {
+        // a shulker box's outline is its block entity's box, which grows out of the cell as it opens
+        BlockStates shipped = BlockStates.vanilla();
+        int shulkers = 0;
+        for (int id = 0; id < shipped.size(); id++) {
+            BlockState state = Block.stateById(id);
+            if (state.getBlock() instanceof ShulkerBoxBlock) {
+                shulkers++;
+                assertTrue(!shipped.outlineInCell(id), shipped.block(id));
+            } else {
+                assertTrue(!shipped.block(id).endsWith("shulker_box"), shipped.block(id));
+            }
+        }
+        assertEquals(17 * 6, shulkers);
+        assertTrue(!shipped.outlineInCell(Block.getId(Blocks.LECTERN.defaultBlockState())));
+        assertTrue(!shipped.outlineInCell(Block.getId(Blocks.POPPY.defaultBlockState())));
+        assertTrue(shipped.outlineInCell(Block.getId(Blocks.STONE.defaultBlockState())));
     }
 
     @Test

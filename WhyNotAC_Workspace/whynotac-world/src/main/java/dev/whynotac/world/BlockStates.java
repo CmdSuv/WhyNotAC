@@ -15,21 +15,27 @@ import java.util.zip.GZIPInputStream;
 
 /**
  * Every block state of Minecraft 1.21.11, indexed by its global id (the id chunks and block updates
- * carry): block, properties, collision shape and the properties movement and interaction read.
+ * carry): block, properties, collision and outline shapes and the properties movement and interaction read.
  *
- * <p>Generated from the server's own registry ({@code BlockStatesDataTest} in whynotac-paper rewrites the
- * resource and fails the build when it no longer matches the game), so the data cannot drift from the
- * game. The collision shape is the one for an empty collision context; {@link #CONTEXTUAL_COLLISION}
+ * <p>Generated from the official client's own registry ({@code BlockDataDump} of the real-client run, which fails when
+ * the resource no longer matches it), and compared with the server's ({@code BlockStatesDataTest} in whynotac-paper,
+ * which fails the build), so the data cannot drift from the game. The collision shape is the one for an empty collision context; {@link #CONTEXTUAL_COLLISION}
  * and {@link #DYNAMIC_SHAPE} mark the states where the game computes it differently.
+ *
+ * <p>The outline shape ({@code getShape}: what the crosshair's ray clips, {@code ClipContext.Block.OUTLINE}) is the one
+ * for an empty world and context too. Where the client's may differ it is never larger (decompiled 1.21.11): a light
+ * block's is empty unless the player holds light, scaffolding's its own unless the player holds scaffolding, a
+ * shulker box's grows as it opens (out of its cell: {@link #outlineInCell}); only states with {@link #OFFSET} are moved
+ * by their position, and no other block reads the world or the position for it.
  *
  * <h2>Text format (inside the gzip resource)</h2>
  * <pre>
- * whynotac-block-states 1
+ * whynotac-block-states 2
  * minecraft &lt;version&gt;
  * shapes &lt;n&gt;
  * &lt;kind&gt; TAB &lt;xs&gt; TAB &lt;ys&gt; TAB &lt;zs&gt; TAB &lt;filled cells, hex longs&gt; TAB &lt;boxes&gt;   (one line per shape)
  * states &lt;n&gt;
- * &lt;block&gt; TAB &lt;properties&gt; TAB &lt;shape&gt; TAB &lt;flags&gt; TAB &lt;friction&gt; TAB &lt;speed factor&gt; TAB &lt;jump factor&gt; TAB &lt;destroy speed&gt; TAB &lt;fluid&gt;
+ * &lt;block&gt; TAB &lt;properties&gt; TAB &lt;shape&gt; TAB &lt;outline&gt; TAB &lt;flags&gt; TAB &lt;friction&gt; TAB &lt;speed factor&gt; TAB &lt;jump factor&gt; TAB &lt;destroy speed&gt; TAB &lt;fluid&gt;
  * </pre>
  * One state per line, in id order. Numbers are written so they read back to the same bits; lists are
  * comma-separated, empty as {@code -}. The fluid is {@code -} or {@code key/amount/falling}.
@@ -37,7 +43,7 @@ import java.util.zip.GZIPInputStream;
 public final class BlockStates {
 
     public static final String RESOURCE = "/dev/whynotac/world/block-states.txt.gz";
-    static final String HEADER = "whynotac-block-states 1";
+    static final String HEADER = "whynotac-block-states 2";
 
     /** {@code isAir()}. */
     public static final int AIR = 1;
@@ -83,6 +89,9 @@ public final class BlockStates {
     private final String[] block;
     private final String[] properties;
     private final int[] shape;
+    private final int[] outline;
+    /** Per shape: every box within the block's own cell ({@code [0, 1]} on each axis). */
+    private final boolean[] withinCell;
     private final int[] flags;
     private final float[] friction;
     private final float[] speedFactor;
@@ -98,10 +107,21 @@ public final class BlockStates {
     private BlockStates(String minecraft, List<Shape> shapes, List<State> states) {
         this.minecraft = minecraft;
         this.shapes = shapes.toArray(Shape[]::new);
+        withinCell = new boolean[this.shapes.length];
+        for (int i = 0; i < this.shapes.length; i++) {
+            Shape shape = this.shapes[i];
+            boolean within = true;
+            for (int b = 0; b < shape.boxCount() && within; b++) {
+                within = shape.box(b, 0) >= 0.0 && shape.box(b, 1) >= 0.0 && shape.box(b, 2) >= 0.0 && shape.box(b, 3) <= 1.0
+                        && shape.box(b, 4) <= 1.0 && shape.box(b, 5) <= 1.0;
+            }
+            withinCell[i] = within;
+        }
         int n = states.size();
         block = new String[n];
         properties = new String[n];
         shape = new int[n];
+        outline = new int[n];
         flags = new int[n];
         friction = new float[n];
         speedFactor = new float[n];
@@ -114,12 +134,13 @@ public final class BlockStates {
         firstState = new HashMap<>();
         for (int id = 0; id < n; id++) {
             State s = states.get(id);
-            if (s.shape < 0 || s.shape >= this.shapes.length) {
-                throw new IllegalArgumentException("state " + id + ": shape " + s.shape + " of " + this.shapes.length);
+            if (s.shape < 0 || s.shape >= this.shapes.length || s.outline < 0 || s.outline >= this.shapes.length) {
+                throw new IllegalArgumentException("state " + id + ": shapes " + s.shape + ", " + s.outline + " of " + this.shapes.length);
             }
             block[id] = s.block;
             properties[id] = s.properties;
             shape[id] = s.shape;
+            outline[id] = s.outline;
             flags[id] = s.flags;
             friction[id] = s.friction;
             speedFactor[id] = s.speedFactor;
@@ -177,11 +198,11 @@ public final class BlockStates {
         List<State> states = new ArrayList<>(stateCount);
         for (int i = 0; i < stateCount; i++) {
             String[] f = reader.readLine().split("\t", -1);
-            if (f.length != 9) {
+            if (f.length != 10) {
                 throw new IOException("state line " + i + ": " + f.length + " fields");
             }
-            states.add(new State(f[0].intern(), f[1].equals("-") ? "" : f[1], Integer.parseInt(f[2]), parseFlags(f[3]), Float.parseFloat(f[4]),
-                    Float.parseFloat(f[5]), Float.parseFloat(f[6]), Float.parseFloat(f[7]), f[8].equals("-") ? "" : f[8].intern()));
+            states.add(new State(f[0].intern(), f[1].equals("-") ? "" : f[1], Integer.parseInt(f[2]), Integer.parseInt(f[3]), parseFlags(f[4]),
+                    Float.parseFloat(f[5]), Float.parseFloat(f[6]), Float.parseFloat(f[7]), Float.parseFloat(f[8]), f[9].equals("-") ? "" : f[9].intern()));
         }
         if (reader.readLine() != null) {
             throw new IOException("trailing data after " + stateCount + " states");
@@ -200,7 +221,8 @@ public final class BlockStates {
         }
         out.write("states " + block.length + "\n");
         for (int id = 0; id < block.length; id++) {
-            out.write(block[id] + "\t" + (properties[id].isEmpty() ? "-" : properties[id]) + "\t" + shape[id] + "\t" + flagLetters(flags[id]) + "\t"
+            out.write(block[id] + "\t" + (properties[id].isEmpty() ? "-" : properties[id]) + "\t" + shape[id] + "\t" + outline[id] + "\t"
+                    + flagLetters(flags[id]) + "\t"
                     + friction[id] + "\t" + speedFactor[id] + "\t" + jumpFactor[id] + "\t" + destroySpeed[id] + "\t"
                     + (fluid[id].isEmpty() ? "-" : fluid[id]) + "\n");
         }
@@ -238,6 +260,20 @@ public final class BlockStates {
 
     public Shape collisionShape(int state) {
         return shapes[shape[state]];
+    }
+
+    /** The outline shape (see the class comment), in the block's own coordinates. */
+    public Shape outlineShape(int state) {
+        return shapes[outline[state]];
+    }
+
+    /**
+     * Whether the state's outline stays in its block's own cell wherever the block is and whatever the client holds: no
+     * box reaches out of it, it is not moved by its position ({@link #OFFSET}), and it is not a shulker box (whose block
+     * entity grows it out of the cell as it opens). Then a ray meets it only inside the cell.
+     */
+    public boolean outlineInCell(int state) {
+        return withinCell[outline[state]] && !has(state, OFFSET) && !block[state].endsWith("shulker_box");
     }
 
     public int flags(int state) {
@@ -310,6 +346,7 @@ public final class BlockStates {
         }
         return minecraft.equals(o.minecraft) && java.util.Arrays.equals(shapes, o.shapes) && java.util.Arrays.equals(block, o.block)
                 && java.util.Arrays.equals(properties, o.properties) && java.util.Arrays.equals(shape, o.shape)
+                && java.util.Arrays.equals(outline, o.outline)
                 && java.util.Arrays.equals(flags, o.flags) && java.util.Arrays.equals(friction, o.friction)
                 && java.util.Arrays.equals(speedFactor, o.speedFactor) && java.util.Arrays.equals(jumpFactor, o.jumpFactor)
                 && java.util.Arrays.equals(destroySpeed, o.destroySpeed) && java.util.Arrays.equals(fluid, o.fluid);
@@ -334,14 +371,17 @@ public final class BlockStates {
         }
 
         /** Adds the state with the next id. */
-        public Builder add(String block, String properties, Shape collision, int flags, float friction, float speedFactor, float jumpFactor,
-                float destroySpeed, String fluid) {
-            int index = shapeIndex.computeIfAbsent(collision, s -> {
+        public Builder add(String block, String properties, Shape collision, Shape outline, int flags, float friction, float speedFactor,
+                float jumpFactor, float destroySpeed, String fluid) {
+            states.add(new State(block, properties, index(collision), index(outline), flags, friction, speedFactor, jumpFactor, destroySpeed, fluid));
+            return this;
+        }
+
+        private int index(Shape shape) {
+            return shapeIndex.computeIfAbsent(shape, s -> {
                 shapes.add(s);
                 return shapes.size() - 1;
             });
-            states.add(new State(block, properties, index, flags, friction, speedFactor, jumpFactor, destroySpeed, fluid));
-            return this;
         }
 
         public BlockStates build() {
@@ -349,8 +389,8 @@ public final class BlockStates {
         }
     }
 
-    private record State(String block, String properties, int shape, int flags, float friction, float speedFactor, float jumpFactor,
-            float destroySpeed, String fluid) {}
+    private record State(String block, String properties, int shape, int outline, int flags, float friction, float speedFactor,
+            float jumpFactor, float destroySpeed, String fluid) {}
 
     // --- text helpers ------------------------------------------------------------------------------------
 

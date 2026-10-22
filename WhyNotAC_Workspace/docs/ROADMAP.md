@@ -65,8 +65,9 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   blok kırma, hotbar) tikin hareketinden önce gelmesi `action-grammar` ile yapıldı (görev #56). Eylem bağlamından
   (`G3`) sunucunun açtığı menü ekrandayken eylem ya da yürüme tuşu (`action-grammar`) ve eşya kullanırken saldırı,
   etkileşim ya da yeni kullanım (`movement`) yapıldı (görev #57).
-- Bakış ve engel (`C2`): saldırılan varlığın tikin bakışıyla kesişmesi `attack-aim` ile yapıldı (görev #58). Kalan:
-  ışın üzerinde blok engeli (duvar arkasından vuruş); blokların seçim (outline) şekilleri gerekir.
+- Bakış ve engel (`C2`): saldırılan varlığın tikin bakışıyla kesişmesi (görev #58) ve bakışın ona, kesin durduran
+  bir bloktan önce değmesi (duvar arkasından vuruş, görev #59) `attack-aim` ile yapıldı; blokların seçim (outline)
+  şekilleri resmi client'tan.
 - Blok erişimi ve yüz doğrulama (`W2`), kırma ilerlemesi (`W1`), yerleştirme (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
 

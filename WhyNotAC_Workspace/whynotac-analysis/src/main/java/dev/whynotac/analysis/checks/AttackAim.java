@@ -50,8 +50,18 @@ final class AttackAim {
 
     /** Whether the ray from the origin along {@code v} ({@code t >= 0}) meets the box (bounds included). */
     static boolean meets(double[] v, AttackReach.Box d) {
+        return enter(v, d) < Double.POSITIVE_INFINITY;
+    }
+
+    /**
+     * Where the ray from the origin along {@code v} first meets the box ({@code t}: the point {@code t * v}; 0 if the origin
+     * is in it), positive infinity if it never does. For offsets ({@link #offsets}), no ray from an eye meets the box
+     * itself sooner.
+     */
+    static double enter(double[] v, AttackReach.Box d) {
         double[] range = {0.0, Double.POSITIVE_INFINITY};
-        return slab(v[0], d.minX(), d.maxX(), range) && slab(v[1], d.minY(), d.maxY(), range) && slab(v[2], d.minZ(), d.maxZ(), range);
+        return slab(v[0], d.minX(), d.maxX(), range) && slab(v[1], d.minY(), d.maxY(), range) && slab(v[2], d.minZ(), d.maxZ(), range)
+                ? range[0] : Double.POSITIVE_INFINITY;
     }
 
     private static boolean slab(double v, double min, double max, double[] range) {

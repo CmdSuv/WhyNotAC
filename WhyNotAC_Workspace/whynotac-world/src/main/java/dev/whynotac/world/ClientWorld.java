@@ -519,6 +519,118 @@ public final class ClientWorld {
     }
 
     /**
+     * The smallest {@code t} below {@code maxT} at which the crosshair's ray along {@code (dx, dy, dz)} from any point of
+     * the box ({@code min} to {@code max}) is certainly stopped by a block of the client's world; positive infinity if
+     * none certainly stops it before {@code maxT}.
+     *
+     * <p>The client ({@code GameRenderer.pick}: {@code Level.clip} with {@code ClipContext.Block.OUTLINE},
+     * {@code BlockGetter.traverseBlocks}, decompiled 1.21.11) walks the cells the ray passes through in order, and stops
+     * at the first whose outline shape the ray meets anywhere on its segment ({@code AABB.clip}: where it enters a box
+     * from outside). A cell stops every ray here at {@code t} when every state the client may hold there has an outline
+     * box that the ray from the box's centre enters at {@code t} once the outline box is shrunk by the box's half size
+     * plus {@link #OUTLINE_MARGIN} (every ray is then that deep in the outline box at {@code t}) and that no ray starts in;
+     * and no cell some ray comes near before can hold a state that is not known or whose outline may leave its cell
+     * ({@link BlockStates#outlineInCell}): where the client meets an outline inside its cell, it is before this one. The
+     * outline of an empty world and context is never larger than the client's (see {@link BlockStates}).
+     */
+    public double certainOutlineHit(double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double dx, double dy, double dz,
+            double maxT) {
+        if (storage == null || !(maxT > 0.0)) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double x = (minX + maxX) / 2.0;
+        double y = (minY + maxY) / 2.0;
+        double z = (minZ + maxZ) / 2.0;
+        double padX = (maxX - minX) / 2.0 + OUTLINE_MARGIN;
+        double padY = (maxY - minY) / 2.0 + OUTLINE_MARGIN;
+        double padZ = (maxZ - minZ) / 2.0 + OUTLINE_MARGIN;
+        double ex = x + dx * maxT;
+        double ey = y + dy * maxT;
+        double ez = z + dz * maxT;
+        int fromX = (int) Math.floor(Math.min(x, ex) - padX);
+        int fromY = (int) Math.floor(Math.min(y, ey) - padY);
+        int fromZ = (int) Math.floor(Math.min(z, ez) - padZ);
+        int toX = (int) Math.floor(Math.max(x, ex) + padX);
+        int toY = (int) Math.floor(Math.max(y, ey) + padY);
+        int toZ = (int) Math.floor(Math.max(z, ez) + padZ);
+        if ((long) (toX - fromX + 1) * (toY - fromY + 1) * (toZ - fromZ + 1) > MAX_OUTLINE_CELLS) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double best = Double.POSITIVE_INFINITY;
+        double unsure = Double.POSITIVE_INFINITY; // where a ray first comes near a cell that may not stop it inside the cell
+        for (int cx = fromX; cx <= toX; cx++) {
+            for (int cy = fromY; cy <= toY; cy++) {
+                for (int cz = fromZ; cz <= toZ; cz++) {
+                    double near = enter(x, y, z, dx, dy, dz, cx - padX, cy - padY, cz - padZ, cx + 1 + padX, cy + 1 + padY, cz + 1 + padZ);
+                    if (!(near < maxT) || near >= Math.min(best, unsure)) {
+                        continue;
+                    }
+                    int[] possible = possibleStates(cx, cy, cz);
+                    double cell = possible == null ? Double.NaN : Double.NEGATIVE_INFINITY;
+                    for (int i = 0; possible != null && i < possible.length; i++) {
+                        int state = possible[i];
+                        if (!states.isValid(state) || !states.outlineInCell(state)) {
+                            cell = Double.NaN;
+                            break;
+                        }
+                        Shape outline = states.outlineShape(state);
+                        double hit = Double.POSITIVE_INFINITY;
+                        for (int b = 0; b < outline.boxCount(); b++) {
+                            double x0 = cx + outline.box(b, 0);
+                            double y0 = cy + outline.box(b, 1);
+                            double z0 = cz + outline.box(b, 2);
+                            double x1 = cx + outline.box(b, 3);
+                            double y1 = cy + outline.box(b, 4);
+                            double z1 = cz + outline.box(b, 5);
+                            if (x0 - padX <= x && x <= x1 + padX && y0 - padY <= y && y <= y1 + padY && z0 - padZ <= z && z <= z1 + padZ) {
+                                continue; // a ray may start in it: the client's clip does not meet a box from inside
+                            }
+                            hit = Math.min(hit, enter(x, y, z, dx, dy, dz, x0 + padX, y0 + padY, z0 + padZ, x1 - padX, y1 - padY, z1 - padZ));
+                        }
+                        cell = Math.max(cell, hit); // every state the client may hold must stop it
+                    }
+                    if (Double.isNaN(cell)) {
+                        unsure = Math.min(unsure, near);
+                    } else if (cell < maxT) {
+                        best = Math.min(best, cell);
+                    }
+                }
+            }
+        }
+        return best < unsure ? best : Double.POSITIVE_INFINITY;
+    }
+
+    /** Outline boxes are shrunk and cells grown by this beyond the rays' spread: the client's own rounding. */
+    static final double OUTLINE_MARGIN = 1.0E-6;
+    /** Cells {@link #certainOutlineHit} looks at, at most (a crosshair ray is a few blocks long). */
+    static final int MAX_OUTLINE_CELLS = 4096;
+
+    /**
+     * Where the ray from {@code (x, y, z)} along {@code (dx, dy, dz)} enters the box ({@code t >= 0}, 0 if it starts
+     * inside); positive infinity if it never does, or the box is empty.
+     */
+    static double enter(double x, double y, double z, double dx, double dy, double dz, double minX, double minY, double minZ, double maxX,
+            double maxY, double maxZ) {
+        if (!(minX < maxX && minY < maxY && minZ < maxZ)) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double[] range = {0.0, Double.POSITIVE_INFINITY};
+        return slab(x, dx, minX, maxX, range) && slab(y, dy, minY, maxY, range) && slab(z, dz, minZ, maxZ, range) ? range[0]
+                : Double.POSITIVE_INFINITY;
+    }
+
+    private static boolean slab(double origin, double d, double min, double max, double[] range) {
+        if (d == 0.0) {
+            return min <= origin && origin <= max;
+        }
+        double t1 = (min - origin) / d;
+        double t2 = (max - origin) / d;
+        range[0] = Math.max(range[0], Math.min(t1, t2));
+        range[1] = Math.min(range[1], Math.max(t1, t2));
+        return range[0] <= range[1];
+    }
+
+    /**
      * Whether a block that moves entities on the client may be in the box (block coordinates, inclusive):
      * one is there once the client processed everything sent so far, or a block there is not known, or one
      * changed to or from such a block (or its chunk was replaced) at or after {@code since}, so the client

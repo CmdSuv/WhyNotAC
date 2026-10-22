@@ -80,6 +80,7 @@ public final class BlockDataDump {
 
         Method getBlock = method(STATE, "getBlock()");
         Method collision = method(STATE, "getCollisionShape(" + GETTER + "," + POS + "," + CONTEXT + ")");
+        Method outline = method(STATE, "getShape(" + GETTER + "," + POS + "," + CONTEXT + ")");
         Method isAir = method(STATE, "isAir()");
         Method offset = method(STATE, "hasOffsetFunction()");
         Method replaceable = method(STATE, "canBeReplaced()");
@@ -140,7 +141,7 @@ public final class BlockDataDump {
                         + (Boolean.TRUE.equals(fallingValue) ? 1 : 0);
             }
             builder.add(getKey.invoke(blocks, block).toString(), properties.toString(),
-                    shapes.read(collisionShape), flags, (float) friction.invoke(block),
+                    shapes.read(collisionShape), shapes.read(outline.invoke(state, emptyGetter, zero, emptyContext)), flags, (float) friction.invoke(block),
                     (float) speed.invoke(block), (float) jump.invoke(block), (float) destroySpeed.invoke(state, emptyGetter, zero), fluidText);
         }
         return builder.build();

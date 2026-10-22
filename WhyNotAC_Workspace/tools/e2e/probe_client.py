@@ -15,6 +15,7 @@ can be verified live:
   * an attack on a sheep 7 blocks away (tick 330)             -> an attack-reach case (P-A, shadow)
   * an attack on the husk with no swing after it (tick 345)    -> an action-grammar case (P-M, shadow)
   * an attack on the husk with the look turned away (tick 365) -> an attack-aim case (P-M, shadow)
+  * an attack on the llama behind a wall, empty-handed (tick 315) -> an attack-aim case through blocks (P-M, shadow)
 
 It also attacks the nearest husk (tick 300), well within reach, which must open nothing. Before each attack its
 mouse turns its look to the target, as a player does.
@@ -62,7 +63,7 @@ PLAY_C_TELEPORT_ENTITY, PLAY_C_ENTITY_POSITION_SYNC, PLAY_C_MOVE_ENTITY_POS, PLA
 # item registry ids (1.21.11, reports/registries.json)
 ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
 # entity type registry ids
-ENTITY_HUSK, ENTITY_SHEEP = 67, 111
+ENTITY_HUSK, ENTITY_SHEEP, ENTITY_LLAMA = 67, 111, 78  # protocol ids (reports/registries.json)
 
 
 def f32(x):
@@ -346,6 +347,8 @@ def server_list_ping(host, port):
 GRAMMAR_VIOLATION_TICK = 345
 # Violation 7, an attack with the look turned away from the target.
 AIM_VIOLATION_TICK = 365
+# Violation 8, an attack on the llama behind the wall: the empty hand selected the tick before, the stick again after.
+WALL_VIOLATION_TICK = 315
 # Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
 CLOCK_BURST = 40
 
@@ -446,6 +449,16 @@ def main():
                 if tick == AIM_VIOLATION_TICK:
                     attack(client, target)
                     attacks.append({"tick": tick, "target": target, "type": "husk off the look", "distance": distance})
+        if tick == WALL_VIOLATION_TICK and inventory_step == 3:
+            # Violation 8: the llama behind the stone wall, in reach and looked at, but only past the wall: the vanilla
+            # client's pick stops at the wall's outline. With the empty hand (no attack range), selected the tick before.
+            target, distance = nearest(client, ENTITY_LLAMA)
+            if target is not None:
+                attack(client, target)
+                aim = (client.entities[target][1:], 0.0)
+                attacks.append({"tick": tick, "target": target, "type": "llama behind the wall", "distance": distance})
+        if inventory_step == 3 and tick in (WALL_VIOLATION_TICK - 1, WALL_VIOLATION_TICK + 1):
+            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick < WALL_VIOLATION_TICK else 2))
         # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
         # to hotbar 4 with two clicks, each listing the slots it changed as the vanilla client hashes them. As the
         # client: the hotbar slot goes out at the tick's start, the clicks between ticks, both before the movement.

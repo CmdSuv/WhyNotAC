@@ -217,6 +217,7 @@ class AttackAimCheckTest {
         assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
         assertEquals("minecraft:zombie", e.details().get("targetType"));
         assertEquals("0.0000/0.0000", e.details().get("looks"));
+        assertEquals("look", e.details().get("reason"));
         assertEquals(2.9, Double.parseDouble(e.details().get("missBy")), 1e-3);
         assertTrue(e.admissibility().admissible());
         assertEquals(List.of(), rejected);
@@ -403,5 +404,84 @@ class AttackAimCheckTest {
         tick();
         assertEquals(List.of(), evidence);
         assertEquals(1, rejected.size());
+    }
+
+    // --- through blocks ---
+
+    /** Stone at x 2, from y 64 to {@code top} (inclusive), z 0: between the eye at x 0.5 and a zombie at x 3.4. */
+    private void wall(int top) {
+        for (int y = 64; y <= top; y++) {
+            out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, y, 0), STATES.firstStateOf("minecraft:stone")));
+        }
+    }
+
+    @Test
+    void anAttackThroughAWallIsAFinding() {
+        zombie(ZOMBIE, 3.7, 0.5);
+        wall(65);
+        sync();
+        attack(ZOMBIE);
+        look(EAST, 0F);
+        tick();
+        assertEquals(1, evidence.size());
+        Evidence e = evidence.getFirst();
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertEquals("blocks", e.details().get("reason"));
+        assertEquals("2,65,0", e.details().get("wall"));
+        assertEquals(1.4, Double.parseDouble(e.details().get("stoppedBefore")), 1e-3); // the stone at x 2, the zombie at 3.4
+        assertEquals("1", e.details().get("throughBlocksAttacks"));
+        assertEquals("0", e.details().get("offAimAttacks"));
+        assertTrue(e.admissibility().admissible());
+    }
+
+    @Test
+    void aLookOverTheWallFromSomePoseIsNoFinding() {
+        zombie(ZOMBIE, 3.7, 0.5);
+        wall(64); // up to 65: the standing eye (65.62) looks over it at the zombie's head
+        sync();
+        attack(ZOMBIE);
+        look(EAST, 0F);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void noWallClaimWithAnAttackRangeItem() {
+        Stack stick = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), LONG, false, 1234);
+        out(new ClientboundPacket.ContainerSetContent(0, 2, inventory(stick), Stack.EMPTY));
+        zombie(ZOMBIE, 3.7, 0.5);
+        wall(65);
+        sync();
+        attack(ZOMBIE);
+        look(EAST, 0F);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aWallTheClientMayNotHaveHadAtTheAttackIsNoFinding() {
+        zombie(ZOMBIE, 3.7, 0.5);
+        wall(65);
+        attack(ZOMBIE);
+        look(EAST, 0F);
+        tick();
+        assertEquals(List.of(), evidence, "not yet acknowledged");
+        for (int i = 0; i < 20; i++) {
+            tick();
+        }
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 65, 0), STATES.firstStateOf("minecraft:air")));
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 65, 0), STATES.firstStateOf("minecraft:stone")));
+        attack(ZOMBIE);
+        sync(); // the client confirms the stone only after the attack: at the pick it may have had the air
+        look(EAST, 0F);
+        tick();
+        assertEquals(List.of(), evidence, "acknowledged after the attack");
+        for (int i = 0; i < 20; i++) {
+            tick();
+        }
+        attack(ZOMBIE);
+        look(EAST, 0F);
+        tick();
+        assertEquals(1, evidence.size());
     }
 }

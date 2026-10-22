@@ -109,6 +109,10 @@ echo "execute at WhyNotProbe run summon minecraft:salmon ~5 ~ ~2 {NoAI:1b,Persis
 echo "execute at WhyNotProbe run summon minecraft:armor_stand ~0.5 ~ ~6 {Marker:1b}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:interaction ~-6 ~ ~-5 {width:2.5f,height:0.75f}" > "$FIFO"
 echo "execute at WhyNotProbe run summon minecraft:area_effect_cloud ~6 ~ ~-5 {Radius:1.25f,Duration:6000,WaitTime:0}" > "$FIFO"
+# Behind a wall of stone (two blocks high, between it and the probe's eye): the probe attacks it on purpose (an
+# attack-aim case through blocks). In reach: its box from 2.75 blocks, the wall from 1.5 to 2.5.
+echo "execute at WhyNotProbe run fill ~-2 ~ ~ ~-2 ~1 ~ minecraft:stone" > "$FIFO"
+echo "execute at WhyNotProbe run summon minecraft:llama ~-3.2 ~ ~ {NoAI:1b,PersistenceRequired:1b,Invulnerable:1b}" > "$FIFO"
 # Out of reach: the probe attacks it on purpose (an attack-reach case), 7 blocks away.
 echo "execute at WhyNotProbe run summon minecraft:sheep ~7 ~ ~0.5 {NoAI:1b,PersistenceRequired:1b,Invulnerable:1b}" > "$FIFO"
 # Items in the probe's inventory: a sword, a spear (its prototype's attack range), a stick with an attack

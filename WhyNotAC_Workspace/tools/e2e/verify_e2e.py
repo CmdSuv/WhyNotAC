@@ -237,13 +237,15 @@ def verify_cases(probe, log, work_dir, check):
         by_check.setdefault(d["check"], []).append(d)
     attacks = {a["type"]: a for a in probe.get("attacks", [])}
     # distances from the probe to the targets' positions (their centres): the husk's box within reach, the sheep's not
-    check(set(attacks) == {"husk", "sheep", "husk without swing", "husk off the look"} and attacks["husk"]["distance"] < 3.2
-          and attacks["sheep"]["distance"] > 6.5 and attacks["husk without swing"]["distance"] < 3.2 and attacks["husk off the look"]["distance"] < 3.2,
-          f"the probe attacked a husk next to it, a sheep 7 blocks away, the husk without a swing and off its look: {probe.get('attacks')}")
-    check(len(dossiers) == 5 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+    check(set(attacks) == {"husk", "sheep", "husk without swing", "husk off the look", "llama behind the wall"} and attacks["husk"]["distance"] < 3.2
+          and attacks["sheep"]["distance"] > 6.5 and attacks["husk without swing"]["distance"] < 3.2 and attacks["husk off the look"]["distance"] < 3.2
+          and 3.1 < attacks["llama behind the wall"]["distance"] < 3.3,
+          f"the probe attacked a husk next to it, a sheep 7 blocks away, the husk without a swing and off its look, the llama behind the wall: "
+          f"{probe.get('attacks')}")
+    check(len(dossiers) == 6 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
           and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("action-grammar", [])) == 1
-          and len(by_check.get("attack-aim", [])) == 1,
-          f"exactly five cases opened, one per violation (none for the attacks in reach and in the look): "
+          and len(by_check.get("attack-aim", [])) == 2,
+          f"exactly six cases opened, one per violation (none for the attacks in reach and in the look): "
           f"{sorted((d['check'], d['summary']) for d in dossiers)}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
@@ -268,13 +270,23 @@ def verify_cases(probe, log, work_dir, check):
         check(grammar["evidenceClass"] == "P-M" and dd.get("attacksWithoutSwing") == "1" and dd.get("actionsAfterMovement") == "0"
               and grammar["summary"].startswith(f"attack on entity {target} not followed by the main hand's swing"),
               f"the action-grammar case is the husk attacked without a swing, the probe's other actions in the client's order (P-M): {grammar['summary']}")
-    aim = by_check.get("attack-aim", [None])[0]
+    aims = {d["details"].get("reason"): d for d in by_check.get("attack-aim", [])}
+    aim = aims.get("look")
+    check(aim is not None, f"an attack-aim case for the look: {sorted(aims)}")
     if aim:
         dd = aim["details"]
         target = attacks.get("husk off the look", {}).get("target")
         check(aim["evidenceClass"] == "P-M" and dd.get("targetType") == "minecraft:husk" and dd.get("target") == str(target)
-              and float(dd.get("missBy", "0")) > 0.5 and dd.get("offAimAttacks") == "1",
+              and float(dd.get("missBy", "0")) > 0.5 and dd.get("offAimAttacks") == "1" and dd.get("throughBlocksAttacks") == "0",
               f"the attack-aim case is the husk attacked with the look turned away, the probe's aimed attacks not counted (P-M): {aim['summary']}")
+    wall = aims.get("blocks")
+    check(wall is not None, f"an attack-aim case through blocks: {sorted(aims)}")
+    if wall:
+        dd = wall["details"]
+        target = attacks.get("llama behind the wall", {}).get("target")
+        check(wall["evidenceClass"] == "P-M" and dd.get("targetType") == "minecraft:llama" and dd.get("target") == str(target)
+              and float(dd.get("stoppedBefore", "0")) > 1.0 and dd.get("throughBlocksAttacks") == "1" and dd.get("offAimAttacks") == "0",
+              f"the attack-aim case through blocks is the llama behind the wall, its look stopped by the stone (P-M): {wall['summary']}")
     for d in dossiers:
         check(d["playerName"] == "WhyNotProbe" and d["identity"] == "UNAUTHENTICATED",
               f"the {d['check']} case names the player, and an offline-mode identity stays unauthenticated: {d['playerName']} {d['identity']}")
@@ -285,12 +297,14 @@ def verify_cases(probe, log, work_dir, check):
               f"a shadow alert for {d['check']} went to the console (and to whynotac.alerts.shadow)")
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
-    check(len(verified) == len(dossiers) == 5 and all(v["verified"] is True and v["evidenceInRecording"] == 1 for v in verified),
+    # a re-run finds every finding of the dossier's check in the recording: attack-aim has two
+    check(len(verified) == len(dossiers) == 6 and all(v["verified"] is True
+                                                      and v["evidenceInRecording"] == len(by_check.get(v["expected"].split("@")[0], [])) for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
-    check(re.search(r"WhyNotAC cases \(newest first\): 5", log) is not None
+    check(re.search(r"WhyNotAC cases \(newest first\): 6", log) is not None
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
                   for d in dossiers),
-          "/whynotac cases lists all five")
+          "/whynotac cases lists all six")
 
 
 def verify_self(log, check):

@@ -13,6 +13,7 @@ import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.world.ClientEntities;
 import dev.whynotac.world.ClientInventory;
 import dev.whynotac.world.ClientSelf;
+import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.EntitySizes;
 import dev.whynotac.world.Replicas;
 import java.util.ArrayList;
@@ -41,6 +42,12 @@ import java.util.TreeMap;
  * ({@code PlayerLoaded}: the new player sends no movement before), and the last sent rotation is not known again
  * until the client sends one of its own; nor while it may ride (a passenger's rotation packets do not set it).
  *
+ * <p>Nor does it attack an entity behind a block (the pick, {@code GameRenderer.pick}: the entity only if the look meets it
+ * nearer than the block its clip hit). Without an {@code attack_range} item, a look that meets the entity only past a block
+ * that certainly stops it ({@link ClientWorld#certainOutlineHit}), from every eye and for every box the entity may have
+ * had, proves the same. The blocks are those the client may have held when it attacked: nothing the client confirmed after
+ * the attack is taken for it.
+ *
  * <p>No claim either where {@link AttackReachCheck} makes none: the player's eye or the target's box not bounded,
  * a spectator, something that may have moved the player after the position its eye is based on, an item reach
  * not known. At most one finding per {@link #REPORT_INTERVAL_NANOS} per session; the next one counts what came between.
@@ -48,7 +55,7 @@ import java.util.TreeMap;
 public final class AttackAimCheck implements TimelineListener {
 
     public static final String ID = "attack-aim";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     /** Rotations the last sent one may be; past this many it is not known until the client certainly sends its own. */
     static final int MAX_ROTATIONS = 8;
@@ -68,9 +75,16 @@ public final class AttackAimCheck implements TimelineListener {
     /** A rotation the client sent, and the sequence and time of the packet that carried it. */
     record Rotation(float yRot, float xRot, long sequence, long nanoTime) {}
 
-    /** An attack waiting for the look of its tick: every box of offsets from an eye (pose by pose) to the target (state by state). */
+    /**
+     * An attack waiting for the look of its tick: every box of offsets from an eye to the target, state by state and in
+     * each the eyes pose by pose; and how many acknowledgements the session had seen then.
+     */
     private record Pending(TimelineEvent.Inbound attack, int target, String type, AttackReach.Eye eye, long eyeSequence, long eyeNanos,
-                           List<AttackReach.Box> picked, List<AttackReach.Box> ranged, ClientSelf.Eye own, int states) {}
+                           List<AttackReach.Eye> eyes, List<AttackReach.Box> picked, List<AttackReach.Box> ranged, ClientSelf.Eye own,
+                           int states, long acknowledgements) {}
+
+    /** A block every look stops at, {@code gap} blocks along it at least before it could meet the target (the weakest case). */
+    private record Wall(double gap, int x, int y, int z) {}
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
@@ -86,8 +100,11 @@ public final class AttackAimCheck implements TimelineListener {
         /** An action of the tick was sent in this interval: movement packets after it are the tick's own. */
         boolean acted;
         final List<Pending> pending = new ArrayList<>();
+        /** Acknowledgements seen: after one the world may hold less than the client may have had at an earlier attack. */
+        long acknowledgements;
         long lastReportNanos = Long.MIN_VALUE;
         long offAimSinceReport;
+        long throughBlocksSinceReport;
     }
 
     @Override
@@ -102,7 +119,10 @@ public final class AttackAimCheck implements TimelineListener {
                     state.lastSent = null;
                 }
             }
-            case TimelineEvent.Acknowledged ack -> state.replies.onAcknowledged(ack);
+            case TimelineEvent.Acknowledged ack -> {
+                state.replies.onAcknowledged(ack);
+                state.acknowledgements++;
+            }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             default -> { }
         }
@@ -175,7 +195,8 @@ public final class AttackAimCheck implements TimelineListener {
             }
             type = s.type();
         }
-        state.pending.add(new Pending(in, target, type, eye, self.eyeSequence(), self.eyeNanoTime(), picked, rangedBoxes, own, states.size()));
+        state.pending.add(new Pending(in, target, type, eye, self.eyeSequence(), self.eyeNanoTime(), eyes, picked, rangedBoxes, own, states.size(),
+                state.acknowledgements));
     }
 
     private void onMove(PlayerSession session, State state, TimelineEvent.Inbound in, ServerboundPacket.MovePlayer move) {
@@ -248,18 +269,57 @@ public final class AttackAimCheck implements TimelineListener {
         }
         // the head's yaw: yRotLast before this tick's own packet
         List<Rotation> heads = candidates(state);
+        ClientWorld world = replicas.world().world(session);
         for (Pending p : pending) {
+            Wall wall = null;
             if (meets(p.picked(), looks, looks) || p.ranged() != null && (heads == null || meets(p.ranged(), looks, heads))) {
-                continue;
+                // the look meets it: through blocks? (the world as the client may have had it at the attack)
+                if (p.ranged() != null || p.acknowledgements() != state.acknowledgements || (wall = throughBlocks(world, p, looks)) == null) {
+                    continue;
+                }
             }
-            String moved = AttackReachCheck.mayHaveMoved(replicas.self().self(session), p.own(), replicas.entities().entities(session),
-                    replicas.world().world(session));
+            String moved = AttackReachCheck.mayHaveMoved(replicas.self().self(session), p.own(), replicas.entities().entities(session), world);
             if (moved != null) {
                 continue;
             }
-            state.offAimSinceReport++;
-            report(session, state, p, looks, at);
+            if (wall == null) {
+                state.offAimSinceReport++;
+            } else {
+                state.throughBlocksSinceReport++;
+            }
+            report(session, state, p, looks, wall, at);
         }
+    }
+
+    /**
+     * The block every look of {@code looks} certainly stops at before it could meet the target, from every eye where it
+     * meets one of the target's boxes; null if some look may reach the target first.
+     */
+    private static Wall throughBlocks(ClientWorld world, Pending p, List<Rotation> looks) {
+        Wall weakest = null;
+        int poses = p.eyes().size();
+        for (Rotation look : looks) {
+            double[] v = AttackAim.view(look.xRot(), look.yRot());
+            for (int i = 0; i < p.picked().size(); i++) {
+                double target = AttackAim.enter(v, p.picked().get(i));
+                if (target == Double.POSITIVE_INFINITY) {
+                    continue; // from this pose, at this box, the look misses it
+                }
+                AttackReach.Eye e = p.eyes().get(i % poses);
+                double r = e.radius() + AttackAim.EPSILON;
+                double block = world.certainOutlineHit(e.x() - r, e.y0() - r, e.z() - r, e.x() + r, e.y1() + r, e.z() + r, v[0], v[1], v[2],
+                        target);
+                if (!(block < target)) {
+                    return null;
+                }
+                if (weakest == null || target - block < weakest.gap()) {
+                    double y = (e.y0() + e.y1()) / 2.0;
+                    weakest = new Wall(target - block, (int) Math.floor(e.x() + v[0] * block), (int) Math.floor(y + v[1] * block),
+                            (int) Math.floor(e.z() + v[2] * block));
+                }
+            }
+        }
+        return weakest;
     }
 
     /** Whether some look, with the pitch of one of {@code pitches} and the yaw of one of {@code yaws}, meets some box. */
@@ -277,7 +337,7 @@ public final class AttackAimCheck implements TimelineListener {
         return false;
     }
 
-    private void report(PlayerSession session, State state, Pending p, List<Rotation> looks, TimelineEvent.Inbound at) {
+    private void report(PlayerSession session, State state, Pending p, List<Rotation> looks, Wall wall, TimelineEvent.Inbound at) {
         TimelineEvent.Inbound attack = p.attack();
         if (state.lastReportNanos != Long.MIN_VALUE && attack.nanoTime() - state.lastReportNanos < REPORT_INTERVAL_NANOS) {
             return;
@@ -310,12 +370,24 @@ public final class AttackAimCheck implements TimelineListener {
         details.put("targetType", p.type());
         details.put("looks", String.join(",", rotations));
         details.put("eye", format(p.eye().x()) + "," + format(p.eye().y0()) + ".." + format(p.eye().y1()) + "," + format(p.eye().z()));
-        details.put("missBy", format(miss));
         details.put("targetStates", Integer.toString(p.states()));
         details.put("offAimAttacks", Long.toString(state.offAimSinceReport));
+        details.put("throughBlocksAttacks", Long.toString(state.throughBlocksSinceReport));
         state.offAimSinceReport = 0;
-        sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, from, at.sequence(), fromNanos, at.nanoTime(),
-                "attacked " + p.type() + " " + p.target() + " with a look passing at least " + format(miss) + " blocks from it",
+        state.throughBlocksSinceReport = 0;
+        String summary;
+        if (wall == null) {
+            details.put("reason", "look");
+            details.put("missBy", format(miss));
+            summary = "attacked " + p.type() + " " + p.target() + " with a look passing at least " + format(miss) + " blocks from it";
+        } else {
+            details.put("reason", "blocks");
+            details.put("wall", wall.x() + "," + wall.y() + "," + wall.z());
+            details.put("stoppedBefore", format(wall.gap()));
+            summary = "attacked " + p.type() + " " + p.target() + " through blocks: its look stops at the block " + wall.x() + "," + wall.y() + ","
+                    + wall.z() + ", at least " + format(wall.gap()) + " blocks before it";
+        }
+        sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, from, at.sequence(), fromNanos, at.nanoTime(), summary,
                 details, admissibility));
     }
 

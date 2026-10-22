@@ -412,4 +412,131 @@ class ClientWorldTest {
         assertEquals(0, pool.size());
     }
 
+
+    // --- the crosshair's ray ---
+
+    /** Half the size of the eyes' box in these tests. */
+    private static final double R = 1.0E-4;
+
+    private static int state(String block, String properties) {
+        for (int id = 0; id < STATES.size(); id++) {
+            if (STATES.block(id).equals(block) && STATES.properties(id).equals(properties)) {
+                return id;
+            }
+        }
+        throw new AssertionError(block + "[" + properties + "]");
+    }
+
+    /** An overworld of air in chunk (0, 0), the client up to date with it. */
+    private void airWorld() {
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0)));
+        sync();
+    }
+
+    private void put(int x, int y, int z, int state) {
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(x, y, z), state));
+    }
+
+    /** From the eyes within {@code r} of the point, along +x. */
+    private double east(double x, double y, double z, double r, double maxT) {
+        return world.certainOutlineHit(x - r, y - r, z - r, x + r, y + r, z + r, 1, 0, 0, maxT);
+    }
+
+    @Test
+    void aFullBlockStopsTheRayWhereItEntersIt() {
+        airWorld();
+        put(3, 65, 0, STONE);
+        sync();
+        assertEquals(2.5, east(0.5, 65.62, 0.5, R, 10), 1e-3);
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 2.4), "not before maxT");
+        assertEquals(Double.POSITIVE_INFINITY, world.certainOutlineHit(0.4, 65.6, 0.4, 0.6, 65.7, 0.6, -1, 0, 0, 10), "nothing behind");
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 66.62, 0.5, R, 10), "above it");
+    }
+
+    @Test
+    void aBlockStopsTheRayOnlyIfItStopsTheRayFromEveryEye() {
+        airWorld();
+        put(3, 65, 0, STONE);
+        sync();
+        assertEquals(2.95, east(0.5, 65.5, 0.5, 0.45, 10), 1e-3); // where the ray from the centre is 0.45 deep in it
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.5, 0.5, 0.55, 10), "a ray beside the block");
+        assertEquals(Double.POSITIVE_INFINITY, world.certainOutlineHit(0.5, 65.5, 0.5, 0.5, 66.2, 0.5, 1, 0, 0, 10), "an eye above it");
+    }
+
+    @Test
+    void onlyTheOutlineStopsTheRay() {
+        airWorld();
+        put(3, 65, 0, state("minecraft:stone_slab", "type=bottom,waterlogged=false"));
+        put(4, 65, 0, state("minecraft:light", "level=15,waterlogged=false")); // empty unless the player holds light
+        sync();
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "over the slab");
+        assertEquals(2.5, east(0.5, 65.25, 0.5, R, 10), 1e-3);
+    }
+
+    @Test
+    void noClaimPastACellWhoseOutlineMayLeaveIt() {
+        airWorld();
+        put(3, 65, 0, STONE);
+        put(5, 65, 0, STATES.firstStateOf("minecraft:lectern")); // past the stone: the client stopped before
+        sync();
+        assertEquals(2.5, east(0.5, 65.62, 0.5, R, 10), 1e-3);
+        for (String block : new String[] {"minecraft:lectern", "minecraft:poppy", "minecraft:shulker_box"}) {
+            put(2, 65, 0, STATES.firstStateOf(block));
+            sync();
+            assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), block + " before the stone");
+        }
+    }
+
+    @Test
+    void aBlockStopsTheRayOnlyIfItIsThereInEveryStateTheClientMayHold() {
+        airWorld();
+        put(3, 65, 0, STONE);
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "the client may not have it yet");
+        sync();
+        put(3, 65, 0, AIR);
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "the client may not hold it any more");
+        put(3, 65, 0, DIRT);
+        put(3, 65, 0, STONE);
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "air in between");
+        sync();
+        assertEquals(2.5, east(0.5, 65.62, 0.5, R, 10), 1e-3);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0)));
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "a chunk the client may not have");
+    }
+
+    @Test
+    void aRayIsNotStoppedByABoxItMayStartIn() {
+        airWorld();
+        put(0, 65, 0, STONE);
+        sync();
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10));
+        put(3, 65, 0, STONE);
+        sync();
+        assertEquals(2.5, east(0.5, 65.62, 0.5, R, 10), 1e-3);
+    }
+
+    @Test
+    void noClaimPastACellWhoseOutlineMayLeaveItWhicheverWayTheRayGoes() {
+        airWorld();
+        put(2, 65, 0, STONE);
+        put(4, 65, 0, STATES.firstStateOf("minecraft:lectern"));
+        sync();
+        double west = world.certainOutlineHit(5.5 - R, 65.62 - R, 0.5 - R, 5.5 + R, 65.62 + R, 0.5 + R, -1, 0, 0, 10);
+        assertEquals(Double.POSITIVE_INFINITY, west, "the lectern before the stone");
+        put(4, 65, 0, AIR);
+        sync();
+        assertEquals(2.5, world.certainOutlineHit(5.5 - R, 65.62 - R, 0.5 - R, 5.5 + R, 65.62 + R, 0.5 + R, -1, 0, 0, 10), 1e-3);
+    }
+
+    @Test
+    void noClaimPastACellNotKnown() {
+        airWorld();
+        out(new ClientboundPacket.LevelChunk(1, 0, chunk(24, AIR, -1, 0)));
+        put(17, 65, 0, STONE);
+        sync();
+        assertEquals(2.5, east(14.5, 65.62, 0.5, R, 10), 1e-3);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0))); // the eye's chunk again: the client may not have it yet
+        assertEquals(Double.POSITIVE_INFINITY, east(14.5, 65.62, 0.5, R, 10));
+    }
 }

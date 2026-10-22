@@ -10,7 +10,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
-| `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) |
+| `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
 
@@ -74,7 +74,23 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   `B - S`'e (gözden kutuya bütün farkların kutusu) değdiğinde değer. Tek bir ışın-kutu (slab) sınaması, 10⁻⁴ pay ile.
   Işın sınırsızdır (client'ın parçaları onun üzerinde); ne kadar uzağa erişildiği `attack-reach`'in işidir. Hedefin
   olası her durumu ve olası her bakış için ışın değmiyorsa saldırı kanıttır; bulgu, bakışın kutudan en az ne kadar
-  uzaktan geçtiğini (`missBy`) söyler.
+  uzaktan geçtiğini (`missBy`) söyler (`reason=look`).
+- **Bloklar (`reason=blocks`):** client'ın seçimi (`GameRenderer.pick`) varlığı ancak bakış ona, `Level.clip`'in
+  (`ClipContext.Block.OUTLINE`) çarptığı bloktan daha yakında değiyorsa seçer. Blok taraması
+  (`BlockGetter.traverseBlocks`) ışının geçtiği hücreleri sırayla gezer ve outline şekline ışının parçasının herhangi
+  bir yerinde değen ilk hücrede durur (`AABB.clip`: bir kutuya dışarıdan girdiği yer). `ClientWorld.certainOutlineHit`
+  bunun kesin olduğu en yakın `t`'yi verir: client'ın o hücrede tutabileceği her durumun (`possibleStates`) outline'ında,
+  gözlerin kutusunun yarı boyu artı 10⁻⁶ kadar küçültülünce merkezden çıkan ışının girdiği ve hiçbir ışının içinden
+  başlamadığı bir kutu var; ışınların daha önce yaklaştığı hiçbir hücre bilinmeyen ya da outline'ı hücresinden
+  taşabilecek bir durumda olamaz (`BlockStates.outlineInCell`: kutusu hücresinden taşan bambu, kürsü, piston kafası,
+  testi bitkisi; konumuyla kayan (`OFFSET`) çiçekler ve damlataş; açılırken büyüyen shulker kutusu). Hücresinde kalan
+  her outline'a ise o hücrenin içinde, yani bu hücreden önce değilir. Outline'lar resmi client'ın kayıt defterinden
+  (`BlockDataDump`), boş dünya ve bağlam için alınır; client'ınki hiçbir zaman daha küçük değildir (ışık bloğu elde ışık
+  yokken boş, iskele elde iskele yokken kendi şekli). Hiçbir varlığın kutusu bakışa bu bloktan önce değmiyorsa (her
+  poz gözü, her olası hedef kutusu ve her olası bakış için) saldırı kanıttır; bulgu bloğu (`wall`) ve bakışın orada
+  hedeften en az ne kadar önce durduğunu (`stoppedBefore`) söyler. `attack_range` eşyasıyla iddia yok (o yolun kendi
+  blok taraması var). Bloklar client'ın saldırı anında tutabileceklerinden alınır: saldırıdan sonra gelen bir
+  onay (client'ın bir değişikliği işlediği) varsa iddia yok.
 - **İddia yok:** giriş ya da yeniden doğuştan sonra client `PlayerLoaded` diyene kadar (yeni oyuncu o zamana kadar
   hareket göndermez), sonra kendi dönüşünü gönderene kadar bakış bilinmez (saldırıdan sonra kendi dönüşü gelirse
   bilinir); binekteyken (yolcunun dönüş paketleri `yRotLast`'ı değiştirmez); izleyici; göz ya da hedef kutusu
@@ -84,9 +100,14 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   dönüşsüz tiklerde son gönderilen bakışı, yanıt olabilecek bir paketin iki bakışı da tutmasını, ışınlama yanıtının
   `yRotLast` sayılmamasını (bakış onu izlerse client kendi paketinde gönderirdi), `attack_range` eşyasında kafanın
   bir önceki tikteki yönünü, tek bakışla iki yandaki varlıklara saldırıyı, saniyede bir bulguyu, piston,
-  izleyici ve yüklenmemiş client istisnalarını ve anlaşılamayan paketle reddi sınar; her kural için negatif kontrol
-  yakalanır. E2E sondası her saldırısında faresini hedefe döndürür (tam fare adımlarıyla) ve bakışını bir tik önceden
-  çevirip husk'a vurarak vakayı açar; yük botları da saldırdıkları ineğe döner.
+  izleyici ve yüklenmemiş client istisnalarını ve anlaşılamayan paketle reddi sınar; duvar arkasındaki saldırıyı, bir
+  pozun gözünün duvarın üstünden bakmasını, `attack_range` eşyasını, client'ın henüz almamış ya da saldırıdan sonra
+  onayladığı duvarı da. `ClientWorldTest` blok sorgusunu sınar: tam blok, gözlerin kutusu, yalnızca outline (yarım
+  basamak, ışık bloğu), hücresinden taşabilen ya da kayan bloklar (her iki yönde), client'ın her olası durumu, bilinmeyen
+  hücre, ışının içinden başladığı kutu. Her kural için negatif kontrol yakalanır (11 mutasyon). E2E sondası her
+  saldırısında faresini hedefe döndürür (tam fare adımlarıyla) ve bakışını bir tik önceden çevirip husk'a vurarak vakayı
+  açar; boş elle, iki blok yüksekliğindeki taş duvarın arkasındaki lamaya bakıp vurarak ikinci vakayı (`reason=blocks`)
+  açar; yük botları da saldırdıkları ineğe döner.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 
