@@ -351,7 +351,7 @@ class UseAimCheckTest {
         assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
         assertEquals("look", e.details().get("reason"));
         assertEquals("2,65,0", e.details().get("block"));
-        assertEquals("1", e.details().get("offLookClicks"));
+        assertEquals("1", e.details().get("offLookBlockActions"));
     }
 
     @Test
@@ -510,5 +510,164 @@ class UseAimCheckTest {
         click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.5, false); // air here, unless that placed something
         tick();
         assertEquals(List.of(), evidence);
+    }
+
+    // --- digging ---
+
+    private void dig(ServerboundPacket.PlayerAction.Action action, int x, int y, int z, dev.whynotac.protocol.packet.BlockFace face) {
+        in(new ServerboundPacket.PlayerAction(action, new BlockPosition(x, y, z), face,
+                action == ServerboundPacket.PlayerAction.Action.ABORT_DESTROY_BLOCK ? 0 : ++clickSequence));
+    }
+
+    /** The server acknowledged the client's block actions so far (no prediction of them left), and the eye is known again. */
+    private void acknowledged() {
+        out(new ClientboundPacket.BlockChangedAck(clickSequence));
+        sync();
+        move(0.5, 64.0, 0.5);
+        tick();
+    }
+
+    private void start(int x, int y, int z, dev.whynotac.protocol.packet.BlockFace face) {
+        dig(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, x, y, z, face);
+    }
+
+    @Test
+    void digTheBlockAndFaceTheLookEnters() {
+        stoneAhead();
+        start(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void digAFaceTheLookCannotEnterIsAFinding() {
+        stoneAhead();
+        start(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.EAST);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("face", evidence.getFirst().details().get("reason"));
+        assertEquals("START_DESTROY_BLOCK", evidence.getFirst().details().get("action"));
+    }
+
+    @Test
+    void digABlockOffTheLookIsAFinding() {
+        put(2, 65, 3, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+        start(2, 65, 3, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("look", evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void digAirIsAFinding() {
+        look(EAST, 0F);
+        tick();
+        start(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("outline", evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void digOutOfReachOrThroughABlockIsAFinding() {
+        put(6, 65, 0, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+        start(6, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("reach", evidence.getFirst().details().get("reason"));
+        out(new ClientboundPacket.BlockChangedAck(clickSequence));
+        put(2, 65, 0, "minecraft:stone");
+        put(4, 65, 0, "minecraft:stone");
+        sync();
+        move(0.5, 64.0, 0.5);
+        for (int i = 0; i < 20; i++) {
+            tick();
+        }
+        start(4, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(2, evidence.size());
+        assertEquals("blocks", evidence.get(1).details().get("reason"));
+        assertEquals("2,65,0", evidence.get(1).details().get("wall"));
+    }
+
+    @Test
+    void digFromInsideTheBlockIsOnTheFaceOppositeTheLook() {
+        put(0, 65, 0, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+        start(0, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(List.of(), evidence);
+        acknowledged();
+        start(0, 65, 0, dev.whynotac.protocol.packet.BlockFace.UP);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("face", evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void digShortGrassIsJudgedButNotAFlowerWhoseOutlineMoves() {
+        put(2, 65, 0, "minecraft:poppy"); // FlowerBlock.getShape: moved by the position's offset
+        sync();
+        look(EAST, 0F);
+        tick();
+        start(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.EAST);
+        tick();
+        assertEquals(List.of(), evidence);
+        acknowledged();
+        put(2, 65, 0, "minecraft:short_grass"); // an offset its outline ignores (TallGrassBlock.getShape)
+        sync();
+        look(EAST, 0F);
+        tick();
+        start(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST);
+        tick();
+        assertEquals(List.of(), evidence);
+        acknowledged();
+        look(EAST, 0F);
+        tick();
+        start(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.EAST);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("face", evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void anAbortIsNotThePicksButTheFinishIs() {
+        stoneAhead();
+        dig(ServerboundPacket.PlayerAction.Action.ABORT_DESTROY_BLOCK, 2, 65, 0, dev.whynotac.protocol.packet.BlockFace.DOWN);
+        tick();
+        assertEquals(List.of(), evidence, "MultiPlayerGameMode.stopDestroyBlock: the block being broken, facing down");
+        acknowledged();
+        dig(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, 2, 65, 0, dev.whynotac.protocol.packet.BlockFace.EAST);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("STOP_DESTROY_BLOCK", evidence.getFirst().details().get("action"));
+    }
+
+    @Test
+    void digTheFaceTheLookEntersNotJustOneFacingIt() {
+        // looking 40 degrees down, the look from the lowest eye (64.2: sleeping) comes in through its top at x 1.93; at x 1
+        // every eye's look is above it (the lowest at 63.78)
+        put(1, 62, 0, "minecraft:stone");
+        sync();
+        look(EAST, 40F);
+        tick();
+        start(1, 62, 0, dev.whynotac.protocol.packet.BlockFace.UP);
+        tick();
+        assertEquals(List.of(), evidence);
+        acknowledged();
+        look(EAST, 40F);
+        tick();
+        start(1, 62, 0, dev.whynotac.protocol.packet.BlockFace.WEST); // a face towards the look, which no look enters
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("face", evidence.getFirst().details().get("reason"));
     }
 }

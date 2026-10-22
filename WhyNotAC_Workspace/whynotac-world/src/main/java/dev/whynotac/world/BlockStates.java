@@ -25,12 +25,12 @@ import java.util.zip.GZIPInputStream;
  * <p>The outline shape ({@code getShape}: what the crosshair's ray clips, {@code ClipContext.Block.OUTLINE}) is the one
  * for an empty world and context too. Where the client's may differ it is never larger (decompiled 1.21.11): a light
  * block's is empty unless the player holds light, scaffolding's its own unless the player holds scaffolding, a
- * shulker box's grows as it opens (out of its cell: {@link #outlineInCell}); only states with {@link #OFFSET} are moved
- * by their position, and no other block reads the world or the position for it.
+ * shulker box's grows as it opens (out of its cell: {@link #outlineInCell}); only states with {@link #MOVING_OUTLINE} are
+ * moved by their position, and no other block reads the world or the position for it.
  *
  * <h2>Text format (inside the gzip resource)</h2>
  * <pre>
- * whynotac-block-states 2
+ * whynotac-block-states 3
  * minecraft &lt;version&gt;
  * shapes &lt;n&gt;
  * &lt;kind&gt; TAB &lt;xs&gt; TAB &lt;ys&gt; TAB &lt;zs&gt; TAB &lt;filled cells, hex longs&gt; TAB &lt;boxes&gt;   (one line per shape)
@@ -43,7 +43,7 @@ import java.util.zip.GZIPInputStream;
 public final class BlockStates {
 
     public static final String RESOURCE = "/dev/whynotac/world/block-states.txt.gz";
-    static final String HEADER = "whynotac-block-states 2";
+    static final String HEADER = "whynotac-block-states 3";
 
     /** {@code isAir()}. */
     public static final int AIR = 1;
@@ -80,7 +80,14 @@ public final class BlockStates {
     public static final int STURDY_SOUTH = 1 << 10;
     public static final int STURDY_WEST = 1 << 11;
     public static final int STURDY_EAST = 1 << 12;
-    private static final String FLAG_LETTERS = "adcormtfsNSWE";
+    /**
+     * The outline ({@code getShape} for an empty world and context) is not the same at every position: the state's
+     * offset moves it ({@code FlowerBlock}, bamboo, pointed dripstone, mangrove propagules). Only some states with
+     * {@link #OFFSET} (short grass and ferns have an offset their outline ignores). Measured: the outline at a spread of
+     * positions differs from the one at the origin.
+     */
+    public static final int MOVING_OUTLINE = 1 << 13;
+    private static final String FLAG_LETTERS = "adcormtfsNSWEp";
 
     private static volatile BlockStates vanilla;
 
@@ -269,20 +276,20 @@ public final class BlockStates {
 
     /**
      * Whether the state's outline stays in its block's own cell wherever the block is and whatever the client holds: no
-     * box reaches out of it, it is not moved by its position ({@link #OFFSET}), and it is not a shulker box (whose block
+     * box reaches out of it, it is not moved by its position ({@link #MOVING_OUTLINE}), and it is not a shulker box (whose block
      * entity grows it out of the cell as it opens). Then a ray meets it only inside the cell.
      */
     public boolean outlineInCell(int state) {
-        return withinCell[outline[state]] && !has(state, OFFSET) && !block[state].endsWith("shulker_box");
+        return withinCell[outline[state]] && !has(state, MOVING_OUTLINE) && !block[state].endsWith("shulker_box");
     }
 
     /**
      * Whether the client's outline of the state is {@link #outlineShape} exactly, wherever the block is and whatever the
-     * player holds: not moved by its position ({@link #OFFSET}), not a shulker box's (its block entity's box), not light's
+     * player holds: not moved by its position ({@link #MOVING_OUTLINE}), not a shulker box's (its block entity's box), not light's
      * or scaffolding's (a full block while the player holds one).
      */
     public boolean outlineExact(int state) {
-        return !has(state, OFFSET) && !block[state].endsWith("shulker_box") && !block[state].equals("minecraft:light")
+        return !has(state, MOVING_OUTLINE) && !block[state].endsWith("shulker_box") && !block[state].equals("minecraft:light")
                 && !block[state].equals("minecraft:scaffolding");
     }
 

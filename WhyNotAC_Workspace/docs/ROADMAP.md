@@ -70,7 +70,7 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   şekilleri resmi client'tan.
 - Blok erişimi ve yüz doğrulama (`W2`): eşya kullanımının dönüşü tikin bakışıyla bit bit aynı ve bloğa tıklamanın
   imleci bakışın o bloğun outline'ına girdiği yerde, girebileceği yüzde, menzilde ve araya blok girmeden (`use-aim`,
-  görev #60) yapıldı. Kalan: kırma paketlerinin bloğu ve yüzü. Kırma ilerlemesi (`W1`), yerleştirme (`W3`).
+  görev #60) yapıldı; kırma paketlerinin bloğu ve yüzü de aynı seçimden. Kırma ilerlemesi (`W1`), yerleştirme (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
 
 ## Faz 4 — Doğrulama ve veri

@@ -55,10 +55,11 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 >
 > **Kullanım bakışı (`use-aim`, P-M):** client eşyayı oyuncunun o anki dönüşüyle kullanır ve bu, tikin bakışıyla bit
 > bit aynıdır; bir bloğa da yalnızca tikin seçiminin bulduğu yerden tıklar: imleç bakışın o bloğun outline'ına girdiği
-> noktada, girebileceği yüzde, menzilde, araya blok girmeden. Yalnızca sunucu için dönüp nişan alan (inci, iksir, ok),
+> noktada, girebileceği yüzde, menzilde, araya blok girmeden. Kırdığı blok ve yüz de aynı seçimdendir. Yalnızca sunucu için dönüp nişan alan (inci, iksir, ok),
 > bakmadan, havaya, duvarın ardına ya da uzağa blok koyan client'ı yakalar. Gerçek client'ın 10 kullanımı ve blok
-> tıklaması vaka açmadı; E2E'de 45° sapmış dönüşle kullanan ve imleci bakışından kaydırarak duvara tıklayan sonda açtı,
-> imleci oyunun aritmetiğiyle bit bit hesaplanmış tıklaması açmadı.
+> tıklaması vaka açmadı; E2E'de 45° sapmış dönüşle kullanan, imleci bakışından kaydırarak duvara tıklayan ve duvarı arka
+> yüzünden kırmaya başlayan sonda açtı, imleci oyunun aritmetiğiyle bit bit hesaplanmış tıklaması ve ön yüzden kırması
+> açmadı.
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md) · [Faz 2b-8](docs/phases/PHASE-2B-8-REPORT.md)
 
 ## Belgeler
@@ -88,7 +89,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 517 test
+./gradlew build                       # tüm modüller + 528 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

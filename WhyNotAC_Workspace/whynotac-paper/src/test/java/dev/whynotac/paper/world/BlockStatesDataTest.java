@@ -21,9 +21,14 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.block.BambooSaplingBlock;
+import net.minecraft.world.level.block.BambooStalkBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FlowerBlock;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.MangrovePropaguleBlock;
+import net.minecraft.world.level.block.PointedDripstoneBlock;
 import net.minecraft.world.level.block.PowderSnowBlock;
 import net.minecraft.world.level.block.ScaffoldingBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
@@ -102,12 +107,27 @@ class BlockStatesDataTest {
             flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.SOUTH) ? BlockStates.STURDY_SOUTH : 0;
             flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.WEST) ? BlockStates.STURDY_WEST : 0;
             flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.EAST) ? BlockStates.STURDY_EAST : 0;
+            if (moves(state, outline)) {
+                flags |= BlockStates.MOVING_OUTLINE;
+            }
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), shape(outline, (DiscreteVoxelShape) discreteField.get(outline)),
                     flags, block.getFriction(), block.getSpeedFactor(),
                     block.getJumpFactor(), state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO), fluid(state.getFluidState()));
         }
         return builder.build();
+    }
+
+    /** Whether the outline somewhere differs from the origin's ({@code BlockDataDump}'s positions: an offset hashes x and z). */
+    private static boolean moves(BlockState state, VoxelShape outline) {
+        List<AABB> boxes = outline.toAabbs();
+        for (int i = 0; i < 64; i++) {
+            BlockPos at = new BlockPos(i * 37 - 1000, i % 7 * 9 - 30, 1000 - i * 53);
+            if (!boxes.equals(state.getShape(EmptyBlockGetter.INSTANCE, at, CollisionContext.empty()).toAabbs())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String properties(BlockState state) {
@@ -217,6 +237,25 @@ class BlockStatesDataTest {
         assertTrue(!shipped.outlineExact(Block.getId(Blocks.POPPY.defaultBlockState())));
         assertTrue(shipped.outlineExact(Block.getId(Blocks.LECTERN.defaultBlockState())));
         assertTrue(shipped.outlineExact(Block.getId(Blocks.MOVING_PISTON.defaultBlockState())));
+        // short grass has an offset its outline ignores (TallGrassBlock.getShape)
+        int grass = Block.getId(Blocks.SHORT_GRASS.defaultBlockState());
+        assertTrue(shipped.has(grass, BlockStates.OFFSET) && shipped.outlineExact(grass) && shipped.outlineInCell(grass));
+    }
+
+    @Test
+    void theOutlinesThatMoveAreTheOnesTheirBlocksMove() {
+        // decompiled 1.21.11: only these getShape methods move the shape by state.getOffset(pos)
+        BlockStates shipped = BlockStates.vanilla();
+        int moving = 0;
+        for (int id = 0; id < shipped.size(); id++) {
+            Block block = Block.stateById(id).getBlock();
+            boolean moves = block instanceof FlowerBlock || block instanceof BambooStalkBlock || block instanceof BambooSaplingBlock
+                    || block instanceof PointedDripstoneBlock || block instanceof MangrovePropaguleBlock;
+            assertEquals(moves, shipped.has(id, BlockStates.MOVING_OUTLINE), shipped.block(id) + "[" + shipped.properties(id) + "]");
+            assertTrue(!moves || shipped.has(id, BlockStates.OFFSET), shipped.block(id));
+            moving += moves ? 1 : 0;
+        }
+        assertTrue(moving > 0);
     }
 
     @Test

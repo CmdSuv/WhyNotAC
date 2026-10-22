@@ -39,6 +39,12 @@ import java.util.TreeMap;
  * client confirmed after the click is taken for them. No claim for a click with an {@code attack_range} item (its own
  * pick comes first), a world border hit, a spectator, the eye not known, or where {@link AttackReachCheck} makes none.
  *
+ * <p>Digging the same way: {@code START_DESTROY_BLOCK} and {@code STOP_DESTROY_BLOCK} carry the block and face of the
+ * tick's pick ({@code MultiPlayerGameMode.startDestroyBlock} and {@code continueDestroyBlock}, from {@code startAttack}
+ * and {@code continueAttack}), so the look must be able to enter that block's outline through that face, in reach and
+ * before any block certainly stops it ({@link BlockClick#judgeDig}; no outline there at all: {@code outline}). An abort
+ * names the block being broken, not the pick's, and is not judged.
+ *
  * <p>No claim while the rotation of the tick is not known ({@link TickLook}), nor while the player may ride (a vehicle
  * may turn it within the tick). At most one finding per {@link #REPORT_INTERVAL_NANOS} per session; the next one
  * counts what came between.
@@ -46,7 +52,7 @@ import java.util.TreeMap;
 public final class UseAimCheck implements TimelineListener {
 
     public static final String ID = "use-aim";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     private static final Object STATE = new Object();
@@ -62,9 +68,26 @@ public final class UseAimCheck implements TimelineListener {
     /** A use waiting for the look of its tick. */
     private record Pending(TimelineEvent.Inbound in, ServerboundPacket.UseItem use) {}
 
-    /** A click waiting for the look of its tick: the eyes and ranges the client may have had then. */
-    private record Click(TimelineEvent.Inbound in, ServerboundPacket.UseItemOn click, List<AttackReach.Eye> eyes, ClientSelf.Eye own,
-                         long eyeSequence, long eyeNanos, double blockHigh, double pickLow, double pickHigh, long acknowledgements) {}
+    /**
+     * A click ({@code UseItemOn}) or a dig ({@code PlayerAction}) waiting for the look of its tick: the eyes and ranges
+     * the client may have had then.
+     */
+    private record Click(TimelineEvent.Inbound in, ServerboundPacket.UseItemOn click, ServerboundPacket.PlayerAction dig, List<AttackReach.Eye> eyes,
+                         ClientSelf.Eye own, long eyeSequence, long eyeNanos, double blockHigh, double pickLow, double pickHigh,
+                         long acknowledgements) {
+
+        dev.whynotac.protocol.packet.BlockPosition position() {
+            return click != null ? click.position() : dig.position();
+        }
+
+        dev.whynotac.protocol.packet.BlockFace face() {
+            return click != null ? click.face() : dig.face();
+        }
+
+        int sequence() {
+            return click != null ? click.sequence() : dig.sequence();
+        }
+    }
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
@@ -109,7 +132,13 @@ public final class UseAimCheck implements TimelineListener {
             case ServerboundPacket.UseItemOn click -> {
                 state.look.onAction();
                 action(state, click.sequence());
-                onClick(session, state, in, click);
+                onClick(session, state, in, click, null);
+            }
+            case ServerboundPacket.PlayerAction dig when dig.action() == ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK
+                    || dig.action() == ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK -> {
+                state.look.onAction();
+                action(state, dig.sequence());
+                onClick(session, state, in, null, dig);
             }
             case ServerboundPacket.MovePlayer move -> {
                 TickLook.Rotation rotation = state.look.onMove(in, move);
@@ -140,9 +169,10 @@ public final class UseAimCheck implements TimelineListener {
         state.firstAction = Math.min(state.firstAction, sequence);
     }
 
-    private void onClick(PlayerSession session, State state, TimelineEvent.Inbound in, ServerboundPacket.UseItemOn click) {
+    private void onClick(PlayerSession session, State state, TimelineEvent.Inbound in, ServerboundPacket.UseItemOn click,
+            ServerboundPacket.PlayerAction dig) {
         ClientSelf self = replicas.self().self(session);
-        if (!state.look.loaded() || self.mayRide() || self.mayBeSpectator() || click.worldBorderHit()) {
+        if (!state.look.loaded() || self.mayRide() || self.mayBeSpectator() || click != null && click.worldBorderHit()) {
             return;
         }
         ClientSelf.Eye own = self.eye();
@@ -162,7 +192,7 @@ public final class UseAimCheck implements TimelineListener {
         }
         double[] block = self.blockRangeBounds();
         double[] entity = self.interactionRangeBounds();
-        state.clicks.add(new Click(in, click, eyes, own, self.eyeSequence(), self.eyeNanoTime(), block[1], Math.max(block[0], entity[0]),
+        state.clicks.add(new Click(in, click, dig, eyes, own, self.eyeSequence(), self.eyeNanoTime(), block[1], Math.max(block[0], entity[0]),
                 Math.max(block[1], entity[1]), state.acknowledgements));
     }
 
@@ -201,13 +231,15 @@ public final class UseAimCheck implements TimelineListener {
      * combination that came furthest ({@link BlockClick.Stage}).
      */
     private static BlockClick.Failure judge(Click c, ClientWorld world, List<TickLook.Rotation> looks, int firstAction) {
-        int before = Math.min(firstAction, c.click().sequence());
+        int before = Math.min(firstAction, c.sequence());
         BlockClick.Failure furthest = null;
         for (TickLook.Rotation look : looks) {
             double[] v = AttackAim.view(look.xRot(), look.yRot());
             for (AttackReach.Eye eye : c.eyes()) {
-                BlockClick.Failure f = BlockClick.judge(world, c.click().position(), c.click().face(), c.click().location(), c.click().inside(), v,
-                        eye, c.blockHigh(), c.pickLow(), c.pickHigh(), before);
+                BlockClick.Failure f = c.click() != null
+                        ? BlockClick.judge(world, c.position(), c.face(), c.click().location(), c.click().inside(), v, eye, c.blockHigh(), c.pickLow(),
+                                c.pickHigh(), before)
+                        : BlockClick.judgeDig(world, c.position(), c.face(), v, eye, c.blockHigh(), c.pickLow(), c.pickHigh(), before);
                 if (f == null) {
                     return null;
                 }
@@ -242,26 +274,31 @@ public final class UseAimCheck implements TimelineListener {
             return;
         }
         ServerboundPacket.UseItemOn click = c.click();
-        String block = click.position().x() + "," + click.position().y() + "," + click.position().z();
-        String what = "clicked the block " + block + " (" + click.face().name().toLowerCase(Locale.ROOT) + ")";
+        String block = c.position().x() + "," + c.position().y() + "," + c.position().z();
+        String face = c.face().name().toLowerCase(Locale.ROOT);
+        String what = click != null ? "clicked the block " + block + " (" + face + ")" : "dug the block " + block + " (" + face + ")";
         Map<String, String> details = new TreeMap<>();
-        details.put("reason", failure.stage().name().toLowerCase(Locale.ROOT));
-        details.put("hand", click.hand().name());
+        boolean noOutline = click == null && failure.stage() == BlockClick.Stage.CURSOR;
+        details.put("reason", noOutline ? "outline" : failure.stage().name().toLowerCase(Locale.ROOT));
+        details.put("action", click != null ? "click" : c.dig().action().name());
         details.put("block", block);
-        details.put("face", click.face().name());
-        details.put("cursor", format(click.location().x()) + "," + format(click.location().y()) + "," + format(click.location().z()));
-        details.put("inside", Boolean.toString(click.inside()));
+        details.put("face", c.face().name());
+        if (click != null) {
+            details.put("hand", click.hand().name());
+            details.put("cursor", format(click.location().x()) + "," + format(click.location().y()) + "," + format(click.location().z()));
+            details.put("inside", Boolean.toString(click.inside()));
+        }
         details.put("looks", String.join(",", rotations));
         AttackReach.Eye eye = c.eyes().getFirst();
         details.put("eye", format(eye.x()) + "," + format(eye.y0()) + ".." + format(eye.y1()) + "," + format(eye.z()));
-        details.put("offLookClicks", Long.toString(state.clicksSinceReport));
+        details.put("offLookBlockActions", Long.toString(state.clicksSinceReport));
         details.put("rotationUses", Long.toString(state.rotationSinceReport));
         state.clicksSinceReport = 0;
         state.rotationSinceReport = 0;
         String summary = switch (failure.stage()) {
-            case LOOK -> what + " at a point no look of the tick passes through";
+            case LOOK -> click != null ? what + " at a point no look of the tick passes through" : what + ", which no look of the tick meets";
             case FACE -> what + " on a face its look cannot enter through";
-            case CURSOR -> what + " at a point not on its outline";
+            case CURSOR -> noOutline ? what + ", which has no outline the client may see" : what + " at a point not on its outline";
             case REACH -> {
                 details.put("distance", format(failure.distance()));
                 details.put("allowed", format(c.blockHigh()));
@@ -309,7 +346,7 @@ public final class UseAimCheck implements TimelineListener {
         details.put("used", used);
         details.put("looks", String.join(",", rotations));
         details.put("rotationUses", Long.toString(state.rotationSinceReport));
-        details.put("offLookClicks", Long.toString(state.clicksSinceReport));
+        details.put("offLookBlockActions", Long.toString(state.clicksSinceReport));
         state.rotationSinceReport = 0;
         state.clicksSinceReport = 0;
         sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, from, at.sequence(), fromNanos, at.nanoTime(),

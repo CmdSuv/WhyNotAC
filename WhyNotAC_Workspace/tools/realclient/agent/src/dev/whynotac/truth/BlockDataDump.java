@@ -44,6 +44,12 @@ public final class BlockDataDump {
             "net.minecraft.world.level.block.PowderSnowBlock", "net.minecraft.world.level.block.ScaffoldingBlock",
             "net.minecraft.world.phys.shapes.CubeVoxelShape", "net.minecraft.world.phys.shapes.Shapes");
 
+    /**
+     * Where the outline is compared with the origin's ({@link BlockStates#MOVING_OUTLINE}): an offset is a hash of the
+     * position's x and z ({@code Mth.getSeed(x, 0, z)}), so these give it many values; y varies too.
+     */
+    static final int[][] MOVED_AT = movedAt();
+
     private final Mappings m;
 
     private BlockDataDump(Mappings m) {
@@ -104,6 +110,12 @@ public final class BlockDataDump {
         Class<?> powderSnow = cls("net.minecraft.world.level.block.PowderSnowBlock");
         Class<?> scaffolding = cls("net.minecraft.world.level.block.ScaffoldingBlock");
         ShapeReader shapes = new ShapeReader(axes);
+        Method toAabbs = method(VOXEL, "toAabbs()");
+        java.lang.reflect.Constructor<?> newPos = cls(POS).getConstructor(int.class, int.class, int.class);
+        Object[] spread = new Object[MOVED_AT.length];
+        for (int i = 0; i < spread.length; i++) {
+            spread[i] = newPos.newInstance(MOVED_AT[i][0], MOVED_AT[i][1], MOVED_AT[i][2]);
+        }
 
         BlockStates.Builder builder = new BlockStates.Builder(minecraft);
         int count = (int) size.invoke(registry);
@@ -125,6 +137,14 @@ public final class BlockDataDump {
             flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[3]) ? BlockStates.STURDY_SOUTH : 0;
             flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[4]) ? BlockStates.STURDY_WEST : 0;
             flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[5]) ? BlockStates.STURDY_EAST : 0;
+            Object outlineShape = outline.invoke(state, emptyGetter, zero, emptyContext);
+            Object outlineBoxes = toAabbs.invoke(outlineShape);
+            for (Object at : spread) {
+                if (!outlineBoxes.equals(toAabbs.invoke(outline.invoke(state, emptyGetter, at, emptyContext)))) {
+                    flags |= BlockStates.MOVING_OUTLINE;
+                    break;
+                }
+            }
 
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {
@@ -141,10 +161,18 @@ public final class BlockDataDump {
                         + (Boolean.TRUE.equals(fallingValue) ? 1 : 0);
             }
             builder.add(getKey.invoke(blocks, block).toString(), properties.toString(),
-                    shapes.read(collisionShape), shapes.read(outline.invoke(state, emptyGetter, zero, emptyContext)), flags, (float) friction.invoke(block),
+                    shapes.read(collisionShape), shapes.read(outlineShape), flags, (float) friction.invoke(block),
                     (float) speed.invoke(block), (float) jump.invoke(block), (float) destroySpeed.invoke(state, emptyGetter, zero), fluidText);
         }
         return builder.build();
+    }
+
+    private static int[][] movedAt() {
+        int[][] at = new int[64][];
+        for (int i = 0; i < at.length; i++) {
+            at[i] = new int[] {i * 37 - 1000, i % 7 * 9 - 30, 1000 - i * 53};
+        }
+        return at;
     }
 
     /** VoxelShape -> {@link Shape}, through the mappings. */

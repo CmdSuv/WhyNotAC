@@ -10,7 +10,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
-| `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) ya da tikin seçiminin yapamayacağı bir blok tıklaması (`UseItemOn`: bakışın dışında, giremeyeceği bir yüzde, outline'ın dışında (havaya), menzil dışında ya da blokların ardında) |
+| `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) ya da tikin seçiminin yapamayacağı bir blok tıklaması (`UseItemOn`: bakışın dışında, giremeyeceği bir yüzde, outline'ın dışında (havaya), menzil dışında ya da blokların ardında) ya da kırma (`START`/`STOP_DESTROY_BLOCK`: bakışın değmediği, giremediği yüzden, outline'ı olmayan, uzaktaki ya da duvarın ardındaki blok) |
 | `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
@@ -84,7 +84,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   gözlerin kutusunun yarı boyu artı 10⁻⁶ kadar küçültülünce merkezden çıkan ışının girdiği ve hiçbir ışının içinden
   başlamadığı bir kutu var; ışınların daha önce yaklaştığı hiçbir hücre bilinmeyen ya da outline'ı hücresinden
   taşabilecek bir durumda olamaz (`BlockStates.outlineInCell`: kutusu hücresinden taşan bambu, kürsü, piston kafası,
-  testi bitkisi; konumuyla kayan (`OFFSET`) çiçekler ve damlataş; açılırken büyüyen shulker kutusu). Hücresinde kalan
+  testi bitkisi; outline'ı konumuyla kayan (`MOVING_OUTLINE`, resmi client'ta 64 konumda ölçülür) çiçekler, bambu,
+  damlataş ve mangrov fidanı; açılırken büyüyen shulker kutusu). Kısa ot ve eğrelti de ofsetlidir ama outline'ları onu
+  yok sayar (`TallGrassBlock.getShape`): seçimi durdururlar ve kesin sayılırlar. Hücresinde kalan
   her outline'a ise o hücrenin içinde, yani bu hücreden önce değilir. Outline'lar resmi client'ın kayıt defterinden
   (`BlockDataDump`), boş dünya ve bağlam için alınır; client'ınki hiçbir zaman daha küçük değildir (ışık bloğu elde ışık
   yokken boş, iskele elde iskele yokken kendi şekli). Hiçbir varlığın kutusu bakışa bu bloktan önce değmiyorsa (her
@@ -135,6 +137,13 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   (kova, nilüfer) beklerken iddia yok, tıklamadan sonra gelen bir onay varsa dünyadan iddia yok. `attack_range`
   eşyasında (önce kendi ışınıyla seçer), dünya sınırı vuruşunda, izleyicide, göz bilinmezken iddia yok. Sunucunun
   `block_changed_ack`'i oyuncuyu geri alabileceği için göz, ardından gelen ilk konuma kadar bilinmez.
+- **Kırma (`BlockClick.judgeDig`):** `START_DESTROY_BLOCK` ve `STOP_DESTROY_BLOCK` tikin seçiminin bloğunu ve yüzünü
+  taşır (`MultiPlayerGameMode.startDestroyBlock`/`continueDestroyBlock`, `startAttack` ve `continueAttack`'ten); imleç
+  yoktur. Bakış o bloğun outline'ına bir gözden o yüzden dışarıdan girebilmeli (yüz dikdörtgeni boyunca geriye,
+  göz kutusuna değen bir ışın; ya da parçanın binde biri outline'ın içindeyse yüz bakışın en yakın ekseninin tersi),
+  menzilde ve araya kesin blok girmeden. Nedenler `look` (bakış bloğa değmiyor), `face`, `outline` (client'ın orada
+  tutabileceği bir outline yok: havayı kırma), `reach`, `blocks`. İptal (`ABORT_DESTROY_BLOCK`) kırılan bloğu adlandırır,
+  seçimi değil: yargılanmaz.
 - **İddia yok:** tikin bakışı bilinmiyorsa (`TickLook`) ve oyuncu binekte olabilirse (araç tik içinde onu döndürebilir;
   kullanım anında da, bakışın bilindiği anda da sorulur).
 - **Sınamalar:** `UseAimCheckTest` son gönderilen ve tikin kendi dönüşünü, başka dönüşü, tikin kullanımdan sonra
@@ -142,11 +151,15 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   bir bulguyu ve reddi sınar; tıklamalar için bakışın girdiği yerde, bakış dışında, yanlış yüzde, havaya ve bloğun
   içine, menzil dışında (sunucunun verdiği menzille de), duvarın ardında, gözün içinde olduğu bloktan (`inside`),
   onaydan sonra, client'ın henüz tutabileceği blokla, `attack_range` eşyasıyla, ışık bloğuyla ve konumu bilinmeyen bir
-  kullanımdan sonra; her kural için negatif kontrol yakalanır (tıklamalar için 12 mutasyon). Gerçek client oturumunun 10
-  kullanımı (kalkan, yiyecek, yay) ve bir bloğa tıklaması vaka açmadı; tıklama tam olarak değerlendirildi (dünya, göz ve
+  kullanımdan sonra; kırmalar için girilen ve arka yüzü, bakış dışındaki bloğu, havayı, menzil dışını, duvarın ardını,
+  gözün içinde olduğu bloğu, yalnızca bakışa dönük ama girilmeyen yüzü, iptali ve bitişi; her kural için negatif kontrol
+  yakalanır (tıklamalar için 12, kırmalar için 8 mutasyon). Gerçek client oturumunun 10
+  kullanımı (kalkan, yiyecek, yay), bir bloğa tıklaması ve kırması (toprağı önünden, zemini üstünden ve ardından bir
+  sonrakini: 3 başlama, 2 bitiş) vaka açmadı; tıklama ve beş kırma paketi tam olarak değerlendirildi (dünya, göz ve
   bakış biliniyordu) ve tutarlı çıktı. E2E sondası çubuğu önce bakışıyla, sonra bakışından 45° sapmış bir dönüşle
   kullanır; duvara önce oyunun sinüs tablosu ve `AABB.clip` aritmetiğiyle bit bit hesaplanmış imleçle, sonra imleci
-  bakışından 0.4 kaydırarak tıklar: yalnızca ikinci kullanım ve ikinci tıklama vaka açar.
+  bakışından 0.4 kaydırarak tıklar, duvarı önce bakışının girdiği doğu yüzünden, sonra arka (batı) yüzünden kırmaya
+  başlar: yalnızca ikinci kullanım, ikinci tıklama ve ikinci kırma vaka açar.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 

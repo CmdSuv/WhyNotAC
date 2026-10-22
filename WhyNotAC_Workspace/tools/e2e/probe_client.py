@@ -18,9 +18,11 @@ can be verified live:
   * an attack on the llama behind a wall, empty-handed (tick 315) -> an attack-aim case through blocks (P-M, shadow)
   * a use of the stick with a rotation 45 degrees off the look (tick 374) -> a use-aim case (P-M, shadow)
   * a click on the wall with the cursor off the look, empty-handed (tick 416) -> a use-aim case for the look (P-M, shadow)
+  * digging the wall on its far face, empty-handed (tick 437) -> a use-aim case for the face (P-M, shadow)
 
-After each use it sends its position once more (ticks 384 and 405: the server's acknowledgement of a use may roll a
-player back), and clicks the wall once where the vanilla pick puts the cursor (tick 395), which must open nothing.
+After each use it sends its position once more (ticks 384, 405, 421 and 431: the server's acknowledgement of a use may
+roll a player back), clicks the wall once where the vanilla pick puts the cursor (tick 395) and starts digging it on the
+face its look enters (tick 426), which must open nothing.
 
 It also attacks the nearest husk (tick 300), well within reach, which must open nothing. Before each attack its
 mouse turns its look to the target, as a player does.
@@ -64,7 +66,7 @@ PLAY_C_SET_ENTITY_MOTION = 0x63
 PLAY_C_CONTAINER_SET_CONTENT, PLAY_C_CONTAINER_SET_SLOT = 0x12, 0x14
 PLAY_S_CONTAINER_CLICK, PLAY_S_SET_CARRIED_ITEM = 0x11, 0x34
 PLAY_C_ADD_ENTITY, PLAY_S_INTERACT, PLAY_S_SWING = 0x01, 0x19, 0x3C
-PLAY_S_USE_ITEM, PLAY_S_USE_ITEM_ON = 0x40, 0x3F
+PLAY_S_USE_ITEM, PLAY_S_USE_ITEM_ON, PLAY_S_PLAYER_ACTION = 0x40, 0x3F, 0x28
 PLAY_C_TELEPORT_ENTITY, PLAY_C_ENTITY_POSITION_SYNC, PLAY_C_MOVE_ENTITY_POS, PLAY_C_MOVE_ENTITY_POS_ROT = 0x7B, 0x23, 0x33, 0x34
 # item registry ids (1.21.11, reports/registries.json)
 ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
@@ -359,7 +361,10 @@ WALL_VIOLATION_TICK = 315
 # the attacks: the server's BlockChangedAck for a use may roll the player back, and the probe sends no position after.
 USE_TICK, USE_AIM_VIOLATION_TICK = 367, 374
 # The position again after the uses, then an honest click on the wall and violation 10: the cursor 0.4 off the look.
-ANCHOR_TICKS, CLICK_TICK, CLICK_VIOLATION_TICK = (384, 405), 395, 416
+ANCHOR_TICKS, CLICK_TICK, CLICK_VIOLATION_TICK = (384, 405, 421, 431), 395, 416
+# An honest START_DESTROY_BLOCK on the wall's face towards the probe, then violation 11: the same on its far face.
+DIG_TICK, DIG_VIOLATION_TICK = 426, 437
+EMPTY_HAND_TICKS = (CLICK_TICK, CLICK_VIOLATION_TICK, DIG_TICK, DIG_VIOLATION_TICK)
 # Mth.SIN, as the game fills it: the view vector and the pick's cursor are computed exactly as the client does.
 SIN_TABLE = []
 
@@ -473,6 +478,7 @@ def main():
     uses, use_sequence = [], 0
     clicks = []
     anchors = []  # the yaw bits of the position packets at ANCHOR_TICKS
+    digs = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets. The client
@@ -535,8 +541,20 @@ def main():
             hit = struct.pack(">Q", packed) + varint(5)  # EAST
             client.send(PLAY_S_USE_ITEM_ON, varint(0) + hit + struct.pack(">fff??", *cursor, False, False) + varint(use_sequence))
             clicks.append({"tick": tick, "block": wall, "cursor": cursor, "yaw": click_yaw})
-        if inventory_step == 3 and tick in (CLICK_TICK - 1, CLICK_TICK + 1, CLICK_VIOLATION_TICK - 1, CLICK_VIOLATION_TICK + 1):
-            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick in (CLICK_TICK - 1, CLICK_VIOLATION_TICK - 1) else 2))
+        if inventory_step == 3 and tick in (DIG_TICK, DIG_VIOLATION_TICK):
+            # As startAttack with the pick on the wall: START_DESTROY_BLOCK with the pick's block and face (east, towards
+            # the probe), the empty hand selected the tick before; no abort, the next start restarts it. Violation 11: the
+            # west face, which the look cannot enter.
+            eye = (x, y + f32(1.62), z)
+            wall = (math.floor(x - 2), math.floor(y) + 1, math.floor(z))
+            aim = ((wall[0] + 1, eye[1], z), 0.0)
+            use_sequence += 1
+            face = 5 if tick == DIG_TICK else 4  # EAST, WEST
+            packed = (wall[0] & 0x3FFFFFF) << 38 | (wall[2] & 0x3FFFFFF) << 12 | (wall[1] & 0xFFF)
+            client.send(PLAY_S_PLAYER_ACTION, varint(0) + struct.pack(">QB", packed, face) + varint(use_sequence))
+            digs.append({"tick": tick, "block": wall, "face": "EAST" if face == 5 else "WEST"})
+        if inventory_step == 3 and (tick - 1 in EMPTY_HAND_TICKS or tick + 1 in EMPTY_HAND_TICKS):
+            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick + 1 in EMPTY_HAND_TICKS else 2))
         if inventory_step == 3 and tick in (WALL_VIOLATION_TICK - 1, WALL_VIOLATION_TICK + 1):
             client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick < WALL_VIOLATION_TICK else 2))
         # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
@@ -609,6 +627,7 @@ def main():
         "uses": uses,
         "clicks": clicks,
         "anchor_yaw_bits": anchors,
+        "digs": digs,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,

@@ -120,6 +120,12 @@ def main():
             if p["type"] == "InteractEntity" and p["kind"] == "ATTACK":
                 attacks += 1
                 due = i
+    # Digging: the client started and finished breaking blocks (the dirt ahead and the ground below), each start and
+    # finish with the pick's block and face (use-aim judges them; no case may open).
+    digs = [p for p in inbound if p["type"] == "PlayerAction" and p["action"] in ("START_DESTROY_BLOCK", "STOP_DESTROY_BLOCK")]
+    faces = sorted({p["face"] for p in digs})
+    check(sum(p["action"] == "STOP_DESTROY_BLOCK" for p in digs) >= 2 and "NORTH" in faces and "UP" in faces,
+          f"the client dug the dirt ahead and the ground below ({len(digs)} starts and finishes, faces {faces})")
     # The chest: from the client's answer to a transaction sent after the OpenScreen until its own ContainerClose, W was
     # held but no movement key and no action reached the server; after it, a movement key did.
     menu, pings, under, after = None, {}, [], None

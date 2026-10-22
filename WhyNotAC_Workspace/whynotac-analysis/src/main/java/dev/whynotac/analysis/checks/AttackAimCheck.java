@@ -45,7 +45,7 @@ import java.util.TreeMap;
 public final class AttackAimCheck implements TimelineListener {
 
     public static final String ID = "attack-aim";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     /** How far along the look a report measures the miss. */
     static final double REPORT_LENGTH = 64.0;

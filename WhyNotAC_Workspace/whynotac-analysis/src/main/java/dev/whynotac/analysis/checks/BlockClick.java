@@ -113,6 +113,132 @@ final class BlockClick {
         return null;
     }
 
+    /**
+     * Null if a dig ({@code START_DESTROY_BLOCK} or {@code STOP_DESTROY_BLOCK}: the block and face of the tick's pick,
+     * {@code MultiPlayerGameMode.startDestroyBlock}/{@code continueDestroyBlock}) may be the pick's along {@code v} from an
+     * eye of {@code eye}; else the first stage it fails ({@link Stage#CURSOR}: no outline the client may hold there). The
+     * hit is either the point a thousandth of the segment ahead, inside the block's outline, with the face opposite the
+     * look's nearest axis, or where a ray from an eye enters a box of the outline through that face, from outside, in reach
+     * and before any block certainly stops every ray. Nothing is claimed where the outline is not known exactly.
+     */
+    static Failure judgeDig(ClientWorld world, BlockPosition pos, BlockFace face, double[] v, AttackReach.Eye eye, double blockHigh,
+            double pickLow, double pickHigh, int before) {
+        if (world == null) {
+            return null;
+        }
+        int[] possible = world.possibleStatesBefore(pos.x(), pos.y(), pos.z(), before);
+        BlockStates states = world.states();
+        if (possible == null || world.hasUnlocatedPredictionBefore(before)) {
+            return null;
+        }
+        for (int state : possible) {
+            if (!states.isValid(state) || !states.outlineExact(state)) {
+                return null;
+            }
+        }
+        double r = eye.radius() + AttackAim.EPSILON;
+        double[] lo = {eye.x() - r, eye.y0() - r, eye.z() - r};
+        double[] hi = {eye.x() + r, eye.y1() + r, eye.z() + r};
+        double[] origin = {pos.x(), pos.y(), pos.z()};
+        boolean anyBox = false;
+        boolean met = false;
+        double entry = Double.POSITIVE_INFINITY; // the nearest s at which a ray from an eye enters a box through the face
+        boolean nearest = nearestOpposite(v, face);
+        for (int state : possible) {
+            Shape outline = states.outlineShape(state);
+            for (int b = 0; b < outline.boxCount(); b++) {
+                anyBox = true;
+                double[] min = new double[3];
+                double[] max = new double[3];
+                for (int i = 0; i < 3; i++) {
+                    min[i] = origin[i] + outline.box(b, i);
+                    max[i] = origin[i] + outline.box(b, i + 3);
+                }
+                // every offset from an eye to the box, widened by the clip's tolerance
+                AttackReach.Box offsets = new AttackReach.Box(min[0] - hi[0] - CURSOR, min[1] - hi[1] - CURSOR, min[2] - hi[2] - CURSOR,
+                        max[0] - lo[0] + CURSOR, max[1] - lo[1] + CURSOR, max[2] - lo[2] + CURSOR);
+                if (nearest && meetsWithin(v, offsets, INSIDE_FRACTION * pickLow * (1 - 1e-9), INSIDE_FRACTION * pickHigh * (1 + 1e-9))) {
+                    return null; // the inside hit: a thousandth of the segment, in the outline
+                }
+                met |= AttackAim.meets(v, offsets);
+                entry = Math.min(entry, faceEntry(v, face, min, max, lo, hi, pickHigh));
+            }
+        }
+        if (!anyBox) {
+            return Failure.at(Stage.CURSOR);
+        }
+        if (!met) {
+            return Failure.at(Stage.LOOK);
+        }
+        if (entry == Double.POSITIVE_INFINITY) {
+            return Failure.at(Stage.FACE);
+        }
+        double norm = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (entry * norm >= blockHigh + CURSOR) {
+            return new Failure(Stage.REACH, entry * norm, Double.NaN, 0, 0, 0);
+        }
+        double stop = world.certainOutlineHitBefore(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], v[0], v[1], v[2], entry, before);
+        if (stop < entry) {
+            double y = (lo[1] + hi[1]) / 2.0;
+            return new Failure(Stage.BLOCKS, entry * norm, (entry - stop) * norm, (int) Math.floor((lo[0] + hi[0]) / 2.0 + v[0] * stop),
+                    (int) Math.floor(y + v[1] * stop), (int) Math.floor((lo[2] + hi[2]) / 2.0 + v[2] * stop));
+        }
+        return null;
+    }
+
+    /** Whether the ray from the origin along {@code v} is in the box for some {@code s} in {@code [from, to]}. */
+    private static boolean meetsWithin(double[] v, AttackReach.Box d, double from, double to) {
+        double low = from;
+        double high = to;
+        double[] min = {d.minX(), d.minY(), d.minZ()};
+        double[] max = {d.maxX(), d.maxY(), d.maxZ()};
+        for (int i = 0; i < 3 && low <= high; i++) {
+            if (v[i] == 0.0) {
+                if (min[i] > 0.0 || max[i] < 0.0) {
+                    return false;
+                }
+                continue;
+            }
+            double a = min[i] / v[i];
+            double b = max[i] / v[i];
+            low = Math.max(low, Math.min(a, b));
+            high = Math.min(high, Math.max(a, b));
+        }
+        return low <= high;
+    }
+
+    /**
+     * The smallest {@code s > 0} at which a ray along {@code v} from an eye in {@code [lo, hi]} crosses the box's
+     * {@code face} inwards inside the face (within the clip's tolerance): where it enters the box through it; positive
+     * infinity if none does.
+     */
+    static double faceEntry(double[] v, BlockFace face, double[] min, double[] max, double[] lo, double[] hi, double pickHigh) {
+        if (!entersThrough(v, face, pickHigh)) {
+            return Double.POSITIVE_INFINITY;
+        }
+        int axis = face.stepX() != 0 ? 0 : face.stepY() != 0 ? 1 : 2;
+        double plane = face.stepX() + face.stepY() + face.stepZ() > 0 ? max[axis] : min[axis];
+        double low = Math.min((plane - hi[axis]) / v[axis], (plane - lo[axis]) / v[axis]);
+        double high = Math.max((plane - hi[axis]) / v[axis], (plane - lo[axis]) / v[axis]);
+        low = Math.max(low, 0.0);
+        for (int i = 0; i < 3 && low <= high; i++) {
+            if (i == axis) {
+                continue;
+            }
+            double from = min[i] - CLIP_TOLERANCE - CURSOR - hi[i];
+            double to = max[i] + CLIP_TOLERANCE + CURSOR - lo[i];
+            if (v[i] == 0.0) {
+                if (from > 0.0 || to < 0.0) {
+                    return Double.POSITIVE_INFINITY;
+                }
+                continue;
+            }
+            low = Math.max(low, Math.min(from / v[i], to / v[i]));
+            high = Math.min(high, Math.max(from / v[i], to / v[i]));
+        }
+        return low <= high && high > 0.0 ? Math.max(low, Double.MIN_VALUE) : Double.POSITIVE_INFINITY;
+    }
+
     /** {@code AABB.getDirection}: the face a segment along {@code v} (times at most {@code pickHigh}) can enter a box through. */
     static boolean entersThrough(double[] v, BlockFace face, double pickHigh) {
         // the face's outward normal points against the motion: WEST (-x) is entered moving +x

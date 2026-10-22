@@ -489,6 +489,20 @@ class ClientWorldTest {
     }
 
     @Test
+    void shortGrassStopsTheRayItsOffsetDoesNotMove() {
+        // TallGrassBlock.getShape ignores the offset; the pick (Block.OUTLINE) stops in it: its box x 2/16..14/16, y to 13/16
+        airWorld();
+        put(5, 65, 0, STONE);
+        put(2, 65, 0, STATES.firstStateOf("minecraft:short_grass"));
+        sync();
+        assertEquals(1.625, east(0.5, 65.62, 0.5, R, 10), 1e-3);
+        assertEquals(4.5, east(0.5, 65.9, 0.5, R, 10), 1e-3, "over it");
+        put(2, 65, 0, STATES.firstStateOf("minecraft:poppy")); // FlowerBlock.getShape moves it by the offset
+        sync();
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.5, 0.5, R, 10));
+    }
+
+    @Test
     void aBlockStopsTheRayOnlyIfItIsThereInEveryStateTheClientMayHold() {
         airWorld();
         put(3, 65, 0, STONE);

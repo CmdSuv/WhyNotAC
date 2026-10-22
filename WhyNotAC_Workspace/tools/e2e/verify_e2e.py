@@ -250,10 +250,12 @@ def verify_cases(probe, log, work_dir, check):
           f"the probe used the stick with its look, then with a rotation 45 degrees off it: {uses}")
     clicks = probe.get("clicks", [])
     check(len(clicks) == 2, f"the probe clicked the wall where its pick put the cursor, then 0.4 off its look: {clicks}")
-    check(len(dossiers) == 8 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+    digs = probe.get("digs", [])
+    check(len(digs) == 2, f"the probe started digging the wall on the face its look enters, then on its far face: {digs}")
+    check(len(dossiers) == 9 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
           and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("action-grammar", [])) == 1
-          and len(by_check.get("attack-aim", [])) == 2 and len(by_check.get("use-aim", [])) == 2,
-          f"exactly eight cases opened, one per violation (none for the attacks in reach and in the look, the honest use and click): "
+          and len(by_check.get("attack-aim", [])) == 2 and len(by_check.get("use-aim", [])) == 3,
+          f"exactly nine cases opened, one per violation (none for the attacks in reach and in the look, the honest use, click and dig): "
           f"{sorted((d['check'], d['summary']) for d in dossiers)}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
@@ -301,9 +303,16 @@ def verify_cases(probe, log, work_dir, check):
     if click and len(clicks) == 2:
         dd = click["details"]
         wall = ",".join(str(c) for c in clicks[1]["block"])
-        check(click["evidenceClass"] == "P-M" and dd.get("block") == wall and dd.get("face") == "EAST" and dd.get("offLookClicks") == "1"
+        check(click["evidenceClass"] == "P-M" and dd.get("block") == wall and dd.get("face") == "EAST" and dd.get("offLookBlockActions") == "1"
               and dd.get("inside") == "false",
               f"the click case is the one 0.4 off the look, the honest click on the same face not counted (P-M): {click['summary']}")
+    dig = uses_by.get("face")
+    check(dig is not None, f"a use-aim case for a dig on a face the look cannot enter: {sorted(uses_by)}")
+    if dig and len(digs) == 2:
+        dd = dig["details"]
+        check(dig["evidenceClass"] == "P-M" and dd.get("action") == "START_DESTROY_BLOCK" and dd.get("face") == "WEST"
+              and dd.get("block") == ",".join(str(c) for c in digs[1]["block"]) and dd.get("offLookBlockActions") == "1",
+              f"the dig case is the far face, the honest start on the near one not counted (P-M): {dig['summary']}")
     use = uses_by.get("rotation")
     check(use is not None, f"a use-aim case for the rotation: {sorted(uses_by)}")
     if use and len(uses) == 2:
@@ -323,13 +332,13 @@ def verify_cases(probe, log, work_dir, check):
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
     # a re-run finds every finding of the dossier's check in the recording: attack-aim has two
-    check(len(verified) == len(dossiers) == 8 and all(v["verified"] is True
+    check(len(verified) == len(dossiers) == 9 and all(v["verified"] is True
                                                       and v["evidenceInRecording"] == len(by_check.get(v["expected"].split("@")[0], [])) for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
-    check(re.search(r"WhyNotAC cases \(newest first\): 8", log) is not None
+    check(re.search(r"WhyNotAC cases \(newest first\): 9", log) is not None
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
                   for d in dossiers),
-          "/whynotac cases lists all eight")
+          "/whynotac cases lists all nine")
 
 
 def verify_self(log, check):
