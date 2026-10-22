@@ -10,7 +10,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
-| `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) |
+| `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) ya da tikin seçiminin yapamayacağı bir blok tıklaması (`UseItemOn`: bakışın dışında, giremeyeceği bir yüzde, outline'ın dışında (havaya), menzil dışında ya da blokların ardında) |
 | `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
@@ -119,13 +119,34 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   ile tikin `sendPosition`'ı arasında oyuncuyu hiçbir şey döndürmez; dönüş, tikin bakışıdır (`TickLook`: tikin kendi
   hareket paketininki, yoksa en son gönderilen), bit bit aynı. Başka bir dönüşle kullanım kanıttır: yalnızca sunucu
   için dönen (atışı, inci ya da iksiri oyuncunun bakışı dönmeden nişanlayan) ya da pakete sahte dönüş yazan client.
+- **Bloğa tıklama (`BlockClick`):** `ServerboundUseItemOnPacket`'in bloğu, yüzü ve imleci tikin seçimindendir
+  (`LocalPlayer.pick` → `Entity.pick`: gözden `getViewVector(1) * d` boyunca `Level.clip`, `d` blok ve varlık
+  menzillerinin büyüğü, `OUTLINE` şekilleri; konum `block_interaction_range`'den yakın değilse ıska). Clip ya gözden
+  parçanın binde biri kadar ötedeki nokta şeklin içindeyse o noktayı (`inside`, yüz bakışın en yakın ekseninin tersi),
+  ya da `AABB.clip` ile parçanın bir kutuya dışarıdan girdiği noktayı verir (o kutunun yüzünde, parçanın içeri doğru
+  geçtiği yüz; eksen boyunca 10⁻⁷'den büyük harekette, diğer iki koordinat 10⁻⁷ içinde). Paket konumu bloğa göre float
+  olarak taşır. Tıklama ancak şunlar tutarsa seçimindir: konum bir gözden bakışın doğrusu üzerinde ve ilerisinde
+  (`look`), yüz bakışın girebileceği yüz (`face`), konum client'ın orada tutabileceği bir outline'ın o yüzünde
+  (`cursor`: havaya ya da olmayan bloğa tıklama; outline'ı `BlockStates.outlineExact` değilse, ışık ve iskele gibi elde
+  tutulana, shulker kutusu gibi blok varlığına ya da konuma bağlıysa iddia yok), menzilde (`reach`) ve bakışı ondan
+  önce kesin durduran blok yok (`blocks`, `ClientWorld.certainOutlineHitBefore`). Hiçbir bakış ve poz için tutmuyorsa
+  kanıttır; bulgu en ileri giden birleşimin nedenini verir. Bloklar client'ın seçiminin gördükleridir: tikin ilk blok
+  eyleminin kendi tahminlerinden öncesi (`ClientWorld.possibleStatesBefore`), konumu bilinmeyen bir kullanım tahmini
+  (kova, nilüfer) beklerken iddia yok, tıklamadan sonra gelen bir onay varsa dünyadan iddia yok. `attack_range`
+  eşyasında (önce kendi ışınıyla seçer), dünya sınırı vuruşunda, izleyicide, göz bilinmezken iddia yok. Sunucunun
+  `block_changed_ack`'i oyuncuyu geri alabileceği için göz, ardından gelen ilk konuma kadar bilinmez.
 - **İddia yok:** tikin bakışı bilinmiyorsa (`TickLook`) ve oyuncu binekte olabilirse (araç tik içinde onu döndürebilir;
   kullanım anında da, bakışın bilindiği anda da sorulur).
 - **Sınamalar:** `UseAimCheckTest` son gönderilen ve tikin kendi dönüşünü, başka dönüşü, tikin kullanımdan sonra
   döndüğü durumu, bit bit karşılaştırmayı, yanıt olabilecek paketi, bilinmeyen bakışı, iki binek durumunu, saniyede
-  bir bulguyu ve reddi sınar; her kural için negatif kontrol yakalanır. Gerçek client oturumunun 10 kullanımı (kalkan,
-  yiyecek, yay) vaka açmadı; E2E sondası çubuğu önce bakışıyla, sonra bakışından 45° sapmış bir dönüşle kullanır ve
-  yalnızca ikincisi vaka açar.
+  bir bulguyu ve reddi sınar; tıklamalar için bakışın girdiği yerde, bakış dışında, yanlış yüzde, havaya ve bloğun
+  içine, menzil dışında (sunucunun verdiği menzille de), duvarın ardında, gözün içinde olduğu bloktan (`inside`),
+  onaydan sonra, client'ın henüz tutabileceği blokla, `attack_range` eşyasıyla, ışık bloğuyla ve konumu bilinmeyen bir
+  kullanımdan sonra; her kural için negatif kontrol yakalanır (tıklamalar için 12 mutasyon). Gerçek client oturumunun 10
+  kullanımı (kalkan, yiyecek, yay) ve bir bloğa tıklaması vaka açmadı; tıklama tam olarak değerlendirildi (dünya, göz ve
+  bakış biliniyordu) ve tutarlı çıktı. E2E sondası çubuğu önce bakışıyla, sonra bakışından 45° sapmış bir dönüşle
+  kullanır; duvara önce oyunun sinüs tablosu ve `AABB.clip` aritmetiğiyle bit bit hesaplanmış imleçle, sonra imleci
+  bakışından 0.4 kaydırarak tıklar: yalnızca ikinci kullanım ve ikinci tıklama vaka açar.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 

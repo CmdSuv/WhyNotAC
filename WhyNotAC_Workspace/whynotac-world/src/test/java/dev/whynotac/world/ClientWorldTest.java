@@ -539,4 +539,44 @@ class ClientWorldTest {
         out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0))); // the eye's chunk again: the client may not have it yet
         assertEquals(Double.POSITIVE_INFINITY, east(14.5, 65.62, 0.5, R, 10));
     }
+
+    @Test
+    void theWorldBeforeAnActionLeavesOutThatActionsOwnPredictionsOnly() {
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        sync();
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(5, 10, 5), BlockFace.UP, new Vec3d(5.5, 11, 5.5), false, false, 7));
+        assertEquals(null, world.possibleStates(5, 10, 5));
+        assertArrayEquals(new int[] {STONE}, world.possibleStatesBefore(5, 10, 5, 7), "what the pick saw");
+        assertEquals(null, world.possibleStatesBefore(5, 10, 5, 8), "a later action's pick may see the prediction");
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(5, 10, 5), BlockFace.UP, new Vec3d(5.5, 11, 5.5), false, false, 8));
+        assertEquals(null, world.possibleStatesBefore(5, 10, 5, 8), "the earlier prediction is still the client's");
+        out(new ClientboundPacket.BlockChangedAck(7));
+        sync();
+        assertArrayEquals(new int[] {STONE}, world.possibleStatesBefore(5, 10, 5, 8), "acknowledged: only the later one is left");
+        assertEquals(null, world.possibleStates(5, 10, 5));
+    }
+
+    @Test
+    void anItemUseWhoseBlocksCannotBeLocatedHidesTheWorldAfterIt() {
+        airWorld();
+        put(3, 65, 0, STONE);
+        sync();
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 5, 0F, 0F)); // a lily pad or a bucket: wherever the client's ray hit
+        assertFalse(world.hasUnlocatedPredictionBefore(5));
+        assertTrue(world.hasUnlocatedPredictionBefore(6));
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10));
+        assertEquals(2.5, world.certainOutlineHitBefore(0.5 - R, 65.62 - R, 0.5 - R, 0.5 + R, 65.62 + R, 0.5 + R, 1, 0, 0, 10, 5), 1e-3,
+                "the pick of that use saw no change of its own");
+    }
+
+    @Test
+    void theBlockAnActionClicksIsInTheWorldItsPickSaw() {
+        airWorld();
+        put(3, 65, 0, STONE);
+        sync();
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(3, 65, 0), BlockFace.WEST, new Vec3d(3, 65.62, 0.5), false, false, 9));
+        assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "the client's prediction: not known");
+        assertEquals(2.5, world.certainOutlineHitBefore(0.5 - R, 65.62 - R, 0.5 - R, 0.5 + R, 65.62 + R, 0.5 + R, 1, 0, 0, 10, 9), 1e-3);
+    }
 }

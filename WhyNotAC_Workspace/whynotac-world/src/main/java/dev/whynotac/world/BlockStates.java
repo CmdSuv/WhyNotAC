@@ -276,6 +276,16 @@ public final class BlockStates {
         return withinCell[outline[state]] && !has(state, OFFSET) && !block[state].endsWith("shulker_box");
     }
 
+    /**
+     * Whether the client's outline of the state is {@link #outlineShape} exactly, wherever the block is and whatever the
+     * player holds: not moved by its position ({@link #OFFSET}), not a shulker box's (its block entity's box), not light's
+     * or scaffolding's (a full block while the player holds one).
+     */
+    public boolean outlineExact(int state) {
+        return !has(state, OFFSET) && !block[state].endsWith("shulker_box") && !block[state].equals("minecraft:light")
+                && !block[state].equals("minecraft:scaffolding");
+    }
+
     public int flags(int state) {
         return flags[state];
     }

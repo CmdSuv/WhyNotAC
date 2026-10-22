@@ -40,7 +40,7 @@ import java.util.UUID;
  * {@code Player.isCreative()} and {@code isSpectator()} read the player's own entry in the client's player
  * list (the entry it cached; a removed and re-added entry is not followed). The pick starts at the camera
  * entity's eye, which is the player's own unless {@code SetCamera} named another entity.
- * {@code entity_interaction_range} and {@code scale} follow {@code UpdateAttributes} for the player's id,
+ * {@code entity_interaction_range}, {@code block_interaction_range} and {@code scale} follow {@code UpdateAttributes} for the player's id,
  * and respawn keeps their modifiers only if the server says so (otherwise the base values).
  *
  * <p>Confined to the session's analysis thread.
@@ -50,11 +50,13 @@ public final class ClientSelf {
     /** {@code LocalPlayer.sendPosition}: a position is sent when it moved more than this (Euclidean) since the last one. */
     public static final double SEND_THRESHOLD = 2.0E-4;
     public static final String INTERACTION_RANGE = "minecraft:entity_interaction_range";
+    public static final String BLOCK_RANGE = "minecraft:block_interaction_range";
     public static final String SCALE = "minecraft:scale";
     /** {@code Player.createAttributes} and the attributes' ranges ({@code Attributes}). */
     static final double DEFAULT_INTERACTION_RANGE = 3.0;
     static final double MIN_INTERACTION_RANGE = 0.0;
     static final double MAX_INTERACTION_RANGE = 64.0;
+    static final double DEFAULT_BLOCK_RANGE = 4.5;
     static final double DEFAULT_SCALE = 1.0;
     static final double MIN_SCALE = 0.0625;
     static final double MAX_SCALE = 16.0;
@@ -103,9 +105,11 @@ public final class ClientSelf {
     /** The cached entry was removed from the list while the player held it. */
     private boolean listEntryReplaced;
     private final Ranges interactionRange = new Ranges(DEFAULT_INTERACTION_RANGE);
+    private final Ranges blockRange = new Ranges(DEFAULT_BLOCK_RANGE);
     /** Cached: the eye height follows it only when the dimensions are refreshed. */
     private final Ranges scale = new Ranges(DEFAULT_SCALE, true);
     private double interactionBase = DEFAULT_INTERACTION_RANGE;
+    private double blockBase = DEFAULT_BLOCK_RANGE;
     private double scaleBase = DEFAULT_SCALE;
     private boolean basesKnown = true;
 
@@ -159,12 +163,15 @@ public final class ClientSelf {
                 vehicle.set(seq, NONE);
                 if (first) {
                     interactionRange.set(seq, DEFAULT_INTERACTION_RANGE, DEFAULT_INTERACTION_RANGE);
+                    blockRange.set(seq, DEFAULT_BLOCK_RANGE, DEFAULT_BLOCK_RANGE);
                     scale.set(seq, DEFAULT_SCALE, DEFAULT_SCALE);
                     interactionBase = DEFAULT_INTERACTION_RANGE;
+                    blockBase = DEFAULT_BLOCK_RANGE;
                     scaleBase = DEFAULT_SCALE;
                     basesKnown = true;
                 } else {
                     interactionRange.widen(seq, DEFAULT_INTERACTION_RANGE);
+                    blockRange.widen(seq, DEFAULT_BLOCK_RANGE);
                     scale.widen(seq, DEFAULT_SCALE);
                     basesKnown = false;
                 }
@@ -181,14 +188,17 @@ public final class ClientSelf {
                 if (keep < 0) {
                     // not recorded: kept or base only
                     interactionRange.widen(seq, interactionBase);
+                    blockRange.widen(seq, blockBase);
                     scale.widen(seq, scaleBase);
                 } else if ((keep & ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS) == 0) {
                     // assignBaseValues: the base values, no modifiers
                     if (basesKnown) {
                         interactionRange.set(seq, interactionBase, interactionBase);
+                        blockRange.set(seq, blockBase, blockBase);
                         scale.set(seq, scaleBase, scaleBase);
                     } else {
                         interactionRange.unknown(seq, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
+                        blockRange.unknown(seq, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
                         scale.unknown(seq, MIN_SCALE, MAX_SCALE);
                     }
                 }
@@ -256,6 +266,10 @@ public final class ClientSelf {
                         double[] range = AttributeValues.range(attribute, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
                         interactionRange.set(seq, range[0], range[1]);
                         interactionBase = clamp(attribute.base(), MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
+                    } else if (attribute.key().equals(BLOCK_RANGE)) {
+                        double[] range = AttributeValues.range(attribute, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
+                        blockRange.set(seq, range[0], range[1]);
+                        blockBase = clamp(attribute.base(), MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
                     } else if (attribute.key().equals(SCALE)) {
                         double[] range = AttributeValues.range(attribute, MIN_SCALE, MAX_SCALE);
                         scale.set(seq, range[0], range[1]);
@@ -272,6 +286,7 @@ public final class ClientSelf {
                 listMode.set(seq, MODE_UNKNOWN);
                 listEntryReplaced = true;
                 interactionRange.unknown(seq, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
+                blockRange.unknown(seq, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
                 scale.unknown(seq, MIN_SCALE, MAX_SCALE);
                 basesKnown = false;
             }
@@ -321,6 +336,7 @@ public final class ClientSelf {
         listMode.set(seq, MODE_UNKNOWN);
         listEntryReplaced = true;
         interactionRange.unknown(seq, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
+        blockRange.unknown(seq, MIN_INTERACTION_RANGE, MAX_INTERACTION_RANGE);
         scale.unknown(seq, MIN_SCALE, MAX_SCALE);
         basesKnown = false;
     }
@@ -371,6 +387,7 @@ public final class ClientSelf {
         localMode.prune(certain);
         listMode.prune(certain);
         interactionRange.prune(certain);
+        blockRange.prune(certain);
     }
 
     private long windowEnd() {
@@ -448,6 +465,11 @@ public final class ClientSelf {
     /** Whether the player may be riding now (a passenger's rotation and position follow its vehicle). */
     public boolean mayRide() {
         return vehicle.mayBeOtherThan(certain, windowEnd(), NONE);
+    }
+
+    /** {@code [low, high]} of the {@code block_interaction_range} the client may have now ({@code Player.blockInteractionRange}). */
+    public double[] blockRangeBounds() {
+        return blockRange.hull(certain, windowEnd());
     }
 
     /** {@code [low, high]} of the {@code entity_interaction_range} the client may have now. */

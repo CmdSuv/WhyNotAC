@@ -230,6 +230,22 @@ class ClientSelfTest {
     }
 
     @Test
+    void theBlockRangeFollowsItsOwnAttribute() {
+        assertEquals(4.5, self.blockRangeBounds()[1], "Player.createAttributes");
+        out(attribute(ClientSelf.BLOCK_RANGE, 4.5,
+                new ClientboundPacket.UpdateAttributes.Modifier("minecraft:creative_mode_block_range", 0.5, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE)));
+        int after = ping();
+        assertEquals(4.5, self.blockRangeBounds()[0], "not processed yet: either");
+        assertEquals(5.0, self.blockRangeBounds()[1]);
+        ack(after);
+        assertEquals(5.0, self.blockRangeBounds()[0]);
+        assertEquals(3.0, self.maxInteractionRange(), "the entity range is another attribute");
+        out(new ClientboundPacket.Respawn(OVERWORLD, SURVIVAL, 0));
+        sync();
+        assertEquals(4.5, self.blockRangeBounds()[1], "assignBaseValues: the base without modifiers");
+    }
+
+    @Test
     void respawnKeepsModifiersOnlyIfTheServerSaysSo() {
         out(attribute(ClientSelf.INTERACTION_RANGE, 3.5,
                 new ClientboundPacket.UpdateAttributes.Modifier("test:long", 2.0, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE)));

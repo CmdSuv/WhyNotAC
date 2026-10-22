@@ -68,9 +68,9 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 - Bakış ve engel (`C2`): saldırılan varlığın tikin bakışıyla kesişmesi (görev #58) ve bakışın ona, kesin durduran
   bir bloktan önce değmesi (duvar arkasından vuruş, görev #59) `attack-aim` ile yapıldı; blokların seçim (outline)
   şekilleri resmi client'tan.
-- Blok erişimi ve yüz doğrulama (`W2`): eşya kullanımının dönüşü tikin bakışıyla bit bit aynı (`use-aim`, görev #60)
-  yapıldı. Kalan: bloğa kullanımın imleci bakış ışınında, yüzünden girerek, menzilde ve araya blok girmeden; kırma
-  paketlerinin bloğu ve yüzü. Kırma ilerlemesi (`W1`), yerleştirme (`W3`).
+- Blok erişimi ve yüz doğrulama (`W2`): eşya kullanımının dönüşü tikin bakışıyla bit bit aynı ve bloğa tıklamanın
+  imleci bakışın o bloğun outline'ına girdiği yerde, girebileceği yüzde, menzilde ve araya blok girmeden (`use-aim`,
+  görev #60) yapıldı. Kalan: kırma paketlerinin bloğu ve yüzü. Kırma ilerlemesi (`W1`), yerleştirme (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
 
 ## Faz 4 — Doğrulama ve veri

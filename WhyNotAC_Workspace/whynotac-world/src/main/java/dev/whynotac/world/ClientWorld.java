@@ -77,6 +77,8 @@ public final class ClientWorld {
     private final List<View> pendingViews = new ArrayList<>();
     /** Client predictions by position: the highest block-action sequence that touched it. */
     private final Map<Long, Integer> predictions = new HashMap<>();
+    /** The lowest block-action sequence that may still hold each position in {@link #predictions}. */
+    private final Map<Long, Integer> earliestPredictions = new HashMap<>();
     /** Block-action sequences of item uses whose block changes (if any) WhyNotAC cannot locate. */
     private final ArrayDeque<Integer> unlocatedPredictions = new ArrayDeque<>();
     /** block_changed_ack values the client may not have processed yet: [outbound sequence, acked sequence]. */
@@ -280,6 +282,8 @@ public final class ClientWorld {
         if (confirmedBlockAck != Integer.MIN_VALUE) {
             int acked = confirmedBlockAck;
             predictions.values().removeIf(sequence -> sequence <= acked);
+            earliestPredictions.keySet().retainAll(predictions.keySet());
+            earliestPredictions.replaceAll((key, sequence) -> sequence <= acked ? acked + 1 : sequence); // some later one is left
             while (!unlocatedPredictions.isEmpty() && unlocatedPredictions.peekFirst() <= acked) {
                 unlocatedPredictions.pollFirst();
             }
@@ -308,6 +312,7 @@ public final class ClientWorld {
         pendingViews.clear();
         // A new ClientLevel has a new BlockStatePredictionHandler: its block-action sequence starts again.
         predictions.clear();
+        earliestPredictions.clear();
         unlocatedPredictions.clear();
         pendingBlockAcks.clear();
         confirmedBlockAck = Integer.MIN_VALUE;
@@ -396,6 +401,7 @@ public final class ClientWorld {
         int[][] offsets = withNeighbours ? PREDICTION_NEIGHBOURS : PREDICTION_SELF;
         for (int[] o : offsets) {
             predictions.merge(blockKey(x + o[0], y + o[1], z + o[2]), sequence, Math::max);
+            earliestPredictions.merge(blockKey(x + o[0], y + o[1], z + o[2]), sequence, Math::min);
         }
     }
 
@@ -484,12 +490,23 @@ public final class ClientWorld {
      * client's own prediction may hold it, or a state is not known.
      */
     public int[] possibleStates(int x, int y, int z) {
+        return possibleStatesBefore(x, y, z, Integer.MAX_VALUE);
+    }
+
+    /**
+     * As {@link #possibleStates}, for the client before its block action {@code sequence} and the later ones: what its
+     * pick saw when it made that action (the client predicts its own action's changes after the pick). Null also where an
+     * earlier own prediction may hold the block.
+     */
+    public int[] possibleStatesBefore(int x, int y, int z, int sequence) {
         int now = blockState(x, y, z);
         if (now == UNKNOWN) {
             return null;
         }
-        if (settled(x, y, z)) {
-            return new int[] {now};
+        long key = blockKey(x, y, z);
+        Integer earliest = earliestPredictions.get(key);
+        if (earliest != null && earliest < sequence) {
+            return null;
         }
         int cx = x >> 4;
         int cz = z >> 4;
@@ -501,9 +518,11 @@ public final class ClientWorld {
                 return null;
             }
         }
-        long key = blockKey(x, y, z);
+        if (!unsettledBlocks.containsKey(key)) {
+            return new int[] {now};
+        }
         ArrayDeque<Integer> before = previousStates.get(key);
-        if (predictions.containsKey(key) || before == null) {
+        if (before == null) {
             return null;
         }
         int[] out = new int[before.size() + 1];
@@ -516,6 +535,11 @@ public final class ClientWorld {
         }
         out[i] = now;
         return out;
+    }
+
+    /** Whether the client may hold blocks of an item use before {@code sequence} that WhyNotAC cannot locate. */
+    public boolean hasUnlocatedPredictionBefore(int sequence) {
+        return !unlocatedPredictions.isEmpty() && unlocatedPredictions.peekFirst() < sequence;
     }
 
     /**
@@ -531,11 +555,18 @@ public final class ClientWorld {
      * plus {@link #OUTLINE_MARGIN} (every ray is then that deep in the outline box at {@code t}) and that no ray starts in;
      * and no cell some ray comes near before can hold a state that is not known or whose outline may leave its cell
      * ({@link BlockStates#outlineInCell}): where the client meets an outline inside its cell, it is before this one. The
-     * outline of an empty world and context is never larger than the client's (see {@link BlockStates}).
+     * outline of an empty world and context is never larger than the client's (see {@link BlockStates}). Nothing while
+     * an item use may have changed blocks WhyNotAC cannot locate ({@link #hasUnlocatedPrediction}).
      */
     public double certainOutlineHit(double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double dx, double dy, double dz,
             double maxT) {
-        if (storage == null || !(maxT > 0.0)) {
+        return certainOutlineHitBefore(minX, minY, minZ, maxX, maxY, maxZ, dx, dy, dz, maxT, Integer.MAX_VALUE);
+    }
+
+    /** As {@link #certainOutlineHit}, in the world the client's pick saw before its block action {@code sequence} ({@link #possibleStatesBefore}). */
+    public double certainOutlineHitBefore(double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double dx, double dy,
+            double dz, double maxT, int sequence) {
+        if (storage == null || !(maxT > 0.0) || hasUnlocatedPredictionBefore(sequence)) {
             return Double.POSITIVE_INFINITY;
         }
         double x = (minX + maxX) / 2.0;
@@ -565,7 +596,7 @@ public final class ClientWorld {
                     if (!(near < maxT) || near >= Math.min(best, unsure)) {
                         continue;
                     }
-                    int[] possible = possibleStates(cx, cy, cz);
+                    int[] possible = possibleStatesBefore(cx, cy, cz, sequence);
                     double cell = possible == null ? Double.NaN : Double.NEGATIVE_INFINITY;
                     for (int i = 0; possible != null && i < possible.length; i++) {
                         int state = possible[i];

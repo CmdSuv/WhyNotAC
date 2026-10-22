@@ -11,7 +11,7 @@
 #   see fetch_interop_plugins.sh), and E2E_EXPECT_PLUGINS="ViaVersion packetevents" checks they were enabled.
 set -euo pipefail
 WORK_DIR=$(mkdir -p "$1" && cd "$1" && pwd)
-PROBE_SECONDS=${2:-19}
+PROBE_SECONDS=${2:-21}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PAPER_JAR=paper-1.21.11-132.jar

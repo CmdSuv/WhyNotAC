@@ -310,4 +310,205 @@ class UseAimCheckTest {
         assertEquals(List.of(), evidence);
         assertEquals(1, rejected.size());
     }
+
+    // --- clicks on blocks ---
+
+    private static final double EYE = 64.0 + 1.62F;
+    private int clickSequence = 100;
+
+    private void put(int x, int y, int z, String block) {
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(x, y, z), STATES.firstStateOf(block)));
+    }
+
+    private void click(int x, int y, int z, dev.whynotac.protocol.packet.BlockFace face, double cx, double cy, double cz, boolean inside) {
+        in(new ServerboundPacket.UseItemOn(dev.whynotac.protocol.packet.Hand.MAIN_HAND, new BlockPosition(x, y, z), face, new Vec3d(cx, cy, cz),
+                inside, false, ++clickSequence));
+    }
+
+    /** Stone at (2, 65, 0): the standing eye's level look east meets its west face at (2, 65.62, 0.5). */
+    private void stoneAhead() {
+        put(2, 65, 0, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+    }
+
+    @Test
+    void aClickWhereTheLookEntersTheBlockIsNoFinding() {
+        stoneAhead();
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.5, false);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aClickOffTheLookIsAFinding() {
+        stoneAhead();
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.9, false); // 0.4 beside the look
+        tick();
+        assertEquals(1, evidence.size());
+        Evidence e = evidence.getFirst();
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertEquals("look", e.details().get("reason"));
+        assertEquals("2,65,0", e.details().get("block"));
+        assertEquals("1", e.details().get("offLookClicks"));
+    }
+
+    @Test
+    void aFaceTheLookCannotEnterIsAFinding() {
+        stoneAhead();
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.EAST, 2.0, EYE, 0.5, false);
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("face", evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void aClickOnAirOrInsideTheBlockIsAFinding() {
+        stoneAhead();
+        click(3, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 3.0, EYE, 0.5, false); // the air behind the stone
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("cursor", evidence.getFirst().details().get("reason"));
+        for (int i = 0; i < 20; i++) {
+            tick();
+        }
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.3, EYE, 0.5, false);
+        tick();
+        assertEquals(1, evidence.size(), "the client's own prediction of the first click holds the stone until the server acknowledges it");
+        out(new ClientboundPacket.BlockChangedAck(clickSequence));
+        sync();
+        move(0.5, 64.0, 0.5); // the ack may have rolled the player back: its eye is known again from its next position
+        for (int i = 0; i < 20; i++) {
+            tick();
+        }
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.3, EYE, 0.5, false); // on the look, inside the stone
+        tick();
+        assertEquals(2, evidence.size());
+        assertEquals("cursor", evidence.get(1).details().get("reason"));
+    }
+
+    @Test
+    void aClickOutOfReachIsAFinding() {
+        put(6, 65, 0, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+        click(6, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 6.0, EYE, 0.5, false); // 5.5 from the eye, 4.5 the range
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("reach", evidence.getFirst().details().get("reason"));
+        assertEquals(5.5, Double.parseDouble(evidence.getFirst().details().get("distance")), 1e-3);
+        evidence.clear();
+        for (int i = 0; i < 20; i++) {
+            tick();
+        }
+        out(new ClientboundPacket.UpdateAttributes(SELF, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:block_interaction_range", 6.0,
+                List.of()))));
+        sync();
+        click(6, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 6.0, EYE, 0.5, false);
+        tick();
+        assertEquals(List.of(), evidence, "in the range the server gave");
+    }
+
+    @Test
+    void aClickThroughABlockIsAFinding() {
+        put(2, 65, 0, "minecraft:stone");
+        put(4, 65, 0, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+        click(4, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 4.0, EYE, 0.5, false);
+        tick();
+        assertEquals(1, evidence.size());
+        Evidence e = evidence.getFirst();
+        assertEquals("blocks", e.details().get("reason"));
+        assertEquals("2,65,0", e.details().get("wall"));
+        assertEquals(2.0, Double.parseDouble(e.details().get("stoppedBefore")), 1e-3);
+    }
+
+    @Test
+    void aClickFromInsideABlockIsAtAThousandthOfTheLook() {
+        put(0, 65, 0, "minecraft:stone"); // the eye is in it
+        sync();
+        look(EAST, 0F);
+        tick();
+        click(0, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 0.5 + 0.001 * 4.5, EYE, 0.5, true);
+        tick();
+        assertEquals(List.of(), evidence);
+        click(0, 65, 0, dev.whynotac.protocol.packet.BlockFace.UP, 0.5 + 0.001 * 4.5, EYE, 0.5, true);
+        tick();
+        assertEquals(1, evidence.size(), "the face is the opposite of the look's nearest axis");
+        assertEquals("face", evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void noClaimFromTheWorldWhenTheClientConfirmedSomethingAfterTheClick() {
+        put(2, 65, 0, "minecraft:stone");
+        put(4, 65, 0, "minecraft:stone");
+        sync();
+        look(EAST, 0F);
+        tick();
+        click(4, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 4.0, EYE, 0.5, false);
+        sync();
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aBlockTheClientMayStillHoldIsEnough() {
+        look(EAST, 0F);
+        tick();
+        put(2, 65, 0, "minecraft:stone"); // not yet acknowledged: the client may have the stone, or still the air
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.5, false);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void noClickClaimWithAnAttackRangeItem() {
+        Stack stick = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), LONG, false, 1234);
+        out(new ClientboundPacket.ContainerSetContent(0, 2, inventory(stick), Stack.EMPTY));
+        stoneAhead();
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.9, false);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void theFacesALookCanEnterAndTheNearestOpposite() {
+        double[] east = {1, 0, 0};
+        assertTrue(BlockClick.entersThrough(east, dev.whynotac.protocol.packet.BlockFace.WEST, 4.5));
+        assertTrue(!BlockClick.entersThrough(east, dev.whynotac.protocol.packet.BlockFace.EAST, 4.5));
+        assertTrue(!BlockClick.entersThrough(east, dev.whynotac.protocol.packet.BlockFace.UP, 4.5), "no motion along y");
+        double[] down = AttackAim.view(60F, EAST);
+        assertTrue(BlockClick.entersThrough(down, dev.whynotac.protocol.packet.BlockFace.UP, 4.5));
+        assertTrue(BlockClick.nearestOpposite(down, dev.whynotac.protocol.packet.BlockFace.UP));
+        assertTrue(!BlockClick.nearestOpposite(down, dev.whynotac.protocol.packet.BlockFace.WEST));
+        double[] diagonal = {Math.sqrt(0.5), 0, Math.sqrt(0.5)};
+        assertTrue(BlockClick.nearestOpposite(diagonal, dev.whynotac.protocol.packet.BlockFace.WEST), "a tie: either");
+        assertTrue(BlockClick.nearestOpposite(diagonal, dev.whynotac.protocol.packet.BlockFace.NORTH));
+    }
+
+    @Test
+    void noCursorClaimOnAnOutlineThatDependsOnTheHeldItem() {
+        put(2, 65, 0, "minecraft:light"); // a full block while the player holds light, empty otherwise
+        sync();
+        look(EAST, 0F);
+        tick();
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.5, false);
+        tick();
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void noCursorClaimWhileAnItemUseMayHavePlacedABlockAnywhere() {
+        look(EAST, 0F);
+        tick();
+        in(new ServerboundPacket.UseItem(dev.whynotac.protocol.packet.Hand.MAIN_HAND, 50, EAST, 0F)); // a lily pad: where its own ray hit
+        tick();
+        click(2, 65, 0, dev.whynotac.protocol.packet.BlockFace.WEST, 2.0, EYE, 0.5, false); // air here, unless that placed something
+        tick();
+        assertEquals(List.of(), evidence);
+    }
 }

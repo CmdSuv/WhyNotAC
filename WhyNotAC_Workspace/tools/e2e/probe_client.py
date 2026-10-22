@@ -17,6 +17,10 @@ can be verified live:
   * an attack on the husk with the look turned away (tick 365) -> an attack-aim case (P-M, shadow)
   * an attack on the llama behind a wall, empty-handed (tick 315) -> an attack-aim case through blocks (P-M, shadow)
   * a use of the stick with a rotation 45 degrees off the look (tick 374) -> a use-aim case (P-M, shadow)
+  * a click on the wall with the cursor off the look, empty-handed (tick 416) -> a use-aim case for the look (P-M, shadow)
+
+After each use it sends its position once more (ticks 384 and 405: the server's acknowledgement of a use may roll a
+player back), and clicks the wall once where the vanilla pick puts the cursor (tick 395), which must open nothing.
 
 It also attacks the nearest husk (tick 300), well within reach, which must open nothing. Before each attack its
 mouse turns its look to the target, as a player does.
@@ -60,7 +64,7 @@ PLAY_C_SET_ENTITY_MOTION = 0x63
 PLAY_C_CONTAINER_SET_CONTENT, PLAY_C_CONTAINER_SET_SLOT = 0x12, 0x14
 PLAY_S_CONTAINER_CLICK, PLAY_S_SET_CARRIED_ITEM = 0x11, 0x34
 PLAY_C_ADD_ENTITY, PLAY_S_INTERACT, PLAY_S_SWING = 0x01, 0x19, 0x3C
-PLAY_S_USE_ITEM = 0x40
+PLAY_S_USE_ITEM, PLAY_S_USE_ITEM_ON = 0x40, 0x3F
 PLAY_C_TELEPORT_ENTITY, PLAY_C_ENTITY_POSITION_SYNC, PLAY_C_MOVE_ENTITY_POS, PLAY_C_MOVE_ENTITY_POS_ROT = 0x7B, 0x23, 0x33, 0x34
 # item registry ids (1.21.11, reports/registries.json)
 ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
@@ -354,6 +358,40 @@ WALL_VIOLATION_TICK = 315
 # An honest use of the stick, then violation 9: a use whose rotation is not the look (ticks without a mouse turn). After
 # the attacks: the server's BlockChangedAck for a use may roll the player back, and the probe sends no position after.
 USE_TICK, USE_AIM_VIOLATION_TICK = 367, 374
+# The position again after the uses, then an honest click on the wall and violation 10: the cursor 0.4 off the look.
+ANCHOR_TICKS, CLICK_TICK, CLICK_VIOLATION_TICK = (384, 405), 395, 416
+# Mth.SIN, as the game fills it: the view vector and the pick's cursor are computed exactly as the client does.
+SIN_TABLE = []
+
+
+def mth_sin(x):
+    """Mth.sin(double): SIN[(int) ((long) (x * 10430.378350470453) & 65535)]."""
+    return SIN_TABLE[int(x * 10430.378350470453) & 65535]
+
+
+def mth_cos(x):
+    return SIN_TABLE[int(x * 10430.378350470453 + 16384.0) & 65535]
+
+
+def view_vector(x_rot, y_rot):
+    """Entity.calculateViewVector: float products of the sine table, widened."""
+    if not SIN_TABLE:
+        SIN_TABLE.extend(f32(math.sin(i / 10430.378350470453)) for i in range(65536))
+    rad = f32(math.pi / 180.0)
+    f = f32(x_rot * rad)
+    g = f32(-y_rot * rad)
+    j = mth_cos(f)
+    return (f32(mth_sin(g) * j), -mth_sin(f), f32(mth_cos(g) * j))
+
+
+def east_face_click(eye, view, block):
+    """Where the vanilla pick (Entity.pick, 4.5 blocks; AABB.clip) enters a full block's east face looking west, as the
+    packet carries it: the block, and the location's float offsets from it."""
+    to = (eye[0] + view[0] * 4.5, eye[1] + view[1] * 4.5, eye[2] + view[2] * 4.5)
+    delta = (to[0] - eye[0], to[1] - eye[1], to[2] - eye[2])
+    d = (block[0] + 1 - eye[0]) / delta[0]
+    location = (eye[0] + d * delta[0], eye[1] + d * delta[1], eye[2] + d * delta[2])
+    return tuple(f32(location[i] - block[i]) for i in range(3))
 # Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
 CLOCK_BURST = 40
 
@@ -433,6 +471,8 @@ def main():
     inventory_step = 0
     attacks = []
     uses, use_sequence = [], 0
+    clicks = []
+    anchors = []  # the yaw bits of the position packets at ANCHOR_TICKS
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets. The client
@@ -479,6 +519,24 @@ def main():
             used_yaw = yaw if tick == USE_TICK else f32(yaw + 45.0)
             client.send(PLAY_S_USE_ITEM, varint(0) + varint(use_sequence) + struct.pack(">ff", used_yaw, pitch))
             uses.append({"tick": tick, "yaw": used_yaw, "look": yaw})
+        if inventory_step == 3 and tick in (CLICK_TICK, CLICK_VIOLATION_TICK):
+            # As startUseItem with the pick on the wall (the stone the fill command put 2 blocks west, its upper half at
+            # the eye): the empty hand (selected the tick before) uses it at the cursor the pick computed with the tick's
+            # look, which the mouse turned to the wall in the frame before. Violation 10: the cursor 0.4 off that look.
+            eye = (x, y + f32(1.62), z)
+            wall = (math.floor(x - 2), math.floor(y) + 1, math.floor(z))
+            aim = ((wall[0] + 1, eye[1], z), 0.0)
+            click_yaw = turn_towards(yaw, eye, aim[0], multiplier)
+            cursor = east_face_click(eye, view_vector(pitch, click_yaw), wall)
+            if tick == CLICK_VIOLATION_TICK:
+                cursor = (cursor[0], cursor[1], f32(cursor[2] + 0.4))
+            use_sequence += 1
+            packed = (wall[0] & 0x3FFFFFF) << 38 | (wall[2] & 0x3FFFFFF) << 12 | (wall[1] & 0xFFF)  # BlockPos.asLong: the long's bits
+            hit = struct.pack(">Q", packed) + varint(5)  # EAST
+            client.send(PLAY_S_USE_ITEM_ON, varint(0) + hit + struct.pack(">fff??", *cursor, False, False) + varint(use_sequence))
+            clicks.append({"tick": tick, "block": wall, "cursor": cursor, "yaw": click_yaw})
+        if inventory_step == 3 and tick in (CLICK_TICK - 1, CLICK_TICK + 1, CLICK_VIOLATION_TICK - 1, CLICK_VIOLATION_TICK + 1):
+            client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick in (CLICK_TICK - 1, CLICK_VIOLATION_TICK - 1) else 2))
         if inventory_step == 3 and tick in (WALL_VIOLATION_TICK - 1, WALL_VIOLATION_TICK + 1):
             client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick < WALL_VIOLATION_TICK else 2))
         # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
@@ -502,7 +560,12 @@ def main():
         counts = (tick % 7) - 3  # -3..3 cursor counts per frame, one frame per tick
         increment = f32(f32(counts * multiplier) * f32(0.15))
         new_yaw = f32(yaw + increment) if aim is None else turn_towards(yaw, (x, y + 1.62, z), aim[0], multiplier, aim[1])
-        if new_yaw != yaw:
+        if tick in ANCHOR_TICKS:
+            # its position once more (unchanged: it does not walk), in the tick's one movement packet
+            client.send(PLAY_S_MOVE_POS_ROT, struct.pack(">dddffB", x, y, z, new_yaw, pitch, 1))
+            anchors.append(struct.unpack(">I", struct.pack(">f", new_yaw))[0])
+            yaw = new_yaw
+        elif new_yaw != yaw:
             client.send(PLAY_S_MOVE_ROT, struct.pack(">ffB", new_yaw, pitch, 1))
             yaw_history.append((yaw, new_yaw, counts))
             yaw = new_yaw
@@ -544,6 +607,8 @@ def main():
         "inventory_steps": inventory_step,
         "attacks": attacks,
         "uses": uses,
+        "clicks": clicks,
+        "anchor_yaw_bits": anchors,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,

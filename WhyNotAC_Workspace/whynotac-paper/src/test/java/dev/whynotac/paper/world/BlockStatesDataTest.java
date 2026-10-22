@@ -210,6 +210,13 @@ class BlockStatesDataTest {
         assertTrue(!shipped.outlineInCell(Block.getId(Blocks.LECTERN.defaultBlockState())));
         assertTrue(!shipped.outlineInCell(Block.getId(Blocks.POPPY.defaultBlockState())));
         assertTrue(shipped.outlineInCell(Block.getId(Blocks.STONE.defaultBlockState())));
+        // the outlines that read the player's held item (LightBlock, ScaffoldingBlock) are not taken as exact
+        assertTrue(!shipped.outlineExact(Block.getId(Blocks.LIGHT.defaultBlockState())));
+        assertTrue(!shipped.outlineExact(Block.getId(Blocks.SCAFFOLDING.defaultBlockState())));
+        assertTrue(!shipped.outlineExact(Block.getId(Blocks.WHITE_SHULKER_BOX.defaultBlockState())));
+        assertTrue(!shipped.outlineExact(Block.getId(Blocks.POPPY.defaultBlockState())));
+        assertTrue(shipped.outlineExact(Block.getId(Blocks.LECTERN.defaultBlockState())));
+        assertTrue(shipped.outlineExact(Block.getId(Blocks.MOVING_PISTON.defaultBlockState())));
     }
 
     @Test
