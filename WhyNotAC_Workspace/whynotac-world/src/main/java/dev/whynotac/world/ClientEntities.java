@@ -969,6 +969,8 @@ public final class ClientEntities {
             case Op.Scale scale -> {
                 if (s.present && !s.lostAll && s.kind.living()) {
                     s.scale = scale.value(); // a non-living entity: the client throws (Server tried to update attributes of a non-living entity)
+                    s.scaleLow = Math.min(s.scaleLow, s.scale); // NaN stays NaN
+                    s.scaleHigh = Math.max(s.scaleHigh, s.scale);
                 }
                 out.add(s);
             }
@@ -1234,7 +1236,14 @@ public final class ClientEntities {
         }
         for (int i = from; i < out.size(); i++) {
             State t = out.get(i);
-            t.shownScale = t.scale; // LivingEntity.tick ends with refreshDirtyAttributes: the box follows the scale
+            // LivingEntity.tick ends with refreshDirtyAttributes: the box follows the scale
+            t.scaleLow = t.scale;
+            t.scaleHigh = t.scale;
+            if (t.animated) {
+                // PolarBear.tick, after LivingEntity.tick: the previous value, then one step towards the standing flag
+                t.animO = t.anim;
+                t.anim = Math.max(0, Math.min(EntitySizes.POLAR_BEAR_STAND_TICKS, t.anim + (t.data0 != 0 ? 1 : -1)));
+            }
             if (t.headSteps > 0) {
                 // LivingEntity.lerpHeadRotationStep: yHeadRot = (float) rotLerp(1.0 / steps, yHeadRot, target).
                 double step = 1.0 / t.headSteps;
@@ -1447,10 +1456,14 @@ public final class ClientEntities {
 
     // --- queries ----------------------------------------------------------------------------------------------------
 
-    /** One state the client may hold for an entity right now. Radii bound the true value (0: exact). */
+    /**
+     * One state the client may hold for an entity right now. Radii bound the true value (0: exact). {@code size}: the
+     * size the client gives it, when known exactly and its box is that size around its position; {@code bounds}: a box
+     * holding the client's box for every position and size this state allows (the radius included), or null.
+     */
     public record PossibleState(boolean present, boolean known, boolean positionKnown, String type, boolean player, double x, double y, double z,
                                 double positionRadius, float yRot, float xRot, float rotationRadius, float yHeadRot, float headRadius, int pose,
-                                int flags, int onGround, int vehicle, EntitySizes.Size size, int pickable, float pickRadius) {}
+                                int flags, int onGround, int vehicle, EntitySizes.Size size, EntitySizes.Box bounds, int pickable, float pickRadius) {}
 
     /**
      * Every state the client may hold for {@code entityId} now: each candidate, after any further prefix
@@ -1460,7 +1473,7 @@ public final class ClientEntities {
         Track track = tracks.get(entityId);
         if (track == null) {
             if (complete) {
-                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE, null, 0, 0.0F));
+                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE, null, null, 0, 0.0F));
             }
             return;
         }
@@ -1554,7 +1567,7 @@ public final class ClientEntities {
                 if (type != null && types.known(type) && !(collidersOnly ? collidesOrPushesItself(type) : pushesOrCollides(type))) {
                     return;
                 }
-                if (!st.known() || type == null || st.size() == null) {
+                if (!st.known() || type == null || (st.positionKnown() ? st.bounds() == null : st.size() == null)) {
                     near[0] = true;
                     return;
                 }
@@ -1564,10 +1577,8 @@ public final class ClientEntities {
                             && base.y() < maxY + unknownRadius && base.z() > minZ - unknownRadius && base.z() < maxZ + unknownRadius;
                     return;
                 }
-                EntitySizes.Box b = st.size().box(st.x(), st.y(), st.z());
-                double r = st.positionRadius();
-                near[0] = b.minX() - r <= maxX && b.maxX() + r >= minX && b.minY() - r <= maxY && b.maxY() + r >= minY && b.minZ() - r <= maxZ
-                        && b.maxZ() + r >= minZ;
+                EntitySizes.Box b = st.bounds(); // the position's radius included
+                near[0] = b.minX() <= maxX && b.maxX() >= minX && b.minY() <= maxY && b.maxY() >= minY && b.minZ() <= maxZ && b.maxZ() >= minZ;
             });
             if (near[0]) {
                 return true;
@@ -1693,24 +1704,25 @@ public final class ClientEntities {
             }
             return null;
         }
-        EntitySizes.Size size = st.view().size();
-        if (size == null) {
+        PossibleState view = st.view();
+        EntitySizes.Box bounds = view.bounds(); // the position's radius included
+        if (bounds == null) {
             if (st.x > minX - unknownRadius && st.x < maxX + unknownRadius && st.y > minY - unknownRadius && st.y < maxY + unknownRadius
                     && st.z > minZ - unknownRadius && st.z < maxZ + unknownRadius) {
                 throw new NotKnown(type + " of a size not known");
             }
             return null;
         }
-        EntitySizes.Box b = size.box(st.x, st.y, st.z);
-        double r = st.rPos;
-        if (!(b.minX() - r <= maxX && b.maxX() + r >= minX && b.minY() - r <= maxY && b.maxY() + r >= minY && b.minZ() - r <= maxZ
-                && b.maxZ() + r >= minZ)) {
+        if (!(bounds.minX() <= maxX && bounds.maxX() >= minX && bounds.minY() <= maxY && bounds.maxY() >= minY && bounds.minZ() <= maxZ
+                && bounds.maxZ() >= minZ)) {
             return null; // cannot meet the box
         }
-        if (r != 0 || !st.tickedKnown || collidesOrPushesItself(type)) {
+        double r = st.rPos;
+        if (r != 0 || view.size() == null || !st.tickedKnown || collidesOrPushesItself(type)) {
             throw new NotKnown(collidesOrPushesItself(type) ? type + ", which collides" : r != 0 ? type + " whose position is not known exactly"
-                    : type + " that may or may not have ticked");
+                    : view.size() == null ? type + " whose size is not known exactly" : type + " that may or may not have ticked");
         }
+        EntitySizes.Box b = view.size().box(st.x, st.y, st.z);
         boolean meets = minX < b.maxX() && maxX > b.minX() && minY < b.maxY() && maxY > b.minY() && minZ < b.maxZ() && maxZ > b.minZ();
         if (!meets || !st.ticked || st.player && st.spectator == 1) {
             return null; // apart, not ticked, or a spectator (noPhysics)
@@ -2048,12 +2060,23 @@ public final class ClientEntities {
         boolean baby;
         double scale = 1.0;
         /**
-         * The scale of the cached dimensions: the box follows a new scale value only at the end of the
-         * entity's next tick ({@code LivingEntity.refreshDirtyAttributes}), or at a pose or size data change.
+         * The values the scale attribute had since the entity's last tick (NaN: not known exactly): the cached dimensions
+         * follow a new value at the end of the entity's next tick ({@code LivingEntity.refreshDirtyAttributes}), or at a
+         * refresh before it (a pose or size data change) at the value the attribute had then.
          */
-        double shownScale = 1.0;
+        double scaleLow = 1.0;
+        double scaleHigh = 1.0;
         int data0;
         int data1;
+        /** The type's size follows the client's own animation ({@link EntitySizes.Rule#POLAR_BEAR}). */
+        boolean animated;
+        /**
+         * {@code PolarBear.clientSideStandAnimation} and its previous value ({@code clientSideStandAnimationO}). The
+         * dimensions were refreshed at one of the two: at the start of the entity's last tick when the animation had
+         * moved, or later at its value then (see {@link #view}).
+         */
+        int anim;
+        int animO;
         /** A player's: 1 a spectator in the client's player list, 0 not, -1 not known. */
         int spectator;
         // InterpolationHandler
@@ -2131,6 +2154,7 @@ public final class ClientEntities {
             if (size != null) {
                 s.data0 = size.initial(0); // defineSynchedData
                 s.data1 = size.initial(1);
+                s.animated = size.rule() == EntitySizes.Rule.POLAR_BEAR;
             }
             return s;
         }
@@ -2164,9 +2188,13 @@ public final class ClientEntities {
             c.vehicle = vehicle;
             c.baby = baby;
             c.scale = scale;
-            c.shownScale = shownScale;
+            c.scaleLow = scaleLow;
+            c.scaleHigh = scaleHigh;
             c.data0 = data0;
             c.data1 = data1;
+            c.animated = animated;
+            c.anim = anim;
+            c.animO = animO;
             c.spectator = spectator;
             c.steps = steps;
             c.tx = tx;
@@ -2211,8 +2239,8 @@ public final class ClientEntities {
             if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || addedSeq != o.addedSeq || minY != o.minY
                     || lostPosition != o.lostPosition
                     || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
-                    || Double.compare(shownScale, o.shownScale) != 0
-                    || data0 != o.data0 || data1 != o.data1 || spectator != o.spectator) {
+                    || Double.compare(scaleLow, o.scaleLow) != 0 || Double.compare(scaleHigh, o.scaleHigh) != 0
+                    || data0 != o.data0 || data1 != o.data1 || anim != o.anim || animO != o.animO || spectator != o.spectator) {
                 return false;
             }
             if (lostPosition) {
@@ -2262,15 +2290,23 @@ public final class ClientEntities {
             boolean known = !lostAll;
             boolean positionKnown = known && present && !lostPosition;
             EntitySizes sizes = EntitySizes.vanilla();
-            EntitySizes.Size size = known && present ? sizes.size(type, pose, baby, scale, data0, data1) : null;
-            if (size != null && Double.compare(shownScale, scale) != 0 && !size.equals(sizes.size(type, pose, baby, shownScale, data0, data1))) {
-                // the box may still be at the old scale (or at the new one, after a pose or size data change)
-                size = null;
+            EntitySizes.Entry entry = known && present ? sizes.entry(type) : null;
+            EntitySizes.Size size = null;
+            EntitySizes.Box bounds = null;
+            if (entry != null) {
+                // The cached dimensions were refreshed at a scale the attribute had since the last tick and (a polar bear)
+                // at the animation's value before or after that tick: sizes grow with both, so the smallest and the
+                // largest bound them, and one size when they agree.
+                EntitySizes.Size low = sizes.size(type, pose, baby, scaleLow, data0, data1, Math.min(anim, animO));
+                EntitySizes.Size high = sizes.size(type, pose, baby, scaleHigh, data0, data1, Math.max(anim, animO));
+                size = low != null && low.equals(high) ? low : null;
+                if (positionKnown && high != null) {
+                    bounds = high.box(x, y, z).inflate(rPos);
+                }
             }
             int pickable = !known ? NONE : !present ? 0 : sizes.pickable(type, data0, spectator);
-            EntitySizes.Entry entry = known && present ? sizes.entry(type) : null;
             return new PossibleState(present, known, positionKnown, type, player, x, y, z, rPos, yRot, xRot, rRot, yHeadRot, rHead, pose, flags,
-                    onGroundKnown ? (onGround ? 1 : 0) : -1, vehicle, size, pickable, entry == null ? 0.0F : entry.pickRadius());
+                    onGroundKnown ? (onGround ? 1 : 0) : -1, vehicle, size, bounds, pickable, entry == null ? 0.0F : entry.pickRadius());
         }
     }
 

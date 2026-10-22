@@ -269,6 +269,39 @@ class AttackReachCheckTest {
     }
 
     @Test
+    void aPolarBearIsAsHighAsTheClientsStandingAnimationMakesIt() {
+        // the eye at least at 64.2 (any pose), the bear right below it: its top 3.5 under it on four legs, 2.1 standing
+        int bear = 30;
+        int standing = dev.whynotac.world.EntitySizes.vanilla().entry("minecraft:polar_bear").data().getFirst().index();
+        out(ClientboundPacket.AddEntity.received(bear, new UUID(0, bear), "minecraft:polar_bear", 0.5, 59.3, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0,
+                (byte) 0, 0));
+        out(new ClientboundPacket.SetEntityData(bear, List.of(new ClientboundPacket.SetEntityData.DataEntry(standing,
+                ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1)), 0));
+        sync();
+        for (int i = 0; i < 3; i++) {
+            move(0.5, 64.0, 0.5);
+            tick();
+        }
+        attack(bear); // half way up: 2.1 high, 2.8 away
+        assertEquals(List.of(), evidence);
+        out(new ClientboundPacket.SetEntityData(bear, List.of(new ClientboundPacket.SetEntityData.DataEntry(standing,
+                ClientboundPacket.SetEntityData.Kind.BOOLEAN, 0)), 0));
+        sync();
+        move(0.5, 64.0, 0.5);
+        tick();
+        attack(bear); // one step down: the box may still be at the value before the tick
+        assertEquals(List.of(), evidence);
+        for (int i = 0; i < 6; i++) {
+            move(0.5, 64.0, 0.5);
+            tick();
+        }
+        attack(bear); // down again
+        assertEquals(1, evidence.size());
+        assertEquals("minecraft:polar_bear", evidence.getFirst().details().get("targetType"));
+        assertEquals("3.4998", evidence.getFirst().details().get("distance"));
+    }
+
+    @Test
     void noClaimNearAShulker() {
         zombie(5.0, 0.5);
         out(ClientboundPacket.AddEntity.received(50, new UUID(0, 50), "minecraft:shulker", -6.0, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));

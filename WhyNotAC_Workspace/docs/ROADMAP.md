@@ -57,7 +57,10 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 
 ## Faz 3b — Savaş ve dünya etkileşimi (fizikle paralel)
 
-- Varlık kutularının kalanı (görev #37): animasyonlar, kaydırılmış kutular, ejderha parçaları.
+- Varlık kutuları (görev #37): kutup ayısının client'ta oynayan ayağa kalkma animasyonu izlenir. Bir tik içinde
+  birkaç kez değişen ölçekte kutu en büyüğüyle sınırlanır. Gerekçesiyle iddia edilmeyenler: shulker ve wind charge
+  (client kendisi taşır), asılı varlıklar, ender ejderhasının parçaları (client yerleştirir). Mermilerin
+  seçilebilirliği bilinmez sayılır, iddiayı engellemez.
 - Tick dilbilgisi (`G1`, `G2`): saldırının ardından el sallama ve client'ın eylemlerinin (saldırı, eşya kullanma,
   blok kırma, hotbar) tikin hareketinden önce gelmesi `action-grammar` ile yapıldı (görev #56). Eylem bağlamından
   (`G3`) sunucunun açtığı menü ekrandayken eylem ya da yürüme tuşu (`action-grammar`) ve eşya kullanırken saldırı,
@@ -120,6 +123,6 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 | `ROB-01` boş çerçeve | Kenar, boş çerçeveyi oyunun decoder'ı gibi yok sayar (`WireObserver`) |
 | `F1`, `F3`, `F4` replikalar | Varlık, dünya, envanter ve öz-oyuncu replikaları (Faz 2b-3, 2b-5–2b-8) |
 | `PHY-A9` gerçek client doğruluk kaydı | `tools/realclient` javaagent kaydedicisi |
-| `C1` erişim (ilk P-A) | `attack-reach` (Faz 2b-8); kalan kutular görev #37 |
+| `C1` erişim (ilk P-A) | `attack-reach` (Faz 2b-8), kutular görev #37 |
 | `REL-01` CI sabitleme | Her action bir commit'e sabit (yorumda o anki etiketi var); token yalnızca okuyabilir |
 | `PROD-1`, `PROD-2`, `PROD-3` vakalar ve günlükler | `/whynotac privacy` kayıtları ve vakaları birlikte kapsar. Vaka saklama süresi saatte bir uygulanır, sahipsiz dosya kalmaz. Günlüklerde IP adresi yok |

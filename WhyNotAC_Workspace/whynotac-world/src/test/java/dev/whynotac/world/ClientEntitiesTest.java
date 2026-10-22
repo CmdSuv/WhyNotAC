@@ -580,9 +580,73 @@ class ClientEntitiesTest {
 
     @Test
     void aSizeTheTableDoesNotFollowIsNotClaimed() {
-        out(add(5, "minecraft:polar_bear", 0.5, 64.0, 0.5));
+        out(add(5, "minecraft:item_frame", 0.0, 64.0, 0.0));
         sync();
         assertNull(onlySize(5));
+        assertNull(states(5).getFirst().bounds(), "a hanging entity's box comes from its block, facing and item");
         assertEquals(ClientEntities.Existence.PRESENT, entities.existence(5));
+    }
+
+    private EntitySizes.Box onlyBounds(int id) {
+        List<ClientEntities.PossibleState> states = states(id);
+        assertEquals(1, states.size(), "one possible state");
+        return states.getFirst().bounds();
+    }
+
+    @Test
+    void aPolarBearsSizeFollowsTheStandingAnimationTheClientRuns() {
+        EntitySizes.Entry bear = SIZES.entry("minecraft:polar_bear");
+        EntitySizes.DataField standing = bear.data().getFirst();
+        EntitySizes.Size[] at = new EntitySizes.Size[7];
+        for (int a = 0; a <= 6; a++) {
+            at[a] = SIZES.size("minecraft:polar_bear", STANDING, false, 1.0, 0, 0, a);
+        }
+        assertEquals(at[0].height() * 2.0F, at[6].height(), 1.0E-6F, "standing: twice as high");
+        out(add(5, "minecraft:polar_bear", 0.5, 64.0, 0.5));
+        sync();
+        assertEquals(at[0], onlySize(5));
+        assertEquals(at[0].box(0.5, 64.0, 0.5), onlyBounds(5));
+        out(data(5, standing.index(), ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1));
+        sync();
+        assertEquals(at[0], onlySize(5), "the flag alone: the animation moves in the entity's tick");
+        for (int a = 1; a <= 6; a++) {
+            tick();
+            assertNull(onlySize(5), "refreshed at the start of the tick or later: " + (a - 1) + " or " + a);
+            assertEquals(at[a].box(0.5, 64.0, 0.5), onlyBounds(5), "bounded by the higher one");
+        }
+        tick();
+        assertEquals(at[6], onlySize(5), "at the top the animation stops and the size is known again");
+        out(data(5, standing.index(), ClientboundPacket.SetEntityData.Kind.BOOLEAN, 0));
+        sync();
+        tick();
+        assertNull(onlySize(5));
+        assertEquals(at[6].box(0.5, 64.0, 0.5), onlyBounds(5), "going down: bounded by the value before the tick");
+        for (int i = 0; i < 6; i++) {
+            tick();
+        }
+        assertEquals(at[0], onlySize(5));
+        // a bear the client does not tick does not animate
+        out(new ClientboundPacket.ForgetLevelChunk(0, 0));
+        out(data(5, standing.index(), ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1));
+        sync();
+        tick();
+        assertEquals(at[0], onlySize(5), "its chunk is gone: it does not tick");
+    }
+
+    @Test
+    void theScaleAnEntityHadSinceItsLastTickBoundsItsBox() {
+        // 1, then 3, then 1 again before a tick: a pose change at 3 left the box at 3 until the entity ticks
+        EntitySizes.Size adult = SIZES.size("minecraft:husk", STANDING, false, 1.0);
+        out(add(5, "minecraft:husk", 0.5, 64.0, 0.5));
+        sync();
+        out(scale(5, 3.0));
+        out(data(5, 6, ClientboundPacket.SetEntityData.Kind.POSE, STANDING));
+        out(scale(5, 1.0));
+        sync();
+        assertNull(onlySize(5));
+        assertEquals(adult.scale(3.0F).box(0.5, 64.0, 0.5), onlyBounds(5));
+        tick();
+        assertEquals(adult, onlySize(5));
+        assertEquals(adult.box(0.5, 64.0, 0.5), onlyBounds(5));
     }
 }

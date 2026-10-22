@@ -27,11 +27,14 @@ import java.util.Map;
  *       The default is the type's size scaled by the age scale (a baby's constant, else 1); some types
  *       have a constant baby size or a constant size in one pose; players have one size per pose; some
  *       types scale it or replace it by their data (slime and phantom size, puff state, salmon variant,
- *       armor stand flags, warden and sniffer digging);</li>
+ *       armor stand flags, warden and sniffer digging) or by an animation the client runs itself (the polar
+ *       bear standing up);</li>
  *   <li>a fixed size ignores every scale.</li>
  * </ul>
- * Types whose size is not followed yet (a client-side animation, a box that is not the size around the
- * position, hanging entities) have rule {@link Rule#STATE}: no size is claimed.
+ * Types whose box is not their size around the position have rule {@link Rule#STATE}: no size is claimed. They
+ * are hanging entities (frames, paintings, leash knots: a box from their block and facing, a framed map's or a
+ * painting variant's size), shulkers (a cube raised by their lid) and wind charges (0.15 lower); the client
+ * moves the last two itself ({@link ClientMotion}), so their boxes would not help without their positions.
  */
 public final class EntitySizes {
 
@@ -54,6 +57,12 @@ public final class EntitySizes {
             return !fixed && factor != 1.0F ? new Size(width * factor, height * factor, eyeHeight * factor, false) : this;
         }
 
+        /** {@code EntityDimensions.scale(w, h)}: the width by {@code w}, the height and the eye by {@code h}. */
+        public Size scale(float widthFactor, float heightFactor) {
+            return !fixed && (widthFactor != 1.0F || heightFactor != 1.0F)
+                    ? new Size(width * widthFactor, height * heightFactor, eyeHeight * heightFactor, false) : this;
+        }
+
         /** {@code EntityDimensions.makeBoundingBox}: half the width (a float) each side, the height upwards. */
         public Box box(double x, double y, double z) {
             float half = width / 2.0F;
@@ -62,7 +71,12 @@ public final class EntitySizes {
     }
 
     /** An axis-aligned box, as {@code AABB}. */
-    public record Box(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {}
+    public record Box(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
+        /** {@code AABB.inflate(d)}. */
+        public Box inflate(double d) {
+            return new Box(minX - d, minY - d, minZ - d, maxX + d, maxY + d, maxZ + d);
+        }
+    }
 
     /** Where a type's size comes from. */
     public enum Rule {
@@ -94,6 +108,12 @@ public final class EntitySizes {
         INTERACTION,
         /** {@code AreaEffectCloud}: twice its radius (data 0, a float) wide, 0.5 high. */
         CLOUD,
+        /**
+         * {@code PolarBear}: the living size, its height and eye scaled by {@code 1 + stand / 6} while the
+         * client's standing animation ({@code clientSideStandAnimation}, 0 to {@link #POLAR_BEAR_STAND_TICKS}) is up;
+         * the animation follows the standing flag (data 0, a boolean) one step per tick of the entity.
+         */
+        POLAR_BEAR,
         /** Depends on what this table does not follow. */
         STATE
     }
@@ -172,6 +192,9 @@ public final class EntitySizes {
             return i < data.size() ? data.get(i).initial() : 0;
         }
     }
+
+    /** {@code PolarBear.STAND_ANIMATION_TICKS}: the standing animation's top. */
+    public static final int POLAR_BEAR_STAND_TICKS = 6;
 
     /** The scale attribute's range (RangedAttribute). */
     static final double MIN_SCALE = 0.0625;
@@ -273,22 +296,28 @@ public final class EntitySizes {
     /** {@link #size(String, int, boolean, double, int, int)} with the type's data as the entity starts with it. */
     public Size size(String type, int pose, boolean baby, double scaleAttribute) {
         Entry e = entries.get(type);
-        return e == null ? null : size(e, pose, baby, scaleAttribute, e.initial(0), e.initial(1));
+        return e == null ? null : size(e, pose, baby, scaleAttribute, e.initial(0), e.initial(1), 0);
+    }
+
+    /** {@link #size(String, int, boolean, double, int, int, int)} with no animation up. */
+    public Size size(String type, int pose, boolean baby, double scaleAttribute, int data0, int data1) {
+        return size(type, pose, baby, scaleAttribute, data0, data1, 0);
     }
 
     /**
      * The size the client gives an entity of {@code type} in {@code pose} (an {@link EntityPose} ordinal),
      * {@code baby} as its baby flag says, with {@code scaleAttribute} the value of its scale attribute
-     * (ignored for non-living types; NaN when it is not known) and {@code data0}, {@code data1} the values
-     * of the type's {@link Entry#data} fields. Null when the type is unknown, its size depends on what this
-     * table does not follow, or on a scale that is not known.
+     * (ignored for non-living types; NaN when it is not known), {@code data0}, {@code data1} the values
+     * of the type's {@link Entry#data} fields and {@code animation} the client's own animation the size reads
+     * (a polar bear's standing). Null when the type is unknown, its size depends on what this table does not
+     * follow, or on a scale that is not known.
      */
-    public Size size(String type, int pose, boolean baby, double scaleAttribute, int data0, int data1) {
+    public Size size(String type, int pose, boolean baby, double scaleAttribute, int data0, int data1, int animation) {
         Entry e = entries.get(type);
-        return e == null ? null : size(e, pose, baby, scaleAttribute, data0, data1);
+        return e == null ? null : size(e, pose, baby, scaleAttribute, data0, data1, animation);
     }
 
-    private Size size(Entry e, int pose, boolean baby, double scaleAttribute, int data0, int data1) {
+    private Size size(Entry e, int pose, boolean baby, double scaleAttribute, int data0, int data1, int animation) {
         switch (e.rule()) {
             case STATE -> {
                 return null;
@@ -328,6 +357,8 @@ public final class EntitySizes {
                 yield pose == EntityPose.DIGGING.ordinal() || pose == EntityPose.EMERGING.ordinal() ? Size.of(d.width(), 1.0F, true) : d;
             }
             case SNIFFER -> (data0 == e.select() ? e.alt() : e.size()).scale(ageScale);
+            // clientSideStandAnimation is a float stepping by 1 from 0 to 6: exactly the int
+            case POLAR_BEAR -> animation > 0 ? e.size().scale(ageScale).scale(1.0F, 1.0F + animation / 6.0F) : e.size().scale(ageScale);
             default -> e.size().scale(ageScale);
         };
         if (defaults.fixed() || e.scaleCap() == ScaleCap.ONE) {

@@ -260,10 +260,24 @@ Kutunun boyutu türe, poza, bebek bayrağına, ölçek özelliğine ve bazı tü
     dururken kaldırılırsa client eski nesneyi tutar; bu durumda değer "bilinmiyor" sayılır.
   - Mermilerin seçilebilirliği sunucunun gönderdiği bir etikete bağlıdır, iddia edilmez.
 - **Replika:** bebek bayrağını, ölçeği ve türün boyut verisini client sırasıyla izler. Her olası durum bir
-  boyut ve bir seçilebilirlik taşır.
-- **Bilinmeyen:** client tarafı animasyonla değişen boyutlar (kutup ayısı, shulker), konumun etrafında
-  olmayan kutular (asılı varlıklar, wind charge) ve sırası belirsiz değiştiricili ölçekler için boyut
-  iddia edilmez.
+  boyut, bir sınır kutusu ve bir seçilebilirlik taşır.
+  - Boyut, client'ın kutusu kesin biliniyorsa vardır. Sınır kutusu, client'ın bu durumda tutabileceği her
+    kutuyu (konumun yarıçapı dahil) içerir. Saldırı mesafesi sınır kutusunu, itmeler kesişmeyi dışlamak için
+    sınırı, kesişmeyi söylemek için kesin boyutu kullanır.
+  - Ölçek: önbellekteki boyut varlığın son tikinden beri ölçeğin aldığı herhangi bir değerde yenilenmiş
+    olabilir (tik sonunda `refreshDirtyAttributes`, araya giren poz ya da veri değişimi). Replika bu
+    değerlerin en küçüğünü ve en büyüğünü tutar: ikisi aynı boyutu veriyorsa boyut kesindir, değilse büyüğü
+    sınırdır.
+  - Kutup ayısı: client ayağa kalkmayı kendi tikinde adım adım oynatır (`clientSideStandAnimation`, 0..6,
+    yükseklik `1 + adım/6` katı). Replika ayakta bayrağını client sırasıyla, adımı varlığın her tikinde izler.
+    Boyut, tikin başındaki ya da sonundaki adımda yenilenmiş olabilir; ikisi aynıysa kesin, değilse yükseği
+    sınırdır.
+- **Bilinmeyen:** konumun etrafında olmayan kutular için boyut iddia edilmez:
+  - asılı varlıklar: kutu bloktan, yönden, çerçevedeki haritadan ve tablo türünden gelir;
+  - shulker ve wind charge: client ikisini de kendisi taşır (`ClientMotion`). Shulker blok merkezine oturur;
+    yanında bir shulker kutusu açılınca client'ta 8 bloğa kadar ışınlanır (`teleportSomewhere`);
+  - ender ejderhası: parçalarını client `aiStep`'te yerleştirir;
+  - sırası belirsiz değiştiricili ölçekler.
 - **Doğrulama:** `/whynotac entities` boyutları ve seçilebilirliği sunucunun kendi hesabıyla karşılaştırır.
 
 ## Client'ın elindeki eşya (Faz 2b-7)

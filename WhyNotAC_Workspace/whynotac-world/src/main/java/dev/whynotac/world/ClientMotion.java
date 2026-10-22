@@ -28,7 +28,8 @@ final class ClientMotion {
     static final Set<String> LIVING = Set.of(
             "minecraft:bat",          // Bat.tick: a resting bat is put under the block above it (setPosRaw), on both sides
             "minecraft:ender_dragon", // EnderDragon.tickDeath: moves up while dying; its parts are placed in aiStep
-            "minecraft:shulker");     // Shulker.setPos: snapped to the block centre; no interpolation
+            "minecraft:shulker");     // Shulker.setPos: snapped to the block centre; no interpolation; and a shulker box opening
+                                      // next to it teleports it up to 8 blocks on the client (move SHULKER_BOX: teleportSomewhere)
 
     /** Non-living entities whose client tick never moves them and whose position is the packet's. */
     static final Set<String> STATIC = Set.of(

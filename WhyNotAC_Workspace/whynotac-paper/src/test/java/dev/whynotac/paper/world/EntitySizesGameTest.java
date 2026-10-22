@@ -25,6 +25,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.polarbear.PolarBear;
 import net.minecraft.world.entity.animal.sniffer.Sniffer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -84,10 +85,16 @@ class EntitySizesGameTest {
                             attribute = EntitySizes.clampScale(scale);
                             assertEquals(instance.getValue(), attribute, "the scale attribute's range");
                         }
+                        for (int animation : animations(entry))
                         for (Pose pose : Pose.values()) {
+                            if (entry.rule() == EntitySizes.Rule.POLAR_BEAR) {
+                                GameEntities.set(PolarBear.class, "clientSideStandAnimation", entity, (float) animation);
+                            }
                             GameEntities.set(entity, GameEntities.accessor(Entity.class, "DATA_POSE"), pose);
-                            EntitySizes.Size ours = SIZES.size(key, EntityPose.valueOf(pose.name()).ordinal(), baby, attribute, data[0], data[1]);
-                            String where = key + " pose " + pose + " baby " + baby + " scale " + scale + " data " + data[0] + "," + data[1];
+                            EntitySizes.Size ours = SIZES.size(key, EntityPose.valueOf(pose.name()).ordinal(), baby, attribute, data[0], data[1],
+                                    animation);
+                            String where = key + " pose " + pose + " baby " + baby + " scale " + scale + " data " + data[0] + "," + data[1]
+                                    + " animation " + animation;
                             if (ours == null) {
                                 assertEquals(EntitySizes.Rule.STATE, entry.rule(), where + ": no size claimed");
                                 unclaimed.merge(key, 1, Integer::sum);
@@ -106,8 +113,13 @@ class EntitySizesGameTest {
         }
         assertTrue(claimed > 100_000, claimed + " sizes compared");
         assertEquals(List.of("minecraft:breeze_wind_charge", "minecraft:glow_item_frame", "minecraft:item_frame", "minecraft:leash_knot",
-                "minecraft:painting", "minecraft:polar_bear", "minecraft:shulker", "minecraft:wind_charge"), List.copyOf(unclaimed.keySet()),
-                "the types whose size is not claimed");
+                "minecraft:painting", "minecraft:shulker", "minecraft:wind_charge"), List.copyOf(unclaimed.keySet()),
+                "the types whose size is not claimed: boxes not their size around the position");
+    }
+
+    /** The client's standing animation, for the type whose size reads it. */
+    private static int[] animations(EntitySizes.Entry entry) {
+        return entry.rule() == EntitySizes.Rule.POLAR_BEAR ? new int[] {0, 1, 2, 3, 4, 5, 6} : new int[] {0};
     }
 
     @Test
@@ -213,6 +225,10 @@ class EntitySizesGameTest {
                     values.add(new int[] {Float.floatToRawIntBits(r), 0});
                 }
             }
+            case POLAR_BEAR -> {
+                values.add(new int[] {0, 0});
+                values.add(new int[] {1, 0});
+            }
             default -> values.add(new int[] {entry.initial(0), entry.initial(1)});
         }
         return values;
@@ -229,6 +245,7 @@ class EntitySizesGameTest {
                 case BYTE -> (byte) data[i];
                 case FLOAT -> Float.intBitsToFloat(data[i]);
                 case SNIFFER_STATE -> Sniffer.State.BY_ID.apply(data[i]);
+                case BOOLEAN -> data[i] != 0;
                 default -> throw new AssertionError(f);
             };
             GameEntities.set(entity, accessor, value);

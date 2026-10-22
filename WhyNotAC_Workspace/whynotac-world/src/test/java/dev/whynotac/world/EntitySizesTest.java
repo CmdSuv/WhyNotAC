@@ -65,9 +65,21 @@ class EntitySizesTest {
     @Test
     void nonLivingTypesKeepTheirSizeAndStateTypesClaimNone() {
         assertEquals(new EntitySizes.Size(2.0F, 2.0F, 1.7F, false), SIZES.size("minecraft:end_crystal", EntityPose.SLEEPING.ordinal(), true, 9.0));
-        assertNull(SIZES.size("minecraft:polar_bear", STANDING, false, 1.0));
         assertNull(SIZES.size("minecraft:item_frame", STANDING, false, 1.0));
+        assertNull(SIZES.size("minecraft:wind_charge", STANDING, false, 1.0));
         assertNull(SIZES.size("minecraft:not_a_type", STANDING, false, 1.0));
+    }
+
+    @Test
+    void aPolarBearGrowsWithItsStandingAnimation() {
+        // PolarBear.getDefaultDimensions: height and eye scaled by 1 + stand / 6, before the scale; a baby too
+        EntitySizes.Size bear = SIZES.entry("minecraft:polar_bear").size();
+        assertEquals(bear, SIZES.size("minecraft:polar_bear", STANDING, false, 1.0, 1, 0, 0), "the flag alone does nothing");
+        assertEquals(bear.scale(1.0F, 1.0F + 3 / 6.0F), SIZES.size("minecraft:polar_bear", STANDING, false, 1.0, 1, 0, 3));
+        assertEquals(new EntitySizes.Size(1.4F, 1.4F * 2.0F, 1.19F * 2.0F, false), SIZES.size("minecraft:polar_bear", STANDING, false, 1.0, 1, 0, 6));
+        assertEquals(bear.scale(0.5F).scale(1.0F, 2.0F).scale(2.0F), SIZES.size("minecraft:polar_bear", STANDING, true, 2.0, 1, 0, 6));
+        assertEquals(SIZES.size("minecraft:husk", EntityPose.SLEEPING.ordinal(), false, 1.0),
+                SIZES.size("minecraft:polar_bear", EntityPose.SLEEPING.ordinal(), false, 1.0, 1, 0, 6), "sleeping: fixed");
     }
 
     @Test

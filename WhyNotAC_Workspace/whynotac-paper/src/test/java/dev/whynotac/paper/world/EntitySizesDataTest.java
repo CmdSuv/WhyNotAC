@@ -51,8 +51,8 @@ import org.junit.jupiter.api.Test;
  *   <li>classes in {@link #BABY_SIZE} return a constant {@code BABY_DIMENSIONS} for a baby; classes in
  *       {@link #POSE_SIZE} a constant size in one pose; classes in {@link #DATA_SIZE} and
  *       {@link #DATA_DIMENSIONS} a size from their data (the indices, initial values and constants are
- *       read here, the formulas checked by {@code EntitySizesGameTest}); classes in {@link #STATE} depend on
- *       what is not followed yet.</li>
+ *       read here, the formulas checked by {@code EntitySizesGameTest}); classes making a box that is not
+ *       their size around the position have no rule.</li>
  * </ul>
  */
 class EntitySizesDataTest {
@@ -87,11 +87,8 @@ class EntitySizesDataTest {
             "net.minecraft.world.entity.animal.fish.Pufferfish", "pufferfish",  // puff state
             "net.minecraft.world.entity.monster.Phantom", "phantom",            // size
             "net.minecraft.world.entity.monster.Slime", "slime",                // size
-            "net.minecraft.world.entity.monster.warden.Warden", "warden");      // digging or emerging pose
-
-    /** Classes whose size depends on what this table does not follow. */
-    private static final Set<String> STATE = Set.of(
-            "net.minecraft.world.entity.animal.polarbear.PolarBear"); // a client-side standing animation
+            "net.minecraft.world.entity.monster.warden.Warden", "warden",       // digging or emerging pose
+            "net.minecraft.world.entity.animal.polarbear.PolarBear", "polar_bear"); // the client's standing animation
 
     /** Non-living classes declaring getDimensions(Pose) from their data: the rule EntitySizes applies. */
     private static final Map<String, String> DATA_DIMENSIONS = Map.of(
@@ -215,7 +212,7 @@ class EntitySizesDataTest {
                     flag.setAccessible(true);
                     babyIndex = ((EntityDataAccessor<?>) flag.get(null)).id();
                 }
-                if (!box.equals(Entity.class.getName()) || STATE.contains(defaults)) {
+                if (!box.equals(Entity.class.getName())) {
                     rule = "state";
                 } else if (defaults.equals(Avatar.class.getName())) {
                     rule = "player";
@@ -257,7 +254,6 @@ class EntitySizesDataTest {
         knownDefaults.addAll(BABY_SIZE.keySet());
         knownDefaults.addAll(POSE_SIZE.keySet());
         knownDefaults.addAll(DATA_SIZE.keySet());
-        knownDefaults.addAll(STATE);
         assertEquals(knownDefaults, declaring.get("getDefaultDimensions"), "classes with their own getDefaultDimensions");
         assertEquals(new TreeSet<>(GET_DIMENSIONS), declaring.get("getDimensions"), "classes with their own getDimensions");
         assertEquals(new TreeSet<>(BOX), declaring.get("makeBoundingBox"), "classes with their own makeBoundingBox");
@@ -364,6 +360,12 @@ class EntitySizesDataTest {
                 yield data(allocated, owner, "DATA_STATE") + "\talt=-:" + cell(constant(owner, "DIGGING_DIMENSIONS")) + "\tselect=" + select;
             }
             case "warden" -> "";
+            case "polar_bear" -> {
+                Field ticks = c.getDeclaredField("STAND_ANIMATION_TICKS");
+                ticks.setAccessible(true);
+                assertEquals((float) EntitySizes.POLAR_BEAR_STAND_TICKS, ticks.getFloat(null), "the polar bear's standing animation");
+                yield data(allocated, owner, "DATA_STANDING_ID");
+            }
             default -> throw new AssertionError(rule);
         };
     }
@@ -387,6 +389,9 @@ class EntitySizesDataTest {
             } else if (accessor.serializer() == EntityDataSerializers.FLOAT) {
                 kind = "FLOAT";
                 initial = value.toString();
+            } else if (accessor.serializer() == EntityDataSerializers.BOOLEAN) {
+                kind = "BOOLEAN";
+                initial = (Boolean) value ? "1" : "0";
             } else if (accessor.serializer() == EntityDataSerializers.SNIFFER_STATE) {
                 kind = "SNIFFER_STATE";
                 initial = Integer.toString(((net.minecraft.world.entity.animal.sniffer.Sniffer.State) value).id());

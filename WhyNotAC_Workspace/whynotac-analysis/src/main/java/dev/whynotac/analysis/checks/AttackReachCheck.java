@@ -171,12 +171,13 @@ public final class AttackReachCheck implements TimelineListener {
         double distance = Double.POSITIVE_INFINITY;
         boolean out = true;
         for (ClientEntities.PossibleState s : states) {
-            if (!s.present() || !s.known() || !s.positionKnown() || s.size() == null || s.pickable() == 0) {
+            if (!s.present() || !s.known() || !s.positionKnown() || s.bounds() == null || s.pickable() == 0) {
                 return Assessment.noClaim(target, !s.present() || !s.known() ? "target may be absent or unknown"
-                        : !s.positionKnown() ? "target position unknown" : s.size() == null ? "target size unknown" : "target not pickable");
+                        : !s.positionKnown() ? "target position unknown" : s.bounds() == null ? "target box unknown" : "target not pickable");
             }
-            EntitySizes.Box b = s.size().box(s.x(), s.y(), s.z());
-            AttackReach.Box box = new AttackReach.Box(b.minX(), b.minY(), b.minZ(), b.maxX(), b.maxY(), b.maxZ()).inflate(s.positionRadius());
+            // every box the client may give it here, its position's radius included
+            EntitySizes.Box b = s.bounds();
+            AttackReach.Box box = new AttackReach.Box(b.minX(), b.minY(), b.minZ(), b.maxX(), b.maxY(), b.maxZ());
             out &= AttackReach.outOfReach(eye, box, s.pickRadius(), pick, check, range, false);
             distance = Math.min(distance, AttackReach.distance(eye, box.inflate(s.pickRadius())));
             type = s.type();
