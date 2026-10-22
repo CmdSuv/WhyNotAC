@@ -377,12 +377,14 @@ public final class EventCodec {
             }
         }
 
+        /** A dimension with its lava speed (0 not known, 1 slow, 2 fast), as {@code CB_LOGIN_LAVA} and {@code CB_RESPAWN_LAVA} hold it. */
         private void dimension(ClientboundPacket.Dimension dimension) {
             body.writeByte(dimension == null ? 0 : 1);
             if (dimension != null) {
                 string(dimension.key());
                 body.writeZigZag(dimension.minY());
                 body.writeZigZag(dimension.height());
+                body.writeByte(dimension.fastLava() == null ? 0 : dimension.fastLava() ? 2 : 1);
             }
         }
 
@@ -397,14 +399,14 @@ public final class EventCodec {
                     body.writeLong(k.id());
                 }
                 case ClientboundPacket.Login l -> {
-                    body.writeVarInt(CB_LOGIN_MODE);
+                    body.writeVarInt(CB_LOGIN_LAVA);
                     body.writeZigZag(l.entityId());
                     body.writeZigZag(l.chunkRadius());
                     dimension(l.dimension());
                     body.writeZigZag(l.gameMode());
                 }
                 case ClientboundPacket.Respawn r -> {
-                    body.writeVarInt(CB_RESPAWN_KEEP);
+                    body.writeVarInt(CB_RESPAWN_LAVA);
                     dimension(r.dimension());
                     body.writeZigZag(r.gameMode());
                     body.writeZigZag(r.dataToKeep());
@@ -1032,6 +1034,20 @@ public final class EventCodec {
             return in.readUnsignedByte() != 0 ? new ClientboundPacket.Dimension(string(in), zint(in), zint(in)) : null;
         }
 
+        private ClientboundPacket.Dimension dimensionWithLava(ByteSource in) {
+            if (in.readUnsignedByte() == 0) {
+                return null;
+            }
+            String key = string(in);
+            int minY = zint(in);
+            int height = zint(in);
+            int lava = in.readUnsignedByte();
+            if (lava > 2) {
+                throw new RecordingFormatException("lava speed " + lava);
+            }
+            return new ClientboundPacket.Dimension(key, minY, height, lava == 0 ? null : lava == 2);
+        }
+
         private ClientboundPacket readClientbound(ByteSource in) {
             int tag = in.readVarInt();
             return switch (tag) {
@@ -1044,6 +1060,8 @@ public final class EventCodec {
                 case CB_LOGIN_MODE -> new ClientboundPacket.Login(zint(in), zint(in), dimension(in), zint(in));
                 case CB_RESPAWN_MODE -> new ClientboundPacket.Respawn(dimension(in), zint(in));
                 case CB_RESPAWN_KEEP -> new ClientboundPacket.Respawn(dimension(in), zint(in), zint(in));
+                case CB_LOGIN_LAVA -> new ClientboundPacket.Login(zint(in), zint(in), dimensionWithLava(in), zint(in));
+                case CB_RESPAWN_LAVA -> new ClientboundPacket.Respawn(dimensionWithLava(in), zint(in), zint(in));
                 case CB_LEVEL_CHUNK -> {
                     int x = zint(in);
                     int z = zint(in);

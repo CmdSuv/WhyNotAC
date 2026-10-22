@@ -22,6 +22,14 @@ public final class Colliders {
 
         /** {@code level.hasChunkAt}: the client holds this chunk. */
         boolean isLoaded(int chunkX, int chunkZ);
+
+        /**
+         * The level's {@code gameplay/fast_lava} ({@code environmentAttributes().getDimensionValue}): lava's current pushes
+         * 0.007 rather than 0.0023333333333333335. Null when not known.
+         */
+        default Boolean fastLava() {
+            return null;
+        }
     }
 
     /** A collision shape the client has that WhyNotAC cannot reproduce. */

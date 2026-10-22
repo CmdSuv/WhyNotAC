@@ -755,7 +755,22 @@ public final class PacketTranslator {
 
     private static ClientboundPacket.Dimension dimension(CommonPlayerSpawnInfo spawn) {
         DimensionType type = spawn.dimensionType().value();
-        return new ClientboundPacket.Dimension(spawn.dimension().identifier().toString(), type.minY(), type.height());
+        return new ClientboundPacket.Dimension(spawn.dimension().identifier().toString(), type.minY(), type.height(), fastLava(type));
+    }
+
+    /**
+     * {@code gameplay/fast_lava} as the client reads it for the dimension ({@code EnvironmentAttributeSystem.getDimensionValue}):
+     * the attribute's default through the type's own attributes (biome layers are positional, so not read); not known
+     * when one of the type's timelines tracks it. The client builds the same from the synced type: the attribute syncs.
+     */
+    private static Boolean fastLava(DimensionType type) {
+        for (Holder<net.minecraft.world.timeline.Timeline> timeline : type.timelines()) {
+            if (timeline.value().attributes().contains(net.minecraft.world.attribute.EnvironmentAttributes.FAST_LAVA)) {
+                return null;
+            }
+        }
+        net.minecraft.world.attribute.EnvironmentAttribute<Boolean> attribute = net.minecraft.world.attribute.EnvironmentAttributes.FAST_LAVA;
+        return attribute.sanitizeValue(type.attributes().applyModifier(attribute, attribute.defaultValue()));
     }
 
     private static ClientboundPacket attributes(ClientboundUpdateAttributesPacket packet) {

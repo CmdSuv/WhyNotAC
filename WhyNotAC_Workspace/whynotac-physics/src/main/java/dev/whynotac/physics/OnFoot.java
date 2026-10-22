@@ -11,9 +11,9 @@ import java.util.List;
  * ({@code travelInAir}: friction, the input impulse, {@code Entity.move} with collisions and step-up,
  * gravity and drag) and the pose for the next tick ({@code Player.updatePlayerPose}).
  *
- * <p>The scope is a survival player on foot, in water or crawling, with default attributes but the speed
+ * <p>The scope is a survival player on foot, in water or lava or crawling, with default attributes but the speed
  * ({@link Speed}) and the effects the step reads ({@link Effects}), using an item or not ({@link ItemUse}),
- * not riding, flying or gliding, away from lava, powder snow, solid entities and the world border; water's current and
+ * not riding, flying or gliding, away from powder snow, solid entities and the world border; the fluids' currents and
  * the blocks that move the player from inside (cobwebs, berry bushes, honey slides, bubble columns) are followed.
  * Outside it, or where the client's world is not known, {@link Colliders.Unknown} is thrown: no claim can rest on that
  * tick. Sources: the decompiled client, {@code LocalPlayer},
@@ -173,6 +173,8 @@ public final class OnFoot {
     private boolean wasTouchingWater;
     /** {@code getFluidHeight(FluidTags.WATER)}. */
     private double waterHeight;
+    /** {@code getFluidHeight(FluidTags.LAVA)}: {@code isInLava} when above 0. */
+    private double lavaHeight;
     private float xxa;
     private float zza;
     private boolean jumping;
@@ -284,12 +286,15 @@ public final class OnFoot {
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
         // --- Player.tick: updateIsUnderwater, from the last tick's eye ---
         wasUnderwater = eyeInWater;
-        // --- Entity.baseTick: water (no other fluid, no powder snow), the eye, swimming ---
+        // --- Entity.baseTick: water and lava (no other fluid, no powder snow), the eye, swimming, a fall in lava halved ---
         Box start = pose.box(x, y, z);
         requireInScope(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
-        updateInWaterStateAndDoWaterCurrentPushing();
+        updateInWaterStateAndDoFluidPushing();
         updateFluidOnEyes();
         updateSwimming();
+        if (lavaHeight > 0.0) { // isInLava (not a new entity's first tick: its fall distance is 0 then)
+            fallDistance *= 0.5;
+        }
         // --- LocalPlayer.aiStep ---
         if (sprintTriggerTime > 0) {
             sprintTriggerTime--;
@@ -357,15 +362,21 @@ public final class OnFoot {
         delta = new Vec3d(dx, dy, dz);
         applyInput(movingSlowly);
         if (jumping) {
-            boolean inWater = wasTouchingWater && waterHeight > 0.0;
-            double threshold = pose.eyeHeight < 0.4 ? 0.0 : 0.4; // getFluidJumpThreshold
-            if (!inWater || onGround && !(waterHeight > threshold)) {
-                if ((onGround || inWater && waterHeight <= threshold) && noJumpDelay == 0) {
-                    jumpFromGround();
-                    noJumpDelay = 10;
+            boolean inLava = lavaHeight > 0.0;
+            double height = inLava ? lavaHeight : waterHeight;
+            boolean inWater = wasTouchingWater && height > 0.0;
+            double threshold = fluidJumpThreshold();
+            if (!inWater || onGround && !(height > threshold)) {
+                if (!inLava || onGround && !(height > threshold)) {
+                    if ((onGround || inWater && height <= threshold) && noJumpDelay == 0) {
+                        jumpFromGround();
+                        noJumpDelay = 10;
+                    }
+                } else {
+                    delta = delta.add(0.0, 0.04F, 0.0); // jumpInLiquid(LAVA)
                 }
             } else {
-                delta = delta.add(0.0, 0.04F, 0.0); // jumpInLiquid
+                delta = delta.add(0.0, 0.04F, 0.0); // jumpInLiquid(WATER)
             }
         } else {
             noJumpDelay = 0;
@@ -381,8 +392,10 @@ public final class OnFoot {
                 delta = delta.add(0.0, (look - delta.y()) * pull, 0.0);
             }
         }
-        if (wasTouchingWater) { // LivingEntity.travel: shouldTravelInFluid
+        if (wasTouchingWater) { // LivingEntity.travel: shouldTravelInFluid, then travelInFluid
             travelInWater(input);
+        } else if (lavaHeight > 0.0) {
+            travelInLava(input);
         } else {
             travelInAir(input);
         }
@@ -536,20 +549,58 @@ public final class OnFoot {
             v = new Vec3d(v.x(), 0.2, v.z());
         }
         v = v.multiply(slowDown, 0.8F, slowDown);
-        if (gravity != 0.0 && !sprinting) { // getFluidFallingAdjustedMovement
+        delta = fluidFallingAdjustedMovement(gravity, falling, v);
+        jumpOutOfFluid(startY);
+    }
+
+    /**
+     * {@code LivingEntity.travelInLava} (from {@code travelInFluid}): 0.02 of input, the move, then shallow lava (its
+     * height at most the jump threshold) slows by 0.5 across and 0.8 up as {@code getFluidFallingAdjustedMovement} takes
+     * it, deeper lava by 0.5 all round; a quarter of gravity, and the jump out of it at a wall.
+     */
+    private void travelInLava(Vec3d input) throws Colliders.Unknown {
+        boolean falling = delta.y() <= 0.0;
+        double startY = y;
+        double gravity = falling && conditions.effects().slowFalling() ? Math.min(GRAVITY, 0.01) : GRAVITY; // getEffectiveGravity
+        delta = delta.add(Vec3d.inputVector(input, 0.02F, yRot)); // moveRelative
+        Box before = pose.box(x, y, z);
+        move(delta);
+        requireInScope(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
+        if (lavaHeight <= fluidJumpThreshold()) {
+            delta = fluidFallingAdjustedMovement(gravity, falling, delta.multiply(0.5, 0.8F, 0.5));
+        } else {
+            delta = delta.scale(0.5);
+        }
+        if (gravity != 0.0) {
+            delta = delta.add(0.0, -gravity / 4.0, 0.0);
+        }
+        jumpOutOfFluid(startY);
+    }
+
+    /** {@code getFluidFallingAdjustedMovement}: a sprinter keeps its motion; otherwise gravity a sixteenth, a slow sink held. */
+    private Vec3d fluidFallingAdjustedMovement(double gravity, boolean falling, Vec3d v) {
+        if (gravity != 0.0 && !sprinting) {
             double vy;
             if (falling && Math.abs(v.y() - 0.005) >= 0.003 && Math.abs(v.y() - gravity / 16.0) < 0.003) {
                 vy = -0.003;
             } else {
                 vy = v.y() - gravity / 16.0;
             }
-            v = new Vec3d(v.x(), vy, v.z());
+            return new Vec3d(v.x(), vy, v.z());
         }
-        delta = v;
-        // jumpOutOfFluid
+        return v;
+    }
+
+    /** {@code jumpOutOfFluid}: against a wall, with room a little above, the motion turns 0.3 up. */
+    private void jumpOutOfFluid(double startY) throws Colliders.Unknown {
         if (horizontalCollision && isFree(delta.x(), delta.y() + 0.6F - y + startY, delta.z())) {
             delta = new Vec3d(delta.x(), 0.3F, delta.z());
         }
+    }
+
+    /** {@code getFluidJumpThreshold}: 0.4, 0 for an eye below 0.4. */
+    private double fluidJumpThreshold() {
+        return pose.eyeHeight < 0.4 ? 0.0 : 0.4;
     }
 
     /** {@code Entity.isFree}: the box moved collides with no block and holds no fluid ({@code containsAnyLiquid}). */
@@ -570,9 +621,21 @@ public final class OnFoot {
         return true;
     }
 
+    /**
+     * {@code Entity.updateInWaterStateAndDoFluidPushing}: the heights forgotten, water's current (below), then lava's, its
+     * push 0.007 where the level's lava is fast ({@code gameplay/fast_lava}: the nether's), 0.0023333333333333335 elsewhere.
+     */
+    private void updateInWaterStateAndDoFluidPushing() throws Colliders.Unknown {
+        waterHeight = 0.0; // fluidHeight.clear()
+        lavaHeight = 0.0;
+        updateInWaterStateAndDoWaterCurrentPushing();
+        Boolean fast = world.fastLava();
+        updateFluidHeightAndDoFluidPushing(BlockStates.FLUID_LAVA, fast == null ? Double.NaN : fast ? 0.007 : 0.0023333333333333335);
+    }
+
     /** {@code Entity.updateInWaterStateAndDoWaterCurrentPushing}: in water the fall distance is reset. */
     private void updateInWaterStateAndDoWaterCurrentPushing() throws Colliders.Unknown {
-        if (updateWaterHeightAndDoWaterPushing()) {
+        if (updateFluidHeightAndDoFluidPushing(BlockStates.FLUID_WATER, 0.014)) {
             fallDistance = 0.0; // resetFallDistance
             wasTouchingWater = true;
         } else {
@@ -581,12 +644,12 @@ public final class OnFoot {
     }
 
     /**
-     * {@code Entity.updateFluidHeightAndDoFluidPushing(FluidTags.WATER, 0.014)} for a player (pushed, the push not
-     * normalised): over the cells of the box deflated by 0.001, the water's height above the box's bottom and the mean of
-     * the flows of the cells it reaches (scaled by that height below 0.4). A chunk the client may not hold near the box
-     * is not known (the client then skips the water altogether).
+     * {@code Entity.updateFluidHeightAndDoFluidPushing(tag, scale)} for a player (pushed, the push not normalised): over the
+     * cells of the box deflated by 0.001, the fluid's height above the box's bottom and the mean of the flows of the cells
+     * it reaches (scaled by that height below 0.4), times {@code scale} (NaN: not known, which only a push needs). A chunk
+     * the client may not hold near the box is not known (the client then skips the fluid altogether).
      */
-    private boolean updateWaterHeightAndDoWaterPushing() throws Colliders.Unknown {
+    private boolean updateFluidHeightAndDoFluidPushing(byte kind, double scale) throws Colliders.Unknown {
         Box full = pose.box(x, y, z);
         Box near = full.inflate(1.0, 1.0, 1.0); // touchingUnloadedChunk
         for (int cx = Colliders.floor(near.minX()) >> 4; cx <= VanillaMath.ceil(near.maxX()) >> 4; cx++) {
@@ -606,14 +669,14 @@ public final class OnFoot {
                 for (int bz = Colliders.floor(box.minZ()); bz < VanillaMath.ceil(box.maxZ()); bz++) {
                     BlockPos p = new BlockPos(bx, by, bz);
                     int s = state(p);
-                    if (states.fluidKind(s) != BlockStates.FLUID_WATER) {
+                    if (states.fluidKind(s) != kind) {
                         continue;
                     }
-                    double top = by + waterHeight(p, s); // int + float, in float
+                    double top = by + fluidHeight(p, s, kind); // int + float, in float
                     if (top >= box.minY()) {
                         touching = true;
                         height = Math.max(top - box.minY(), height);
-                        Vec3d flow = flow(p, s);
+                        Vec3d flow = flow(p, s, kind);
                         if (height < 0.4) {
                             flow = flow.scale(height);
                         }
@@ -627,19 +690,26 @@ public final class OnFoot {
             if (count > 0) {
                 push = push.scale(1.0 / count);
             }
-            push = push.scale(0.014);
+            if (Double.isNaN(scale)) {
+                throw new Colliders.Unknown("lava's current in a level whose lava speed is not known");
+            }
+            push = push.scale(scale);
             if (Math.abs(delta.x()) < 0.003 && Math.abs(delta.z()) < 0.003 && push.length() < 0.0045000000000000005) {
                 push = push.normalize().scale(0.0045000000000000005);
             }
             delta = delta.add(push);
         }
-        waterHeight = height;
+        if (kind == BlockStates.FLUID_WATER) {
+            waterHeight = height;
+        } else {
+            lavaHeight = height;
+        }
         return touching;
     }
 
-    /** {@code FlowingFluid.getHeight}: a full block under water of its own kind, else its own height. */
-    private float waterHeight(BlockPos p, int s) throws Colliders.Unknown {
-        return states.fluidKind(state(p.atY(p.y() + 1))) == BlockStates.FLUID_WATER ? 1.0F : ownHeight(s);
+    /** {@code FlowingFluid.getHeight}: a full block under fluid of its own kind, else its own height. */
+    private float fluidHeight(BlockPos p, int s, byte kind) throws Colliders.Unknown {
+        return states.fluidKind(state(p.atY(p.y() + 1))) == kind ? 1.0F : ownHeight(s);
     }
 
     /** {@code FluidState.getOwnHeight}: {@code amount / 9}, 0 for no fluid. */
@@ -651,17 +721,17 @@ public final class OnFoot {
     private static final int[][] HORIZONTAL = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
 
     /**
-     * {@code FlowingFluid.getFlow} for water: toward lower neighbours (through a passable neighbour to the water below
+     * {@code FlowingFluid.getFlow}: toward lower neighbours (through a passable neighbour to the fluid of its kind below
      * it), and for a falling fluid next to a sturdy face (or one above it) mostly down.
      */
-    private Vec3d flow(BlockPos pos, int s) throws Colliders.Unknown {
+    private Vec3d flow(BlockPos pos, int s, byte kind) throws Colliders.Unknown {
         float own = ownHeight(s);
         double fx = 0.0;
         double fz = 0.0;
         for (int[] d : HORIZONTAL) {
             BlockPos n = new BlockPos(pos.x() + d[0], pos.y(), pos.z() + d[1]);
             int ns = state(n);
-            if (!affectsFlow(ns)) {
+            if (!affectsFlow(ns, kind)) {
                 continue;
             }
             float f = ownHeight(ns);
@@ -669,7 +739,7 @@ public final class OnFoot {
             if (f == 0.0F) {
                 if (!states.has(ns, BlockStates.BLOCKS_MOTION)) {
                     int below = state(n.atY(n.y() - 1));
-                    if (affectsFlow(below)) {
+                    if (affectsFlow(below, kind)) {
                         f = ownHeight(below);
                         if (f > 0.0F) {
                             g = own - (f - 0.8888889F);
@@ -688,7 +758,7 @@ public final class OnFoot {
         if (states.fluidFalling(s)) {
             for (int[] d : HORIZONTAL) {
                 BlockPos n = new BlockPos(pos.x() + d[0], pos.y(), pos.z() + d[1]);
-                if (solidFace(n, d) || solidFace(n.atY(n.y() + 1), d)) {
+                if (solidFace(n, d, kind) || solidFace(n.atY(n.y() + 1), d, kind)) {
                     flow = flow.normalize().add(0.0, -6.0, 0.0);
                     break;
                 }
@@ -697,16 +767,16 @@ public final class OnFoot {
         return flow.normalize();
     }
 
-    /** {@code FlowingFluid.affectsFlow}: no fluid, or water. */
-    private boolean affectsFlow(int s) {
-        byte kind = states.fluidKind(s);
-        return kind == BlockStates.FLUID_NONE || kind == BlockStates.FLUID_WATER;
+    /** {@code FlowingFluid.affectsFlow}: no fluid, or the same kind ({@code isSame}). */
+    private boolean affectsFlow(int s, byte kind) {
+        byte k = states.fluidKind(s);
+        return k == BlockStates.FLUID_NONE || k == kind;
     }
 
-    /** {@code FlowingFluid.isSolidFace} for a horizontal side: not water, not ice, and the face sturdy. */
-    private boolean solidFace(BlockPos n, int[] d) throws Colliders.Unknown {
+    /** {@code FlowingFluid.isSolidFace} for a horizontal side: not the same fluid, not ice, and the face sturdy. */
+    private boolean solidFace(BlockPos n, int[] d, byte kind) throws Colliders.Unknown {
         int s = state(n);
-        if (states.fluidKind(s) == BlockStates.FLUID_WATER) {
+        if (states.fluidKind(s) == kind) {
             return false;
         }
         String block = states.block(s);
@@ -714,7 +784,7 @@ public final class OnFoot {
             return false;
         }
         if (states.has(s, BlockStates.DYNAMIC_SHAPE)) {
-            throw new Colliders.Unknown(block + " beside falling water (its faces depend on the world)");
+            throw new Colliders.Unknown(block + " beside a falling fluid (its faces depend on the world)");
         }
         int flag = d[1] < 0 ? BlockStates.STURDY_NORTH : d[0] > 0 ? BlockStates.STURDY_EAST : d[1] > 0 ? BlockStates.STURDY_SOUTH : BlockStates.STURDY_WEST;
         return states.has(s, flag);
@@ -725,7 +795,7 @@ public final class OnFoot {
         double eyeY = y + pose.eyeHeight;
         BlockPos p = BlockPos.containing(x, eyeY, z);
         int s = state(p);
-        eyeInWater = states.fluidKind(s) == BlockStates.FLUID_WATER && p.y() + waterHeight(p, s) > eyeY;
+        eyeInWater = states.fluidKind(s) == BlockStates.FLUID_WATER && p.y() + fluidHeight(p, s, BlockStates.FLUID_WATER) > eyeY;
     }
 
     /** {@code Entity.updateSwimming} for the local player ({@code isUnderWater}: {@code wasUnderwater}). */
@@ -1259,7 +1329,7 @@ public final class OnFoot {
         return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
     }
 
-    /** No block in the cells the two boxes span holds a fluid but water, nor is powder snow. */
+    /** No block in the cells the two boxes span holds a fluid but water and lava, nor is powder snow. */
     private void requireInScope(Box a, Box b, String when) throws Colliders.Unknown {
         int x0 = Colliders.floor(Math.min(a.minX(), b.minX()));
         int x1 = Colliders.floor(Math.max(a.maxX(), b.maxX()));
@@ -1272,7 +1342,7 @@ public final class OnFoot {
                 for (int bz = z0; bz <= z1; bz++) {
                     int s = state(new BlockPos(bx, by, bz));
                     byte fluid = states.fluidKind(s);
-                    if (fluid != BlockStates.FLUID_NONE && fluid != BlockStates.FLUID_WATER || states.block(s).equals(POWDER_SNOW)) {
+                    if (fluid == BlockStates.FLUID_OTHER || states.block(s).equals(POWDER_SNOW)) {
                         throw new Colliders.Unknown(states.block(s) + " inside the box " + when + " (not modelled)");
                     }
                 }

@@ -315,8 +315,9 @@ def verify_world(log, dump_path, check):
     check(kinds.get("LevelChunk", 0) >= 9 and kinds.get("BlockUpdate", 0) >= 1 and kinds.get("SectionBlocksUpdate", 0) >= 1,
           f"the recording holds the world packets: {[(k, kinds.get(k, 0)) for k in ('LevelChunk', 'BlockUpdate', 'SectionBlocksUpdate', 'ChunkCacheCenter')]}")
     logins = [e["packet"] for e in events if e["type"] == "Outbound" and e["packet"]["type"] == "Login"]
-    check(len(logins) == 1 and logins[0].get("dimension", {}).get("minY") == -64 and logins[0].get("chunkRadius") == 3,
-          f"the login carries the dimension and chunk radius: {logins}")
+    check(len(logins) == 1 and logins[0].get("dimension", {}).get("minY") == -64 and logins[0].get("chunkRadius") == 3
+          and logins[0].get("dimension", {}).get("fastLava") is False,
+          f"the login carries the dimension (the overworld's lava slow) and chunk radius: {logins}")
 
 
 def verify_entities(log, dump_path, check):

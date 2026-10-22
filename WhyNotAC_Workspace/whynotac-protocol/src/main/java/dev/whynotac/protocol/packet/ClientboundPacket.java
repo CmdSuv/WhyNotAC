@@ -22,8 +22,15 @@ public sealed interface ClientboundPacket {
     /**
      * The dimension a {@link Login} or {@link Respawn} puts the client in: its key and the vertical
      * extent of its chunks ({@code DimensionType.minY()} and {@code height()}, a multiple of 16).
+     * {@code fastLava} is the {@code gameplay/fast_lava} environment attribute the client reads for the
+     * dimension (from its type's attributes: how hard lava's current pushes); null when a timeline of the type
+     * may change it, and in older recordings.
      */
-    record Dimension(String key, int minY, int height) {
+    record Dimension(String key, int minY, int height, Boolean fastLava) {
+        public Dimension(String key, int minY, int height) {
+            this(key, minY, height, null);
+        }
+
         /** Chunk sections per chunk column. */
         public int sections() {
             return height >> 4;

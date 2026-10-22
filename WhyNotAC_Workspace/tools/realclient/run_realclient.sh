@@ -102,7 +102,15 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "fill 149 -61 13 151 -56 15 minecraft:glass" "setblock 150 -61 14 minecraft:magma_block" "fill 150 -60 14 150 -56 14 minecraft:bubble_column[drag=true]" \
   "fill 159 -61 11 171 -57 17 minecraft:glass" "fill 160 -60 12 170 -57 16 minecraft:water" \
   "fill 163 -61 12 164 -61 16 minecraft:soul_sand" "fill 167 -61 12 168 -61 16 minecraft:magma_block" \
-  "fill 163 -60 12 164 -57 16 minecraft:bubble_column[drag=false]" "fill 167 -60 12 168 -57 16 minecraft:bubble_column[drag=true]"; do
+  "fill 163 -60 12 164 -57 16 minecraft:bubble_column[drag=false]" "fill 167 -60 12 168 -57 16 minecraft:bubble_column[drag=true]" \
+  "fill 100 -64 24 110 -61 29 minecraft:glass" "fill 101 -63 25 109 -61 28 minecraft:lava" \
+  "fill 113 -61 26 118 -61 26 minecraft:air" "setblock 113 -61 26 minecraft:lava" \
+  "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
+  "execute in minecraft:the_nether run fill -1 99 -1 21 108 21 minecraft:glass hollow" \
+  "execute in minecraft:the_nether run fill 0 100 0 20 102 20 minecraft:glass" \
+  "execute in minecraft:the_nether run fill 5 100 5 12 102 8 minecraft:lava" \
+  "execute in minecraft:the_nether run fill 13 102 10 20 102 10 minecraft:air" \
+  "execute in minecraft:the_nether run setblock 13 102 10 minecraft:lava"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -274,7 +282,7 @@ water 176.5 -60 -90 0 -/0.5 w/0.8 w/0.6/space w/1.2 -/0.5
 # random ticks are off so they stay so) walked and sprinted through and jumped in; a honey column (x 132) slid down from
 # its top pressed against it, and jumped against from the ground; bubble columns walled in glass, rising over soul sand
 # (x 142: the player shoots out of its open top and falls back, sinks with shift, jumps) and dragging down over magma
-# (x 150, with fire resistance: its floor does not hurt); a pool four deep (x 160..170) over two rows of columns rising
+# (x 150, with fire resistance from here on: its floor, lava and the fire it sets do not hurt); a pool four deep (x 160..170) over two rows of columns rising
 # from soul sand (x 163..164) and two dragging down over magma (x 167..168), swum and sprint-swum across: the box meets
 # several columns at once, each once a tick.
 inside() { echo "tp $NAME $1 $2 14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
@@ -291,12 +299,18 @@ inside 120.5 -60 w/0.5 w/1.0/space -/0.5
 inside 131.5 -53 w/3.0 -/0.5
 inside 129.5 -60 w/1.0 w/1.5/space -/0.5
 inside 142.5 -59 -/3.0 Shift_L/1.0 -/0.5 space/1.5 -/0.5
-effect give $NAME minecraft:fire_resistance 60 0 true
+effect give $NAME minecraft:fire_resistance 1000 0 true
 inside 150.5 -57 -/2.0 space/1.0 -/0.5
 inside 160.5 -59 w/5.0 -/0.5
 inside 160.5 -60 w,Control_L/4.0 -/0.5
-echo "tp $NAME 155.5 -60 18.5 -90 0" > "$FIFO"; sleep 1.0 # off the magma before the effect ends
-effect clear $NAME minecraft:fire_resistance
+# Lava, at z = 26.5: a pool three deep sunk in the ground (x 101..109, glass-walled) walked into, crossed jumping and
+# left at its far wall, placed in and jumped in (jumpInLiquid), sprinted in; a channel in the ground (x 113..118) its
+# source floods three blocks east (the overworld's slow lava), walked into from the east against the current, stood
+# in and jumped in.
+lava() { echo "tp $NAME $1 $2 26.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+lava 98.5 -60 -90 w/2.0 -/1.0 w/1.5/space -/0.5 Shift_L/1.0 -/0.5
+lava 104.5 -62 -90 space/2.0 -/1.0 w,Control_L/1.5 -/1.0
+lava 119.5 -60 90 w/3.0 -/1.5 space/1.0 -/0.5
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap
@@ -327,6 +341,13 @@ for c in "team add wnc" "team modify wnc collisionRule never" "team join wnc $NA
 sleep 0.5
 pushes 53.5 20.5 w/1.0 -/1.5
 for c in "team leave $NAME" "team remove wnc"; do echo "$c" > "$FIFO"; done
+# Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
+# y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at
+# x 13 floods eight blocks east, walked into from the east against the current, stood in and jumped in. The session ends
+# there.
+nether() { echo "execute in minecraft:the_nether run tp $NAME $1 $2 $3 $4 0" > "$FIFO"; sleep 2.5; shift 4; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+nether 2.5 103 6.5 -90 -/1.5 w/2.5 -/1.0 space/1.5 -/0.5
+nether 20.5 103 10.5 90 -/0.5 w/3.0 -/2.0 space/1.0 -/0.5
 sleep 0.5
 kill -0 "$CLIENT" 2>/dev/null || { echo "client died during the drive"; grep -h -A12 "^Description" "$WORK_DIR"/game/crash-reports/*.txt 2>/dev/null | head -30; tail -20 "$WORK_DIR/client.log"; exit 1; }
 kill "$CLIENT"; wait "$CLIENT" 2>/dev/null || true; CLIENT=

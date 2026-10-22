@@ -95,7 +95,7 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
     yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200,
-    tırmanma alanında 499, sekme alanında 756, iç-blok şeritlerinde 1588 tik.
+    tırmanma alanında 499, sekme alanında 756, iç-blok şeritlerinde 1588, lav şeritlerinde 494, Nether'de 396 tik.
   - **Tırmanma (`onClimbable`, `handleOnClimbable`):** ayaktaki blok tırmanılabilir (merdiven, sarmaşıklar) ya da
     aynı yöne bakan bir merdivenin üstünde açık bir tuzak kapı: hareket tik başına 0.15'e tutulur, düşüş mesafesi
     sıfırlanır, shift aşağı kaymayı durdurur; hareketten sonra yatay çarpışma ya da zıplama dikey hızı 0.2 yapar.
@@ -166,6 +166,20 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     kutusunu taramak, bir bloğun tikte iki kez etki etmesi, hareketi eksenlere bölmemek. Bu veride ayırt edilmeyenler:
     x ile z'nin sırası (yatay hareket hep x yönünde), hızlı bal kaymasının eşiği (−0.13'e yakın düşüş yok) ve 16 adımlık
     bütçe (yaya hareketi tikte 16 hücreyi geçmez).
+  - **Lav (`travelInLava`):** tikin başında yükseklikler unutulur, suyun akıntısından sonra lavınki aynı yordamla
+    bulunur; itişi boyutun lav hızıyla ölçeklenir (`gameplay/fast_lava` ortam özniteliği: Nether'de 0.007, başka yerde
+    0.0023333333333333335; boyut tipinin özniteliklerinden, giriş ve yeniden doğuş paketiyle kayda girer, bir zaman
+    çizelgesi onu değiştirebiliyorsa bilinmez). Akış `FlowingFluid.getFlow` lav için de birebir (aynı türden komşular,
+    lavın kendisi sağlam yüz değil). Lavdayken düşüş tikin başında yarılanır. `travelInLava`: girdi 0.02, hareket, lav
+    yüksekliği zıplama eşiğini aşmıyorsa 0.5, 0.8, 0.5 ve `getFluidFallingAdjustedMovement`, aşıyorsa 0.5; yerçekiminin
+    dörtte biri; duvarda lavdan çıkış. Zıplama, lavda ve eşiğin üstündeyse sıvıda zıplar (+0.04). **Son oturum
+    (Overworld: üç blok derin, cam çevrili bir lav havuzuna yürüme, zıplayarak geçme, içinde zıplama ve koşma; akıntısı
+    üç blok giden bir kanala akıntıya karşı yürüme, içinde durma ve zıplama. Nether'de bir cam kabuk içinde aynısı,
+    kanalda hızlı lav sekiz blok akar):** Overworld şeritlerinin 494 tikinin hepsi bit bit eşit (406'sı lavda, 129'u
+    akıntıda), Nether'in 396 tikinin hepsi de (307'si lavda, 131'i hızlı akıntıda). Tüm oturum: 8944 tikin 8889'u eşit,
+    0 fark. Negatif kontroller (hepsi yakalandı): derin lavda 0.5 → 0.51, sığ lavda 0.8 → 0.81, yerçekiminin beşte biri,
+    yavaş itiş 0.0024, hızlı itiş 0.0071, Nether'i yavaş saymak, lavda zıplama 0.05, düşüşü yarılamamak, girdi 0.025,
+    lavı hava gibi geçmek. Eşikte `<=` ile `<` bu veride ayırt edilmez (lav yüksekliği tam 0.4 olmaz).
   - **Eşdeğer durumlar (`OnFoot.sameForMovement`):** adımın her yerde aynı okuduğu blok durumları: aynı çarpışma
     geometrisi, bayraklar, sürtünme, hız ve zıplama çarpanları, hiçbirinde sıvı yok. Adımın ya da `Colliders`'ın adıyla
     okuduğu bloklar (tırmanılabilir, içinde etkili, slime, yatak, tuzak kapı, çit, duvar, su, lav, hareketli piston)
@@ -178,8 +192,9 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     düşebilir. Destek bloğu hâlâ eski, yüklü chunk'ta olduğu için yerçekimi normaldir. Motor bu tick'i artık
     kanıtsız karşılaştırmaz.
   - **Kapsam dışında `Colliders.Unknown`:**
-    - su dışındaki sıvılar (lav), toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), iskele, düşen
-      suyun ya da bir kabarcık sütununun üstünde şekli dünyaya bağlı bir blok;
+    - su ve lav dışındaki sıvılar, toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), iskele, düşen
+      bir sıvının ya da bir kabarcık sütununun yanında/üstünde şekli dünyaya bağlı bir blok, hızı bilinmeyen bir boyutta
+      lav akıntısı;
     - yüklenmemiş chunk (suyun yakınında, client'ın tutup tutmadığı kesin olmayan chunk da), su hareket verimliliği
       özniteliği (derinlik gezgini);
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.

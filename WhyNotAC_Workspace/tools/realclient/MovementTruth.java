@@ -205,6 +205,11 @@ public class MovementTruth {
                 }
                 return world.isLoaded(chunkX, chunkZ) && world.settled(chunkX << 4, world.minY(), chunkZ << 4);
             }
+
+            @Override
+            public Boolean fastLava() {
+                return world.dimension() == null ? null : world.dimension().fastLava();
+            }
         };
     }
 

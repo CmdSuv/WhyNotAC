@@ -1525,6 +1525,12 @@ public final class MovementTracker {
             return world.isLoaded(chunkX, chunkZ) && world.settled(chunkX << 4, world.minY(), chunkZ << 4);
         }
 
+        /** The level's lava speed: its dimension's, from the login or the respawn that made it. */
+        @Override
+        public Boolean fastLava() {
+            return world.dimension() == null ? null : world.dimension().fastLava();
+        }
+
         /**
          * No entity that collides (or pushes otherwise than living entities in their tick, which {@link #pushed} follows), no
          * piston, the world border far, around everywhere the player may be this tick.

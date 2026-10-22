@@ -146,6 +146,10 @@ public final class RecordingFormat {
     public static final int CB_SET_BORDER_LERP_SIZE = 56;
     public static final int CB_SET_BORDER_SIZE = 57;
     public static final int CB_SET_PLAYER_TEAM = 58;
+    /** Login with the chunk radius, the dimension (with its lava speed) and the game mode. */
+    public static final int CB_LOGIN_LAVA = 59;
+    /** Respawn with the dimension (with its lava speed), the game mode and what the client keeps. */
+    public static final int CB_RESPAWN_LAVA = 60;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

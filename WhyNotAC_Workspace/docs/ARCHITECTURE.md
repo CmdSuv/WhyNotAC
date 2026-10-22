@@ -194,7 +194,8 @@ okuduğu sırayla yeniden kurulur:
 
 - **Yakalama:** chunk paketi kenarda client'ın aldığı baytlar olarak tutulur. Ağ thread'inde çözülmez,
   tek bir kopya alınır. Blok ve bölüm güncellemeleri, unutulan chunk'lar, görüş merkezi/yarıçapı,
-  `block_changed_ack` ve giriş/yeniden doğuştaki boyut modellenir ve kayda girer. Posta kutusu
+  `block_changed_ack` ve giriş/yeniden doğuştaki boyut (yüksekliği ve lavın hızı: boyut tipinin `gameplay/fast_lava`
+  özniteliği, client'ın okuduğu gibi) modellenir ve kayda girer. Posta kutusu
   sınırları chunk baytlarını da sayar (128 bayt = 1 birim), bellek sınırı korunur.
 - **Veri:** her blok durumu için çarpışma şekli oyunun kendi biçiminde (eksen koordinatları, dolu
   hücreler, kutular, `CubeVoxelShape`/`ArrayVoxelShape` türü), sürtünme, hız ve zıplama çarpanları,

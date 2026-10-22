@@ -38,7 +38,9 @@ import org.junit.jupiter.api.Test;
  * {@code truth-inside.jsonl.gz} holds the blocks that move the player from inside: cobwebs walked, sprinted and jumped
  * into and fallen into (under weaving too), sweet berry bushes walked, sprinted and jumped through, a honey column slid
  * down and jumped against, a bubble column rising over soul sand (out of its open top and back, shift, jumps) and one
- * dragging down over magma. Each tick, run from its start in the same world (rebuilt here from the commands that built
+ * dragging down over magma. {@code truth-lava.jsonl.gz} holds a lava pool walked into, crossed jumping, jumped and
+ * sprinted in, and a channel's slow current walked against and stood in; {@code truth-nether.jsonl.gz} the same in the
+ * nether, where lava is fast. Each tick, run from its start in the same world (rebuilt here from the commands that built
  * the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -140,6 +142,13 @@ class OnFootTruthTest {
      * not the flat world's), read from the session's own replica: the pool, the channel's flow and the waterfall's spread.
      */
     private static final java.util.Map<Long, Integer> WATER_LANES = readBlocks("course-water.txt.gz");
+    /** The lava lanes likewise (course-lava.txt.gz): the pool, and the channel's flow and the holes beyond it. */
+    private static final java.util.Map<Long, Integer> LAVA_LANES = readBlocks("course-lava.txt.gz");
+    /**
+     * The nether's glass shell, its lava and the terrain around it (course-nether.txt.gz: x -4..24, y 96..111, z -4..24,
+     * every block that is not air), as the client held them.
+     */
+    private static final java.util.Map<Long, Integer> NETHER_SHELL = readBlocks("course-nether.txt.gz");
 
     private static java.util.Map<Long, Integer> readBlocks(String resource) {
         java.util.Map<Long, Integer> blocks = new java.util.HashMap<>();
@@ -181,6 +190,9 @@ class OnFootTruthTest {
         @Override
         public int blockState(int x, int y, int z) {
             Integer lane = WATER_LANES.get(key(x, y, z));
+            if (lane == null) {
+                lane = LAVA_LANES.get(key(x, y, z));
+            }
             if (lane != null) {
                 return lane;
             }
@@ -194,6 +206,41 @@ class OnFootTruthTest {
 
         @Override
         public boolean isLoaded(int chunkX, int chunkZ) {
+            return true;
+        }
+
+        /** The overworld's: slow. */
+        @Override
+        public Boolean fastLava() {
+            return false;
+        }
+    };
+
+    /** The nether lane: around the glass shell what the client held (air where nothing is listed), beyond it not known. */
+    private static final Colliders.World NETHER_WORLD = new Colliders.World() {
+        @Override
+        public BlockStates states() {
+            return STATES;
+        }
+
+        @Override
+        public int blockState(int x, int y, int z) {
+            Integer block = NETHER_SHELL.get(key(x, y, z));
+            if (block != null) {
+                return block;
+            }
+            boolean inside = x >= -4 && x <= 24 && y >= 96 && y <= 111 && z >= -4 && z <= 24;
+            return inside ? STATES.firstStateOf("minecraft:air") : dev.whynotac.world.ClientWorld.UNKNOWN;
+        }
+
+        @Override
+        public boolean isLoaded(int chunkX, int chunkZ) {
+            return true;
+        }
+
+        /** The nether's: fast. */
+        @Override
+        public Boolean fastLava() {
             return true;
         }
     };
@@ -271,6 +318,15 @@ class OnFootTruthTest {
     }
 
     @Test
+    void lavaIsTheClientsOwnInTheOverworldAndTheNether() throws Exception {
+        int[] overworld = replay("truth-lava.jsonl.gz", COURSE_WORLD);
+        int[] nether = replay("truth-nether.jsonl.gz", NETHER_WORLD);
+        // ticks touching lava and in a channel's current
+        assertTrue(overworld[0] > 450 && overworld[34] > 350 && overworld[35] > 100, java.util.Arrays.toString(overworld));
+        assertTrue(nether[0] > 380 && nether[34] > 200 && nether[35] > 100, java.util.Arrays.toString(nether));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -283,7 +339,8 @@ class OnFootTruthTest {
      * pad and on the bed, ticks walking on the slime pad, and landings on it with shift held, then ticks ending on top of a
      * fence, a wall or a fence gate, then ticks in water, swimming, with the eye under water, in the channel's current and in
      * the waterfall, and crawling, then ticks held back by a cobweb, by one under weaving and by a berry bush, honey slides,
-     * ticks in the rising bubble column, above it, in the dragging one, and among the pool's columns}.
+     * ticks in the rising bubble column, above it, in the dragging one, and among the pool's columns, then ticks touching
+     * lava, in a lava channel's current, and jumping out of lava at a wall}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -293,7 +350,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[34];
+        int[] counts = new int[37];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -357,8 +414,30 @@ class OnFootTruthTest {
             counts[31] += inRising && !inWater && expected.y() > -55.0 ? 1 : 0;
             counts[32] += inWater && expected.x() > 150.0 && expected.x() < 151.0 && expected.z() > 14.0 && expected.z() < 15.0 ? 1 : 0;
             counts[33] += inWater && expected.x() > 162.7 && expected.x() < 169.3 && expected.z() > 12.0 && expected.z() < 17.0 ? 1 : 0;
+            boolean inLava = touches(world, expected.box(), BlockStates.FLUID_LAVA);
+            boolean inChannel = expected.y() < -59.0 && expected.x() > 112.7 && expected.x() < 118.3 && expected.z() > 25.7 && expected.z() < 27.3
+                    || expected.y() > 95.0 && expected.x() > 12.7 && expected.x() < 20.3 && expected.z() > 9.7 && expected.z() < 11.3;
+            counts[34] += inLava ? 1 : 0;
+            counts[35] += inLava && inChannel ? 1 : 0;
+            counts[36] += inLava && expected.deltaMovement().y() == 0.3F ? 1 : 0;
         }
         return counts;
+    }
+
+    /** Whether a cell of the box, deflated by 0.001, holds this kind of fluid (as far as the world is known). */
+    private static boolean touches(Colliders.World world, Box box, byte kind) {
+        Box b = box.inflate(-0.001, -0.001, -0.001);
+        for (int x = Colliders.floor(b.minX()); x <= Colliders.floor(b.maxX()); x++) {
+            for (int y = Colliders.floor(b.minY()); y <= Colliders.floor(b.maxY()); y++) {
+                for (int z = Colliders.floor(b.minZ()); z <= Colliders.floor(b.maxZ()); z++) {
+                    int s = world.blockState(x, y, z);
+                    if (s != dev.whynotac.world.ClientWorld.UNKNOWN && STATES.fluidKind(s) == kind) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static PlayerState state(String line) {

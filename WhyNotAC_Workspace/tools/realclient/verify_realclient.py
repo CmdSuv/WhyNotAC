@@ -83,6 +83,11 @@ def main():
     check(not divergences, f"edge and game agree on every packet of a real session ({len(divergences)} divergences)")
     brands = [p["brand"] for p in inbound if p["type"] == "ClientBrand"]
     check(brands == ["vanilla"], f"the unmodified client announces itself as vanilla: {brands}")
+    spawns = [(e["packet"]["dimension"] or {}) for e in events
+              if e["type"] == "Outbound" and e["packet"]["type"] in ("Login", "Respawn") and e["packet"].get("dimension")]
+    lava = [(d.get("key"), d.get("fastLava")) for d in spawns]
+    check(("minecraft:overworld", False) in lava and ("minecraft:the_nether", True) in lava and all(f is not None for _, f in lava),
+          f"each dimension the client entered carries its lava speed, read from its type (fast in the nether only): {lava}")
 
     inputs = [p for p in inbound if p["type"] == "PlayerInput"]
     for key in ("forward", "backward", "left", "right", "jump", "shift", "sprint"):

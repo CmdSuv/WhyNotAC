@@ -48,7 +48,7 @@ import org.junit.jupiter.api.Test;
 class MovementCheckTest {
 
     private static final BlockStates STATES = BlockStates.vanilla();
-    private static final ClientboundPacket.Dimension OVERWORLD = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384);
+    private static final ClientboundPacket.Dimension OVERWORLD = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384, false);
     private static final UUID ME = new UUID(7, 7);
     private static final int SELF = 1;
     private static final long SECOND = 1_000_000_000L;
@@ -79,6 +79,11 @@ class MovementCheckTest {
         @Override
         public boolean isLoaded(int chunkX, int chunkZ) {
             return chunkX >= -2 && chunkX <= 2 && chunkZ >= -2 && chunkZ <= 2;
+        }
+
+        @Override
+        public Boolean fastLava() {
+            return OVERWORLD.fastLava();
         }
     };
 
@@ -876,6 +881,37 @@ class MovementCheckTest {
                 String.valueOf(ticks.subList(from, ticks.size())));
         // floating in place without the water's pull
         tick(NONE, -90.0F, 0.0F, new Vec3d(0.0, 0.03, 0.0));
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void walkingAgainstALavaCurrentAndStandingInItAreFollowed() throws Exception {
+        // a channel one block wide in the ground (z 0), its source at x 2 flooding three blocks east, as the slow lava of
+        // the overworld does
+        int[] lava = new int[4];
+        for (int s = STATES.firstStateOf("minecraft:lava"); STATES.block(s).equals("minecraft:lava"); s++) {
+            for (int i = 0; i < 4; i++) {
+                lava[i] = STATES.properties(s).equals("level=" + 2 * i) ? s : lava[i];
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            place(2 + i, 63, 0, lava[i]);
+        }
+        place(6, 63, 0, AIR);
+        teleport(7.5, 64.0, 0.5, 90.0F, 0.0F);
+        ticks(5, NONE, 90.0F);
+        int from = ticks.size();
+        ticks(40, FORWARD, 90.0F); // west into the channel, against the current
+        double reached = player.x();
+        ticks(20, NONE, 90.0F); // carried back east
+        assertTrue(player.y() < 64.0 && reached < 5.0 && player.x() > reached, String.valueOf(player));
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+        // standing in the current as if it did not push
+        teleport(3.5, 63.0, 0.5, 90.0F, 0.0F);
+        ticks(5, NONE, 90.0F);
+        tick(NONE, 90.0F, 0.0F, new Vec3d(-0.002, 0.0, 0.0));
         assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
     }
 

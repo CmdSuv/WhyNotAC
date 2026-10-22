@@ -320,7 +320,7 @@ public final class Generators {
     }
 
     private ClientboundPacket.Dimension dimension() {
-        return new ClientboundPacket.Dimension(anyString(), anyInt(), anyInt());
+        return new ClientboundPacket.Dimension(anyString(), anyInt(), anyInt(), random.nextInt(3) == 0 ? null : random.nextBoolean());
     }
 
     private byte[] bytes(int length) {
