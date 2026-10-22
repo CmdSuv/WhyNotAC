@@ -85,6 +85,8 @@ public final class MovementTracker {
     public record Tick(long number, long sequence, long nanoTime, Outcome outcome, String reason, int hypotheses, long since, PlayerState closest,
             ServerboundPacket.MovePlayer sent) {}
 
+    /** An unexplained tick's reason when every state it may have started in was using an item while it attacked or used one. */
+    public static final String ACTED_WHILE_USING = "attacked, interacted or used an item while already using one";
     static final int MAX_HYPOTHESES = 64;
     static final int MAX_PENDING = 4096;
     static final int MAX_PINGS = 4096;
@@ -410,6 +412,9 @@ public final class MovementTracker {
         ServerboundPacket.MovePlayer move;
         int moves;
         int attacks;
+        /** Stabs, interactions with entities: with attacks and uses, what handleKeybinds does not do while an item is in use. */
+        int stabs;
+        int interactions;
         boolean loaded;
         String unmodelled;
         /** {@code handleKeybinds}' item actions in order: a {@link Hand} for each {@code UseItem}, {@link #RELEASE} for a release. */
@@ -466,6 +471,7 @@ public final class MovementTracker {
                     if (interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK) {
                         t.attacks++;
                     } else {
+                        t.interactions++;
                         t.handsTouched = true; // an interaction may use up or fill the stack in its hand
                     }
                 }
@@ -477,8 +483,9 @@ public final class MovementTracker {
                         case RELEASE_USE_ITEM -> t.itemActions.add(RELEASE);
                         case DROP_ITEM, DROP_ALL_ITEMS -> t.handsTouched = true;
                         case UNKNOWN -> t.unmodelled = "player action " + action.action();
+                        case STAB -> t.stabs++; // Player.onAttack only resets the attack strength: nothing on the movement
                         // digging (the world replica follows the client's predictions), drops and swaps (the inventory
-                        // replica), a stab (Player.onAttack only resets the attack strength): nothing on the movement
+                        // replica): nothing on the movement
                         default -> { }
                     }
                 }
@@ -520,6 +527,7 @@ public final class MovementTracker {
     }
 
     private Tick tracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+        boolean actedWhileUsing = false;
         Set<Hypothesis> next = new LinkedHashSet<>();
         List<PlayerState> predictions = new ArrayList<>();
         View view = new View(world, entities, selfId);
@@ -531,6 +539,14 @@ public final class MovementTracker {
                 }
             }
             starts = pushed(starts, true, view); // the entities that tick before the player, after the packets
+            if (in.unmodelled == null && (in.attacks > 0 || in.stabs > 0 || in.interactions > 0 || in.itemActions.stream().anyMatch(Hand.class::isInstance))) {
+                // Minecraft.handleKeybinds, before the player's tick: while it is using an item it only releases it (the use
+                // key up) and consumes the attack and use keys' clicks; attacks, stabs, interactions and uses come from
+                // startAttack and startUseItem, which only a state not using an item runs
+                boolean any = !starts.isEmpty();
+                starts.removeIf(a -> a.self().using() != null);
+                actedWhileUsing = any && starts.isEmpty();
+            }
             view.checkSurroundings(starts);
             Map<StepKey, OnFoot.Step> steps = new HashMap<>();
             for (Hypothesis a : starts) {
@@ -546,8 +562,8 @@ public final class MovementTracker {
         if (next.isEmpty()) {
             long from = since;
             lose("unexplained movement");
-            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, "no vanilla client sends this", 0, from,
-                    closest(predictions, in.move), in.move);
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, actedWhileUsing ? ACTED_WHILE_USING : "no vanilla client sends this", 0,
+                    from, closest(predictions, in.move), in.move);
         }
         lastHands = hands();
         sent = merged(next);

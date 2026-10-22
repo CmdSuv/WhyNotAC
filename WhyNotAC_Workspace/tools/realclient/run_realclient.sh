@@ -105,7 +105,7 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "fill 163 -60 12 164 -57 16 minecraft:bubble_column[drag=false]" "fill 167 -60 12 168 -57 16 minecraft:bubble_column[drag=true]" \
   "fill 100 -64 24 110 -61 29 minecraft:glass" "fill 101 -63 25 109 -61 28 minecraft:lava" \
   "fill 113 -61 26 118 -61 26 minecraft:air" "setblock 113 -61 26 minecraft:lava" \
-  "fill 132 -60 26 132 -56 26 minecraft:scaffolding[distance=0,bottom=false]" \
+  "fill 132 -60 26 132 -56 26 minecraft:scaffolding[distance=0,bottom=false]" "setblock 66 -60 22 minecraft:chest[facing=north]" \
   "setblock 133 -56 26 minecraft:scaffolding[distance=1,bottom=true]" "setblock 134 -56 26 minecraft:scaffolding[distance=2,bottom=true]" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
@@ -353,6 +353,12 @@ for c in "team add wnc" "team modify wnc collisionRule never" "team join wnc $NA
 sleep 0.5
 pushes 53.5 20.5 w/1.0 -/1.5
 for c in "team leave $NAME" "team remove wnc"; do echo "$c" > "$FIFO"; done
+# A menu the server opens covers the screen: a chest, used with the right button from an empty hand (x 66, z 22), then
+# W held under its screen (it moves nothing and sends no input: setScreen released the keys and they reach the screen),
+# escape (ContainerClose), and A, which walks again.
+echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
+echo "tp $NAME 66.5 -60 20.5 0 30" > "$FIFO"; sleep 1.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button3/0.2 -/1.0 w/1.5 -/0.5 Escape/0.2 -/0.5 a/0.5 -/1.0; sleep 0.5
 # Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
 # y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at
 # x 13 floods eight blocks east, walked into from the east against the current, stood in and jumped in. The session ends

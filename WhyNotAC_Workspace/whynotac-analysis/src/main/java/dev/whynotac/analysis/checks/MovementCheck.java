@@ -23,7 +23,8 @@ import java.util.TreeMap;
  * the server sends it (teleports, knockback, explosions, attributes, effects, food, its own flags), each in the client
  * tick the transactions place it in or, where they cannot, in every tick it may be in. A tick is a finding
  * when no state the client may have been in sends what it sent: the position to the bit, the flags, the
- * sprint and input packets. Items in use slow it as their use effects say. Whatever the step does not model (fluids, climbing, a use on a block,
+ * sprint and input packets. Items in use slow it as their use effects say; while one is in use, {@code handleKeybinds}
+ * neither attacks nor starts a use, so a tick that does is explained only by a state not using one. Whatever the step does not model (fluids, climbing, a use on a block,
  * vehicles, pushing entities, blocks still changing, the world border) ends the claim until the next anchor.
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
@@ -33,7 +34,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     private static final Object STATE = new Object();
@@ -77,6 +78,7 @@ public final class MovementCheck implements TimelineListener {
         Map<String, String> details = new TreeMap<>();
         details.put("clientTick", Long.toString(tick.number()));
         details.put("unexplainedTicks", Long.toString(state.unexplainedSinceReport));
+        details.put("reason", tick.reason());
         ServerboundPacket.MovePlayer sent = tick.sent();
         details.put("sent", sent == null ? "nothing" : describe(sent));
         PlayerState closest = tick.closest();
@@ -91,7 +93,8 @@ public final class MovementCheck implements TimelineListener {
             }
         }
         sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(), tick.nanoTime(),
-                "moved on foot as no vanilla client could (tick " + tick.number() + ")", details, admissibility));
+                (MovementTracker.ACTED_WHILE_USING.equals(tick.reason()) ? tick.reason() : "moved on foot as no vanilla client could") + " (tick "
+                        + tick.number() + ")", details, admissibility));
         state.lastReportNanos = tick.nanoTime();
         state.unexplainedSinceReport = 0;
     }

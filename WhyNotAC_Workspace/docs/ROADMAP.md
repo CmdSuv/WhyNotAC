@@ -59,8 +59,9 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 
 - Varlık kutularının kalanı (görev #37): animasyonlar, kaydırılmış kutular, ejderha parçaları.
 - Tick dilbilgisi (`G1`, `G2`): saldırının ardından el sallama ve client'ın eylemlerinin (saldırı, eşya kullanma,
-  blok kırma, hotbar) tikin hareketinden önce gelmesi `action-grammar` ile yapıldı (görev #56); eylem bağlamı (`G3`:
-  ekran açıkken eylem, kullanırken saldırı gibi) kaldı.
+  blok kırma, hotbar) tikin hareketinden önce gelmesi `action-grammar` ile yapıldı (görev #56). Eylem bağlamından
+  (`G3`) sunucunun açtığı menü ekrandayken eylem ya da yürüme tuşu (`action-grammar`) ve eşya kullanırken saldırı,
+  etkileşim ya da yeni kullanım (`movement`) yapıldı (görev #57).
 - Duvar arkasından vuruş ve ışın üzerinde engel (`C2`).
 - Blok erişimi ve yüz doğrulama (`W2`), kırma ilerlemesi (`W1`), yerleştirme (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).

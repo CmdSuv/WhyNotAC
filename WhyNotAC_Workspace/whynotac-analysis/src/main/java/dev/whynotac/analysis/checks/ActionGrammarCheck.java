@@ -5,18 +5,22 @@ import dev.whynotac.analysis.evidence.AdmissibilityTracker;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.world.Replicas;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
  * Action grammar (P-M): the vanilla 1.21.11 client acts (attacks, uses items, digs, drops, swaps hands, picks a
- * hotbar slot) early in its tick, before its movement, and swings right after an attack.
+ * hotbar slot) early in its tick, before its movement, swings right after an attack, and neither acts nor walks while a
+ * menu covers its screen.
  *
  * <p>Soundness (decompiled 1.21.11 client):
  * <ul>
@@ -45,7 +49,10 @@ import java.util.TreeMap;
  *       the next packet other than {@code KeepAlive} and {@code ChunkBatchReceived} is the main hand's swing;</li>
  *   <li>none of these actions follows, in the same client tick, a movement packet that can only be the tick's own:
  *       not the reply to an accepted teleport, nor a packet a rotation or entity teleport the client may have
- *       handled could explain ({@link MoveReplies}, the tick-framing allowances).</li>
+ *       handled could explain ({@link MoveReplies}, the tick-framing allowances);</li>
+ *   <li>while a menu the server opened is certainly on the client's screen ({@link MenuScreen}), none of these actions
+ *       (the hotbar slot aside: the tick's start sends it under a screen too) and no movement key (forward, backward,
+ *       left, right; jump, sneak and sprint aside, which auto-jump and the toggle options may hold).</li>
  * </ol>
  * Each rule is judged as packets arrive. The second needs the tick's start, so it waits for a first
  * ClientTickEnd. A modified client is proven, not a cheat: a mod may reorder these packets too.
@@ -60,6 +67,7 @@ public final class ActionGrammarCheck implements TimelineListener {
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final String NO_SWING = "attacksWithoutSwing";
     static final String AFTER_MOVEMENT = "actionsAfterMovement";
+    static final String IN_MENU = "actionsInMenu";
 
     private static final Object STATE = new Object();
 
@@ -84,8 +92,10 @@ public final class ActionGrammarCheck implements TimelineListener {
         long swingDueNanos;
         String swingFor;
         long lastReportNanos = Long.MIN_VALUE;
+        final MenuScreen menu = new MenuScreen();
         long withoutSwing;
         long afterMovement;
+        long inMenu;
     }
 
     @Override
@@ -93,8 +103,14 @@ public final class ActionGrammarCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
-            case TimelineEvent.Outbound out -> state.replies.onOutbound(out);
-            case TimelineEvent.Acknowledged ack -> state.replies.onAcknowledged(ack);
+            case TimelineEvent.Outbound out -> {
+                state.replies.onOutbound(out);
+                state.menu.onOutbound(out);
+            }
+            case TimelineEvent.Acknowledged ack -> {
+                state.replies.onAcknowledged(ack);
+                state.menu.onAcknowledged(ack);
+            }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             default -> { }
         }
@@ -122,6 +138,11 @@ public final class ActionGrammarCheck implements TimelineListener {
                     state.ownMove = in.sequence();
                 }
             }
+            case ServerboundPacket.ContainerClose ignored -> state.menu.forget(); // the client closed its screen
+            case ServerboundPacket.PlayerInput input when state.menu.open() && (input.forward() || input.backward() || input.left() || input.right()) -> {
+                state.inMenu++;
+                report(session, state, state.menu.since(), state.menu.sinceNanos(), in, "movement keys pressed while a menu was open");
+            }
             case ServerboundPacket.ClientTickEnd ignored -> {
                 state.replies.closeInterval();
                 state.tickStart = in.sequence();
@@ -132,6 +153,10 @@ public final class ActionGrammarCheck implements TimelineListener {
                 String action = action(packet);
                 if (action == null) {
                     return;
+                }
+                if (state.menu.open() && !(packet instanceof ServerboundPacket.SetCarriedItem)) { // the tick's start sends it under a screen too
+                    state.inMenu++;
+                    report(session, state, state.menu.since(), state.menu.sinceNanos(), in, action + " while a menu was open");
                 }
                 if (state.ownMove != Long.MIN_VALUE) {
                     state.afterMovement++;
@@ -196,9 +221,84 @@ public final class ActionGrammarCheck implements TimelineListener {
         Map<String, String> details = new TreeMap<>();
         details.put(NO_SWING, Long.toString(state.withoutSwing));
         details.put(AFTER_MOVEMENT, Long.toString(state.afterMovement));
+        details.put(IN_MENU, Long.toString(state.inMenu));
         state.withoutSwing = 0;
         state.afterMovement = 0;
+        state.inMenu = 0;
         sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, from, at.sequence(), fromNanos, at.nanoTime(), summary,
                 details, admissibility));
+    }
+
+    /**
+     * Whether a menu the server opened is certainly on the client's screen: {@code handleOpenScreen} always shows a vanilla
+     * menu type's screen, and the screen stays until the client closes it itself (every way it does sends
+     * {@code ContainerClose}: escape or the inventory key, the debug options key, a portal, death under the screen) or the
+     * server sends something that closes or covers it. So from the client's answer to a transaction sent after the
+     * {@code OpenScreen} until either, the client runs no {@code handleKeybinds} and its keys stay released
+     * ({@code setScreen} releases them all; with a screen open, key and button presses reach the screen, not the key
+     * mappings).
+     */
+    static final class MenuScreen {
+        /** Unmodelled server packets whose handlers close or cover the screen (by their id's path). */
+        static final Set<String> COVERING = Set.of("open_sign_editor", "open_book", "player_combat_kill", "show_dialog", "clear_dialog",
+                "resource_pack_push", "start_configuration", "transfer", "disconnect");
+        /** {@code ClientboundGameEventPacket}'s WIN_GAME (credits) and DEMO_EVENT (the demo screen). */
+        static final int WIN_GAME = 4;
+        static final int DEMO_EVENT = 5;
+
+        private final Map<Integer, Long> pings = new LinkedHashMap<>(16, 0.75f, false) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Integer, Long> eldest) {
+                return size() > MoveReplies.MAX_TRACKED_PINGS;
+            }
+        };
+        /** The OpenScreen, while nothing that may close or cover its screen was sent since. */
+        private long sent = Long.MIN_VALUE;
+        private long sentNanos;
+        private boolean open;
+
+        void onOutbound(TimelineEvent.Outbound out) {
+            switch (out.packet()) {
+                case ClientboundPacket.OpenScreen screen -> {
+                    forget();
+                    if (screen.menuType() != null) {
+                        sent = out.sequence();
+                        sentNanos = out.nanoTime();
+                    }
+                }
+                case ClientboundPacket.Ping ping -> pings.put(ping.id(), out.sequence());
+                case ClientboundPacket.MountScreenOpen ignored -> forget();
+                case ClientboundPacket.ContainerClose ignored -> forget();
+                case ClientboundPacket.Respawn ignored -> forget();
+                case ClientboundPacket.Login ignored -> forget();
+                case ClientboundPacket.GameEvent event when event.type() == WIN_GAME || event.type() == DEMO_EVENT -> forget();
+                case ClientboundPacket.Unmodeled other when COVERING.contains(other.type().substring(other.type().indexOf(':') + 1)) -> forget();
+                default -> { }
+            }
+        }
+
+        void onAcknowledged(TimelineEvent.Acknowledged ack) {
+            Long ping = pings.remove(ack.transactionId());
+            if (ping != null && sent != Long.MIN_VALUE && ping > sent) {
+                open = true; // the client handled the OpenScreen before this transaction
+            }
+        }
+
+        void forget() {
+            sent = Long.MIN_VALUE;
+            open = false;
+        }
+
+        boolean open() {
+            return open;
+        }
+
+        long since() {
+            return sent;
+        }
+
+        long sinceNanos() {
+            return sentNanos;
+        }
     }
 }

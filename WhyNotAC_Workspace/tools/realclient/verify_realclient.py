@@ -120,6 +120,30 @@ def main():
             if p["type"] == "InteractEntity" and p["kind"] == "ATTACK":
                 attacks += 1
                 due = i
+    # The chest: from the client's answer to a transaction sent after the OpenScreen until its own ContainerClose, W was
+    # held but no movement key and no action reached the server; after it, a movement key did.
+    menu, pings, under, after = None, {}, [], None
+    for e in events:
+        if e["type"] == "Outbound" and e["packet"]["type"] == "OpenScreen" and menu is None:
+            menu = {"sent": e["sequence"], "open": None, "closed": None}
+        elif e["type"] == "Outbound" and e["packet"]["type"] == "Ping":
+            pings[e["packet"]["id"]] = e["sequence"]
+        elif e["type"] == "Acknowledged" and menu and menu["open"] is None and pings.get(e["transactionId"], -1) > menu["sent"]:
+            menu["open"] = e["sequence"]
+        elif e["type"] == "Inbound" and menu and menu["open"] is not None and menu["closed"] is None:
+            p = e["packet"]
+            if p["type"] == "ContainerClose":
+                menu["closed"] = e["sequence"]
+            elif p["type"] in keybind or p["type"] == "PlayerInput":
+                under.append(p)
+        elif e["type"] == "Inbound" and menu and menu["closed"] is not None and after is None and e["packet"]["type"] == "PlayerInput":
+            after = e["packet"]
+    walking = [p for p in under if p["type"] == "PlayerInput" and any(p[k] for k in ("forward", "backward", "left", "right"))]
+    acting = [p["type"] for p in under if p["type"] in keybind and p["type"] != "SetCarriedItem"]
+    check(menu is not None and menu["open"] is not None and menu["closed"] is not None and not walking and not acting
+          and after is not None and after["left"],
+          f"under the chest's screen the client sent no movement key and no action although W was held, and A walked after it "
+          f"closed: {menu} {under} {after}")
     rotations = sum(1 for e in events if e["type"] == "Outbound" and e["packet"]["type"] in ("PlayerRotation", "TeleportEntity"))
     check(attacks >= 2 and actions.get("UseItem", 0) >= 3 and actions.get("SetCarriedItem", 0) >= 3 and not broken and rotations == 0,
           f"the client's actions all came before its tick's movement, each of its {attacks} attacks followed by the main hand's swing "

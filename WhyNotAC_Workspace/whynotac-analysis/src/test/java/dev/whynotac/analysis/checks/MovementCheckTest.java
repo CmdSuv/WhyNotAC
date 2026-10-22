@@ -731,6 +731,72 @@ class MovementCheckTest {
         assertEquals(72, count(MovementTracker.Outcome.EXPLAINED));
     }
 
+    private static final ServerboundPacket.InteractEntity ATTACK = new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK,
+            null, null, false);
+
+    /** Blocking with the shield behind the sword, the server's flags echoed: the client is using an item. */
+    private void block() throws Exception {
+        hold("minecraft:diamond_sword", "minecraft:shield");
+        ticks(5, NONE, 30.0F);
+        ticks(10, FORWARD, 30.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        keybinds.add(useItem(Hand.OFF_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(3);
+        ticks(10, FORWARD, 30.0F);
+    }
+
+    @Test
+    void attackingWhileBlockingIsAFinding() throws Exception {
+        block();
+        assertEquals(List.of(), evidence);
+        keybinds.add(ATTACK); // handleKeybinds consumes the click while the shield is up: no vanilla client sends this
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        assertEquals(MovementTracker.ACTED_WHILE_USING + " (tick " + evidence.getFirst().details().get("clientTick") + ")", evidence.getFirst().summary());
+        assertEquals(MovementTracker.ACTED_WHILE_USING, evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void startingAnotherUseWhileBlockingIsAFinding() throws Exception {
+        block();
+        keybinds.add(useItem(Hand.MAIN_HAND)); // startUseItem only runs while no item is in use
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        assertEquals(MovementTracker.ACTED_WHILE_USING, evidence.getFirst().details().get("reason"));
+    }
+
+    @Test
+    void releasingAndAttackingInOneTickIsAFindingToo() throws Exception {
+        block();
+        keybinds.add(RELEASE); // the use key up: handleKeybinds releases, and still consumes the attack click
+        keybinds.add(ATTACK);
+        use = null;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+    }
+
+    @Test
+    void attackingTheTickAfterTheReleaseIsVanilla() throws Exception {
+        block();
+        keybinds.add(RELEASE);
+        use = null;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(0);
+        keybinds.add(ATTACK);
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        ticks(10, FORWARD, 30.0F);
+        keybinds.add(ATTACK);
+        keybinds.add(useItem(Hand.MAIN_HAND)); // an attack, then a use, in the same tick: startAttack, then startUseItem
+        keybinds.add(useItem(Hand.OFF_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        ticks(5, FORWARD, 30.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
     @Test
     void aSpearInUseLetsThePlayerSprintAtFullSpeed() throws Exception {
         hold("minecraft:iron_spear", null);

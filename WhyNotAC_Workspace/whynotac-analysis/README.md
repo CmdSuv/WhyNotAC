@@ -10,8 +10,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
-| `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi |
-| `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi |
+| `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
+| `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
 
 ### `action-grammar` (`ActionGrammarCheck`)
 
@@ -29,12 +29,24 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   (hareketten sonra saldıran ya da blok koyan, yani "post" sırasıyla çalışan bir client). Işınlama, döndürme ve varlık
   ışınlaması yanıtları tick-framing'in haklarıyla (`MoveReplies`) ayrılır. İkinci kural tikin başlangıcını ister: ilk
   `ClientTickEnd`'den önce iddia yoktur. Bu build'in tanımadığı bir `PlayerAction` iddia dışıdır.
+- **Menü ekrandayken (`MenuScreen`):** `handleOpenScreen` vanilla bir menü tipinin ekranını her zaman açar; ekran,
+  client kendisi kapatana (her yolu `ContainerClose` gönderir: escape ya da envanter tuşu, hata ayıklama seçenekleri
+  tuşu, portal, ekran altında ölüm) ya da sunucu onu kapatan veya örten bir şey gönderene (sandık kapatma, binek ekranı,
+  yeniden doğma, giriş, oyun sonu ve demo olayı, tabela editörü, kitap, ölüm, diyalog, kaynak paketi isteği,
+  yapılandırma, aktarma, bağlantı kesme) kadar kalır. Client'ın `OpenScreen`'den sonra gönderilmiş bir transaction'ı
+  yanıtlamasından o ana kadar `handleKeybinds` çalışmaz; tuşlar da bırakılmış kalır (`setScreen` hepsini bırakır,
+  ekran açıkken tuş ve fare basışları ekrana gider, tuş eşlemelerine değil). Bu aralıkta tuş aşamasının bir eylemi
+  (tikin başında da giden hotbar seçimi hariç) ya da ileri, geri, sol, sağ tuşu kanıttır ("envanterde yürüme");
+  zıplama, eğilme ve koşma (otomatik zıplama ve aç/kapa seçenekleri) iddia dışıdır. Tanınmayan menü tipi iddia
+  dışıdır. Gerçek client'ın sandık şeridi bunu sınar: sandık ekranı açıkken W basılı tutulur, hiçbir hareket tuşu
+  ve eylem sunucuya ulaşmaz; escape'ten sonra A yeniden yürür.
 - **İzleyici:** `Player.isSpectator()` oyuncunun önbelleğe aldığı oyuncu listesi girdisinin modunu okur
   (`ClientSelf.mayBeSpectator`); client'ın işleyip işlemediği belli olmayan bir değişiklik ya da bilinmeyen mod
   sallanma kuralını kapatır.
 - **Sınamalar:** `ActionGrammarCheckTest` vanilla dizilerinin (ağ iş parçacığının araya giren yanıtları, bir tikte
   iki tık, ışınlama ve döndürme yanıtlarından sonra saldırı, hareketten önce her eylem) hiç kanıt üretmediğini ve her
-  kuralın, her eylemin ihlalini ister; her kural ve istisnası için negatif kontrol yakalanır. Gerçek client
+  kuralın, her eylemin ihlalini ister; menü kuralında da açılmadan önceki bir transaction'ın yanıtı, her örten paket,
+  hotbar ve zıplama istisnaları sınanır; her kural ve istisnası için negatif kontrol yakalanır. Gerçek client
   oturumunun kaydı (2 saldırı, 8 eşya kullanımı, 5 bırakma, 5 hotbar seçimi) ve yük testinin bot kayıtları 0 kanıt,
   0 ret verir; gerçek client doğrulayıcısı aynı sırayı ayrıca kendisi de denetler. E2E sondası el sallamadan bir
   saldırıyla vakayı açar. Botlar saldırı ile sallamayı tek yazımda gönderir (vanilla'da pong da ana iş
@@ -79,6 +91,13 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   açlığı koşmayı sunucudan önce belirler). Çapa her olası kullanımı dener: hiçbiri ya da ellerdeki her yığın.
   İddia yok: blok değiştirebilen kullanım (kova, nilüfer), kendi kendine bitebilen kullanım (fırça, kese),
   bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
+- **Kullanırken eylem yok:** `handleKeybinds` oyuncu bir eşya kullanırken yalnızca bırakır (kullanma tuşu
+  kalkmışsa) ve saldırı ile kullanma tuşlarının tıklarını boşa harcar; saldırı, mızrak dürtmesi, varlıkla etkileşim
+  ve yeni kullanım yalnızca kullanmayan bir durumun `startAttack`/`startUseItem`'ından gelir. Bunlardan birini içeren
+  bir tick, tikin başında eşya kullanan hipotezlerle açıklanmaz; hepsi kullanıyorsa tick kanıttır ("eşya
+  kullanırken saldırdı, etkileşti ya da yeni bir kullanım başlattı": kalkanla bloklarken ya da yerken vuran client).
+  Bırakmayla saldırı aynı tikte de kanıttır (bırakan tik tıkları yine harcar); bırakmadan sonraki tikte saldırı
+  vanilla'dır. Bulgunun özeti nedeni söyler (`reason`).
 - **Varlık itmeleri (`ClientEntities.pushers`, `ClientTeams`):** client'ta oyuncuyu yalnızca başka canlıların
   tick'i iter (`LivingEntity.pushEntities`; client'ta `pushableBy` yalnız yerel oyuncuyu kabul eder): kutusu
   oyuncununkiyle kesişen canlı, `Entity.push(Entity)` ile hareketine en çok 0.05 ekler. Yarasa, zırh askısı,

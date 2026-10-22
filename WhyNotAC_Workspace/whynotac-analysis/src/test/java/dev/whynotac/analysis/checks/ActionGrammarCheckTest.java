@@ -287,6 +287,81 @@ class ActionGrammarCheckTest {
         assertEquals(11, evidence.size());
     }
 
+    private void openMenu() {
+        out(new ClientboundPacket.OpenScreen(5, "minecraft:generic_9x3"));
+    }
+
+    private void input(boolean forward, boolean jump, boolean shift, boolean sprint) {
+        in(new ServerboundPacket.PlayerInput(forward, false, false, false, jump, shift, sprint));
+    }
+
+    @Test
+    void underAMenuTheClientNeitherActsNorWalks() {
+        tickEnd();
+        int before = ++pingId;
+        out(new ClientboundPacket.Ping(before));
+        openMenu();
+        in(new ServerboundPacket.Pong(before));
+        deliver(new TimelineEvent.Acknowledged(seq++, now, before, now, 0)); // answered before it handled the OpenScreen
+        attack(); // so it may not have handled it yet
+        swing();
+        input(true, false, false, false);
+        sync(); // now it has
+        input(false, false, false, false); // its keys, released by setScreen
+        input(false, true, true, true); // jump, sneak and sprint: not claimed
+        in(new ServerboundPacket.SetCarriedItem(4)); // the tick's start sends it under a screen too
+        move();
+        tickEnd();
+        assertEquals(List.of(), evidence);
+        attack();
+        swing();
+        assertEquals(1, evidence.size());
+        Evidence e = evidence.getFirst();
+        assertEquals("attack on entity 20 while a menu was open", e.summary());
+        assertEquals("1", e.details().get(ActionGrammarCheck.IN_MENU));
+        tickEnd();
+        now += SECOND;
+        input(true, false, false, false);
+        assertEquals(2, evidence.size());
+        assertEquals("movement keys pressed while a menu was open", evidence.getLast().summary());
+        now += SECOND;
+        in(new ServerboundPacket.ContainerClose(5)); // the client closed it: free again
+        input(true, false, false, false);
+        attack();
+        swing();
+        move();
+        tickEnd();
+        assertEquals(2, evidence.size());
+    }
+
+    @Test
+    void noMenuClaimOnceTheServerMayHaveClosedOrCoveredIt() {
+        tickEnd();
+        List<ClientboundPacket> covering = List.of(new ClientboundPacket.ContainerClose(5), new ClientboundPacket.MountScreenOpen(6, 3, 40),
+                new ClientboundPacket.Respawn(OVERWORLD, 0, 0), new ClientboundPacket.GameEvent(ActionGrammarCheck.MenuScreen.WIN_GAME, 1F),
+                new ClientboundPacket.GameEvent(ActionGrammarCheck.MenuScreen.DEMO_EVENT, 0F), new ClientboundPacket.Unmodeled("minecraft:open_sign_editor"),
+                new ClientboundPacket.Unmodeled("minecraft:player_combat_kill"), new ClientboundPacket.Unmodeled("minecraft:show_dialog"),
+                new ClientboundPacket.OpenScreen(7, null)); // a menu type this build does not know
+        for (ClientboundPacket packet : covering) {
+            openMenu();
+            sync();
+            out(packet);
+            sync();
+            attack();
+            swing();
+            input(true, false, false, false);
+            input(false, false, false, false);
+            tickEnd();
+        }
+        out(new ClientboundPacket.GameEvent(3, 0F)); // a game mode change covers nothing
+        openMenu();
+        out(new ClientboundPacket.Unmodeled("minecraft:sound"));
+        sync();
+        assertEquals(List.of(), evidence);
+        attack();
+        assertEquals(1, evidence.size());
+    }
+
     @Test
     void aPossibleSpectatorNeedNotSwingButStillAttacksBeforeItsMovement() {
         out(new ClientboundPacket.PlayerInfoUpdate(false, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ME, 3))));
