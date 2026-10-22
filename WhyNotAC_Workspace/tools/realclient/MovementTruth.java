@@ -491,6 +491,7 @@ public class MovementTruth {
         boolean slowFalling = false;
         boolean blindness = false;
         boolean dolphinsGrace = false;
+        boolean weaving = false;
         for (Map.Entry<String, Object> e : active.entrySet()) {
             int level = ((Number) e.getValue()).intValue() + 1;
             switch (e.getKey()) {
@@ -499,6 +500,7 @@ public class MovementTruth {
                 case "minecraft:slow_falling" -> slowFalling = true;
                 case "minecraft:blindness" -> blindness = true;
                 case "minecraft:dolphins_grace" -> dolphinsGrace = true;
+                case "minecraft:weaving" -> weaving = true;
                 default -> {
                     if (e.getKey().startsWith("unparsed:")) {
                         return null;
@@ -506,7 +508,7 @@ public class MovementTruth {
                 }
             }
         }
-        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness, dolphinsGrace);
+        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness, dolphinsGrace, weaving);
     }
 
     /**

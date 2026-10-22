@@ -95,7 +95,7 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     ikisinden birini tek başına değiştirebilir (kendi bayrak ve öznitelik yankısı).
   - **Birim testi:** `OnFootTruthTest` oturumdan hareket eden tikleri yeniden oynatır: düz dünyada 195, kodla
     yeniden kurulan parkurda 544, otomatik zıplamalı basamaklarda 166, efekt altında 504, eşya kullanılırken 200,
-    tırmanma alanında 499, sekme alanında 756 tik.
+    tırmanma alanında 499, sekme alanında 756, iç-blok şeritlerinde 1588 tik.
   - **Tırmanma (`onClimbable`, `handleOnClimbable`):** ayaktaki blok tırmanılabilir (merdiven, sarmaşıklar) ya da
     aynı yöne bakan bir merdivenin üstünde açık bir tuzak kapı: hareket tik başına 0.15'e tutulur, düşüş mesafesi
     sıfırlanır, shift aşağı kaymayı durdurur; hareketten sonra yatay çarpışma ya da zıplama dikey hızı 0.2 yapar.
@@ -143,6 +143,29 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     (hepsi yakalandı): yavaşlama 0.8 → 0.81, itme 0.014 → 0.015, düşen suyun aşağı akışı yok, yüzmede bakışın çekişi yok,
     sürünmede yavaşlama yok, hareket içinde suyun yeniden bulunması yok, batma 0.04 → 0.05, sıvıda zıplama 0.04 → 0.05,
     yunus lütfu 0.96 → 0.95, sığ suda koşu.
+  - **İçeriden etki eden bloklar (`checkInsideBlocks`):** tikin sonunda (`applyEffectsFromBlocks`) kutu (1.0E-5F içeri)
+    tikin hareketleri boyunca süpürülür: `Entity.move`'un kaydettiği her hareket, istenen hareket varsa eksen eksen
+    (`Direction.axisStepOrder`: önce y, sonra x ve z'den büyüğü sona), hareket yoksa tikin başladığı yerden. Hücreler
+    `BlockGetter.forEachBlockIntersectedBetween`'in sırasıyla gelir (`InsideBlocks`): başlangıç kutusunun hücreleri (adım
+    0), bir köşeden çıkan ışının ızgara yürüyüşü (`addCollisionsAlongTravel`, `AABB.clip`, oyunun tuhaf köşe seçimi
+    `getFurthestCorner` dahil), bitiş kutusunun hücreleri; hareket başına 16 adım. Her blok bir tikte bir kez, karşılaşma
+    sırasıyla etki eder: örümcek ağı bir sonraki hareketi tutar (`makeStuckInBlock` 0.25, 0.05, 0.25; dokuma efektiyle
+    0.5, 0.25, 0.5; düşüş unutulur), tatlı çilek çalısı da (0.8, 0.75, 0.8; yaş 0 dışında sunucuda can yakar), bal
+    yanından düşeni yavaşlatır (`isSlidingDown`, `doSlideMovement`), kabarcık sütunu kutunun değdiği hücrede yukarı
+    iter ya da aşağı çeker (üstü boşsa güçlü: `onAboveBubbleColumn`, değilse `onInsideBubbleColumn`). Başka hiçbir bloğun
+    `entityInside`'ı client'ın hareketini değiştirmez (kaktüsün ve kamp ateşinin hasarı sunucudadır). **Son oturum
+    (iki blok yüksek ağlara yürüme, koşma, zıplama, beş bloktan düşme, dokuma efektiyle yine; çalılardan yürüyerek,
+    koşarak, zıplayarak geçme; bal sütununun yanından kayma ve ona zıplama; cama çevrili, ruh kumu üstünde yükselen
+    (açık tepesinden fırlayıp geri düşme, shift, zıplama) ve magma üstünde aşağı çeken sütunlar; dört blok derin bir
+    havuzda yan yana yükselen ve çeken sütun sıraları arasından yüzme ve koşarak yüzme):** şeritlerin 1588 tikinin
+    hepsi bit bit eşit: 233'ünde ağ, 134'ünde dokumalı ağ, 147'sinde çalı tutuyor, 18'i bal kayması, 92'si yükselen
+    sütunda, 81'i onun üstünde, 112'si çeken sütunda, 66'sı havuzun sütunları arasında. Tüm oturum: 8097 tikin 8054'ü
+    eşit, 0 fark. Negatif kontroller (hepsi yakalandı): ağ 0.25 → 0.26, dokumayı yok saymak, çalı 0.8 → 0.81, bal
+    kayması −0.05 → −0.06, kenar mesafesi 0.4375 → 0.45, üstte itiş 0.1 → 0.11, içte itiş 0.06 → 0.07, çekiş 0.03 →
+    0.04 (içte ve üstte), kutunun değmesini yok saymak, üstteki suyu yok saymak, ağda düşüşü sıfırlamamak, yalnız bitiş
+    kutusunu taramak, bir bloğun tikte iki kez etki etmesi, hareketi eksenlere bölmemek. Bu veride ayırt edilmeyenler:
+    x ile z'nin sırası (yatay hareket hep x yönünde), hızlı bal kaymasının eşiği (−0.13'e yakın düşüş yok) ve 16 adımlık
+    bütçe (yaya hareketi tikte 16 hücreyi geçmez).
   - **Eşdeğer durumlar (`OnFoot.sameForMovement`):** adımın her yerde aynı okuduğu blok durumları: aynı çarpışma
     geometrisi, bayraklar, sürtünme, hız ve zıplama çarpanları, hiçbirinde sıvı yok. Adımın ya da `Colliders`'ın adıyla
     okuduğu bloklar (tırmanılabilir, içinde etkili, slime, yatak, tuzak kapı, çit, duvar, su, lav, hareketli piston)
@@ -155,13 +178,13 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     düşebilir. Destek bloğu hâlâ eski, yüklü chunk'ta olduğu için yerçekimi normaldir. Motor bu tick'i artık
     kanıtsız karşılaştırmaz.
   - **Kapsam dışında `Colliders.Unknown`:**
-    - su dışındaki sıvılar (lav) ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar),
-      iskele, düşen suyun yanında şekli dünyaya bağlı bir blok;
+    - su dışındaki sıvılar (lav), toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), iskele, düşen
+      suyun ya da bir kabarcık sütununun üstünde şekli dünyaya bağlı bir blok;
     - yüklenmemiş chunk (suyun yakınında, client'ın tutup tutmadığı kesin olmayan chunk da), su hareket verimliliği
       özniteliği (derinlik gezgini);
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 
     Varsayılan öznitelikler (hız dışında) varsayılır; adımın okuduğu efektler (`OnFoot.Effects`: zıplama gücü,
-    havada süzülme, yavaş düşüş, körlük) dışarıdan verilir. Katı varlıklar ve dünya sınırı çağıranın
+    havada süzülme, yavaş düşüş, körlük, yunus lütfu, dokuma) dışarıdan verilir. Katı varlıklar ve dünya sınırı çağıranın
     sorumluluğundadır.
 - **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.

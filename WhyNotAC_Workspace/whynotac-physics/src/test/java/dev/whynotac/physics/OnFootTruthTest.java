@@ -34,8 +34,12 @@ import org.junit.jupiter.api.Test;
  * on top (sneaking to their edges too) and jumped along until the player drops off, and the fence walked and jumped
  * into from the ground. {@code truth-water.jsonl.gz} holds a pool walked into, crossed jumping, sunk into with shift, swum
  * across under water (level, down, up, with dolphin's grace) and left at its wall, a channel's current walked against,
- * stood in and sprinted through, a waterfall against a wall stood and jumped in, and a tunnel crawled out of. Each tick, run from its start in the same world (rebuilt here from the
- * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
+ * stood in and sprinted through, a waterfall against a wall stood and jumped in, and a tunnel crawled out of.
+ * {@code truth-inside.jsonl.gz} holds the blocks that move the player from inside: cobwebs walked, sprinted and jumped
+ * into and fallen into (under weaving too), sweet berry bushes walked, sprinted and jumped through, a honey column slid
+ * down and jumped against, a bubble column rising over soul sand (out of its open top and back, shift, jumps) and one
+ * dragging down over magma. Each tick, run from its start in the same world (rebuilt here from the commands that built
+ * the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
 class OnFootTruthTest {
@@ -104,6 +108,23 @@ class OnFootTruthTest {
         {101, -60, 8, 105, -60, 8, wall("east=low", "up=false", "west=low")},
         {106, -60, 8, 106, -60, 8, wall("east=none", "up=true", "west=low")},
         {100, -60, 11, 104, -60, 11, blockState("minecraft:oak_fence_gate", "facing=north", "in_wall=false", "open=false", "powered=false")},
+        // the blocks that move the player from inside, at z 14; the bubble columns walled in glass
+        {114, -60, 14, 116, -59, 14, blockState("minecraft:cobweb")},
+        {122, -60, 14, 124, -60, 14, blockState("minecraft:sweet_berry_bush", "age=0")},
+        {132, -60, 14, 132, -53, 14, blockState("minecraft:honey_block")},
+        {142, -61, 14, 142, -61, 14, blockState("minecraft:soul_sand")},
+        {142, -60, 14, 142, -56, 14, blockState("minecraft:bubble_column", "drag=false")},
+        {141, -61, 13, 143, -56, 15, blockState("minecraft:glass")},
+        {150, -61, 14, 150, -61, 14, blockState("minecraft:magma_block")},
+        {150, -60, 14, 150, -56, 14, blockState("minecraft:bubble_column", "drag=true")},
+        {149, -61, 13, 151, -56, 15, blockState("minecraft:glass")},
+        // a pool over two rows of rising and two of dragging columns
+        {163, -60, 12, 164, -57, 16, blockState("minecraft:bubble_column", "drag=false")},
+        {167, -60, 12, 168, -57, 16, blockState("minecraft:bubble_column", "drag=true")},
+        {163, -61, 12, 164, -61, 16, blockState("minecraft:soul_sand")},
+        {167, -61, 12, 168, -61, 16, blockState("minecraft:magma_block")},
+        {160, -60, 12, 170, -57, 16, blockState("minecraft:water", "level=0")},
+        {159, -61, 11, 171, -57, 17, blockState("minecraft:glass")},
     };
 
     private static int fence(String east, String west) {
@@ -241,6 +262,15 @@ class OnFootTruthTest {
     }
 
     @Test
+    void blocksThatMoveThePlayerFromInsideAreTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-inside.jsonl.gz", COURSE_WORLD);
+        // ticks held back by a cobweb, under weaving, by a berry bush; honey slides; in the rising column, shot out of its
+        // top, in the dragging column, among the pool's columns
+        assertTrue(counts[0] > 1500 && counts[26] > 200 && counts[27] > 100 && counts[28] > 100 && counts[29] > 10 && counts[30] > 60
+                && counts[31] > 50 && counts[32] > 80 && counts[33] > 40, java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -252,7 +282,8 @@ class OnFootTruthTest {
      * ticks ending in a climbable column, and ticks after a push out of a block, then landings that bounce on the slime
      * pad and on the bed, ticks walking on the slime pad, and landings on it with shift held, then ticks ending on top of a
      * fence, a wall or a fence gate, then ticks in water, swimming, with the eye under water, in the channel's current and in
-     * the waterfall, and crawling}.
+     * the waterfall, and crawling, then ticks held back by a cobweb, by one under weaving and by a berry bush, honey slides,
+     * ticks in the rising bubble column, above it, in the dragging one, and among the pool's columns}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -262,7 +293,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[26];
+        int[] counts = new int[34];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -316,6 +347,16 @@ class OnFootTruthTest {
             counts[23] += inWater && expected.z() > -10.0 && expected.z() < -9.0 && expected.x() > 134.0 && expected.x() < 142.0 ? 1 : 0;
             counts[24] += inWater && expected.x() > 159.0 && expected.x() < 161.0 && expected.z() > -10.5 && expected.z() < -8.5 ? 1 : 0;
             counts[25] += expected.pose() == PlayerState.Pose.SWIMMING && !inWater ? 1 : 0;
+            Vec3d held = expected.stuckSpeedMultiplier();
+            counts[26] += held.equals(new Vec3d(0.25, 0.05F, 0.25)) ? 1 : 0;
+            counts[27] += held.equals(new Vec3d(0.5, 0.25, 0.5)) ? 1 : 0;
+            counts[28] += held.equals(new Vec3d(0.8F, 0.75, 0.8F)) ? 1 : 0;
+            counts[29] += expected.deltaMovement().y() == (-0.05 - 0.08) * 0.98F && expected.x() > 131.0 && expected.x() < 132.0 ? 1 : 0;
+            boolean inRising = expected.x() > 142.0 && expected.x() < 143.0 && expected.z() > 14.0 && expected.z() < 15.0;
+            counts[30] += inRising && inWater ? 1 : 0;
+            counts[31] += inRising && !inWater && expected.y() > -55.0 ? 1 : 0;
+            counts[32] += inWater && expected.x() > 150.0 && expected.x() < 151.0 && expected.z() > 14.0 && expected.z() < 15.0 ? 1 : 0;
+            counts[33] += inWater && expected.x() > 162.7 && expected.x() < 169.3 && expected.z() > 12.0 && expected.z() < 17.0 ? 1 : 0;
         }
         return counts;
     }
@@ -344,6 +385,7 @@ class OnFootTruthTest {
         boolean slowFalling = false;
         boolean blindness = false;
         boolean dolphinsGrace = false;
+        boolean weaving = false;
         if (m.find() && !m.group(1).isEmpty()) {
             for (String entry : m.group(1).split(",")) {
                 String[] kv = entry.split("\":");
@@ -355,11 +397,12 @@ class OnFootTruthTest {
                     case "minecraft:slow_falling" -> slowFalling = true;
                     case "minecraft:blindness" -> blindness = true;
                     case "minecraft:dolphins_grace" -> dolphinsGrace = true;
+                    case "minecraft:weaving" -> weaving = true;
                     default -> { } // not read by the step (a golden apple's absorption and regeneration): the ticks show it
                 }
             }
         }
-        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness, dolphinsGrace);
+        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness, dolphinsGrace, weaving);
     }
 
     /** The item in use at the tick's start (newer files only): its prototype's {@code use_effects}; null when none. */

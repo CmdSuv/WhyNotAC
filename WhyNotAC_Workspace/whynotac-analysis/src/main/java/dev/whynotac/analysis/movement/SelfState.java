@@ -149,11 +149,12 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
         int level = active ? Math.clamp(amplifier, 0, 255) + 1 : 0;
         OnFoot.Effects e = effects;
         OnFoot.Effects next = switch (key) {
-            case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness(), e.dolphinsGrace());
-            case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness(), e.dolphinsGrace());
-            case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), active, e.blindness(), e.dolphinsGrace());
-            case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), active, e.dolphinsGrace());
-            case "minecraft:dolphins_grace" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), e.blindness(), active);
+            case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness(), e.dolphinsGrace(), e.weaving());
+            case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness(), e.dolphinsGrace(), e.weaving());
+            case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), active, e.blindness(), e.dolphinsGrace(), e.weaving());
+            case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), active, e.dolphinsGrace(), e.weaving());
+            case "minecraft:dolphins_grace" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), e.blindness(), active, e.weaving());
+            case "minecraft:weaving" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), e.blindness(), e.dolphinsGrace(), active);
             default -> e;
         };
         if (next.equals(e)) {

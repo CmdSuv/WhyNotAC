@@ -311,10 +311,11 @@ class MovementCheckTest {
             int level = amplifier + 1;
             OnFoot.Effects e = effects;
             effects = switch (effect) {
-                case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness());
-                case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness());
-                case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), level > 0, e.blindness());
-                case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), level > 0);
+                case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness(), e.dolphinsGrace(), e.weaving());
+                case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness(), e.dolphinsGrace(), e.weaving());
+                case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), level > 0, e.blindness(), e.dolphinsGrace(), e.weaving());
+                case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), level > 0, e.dolphinsGrace(), e.weaving());
+                case "minecraft:weaving" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), e.blindness(), e.dolphinsGrace(), level > 0);
                 default -> throw new AssertionError(effect);
             };
         }
@@ -875,6 +876,49 @@ class MovementCheckTest {
                 String.valueOf(ticks.subList(from, ticks.size())));
         // floating in place without the water's pull
         tick(NONE, -90.0F, 0.0F, new Vec3d(0.0, 0.03, 0.0));
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void cobwebsBerryBushesAndABubbleColumnAreFollowed() throws Exception {
+        int web = STATES.firstStateOf("minecraft:cobweb");
+        int bush = STATES.firstStateOf("minecraft:sweet_berry_bush"); // age=0
+        int column = -1;
+        for (int s = STATES.firstStateOf("minecraft:bubble_column"); STATES.block(s).equals("minecraft:bubble_column"); s++) {
+            column = STATES.properties(s).equals("drag=false") ? s : column;
+        }
+        for (int z = -1; z <= 1; z++) {
+            place(3, 64, z, web);
+            place(3, 65, z, web);
+            place(7, 64, z, bush);
+        }
+        // a shaft four deep in the ground (x 12, z 0), rising over soul sand
+        place(12, 59, 0, STATES.firstStateOf("minecraft:soul_sand"));
+        for (int y = 60; y <= 63; y++) {
+            place(12, y, 0, column);
+        }
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        boolean held = false;
+        for (int i = 0; i < 120; i++) { // walks east through the cobwebs, then the bushes
+            tick(FORWARD, -90.0F, 0.0F, Vec3d.ZERO);
+            held |= player.stuckSpeedMultiplier().lengthSqr() > 0.0;
+        }
+        assertTrue(held && player.x() > 8.0, String.valueOf(player));
+        teleport(12.5, 60.0, 0.5, -90.0F, 0.0F);
+        double top = 0.0;
+        for (int i = 0; i < 40; i++) { // the column lifts the player out of its open top; it falls back in
+            tick(NONE, -90.0F, 0.0F, Vec3d.ZERO);
+            top = Math.max(top, player.y());
+        }
+        assertTrue(top > 64.5, String.valueOf(top));
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+        // walking through a cobweb as if it were not there
+        teleport(2.5, 64.0, 0.5, -90.0F, 0.0F);
+        ticks(5, FORWARD, -90.0F);
+        tick(FORWARD, -90.0F, 0.0F, new Vec3d(0.1, 0.0, 0.0));
         assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
     }
 }

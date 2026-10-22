@@ -13,9 +13,10 @@ import java.util.List;
  *
  * <p>The scope is a survival player on foot, in water or crawling, with default attributes but the speed
  * ({@link Speed}) and the effects the step reads ({@link Effects}), using an item or not ({@link ItemUse}),
- * not riding, flying or gliding, on blocks without side effects (water's current aside) and away from lava, solid
- * entities and the world border. Outside it, or where the client's world is not known, {@link Colliders.Unknown} is
- * thrown: no claim can rest on that tick. Sources: the decompiled client, {@code LocalPlayer},
+ * not riding, flying or gliding, away from lava, powder snow, solid entities and the world border; water's current and
+ * the blocks that move the player from inside (cobwebs, berry bushes, honey slides, bubble columns) are followed.
+ * Outside it, or where the client's world is not known, {@link Colliders.Unknown} is thrown: no claim can rest on that
+ * tick. Sources: the decompiled client, {@code LocalPlayer},
  * {@code Player}, {@code LivingEntity} and {@code Entity}.
  */
 public final class OnFoot {
@@ -36,6 +37,8 @@ public final class OnFoot {
      */
     static final java.util.Set<String> MOVING_INSIDE = java.util.Set.of("minecraft:bubble_column", "minecraft:honey_block", "minecraft:cobweb",
             "minecraft:sweet_berry_bush", "minecraft:powder_snow");
+    /** Its collision and its hold depend on the player's boots and fall ({@code PowderSnowBlock}): not followed. */
+    static final String POWDER_SNOW = "minecraft:powder_snow";
     /** {@code BlockTags.CLIMBABLE}; trapdoors can be ladders too ({@code trapdoorUsableAsLadder}). */
     static final java.util.Set<String> CLIMBABLE = java.util.Set.of("minecraft:ladder", "minecraft:vine", "minecraft:scaffolding",
             "minecraft:weeping_vines", "minecraft:weeping_vines_plant", "minecraft:twisting_vines", "minecraft:twisting_vines_plant",
@@ -88,9 +91,10 @@ public final class OnFoot {
      * @param slowFalling {@code getEffectiveGravity}: at most {@code 0.01} while not rising; the fall distance reset
      * @param blindness   {@code isMobilityRestricted}: sprinting is not possible
      * @param dolphinsGrace {@code travelInWater}: the water's slowdown is 0.96
+     * @param weaving     {@code WebBlock.entityInside}: a cobweb holds the player back less ({@code 0.5, 0.25, 0.5})
      */
-    public record Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness, boolean dolphinsGrace) {
-        public static final Effects NONE = new Effects(0, 0, false, false, false);
+    public record Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness, boolean dolphinsGrace, boolean weaving) {
+        public static final Effects NONE = new Effects(0, 0, false, false, false, false);
 
         public Effects {
             if (jumpBoost < 0 || jumpBoost > 256 || levitation < 0 || levitation > 256) {
@@ -99,7 +103,7 @@ public final class OnFoot {
         }
 
         public Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness) {
-            this(jumpBoost, levitation, slowFalling, blindness, false);
+            this(jumpBoost, levitation, slowFalling, blindness, false, false);
         }
     }
 
@@ -174,6 +178,13 @@ public final class OnFoot {
     private boolean jumping;
     private float moveX;
     private float moveY;
+    /** {@code oldPosition()}: where the tick started. */
+    private final Vec3d oldPosition;
+    /** {@code movementThisTick}: the moves {@code Entity.move} made during the tick. */
+    private final java.util.ArrayList<Movement> movements = new java.util.ArrayList<>(2);
+
+    /** {@code Entity.Movement}: a move's start and end, and the movement asked for (null: none, a plain sweep). */
+    private record Movement(Vec3d from, Vec3d to, Vec3d original) {}
 
     private OnFoot(PlayerState pre, Colliders.World world, Conditions conditions) {
         this.world = world;
@@ -205,6 +216,7 @@ public final class OnFoot {
         stuck = pre.stuckSpeedMultiplier();
         swimming = pre.swimming();
         eyeInWater = pre.eyeInWater();
+        oldPosition = new Vec3d(x, y, z);
     }
 
     /** The player after one client tick in which the keys were {@code keys}. */
@@ -272,9 +284,9 @@ public final class OnFoot {
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
         // --- Player.tick: updateIsUnderwater, from the last tick's eye ---
         wasUnderwater = eyeInWater;
-        // --- Entity.baseTick: water (no other fluid nor a block that moves the player from inside), the eye, swimming ---
+        // --- Entity.baseTick: water (no other fluid, no powder snow), the eye, swimming ---
         Box start = pose.box(x, y, z);
-        requireNoEffects(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
+        requireInScope(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
         updateInWaterStateAndDoWaterCurrentPushing();
         updateFluidOnEyes();
         updateSwimming();
@@ -478,8 +490,7 @@ public final class OnFoot {
         delta = handleOnClimbable(delta);
         Box before = pose.box(x, y, z);
         move(delta);
-        // checkInsideBlocks sweeps the box (deflated by 1.0E-5F) along the move
-        requireNoEffects(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
+        requireInScope(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
         Vec3d moved = delta;
         if ((horizontalCollision || jumping) && onClimbable()) { // asked again after the move, at the new feet block
             moved = new Vec3d(moved.x(), 0.2, moved.z());
@@ -519,7 +530,7 @@ public final class OnFoot {
         delta = delta.add(Vec3d.inputVector(input, waterSpeed, yRot)); // moveRelative
         Box before = pose.box(x, y, z);
         move(delta);
-        requireNoEffects(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
+        requireInScope(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
         Vec3d v = delta;
         if (horizontalCollision && onClimbable()) {
             v = new Vec3d(v.x(), 0.2, v.z());
@@ -868,9 +879,11 @@ public final class OnFoot {
             if (fallDistance != 0.0 && length >= 1.0) {
                 throw new Colliders.Unknown("a fall reset by a ray (not modelled)");
             }
+            Vec3d from = new Vec3d(x, y, z);
             x += collided.x();
             y += collided.y();
             z += collided.z();
+            movements.add(new Movement(from, new Vec3d(x, y, z), movement)); // addMovementThisTick
         }
         boolean xHit = !VanillaMath.equal(movement.x(), collided.x());
         boolean zHit = !VanillaMath.equal(movement.z(), collided.z());
@@ -1024,9 +1037,18 @@ public final class OnFoot {
     /**
      * {@code Entity.applyEffectsFromBlocks}: on the ground, the block below the feet's {@code stepOn} (a slime block slows
      * a player not sneaking while its vertical motion is under 0.1: {@code 0.4 + |y| * 0.2} horizontally; no other block's
-     * changes the motion); no block with an effect was inside the box (checked along the move).
+     * changes the motion), then the blocks the box passed through ({@link #checkInsideBlocks}) along the tick's moves, or
+     * from where the tick started when it made none.
      */
     private void applyEffectsFromBlocks() throws Colliders.Unknown {
+        java.util.ArrayList<Movement> moves = new java.util.ArrayList<>(movements); // finalMovementsThisTick
+        movements.clear();
+        Vec3d position = new Vec3d(x, y, z);
+        if (moves.isEmpty()) {
+            moves.add(new Movement(oldPosition, position, null));
+        } else if (moves.getLast().to().distanceToSqr(position) > 9.9999994E-11F) {
+            moves.add(new Movement(moves.getLast().to(), position, null));
+        }
         if (onGround) {
             String block = states.block(state(onPos(0.2F)));
             if (block.equals("minecraft:slime_block")) {
@@ -1037,6 +1059,123 @@ public final class OnFoot {
                 }
             }
         }
+        checkInsideBlocks(moves);
+    }
+
+    /**
+     * {@code Entity.checkInsideBlocks(List<Movement>)}: each move swept in at most 16 steps, a move asked for split per
+     * axis ({@code Direction.axisStepOrder}: y, then x and z, the larger last) and, the steps spent, its end once more;
+     * a block acts once a tick, in the order the sweeps meet it.
+     */
+    private void checkInsideBlocks(List<Movement> moves) throws Colliders.Unknown {
+        java.util.Set<BlockPos> visited = new java.util.HashSet<>();
+        for (Movement m : moves) {
+            Vec3d from = m.from();
+            Vec3d travel = m.to().subtract(m.from());
+            int budget = 16;
+            if (m.original() != null && travel.lengthSqr() > 0.0) {
+                boolean zBeforeX = Math.abs(m.original().x()) < Math.abs(m.original().z()); // YZX, else YXZ
+                Axis[] order = zBeforeX ? new Axis[] {Axis.Y, Axis.Z, Axis.X} : new Axis[] {Axis.Y, Axis.X, Axis.Z};
+                for (Axis axis : order) {
+                    double d = axis.choose(travel.x(), travel.y(), travel.z());
+                    if (d != 0.0) {
+                        // Vec3.relative(axis.getPositive(), d)
+                        Vec3d next = new Vec3d(from.x() + d * (axis == Axis.X ? 1 : 0), from.y() + d * (axis == Axis.Y ? 1 : 0),
+                                from.z() + d * (axis == Axis.Z ? 1 : 0));
+                        budget -= checkInsideBlocks(from, next, budget, visited);
+                        from = next;
+                    }
+                }
+            } else {
+                budget -= checkInsideBlocks(m.from(), m.to(), 16, visited);
+            }
+            if (budget <= 0) {
+                checkInsideBlocks(m.to(), m.to(), 1, visited);
+            }
+        }
+    }
+
+    /**
+     * One sweep of {@code checkInsideBlocks}: the box at {@code to}, deflated by {@code 1.0E-5F}, through the cells from
+     * {@code from} ({@link InsideBlocks}), stopping at the step budget; the steps it took. Every block that acts is
+     * met wherever its cell is (its inside shape is the full block).
+     */
+    private int checkInsideBlocks(Vec3d from, Vec3d to, int budget, java.util.Set<BlockPos> visited) throws Colliders.Unknown {
+        Box box = pose.box(to.x(), to.y(), to.z()).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F);
+        boolean far = from.distanceToSqr(to) > 0.9999900000002526 * 0.9999900000002526;
+        int[] last = {0};
+        InsideBlocks.forEachBlockIntersectedBetween(from, to, box, (bx, by, bz, step) -> {
+            if (step >= budget) {
+                return false;
+            }
+            last[0] = step;
+            BlockPos pos = new BlockPos(bx, by, bz);
+            int s = state(pos);
+            if (!states.has(s, BlockStates.AIR) && MOVING_INSIDE.contains(states.block(s)) && visited.add(pos)) {
+                entityInside(s, pos, far || box.intersects(bx, by, bz, bx + 1, by + 1, bz + 1));
+            }
+            return true;
+        });
+        return last[0] + 1;
+    }
+
+    /**
+     * The {@code entityInside} of the blocks that move the player: a cobweb or a berry bush holds the next move back
+     * ({@code makeStuckInBlock}, the fall forgotten), honey slows a fall down its side ({@code HoneyBlock.doSlideMovement}),
+     * a bubble column the box meets lifts or drags it (more where its top is open). No other block's changes the
+     * client's motion.
+     */
+    private void entityInside(int s, BlockPos pos, boolean intersects) throws Colliders.Unknown {
+        switch (states.block(s)) {
+            case "minecraft:cobweb" -> {
+                fallDistance = 0.0;
+                stuck = conditions.effects().weaving() ? new Vec3d(0.5, 0.25, 0.5) : new Vec3d(0.25, 0.05F, 0.25);
+            }
+            case "minecraft:sweet_berry_bush" -> {
+                fallDistance = 0.0;
+                stuck = new Vec3d(0.8F, 0.75, 0.8F);
+            }
+            case "minecraft:honey_block" -> {
+                if (isSlidingDown(pos)) {
+                    double old = delta.y() / 0.98F + 0.08; // getOldDeltaY
+                    double slid = (-0.05 - 0.08) * 0.98F; // getNewDeltaY(-0.05)
+                    if (old < -0.13) {
+                        double factor = -0.05 / old;
+                        delta = new Vec3d(delta.x() * factor, slid, delta.z() * factor);
+                    } else {
+                        delta = new Vec3d(delta.x(), slid, delta.z());
+                    }
+                    fallDistance = 0.0;
+                }
+            }
+            case "minecraft:bubble_column" -> {
+                if (intersects) {
+                    boolean drag = property(s, "drag").equals("true");
+                    int above = state(pos.above());
+                    if (states.has(above, BlockStates.DYNAMIC_SHAPE)) {
+                        throw new Colliders.Unknown(states.block(above) + " (shape depends on the world) over a bubble column at " + pos);
+                    }
+                    if (states.collisionShape(above).isEmpty() && states.fluidKind(above) == BlockStates.FLUID_NONE) { // onAboveBubbleColumn
+                        delta = new Vec3d(delta.x(), drag ? Math.max(-0.9, delta.y() - 0.03) : Math.min(1.8, delta.y() + 0.1), delta.z());
+                    } else { // onInsideBubbleColumn
+                        delta = new Vec3d(delta.x(), drag ? Math.max(-0.3, delta.y() - 0.03) : Math.min(0.7, delta.y() + 0.06), delta.z());
+                        fallDistance = 0.0;
+                    }
+                }
+            }
+            default -> throw new Colliders.Unknown(states.block(s) + " inside the box at " + pos + " (not modelled)");
+        }
+    }
+
+    /** {@code HoneyBlock.isSlidingDown}: falling in the air, below the top, against a side of the block. */
+    private boolean isSlidingDown(BlockPos pos) {
+        if (onGround || y > pos.y() + 0.9375 - 1.0E-7 || delta.y() / 0.98F + 0.08 >= -0.08) {
+            return false;
+        }
+        double dx = Math.abs(pos.x() + 0.5 - x);
+        double dz = Math.abs(pos.z() + 0.5 - z);
+        double edge = 0.4375 + pose.width / 2.0F;
+        return dx + 1.0E-7 > edge || dz + 1.0E-7 > edge;
     }
 
     /** {@code Player.updatePlayerPose}, with the current shift key. */
@@ -1120,8 +1259,8 @@ public final class OnFoot {
         return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
     }
 
-    /** No block in the cells the two boxes span holds a fluid but water or moves the player from inside ({@link #MOVING_INSIDE}). */
-    private void requireNoEffects(Box a, Box b, String when) throws Colliders.Unknown {
+    /** No block in the cells the two boxes span holds a fluid but water, nor is powder snow. */
+    private void requireInScope(Box a, Box b, String when) throws Colliders.Unknown {
         int x0 = Colliders.floor(Math.min(a.minX(), b.minX()));
         int x1 = Colliders.floor(Math.max(a.maxX(), b.maxX()));
         int y0 = Colliders.floor(Math.min(a.minY(), b.minY()));
@@ -1133,7 +1272,7 @@ public final class OnFoot {
                 for (int bz = z0; bz <= z1; bz++) {
                     int s = state(new BlockPos(bx, by, bz));
                     byte fluid = states.fluidKind(s);
-                    if (fluid != BlockStates.FLUID_NONE && fluid != BlockStates.FLUID_WATER || MOVING_INSIDE.contains(states.block(s))) {
+                    if (fluid != BlockStates.FLUID_NONE && fluid != BlockStates.FLUID_WATER || states.block(s).equals(POWDER_SNOW)) {
                         throw new Colliders.Unknown(states.block(s) + " inside the box " + when + " (not modelled)");
                     }
                 }

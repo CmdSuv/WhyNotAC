@@ -64,7 +64,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   `pushableBy`'ın kurallarıyla verilir ve client'ın o tick tutabileceği her takım durumunda aynı olmalıdır. Bir
   oyuncunun ya da evcil bir hayvanın takımı adından bilinmez: her takım denenir. Birden çok iticinin sırası
   izlenmez, her sıra bir hipotezdir (en çok 3 itici).
-- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (lav, kabarcık sütunu, iskele...), çarpışan ya da kendi yoluyla iten bir
+- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (lav, toz kar, iskele...), çarpışan ya da kendi yoluyla iten bir
   varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
   boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
   böyle), itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
@@ -80,11 +80,13 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
   az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
-  ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme): 6552 tikin 6504'ü iddia edildi, 0 açıklanamayan,
-  3534/3534 tick'te client'ın durumu kümede, 24 itme izlendi. Kalanlar uzak ışınlamalardan sonra client'ın henüz
-  işlemediği chunk'lardır. Kalan 22 tik,
-  uzak bir ışınlamadan sonra yeniden gönderilen ve client'ın henüz işlemediği chunk'tır. Eşdeğer durumlar
-  izlenmeden önce buz pistinin altında çimenin yayılması da 98 tik daha iddiasız bırakıyordu. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
+  ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme; ağlar, çalılar, bal ve kabarcık sütunları):
+  8120 tikin 8016'sı iddia edildi, 0 açıklanamayan, 4459/4459 tick'te client'ın durumu kümede, 24 itme izlendi.
+  Kalanların 68'i uzak ışınlamalardan sonra client'ın henüz işlemediği chunk'lar, 32'si konumu kesin bilinmeyen,
+  dünyayla doğmuş bir koyunun yakınlığıdır. Eşdeğer durumlar izlenmeden önce buz pistinin altında çimenin yayılması
+  da 98 tik daha iddiasız bırakıyordu. Bir parkur hatası da öğreticiydi: ateş direnci oyuncu magmanın üstündeyken
+  kalkınca sunucu hasarla birlikte oyuncunun hızını gönderir (`SetEntityMotion`); takipçi bunu izlemez, iddiadan
+  çekilir ve oyuncu durunca yeniden bağlanır. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
   da 0.05'i float yerine double alan model açıklanamayan tick verir. Efekt modellerinin bilinçli
   hataları (zıplama gücü, yavaş düşüş, havada süzülme, körlük) takipçide de açıklanamayan tik ya da kümede
   bulunmayan client durumu verir. `MovementCheckTest` aynı adımı koşan sentetik bir
@@ -94,7 +96,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   iki köylünün itmesi ve hiç çarpışmayan takımda itilmemek açıklanır; client'ın belki işlemediği bir takım değişikliği
   iddiayı yalnızca karar verdiği yerde bitirir; altındaki toprak çimene dönerken (iki durum adım için aynı) izlenir,
   havaya dönebilecek blokta iddia yoktur; bir havuza yürüyüp batan, su altında yüzen, yükselen ve shift'le batan oyuncu
-  izlenir, suyun çekişi olmadan yerinde süzülmek kanıttır. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
+  izlenir, suyun çekişi olmadan yerinde süzülmek kanıttır; ağlardan ve çalılardan yürüyerek geçen, kabarcık sütununun
+  açık tepesinden fırlayıp geri düşen oyuncu izlenir, ağın içinde onu yok sayarak yürümek kanıttır. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
   yok sayılan yavaşlık, verilmemiş zıplama gücüyle zıplama, körken koşma, yerken tam hızla yürüme ve itmeye karşı
   durmak kanıttır. `ClientPushersTest` ve `ClientTeamsTest` itici sorgusunu (sıra, tick, belirsizlik) ve takım
   kurallarını tek tek sınar.

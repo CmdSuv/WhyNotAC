@@ -76,7 +76,7 @@ done
 echo "server up"
 # The movement course, east of everything else along z = -1..1 (the ground's top is y = -60). Built before the
 # client joins, so it arrives with the chunks: the physics check needs the world as the client had it.
-for c in "forceload add 32 -16 191 16" \
+for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "fill 44 -60 -1 44 -60 1 minecraft:smooth_stone_slab[type=bottom]" "fill 45 -60 -1 46 -60 1 minecraft:stone" \
   "fill 46 -59 -1 46 -59 1 minecraft:smooth_stone_slab[type=bottom]" \
   "fill 52 -61 -1 62 -61 1 minecraft:ice" "fill 70 -61 -1 74 -61 1 minecraft:soul_sand" "fill 82 -60 -2 82 -59 2 minecraft:stone" \
@@ -95,7 +95,14 @@ for c in "forceload add 32 -16 191 16" \
   "fill 133 -60 -11 143 -59 -11 minecraft:stone" "fill 133 -60 -9 143 -59 -9 minecraft:stone" "fill 133 -60 -10 133 -59 -10 minecraft:stone" \
   "setblock 134 -60 -10 minecraft:water" \
   "fill 161 -60 -11 161 -56 -9 minecraft:stone" "setblock 160 -56 -10 minecraft:water" \
-  "fill 175 -59 -10 180 -59 -10 minecraft:stone" "fill 175 -60 -11 180 -60 -11 minecraft:stone" "fill 175 -60 -9 180 -60 -9 minecraft:stone"; do
+  "fill 175 -59 -10 180 -59 -10 minecraft:stone" "fill 175 -60 -11 180 -60 -11 minecraft:stone" "fill 175 -60 -9 180 -60 -9 minecraft:stone" \
+  "fill 114 -60 14 116 -59 14 minecraft:cobweb" "fill 122 -60 14 124 -60 14 minecraft:sweet_berry_bush[age=0]" \
+  "fill 132 -60 14 132 -53 14 minecraft:honey_block" \
+  "fill 141 -61 13 143 -56 15 minecraft:glass" "setblock 142 -61 14 minecraft:soul_sand" "fill 142 -60 14 142 -56 14 minecraft:bubble_column[drag=false]" \
+  "fill 149 -61 13 151 -56 15 minecraft:glass" "setblock 150 -61 14 minecraft:magma_block" "fill 150 -60 14 150 -56 14 minecraft:bubble_column[drag=true]" \
+  "fill 159 -61 11 171 -57 17 minecraft:glass" "fill 160 -60 12 170 -57 16 minecraft:water" \
+  "fill 163 -61 12 164 -61 16 minecraft:soul_sand" "fill 167 -61 12 168 -61 16 minecraft:magma_block" \
+  "fill 163 -60 12 164 -57 16 minecraft:bubble_column[drag=false]" "fill 167 -60 12 168 -57 16 minecraft:bubble_column[drag=true]"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -262,6 +269,34 @@ water 160.5 -60 -90 0 -/1.5 space/1.0 -/1.0 w/1.0 -/0.5
 # Crawling: placed in a tunnel one block high (x 175..180), the player lies down (no pose fits but swimming's), crawls
 # out at the sneaking speed, jumps under the ceiling, and stands up beyond it.
 water 176.5 -60 -90 0 -/0.5 w/0.8 w/0.6/space w/1.2 -/0.5
+# Blocks that move the player from inside, at z = 14.5: cobwebs two high (x 114..116) walked and sprinted into, jumped in
+# and fallen into from five blocks, then again under weaving; sweet berry bushes (x 122..124, age 0: they do not harm, and
+# random ticks are off so they stay so) walked and sprinted through and jumped in; a honey column (x 132) slid down from
+# its top pressed against it, and jumped against from the ground; bubble columns walled in glass, rising over soul sand
+# (x 142: the player shoots out of its open top and falls back, sinks with shift, jumps) and dragging down over magma
+# (x 150, with fire resistance: its floor does not hurt); a pool four deep (x 160..170) over two rows of columns rising
+# from soul sand (x 163..164) and two dragging down over magma (x 167..168), swum and sprint-swum across: the box meets
+# several columns at once, each once a tick.
+inside() { echo "tp $NAME $1 $2 14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+inside 111.5 -60 w/2.5 -/0.5 w/1.0/space -/0.5
+inside 111.5 -60 w,Control_L/2.0 -/0.5
+inside 115.5 -55 -/2.5
+effect give $NAME minecraft:weaving 60 0 true
+inside 111.5 -60 w/2.0 -/0.5
+inside 115.5 -55 -/2.0
+effect clear $NAME minecraft:weaving
+inside 119.5 -60 w/2.0 -/0.5
+inside 119.5 -60 w,Control_L/2.0 -/0.5
+inside 120.5 -60 w/0.5 w/1.0/space -/0.5
+inside 131.5 -53 w/3.0 -/0.5
+inside 129.5 -60 w/1.0 w/1.5/space -/0.5
+inside 142.5 -59 -/3.0 Shift_L/1.0 -/0.5 space/1.5 -/0.5
+effect give $NAME minecraft:fire_resistance 60 0 true
+inside 150.5 -57 -/2.0 space/1.0 -/0.5
+inside 160.5 -59 w/5.0 -/0.5
+inside 160.5 -60 w,Control_L/4.0 -/0.5
+echo "tp $NAME 155.5 -60 18.5 -90 0" > "$FIFO"; sleep 1.0 # off the magma before the effect ends
+effect clear $NAME minecraft:fire_resistance
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap
