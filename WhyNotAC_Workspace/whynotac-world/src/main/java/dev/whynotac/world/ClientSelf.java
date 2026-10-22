@@ -60,6 +60,7 @@ public final class ClientSelf {
     static final double MAX_SCALE = 16.0;
     /** {@code Avatar.POSES}: the scaled eye heights (standing and crouching above, the 0.6-tall poses below). */
     static final float EYE_STANDING = 1.62F;
+    static final float EYE_CROUCHING = 1.27F;
     static final float EYE_LOW_POSE = 0.4F;
     /** The fixed poses: sleeping ({@code LivingEntity.SLEEPING_DIMENSIONS}) and dying (standing's eye). */
     static final float EYE_SLEEPING = 0.2F;
@@ -396,6 +397,28 @@ public final class ClientSelf {
         double eyeLow = Math.min(EYE_SLEEPING, EYE_LOW_POSE * low);
         double eyeHigh = Math.max(EYE_DYING, EYE_STANDING * high);
         return new Eye(sentX, sentZ, sentY + eyeLow, sentY + eyeHigh, SEND_THRESHOLD);
+    }
+
+    /**
+     * The eye positions {@link #eye()} bounds, pose by pose ({@code Avatar.POSES}): standing, crouching and the 0.6-tall
+     * poses, each over the scales the player's cached dimensions may have now, then sleeping and dying (fixed sizes).
+     * Null when {@link #eye()} is.
+     */
+    public java.util.List<Eye> eyes() {
+        if (!eyeState().equals("known")) {
+            return null;
+        }
+        double[] s = scale.hull(certain, windowEnd());
+        float low = (float) s[0];
+        float high = (float) s[1];
+        java.util.List<Eye> out = new java.util.ArrayList<>(5);
+        for (float eye : new float[] {EYE_STANDING, EYE_CROUCHING, EYE_LOW_POSE}) {
+            // EntityDimensions.scale: float products
+            out.add(new Eye(sentX, sentZ, sentY + eye * low, sentY + eye * high, SEND_THRESHOLD));
+        }
+        out.add(new Eye(sentX, sentZ, sentY + EYE_SLEEPING, sentY + EYE_SLEEPING, SEND_THRESHOLD));
+        out.add(new Eye(sentX, sentZ, sentY + EYE_DYING, sentY + EYE_DYING, SEND_THRESHOLD));
+        return out;
     }
 
     /**

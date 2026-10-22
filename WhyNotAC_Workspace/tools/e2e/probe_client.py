@@ -14,8 +14,10 @@ can be verified live:
   * two movement packets in one client tick (tick 200)        -> a tick-framing case (P-M, shadow)
   * an attack on a sheep 7 blocks away (tick 330)             -> an attack-reach case (P-A, shadow)
   * an attack on the husk with no swing after it (tick 345)    -> an action-grammar case (P-M, shadow)
+  * an attack on the husk with the look turned away (tick 365) -> an attack-aim case (P-M, shadow)
 
-It also attacks the nearest husk (tick 300), well within reach, which must open nothing.
+It also attacks the nearest husk (tick 300), well within reach, which must open nothing. Before each attack its
+mouse turns its look to the target, as a player does.
 
 It also keeps a trace of every transaction ping and every velocity packet addressed to itself, in
 arrival order, with velocities decoded exactly as the client's LpVec3 codec does: the ground truth the
@@ -29,6 +31,7 @@ Stdlib only. Prints a JSON summary as the last line.
 """
 import hashlib
 import json
+import math
 import socket
 import struct
 import sys
@@ -55,6 +58,7 @@ PLAY_C_SET_ENTITY_MOTION = 0x63
 PLAY_C_CONTAINER_SET_CONTENT, PLAY_C_CONTAINER_SET_SLOT = 0x12, 0x14
 PLAY_S_CONTAINER_CLICK, PLAY_S_SET_CARRIED_ITEM = 0x11, 0x34
 PLAY_C_ADD_ENTITY, PLAY_S_INTERACT, PLAY_S_SWING = 0x01, 0x19, 0x3C
+PLAY_C_TELEPORT_ENTITY, PLAY_C_ENTITY_POSITION_SYNC, PLAY_C_MOVE_ENTITY_POS, PLAY_C_MOVE_ENTITY_POS_ROT = 0x7B, 0x23, 0x33, 0x34
 # item registry ids (1.21.11, reports/registries.json)
 ITEM_DIAMOND_SWORD, ITEM_STICK = 936, 946
 # entity type registry ids
@@ -294,6 +298,22 @@ class Client:
                 entity_type = r.varint()
                 ex, ey, ez = r.unpack("ddd")
                 self.entities[entity_id] = (entity_type, ex, ey, ez)
+            elif packet_id in (PLAY_C_TELEPORT_ENTITY, PLAY_C_ENTITY_POSITION_SYNC):
+                # PositionMoveRotation (position, delta, yRot, xRot); a teleport adds its relative flags (x, y, z: bits 0-2)
+                entity_id = r.varint()
+                ex, ey, ez = r.unpack("ddd")
+                r.unpack("dddff")
+                relative = r.unpack("i") if packet_id == PLAY_C_TELEPORT_ENTITY else 0
+                if entity_id in self.entities:
+                    kind, ox, oy, oz = self.entities[entity_id]
+                    self.entities[entity_id] = (kind, ex + (ox if relative & 1 else 0.0), ey + (oy if relative & 2 else 0.0),
+                                                ez + (oz if relative & 4 else 0.0))
+            elif packet_id in (PLAY_C_MOVE_ENTITY_POS, PLAY_C_MOVE_ENTITY_POS_ROT):
+                entity_id = r.varint()
+                dx, dy, dz = r.unpack("hhh")
+                if entity_id in self.entities:  # VecDeltaCodec, near enough to aim: 1/4096 of a block per unit
+                    kind, ox, oy, oz = self.entities[entity_id]
+                    self.entities[entity_id] = (kind, ox + dx / 4096.0, oy + dy / 4096.0, oz + dz / 4096.0)
             elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
                 self.send(PLAY_S_CHUNK_BATCH_RECEIVED, struct.pack(">f", 9.0))
             elif packet_id == PLAY_C_DISCONNECT:
@@ -324,6 +344,8 @@ def server_list_ping(host, port):
 
 # Violation 6, an attack without its swing (1.5 s after the sheep: attack-reach and action-grammar each report once).
 GRAMMAR_VIOLATION_TICK = 345
+# Violation 7, an attack with the look turned away from the target.
+AIM_VIOLATION_TICK = 365
 # Extra ClientTickEnd sent at once for violation 4: well above the client-clock check's 22 ticks of slack.
 CLOCK_BURST = 40
 
@@ -350,6 +372,17 @@ def nearest(client, entity_type):
     x, _, z = client.position[:3]
     found = [(((e[1] - x) ** 2 + (e[3] - z) ** 2) ** 0.5, i) for i, e in list(client.entities.items()) if e[0] == entity_type]
     return (min(found)[1], min(found)[0]) if found else (None, None)
+
+
+def turn_towards(yaw, eye, target, multiplier, away=0.0):
+    """The yaw after the mouse turned towards the target (plus `away` degrees) in whole cursor counts, as MouseHandler and
+    Entity.turn compute it: the client's look then points at the target's position within half a count (0.075 degrees).
+
+    Entity.calculateViewVector: the look's x is -sin(yaw), its z cos(yaw)."""
+    wanted = math.degrees(math.atan2(-(target[0] - eye[0]), target[2] - eye[2])) + away
+    step = multiplier * 0.15
+    counts = round(((wanted - yaw + 180.0) % 360.0 - 180.0) / step)
+    return f32(yaw + f32(f32(counts * multiplier) * f32(0.15)))
 
 
 def attack(client, entity_id, swing=True):
@@ -384,12 +417,16 @@ def main():
     attacks = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
-        # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets.
+        # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets. The client
+        # attacks what its look met at the tick's start: the mouse turned it to the target in the frame before, and the
+        # tick's rotation packet carries that look.
+        aim = None  # (target position, degrees away from it)
         if tick in (300, 330):
             # An attack in reach (the husk next to the probe), then violation 5: a sheep 7 blocks away.
             target, distance = nearest(client, ENTITY_HUSK if tick == 300 else ENTITY_SHEEP)
             if target is not None:
                 attack(client, target)
+                aim = (client.entities[target][1:], 0.0)
                 attacks.append({"tick": tick, "target": target, "type": "husk" if tick == 300 else "sheep", "distance": distance})
         if tick == GRAMMAR_VIOLATION_TICK:
             # Violation 6: the husk again, in reach, without the swing every vanilla attack is followed by. WhyNotAC's
@@ -397,7 +434,18 @@ def main():
             target, distance = nearest(client, ENTITY_HUSK)
             if target is not None:
                 attack(client, target, swing=False)
+                aim = (client.entities[target][1:], 0.0)
                 attacks.append({"tick": tick, "target": target, "type": "husk without swing", "distance": distance})
+        if tick in (AIM_VIOLATION_TICK - 1, AIM_VIOLATION_TICK):
+            # Violation 7: the husk again, in reach and swung at, with the look turned a quarter away from it since the tick
+            # before (the stick's attack range also picks along the head's yaw, which is the previous tick's): the vanilla
+            # client attacks only what its look met. WhyNotAC's attack-aim check must open a case.
+            target, distance = nearest(client, ENTITY_HUSK)
+            if target is not None:
+                aim = (client.entities[target][1:], 90.0)
+                if tick == AIM_VIOLATION_TICK:
+                    attack(client, target)
+                    attacks.append({"tick": tick, "target": target, "type": "husk off the look", "distance": distance})
         # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
         # to hotbar 4 with two clicks, each listing the slots it changed as the vanilla client hashes them. As the
         # client: the hotbar slot goes out at the tick's start, the clicks between ticks, both before the movement.
@@ -418,7 +466,7 @@ def main():
             inputs_sent.append(flags)
         counts = (tick % 7) - 3  # -3..3 cursor counts per frame, one frame per tick
         increment = f32(f32(counts * multiplier) * f32(0.15))
-        new_yaw = f32(yaw + increment)
+        new_yaw = f32(yaw + increment) if aim is None else turn_towards(yaw, (x, y + 1.62, z), aim[0], multiplier, aim[1])
         if new_yaw != yaw:
             client.send(PLAY_S_MOVE_ROT, struct.pack(">ffB", new_yaw, pitch, 1))
             yaw_history.append((yaw, new_yaw, counts))

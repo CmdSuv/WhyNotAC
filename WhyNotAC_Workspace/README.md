@@ -44,6 +44,12 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > 2.98 blokta kılıçla saldırdı; ikisi de değerlendirildi ve menzil içi bulundu. 3.05 blokta client saldırıyı
 > hiç göndermedi. E2E'de 7 bloktan saldırı vaka açtı, menzil içi saldırı açmadı. Kayıtlar artık her UUID'yi
 > takma adla tutuyor ([rapor](docs/phases/PHASE-2B-8-REPORT.md)).
+>
+> **Bakış (`attack-aim`, P-M):** vanilla client yalnızca tikin başında bakışının değdiği varlığa saldırır. Bakış,
+> tikin kendi dönüş paketinden ya da client'ın en son gönderdiği dönüşten okunur; göz pozların göz yüksekliklerinden
+> birindedir, bu yüzden eğim de sayılır. Hiçbir olası gözden ve hedefin hiçbir olası kutusuna değmeyen bakışla
+> saldırı kanıttır. Gerçek client'ın iki saldırısı ve yük testinde 20 botun 1829 saldırısı vaka açmadı; E2E'de
+> bakışını çevirip vuran sonda açtı.
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md) · [Faz 2b-8](docs/phases/PHASE-2B-8-REPORT.md)
 
 ## Belgeler
@@ -73,7 +79,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 464 test
+./gradlew build                       # tüm modüller + 477 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

@@ -186,7 +186,19 @@ public final class AttackReachCheck implements TimelineListener {
         if (!out) {
             return new Assessment(Outcome.IN_REACH, "in reach", target, type, distance, allowed, eye, pick, check, range, states.size());
         }
-        // nothing pushed the player after the position it sent
+        String moved = mayHaveMoved(self, own, entities, world);
+        if (moved != null) {
+            return Assessment.noClaim(target, moved);
+        }
+        return new Assessment(Outcome.OUT_OF_REACH, "out of reach", target, type, distance, allowed, eye, pick, check, range, states.size());
+    }
+
+    /**
+     * Why something may have moved the player after the position its eye is based on (a piston or shulker box
+     * near it, a shulker near it: they move entities on the client after the player's own tick), or null if
+     * nothing may have.
+     */
+    static String mayHaveMoved(ClientSelf self, ClientSelf.Eye own, ClientEntities entities, ClientWorld world) {
         double feet = self.sentPosition().y();
         double scale = self.maxScale();
         double half = 0.3 * Math.max(1.0, scale) + own.radius();
@@ -198,12 +210,12 @@ public final class AttackReachCheck implements TimelineListener {
         int maxY = (int) Math.floor(feet + 1.8 * Math.max(1.0, scale) + own.radius()) + MOVER_BLOCKS_MARGIN;
         long since = self.eyeCertain();
         if (world.mayMoveEntitiesIn(minX, minY, minZ, maxX, maxY, maxZ, since)) {
-            return Assessment.noClaim(target, "a piston or shulker box may have pushed the player");
+            return "a piston or shulker box may have pushed the player";
         }
         if (entities.mayHaveNear(SHULKER, own.x(), feet, own.z(), SHULKER_RADIUS + half, since)) {
-            return Assessment.noClaim(target, "a shulker may have pushed the player");
+            return "a shulker may have pushed the player";
         }
-        return new Assessment(Outcome.OUT_OF_REACH, "out of reach", target, type, distance, allowed, eye, pick, check, range, states.size());
+        return null;
     }
 
     private static String format(double value) {

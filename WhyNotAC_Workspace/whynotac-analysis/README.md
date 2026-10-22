@@ -10,6 +10,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `tick-framing` | P-M | Bir client tick'inde vanilla'nın gönderebileceğinden fazla hareket paketi |
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
+| `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
 
@@ -51,6 +52,41 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   0 ret verir; gerçek client doğrulayıcısı aynı sırayı ayrıca kendisi de denetler. E2E sondası el sallamadan bir
   saldırıyla vakayı açar. Botlar saldırı ile sallamayı tek yazımda gönderir (vanilla'da pong da ana iş
   parçacığındandır, araya giremez); sonda hotbar seçimini ve tıklarını tikin hareketinden önce gönderir.
+
+### `attack-aim` (`AttackAimCheck`, `AttackAim`)
+
+- **Client'ın kuralı (1.21.11):** client yalnızca tikin başındaki seçimin (`GameRenderer.pick`,
+  `LocalPlayer.raycastHitResult`) bulduğu varlığa saldırır. Her seçim gözden çıkan bir ışın boyuncadır: vanilla seçim
+  bakış vektörüyle (`getViewVector(1)`: güncel eğim ve yön), kutu seçme yarıçapı kadar büyütülmüş ya da göz kutunun
+  içinde; `attack_range` bileşenli eşyada önce kafanın bakışıyla (`getHeadLookAngle`: güncel eğim ve kafanın yönü),
+  kutu `hitbox_margin` kadar büyütülmüş.
+- **Hangi bakış:** client dışarıdan bir araç değilse seçim ile tikin `sendPosition`'ı arasında hiçbir şey onu
+  döndürmez: fare her karede, paketler karelerin arasında döndürür. Bu yüzden seçimin bakışı, tikin kendi hareket
+  paketinin taşıdığı dönüştür; bu paket, saldırıdan sonra aynı tikteki ilk hareket paketidir. Pakette dönüş ya da
+  böyle bir paket yoksa dönüş, `sendPosition`'ın en son dönüşle gönderdiği paketten beri değişmemiştir
+  (`yRotLast`). Işınlama ve döndürme yanıtları onu değiştirmez; oyuncuyu döndürdülerse `sendPosition` yeni dönüşü
+  gönderir. Kontrol, `yRotLast`'ın olabileceği her dönüşü tutar (`MoveReplies` hangi paketlerin yanıt olabileceğini
+  söyler; en çok 8, sonra kesin bir kendi paketine kadar bilinmez). Kafanın yönü bir önceki tikin `aiStep`'indeki
+  yöndür, yani o tikten sonraki `yRotLast`; ışınlama bakışın yönünü değiştirir, kafanınkini değil.
+- **Geometri:** göz, pozların göz yüksekliklerinden birindedir (`ClientSelf.eyes()`, `Avatar.POSES`: ayakta 1.62,
+  eğilirken 1.27, 0.6 boylu pozlarda 0.4, hepsi oyuncunun olası ölçekleriyle; uyurken 0.2 ve ölürken 1.62 sabit); x ve
+  z ±2·10⁻⁴. Eğim de bu yüzden sayılır: iki göz yüksekliğinin arasında kalan bir kutuya düz bakış değmez. Bir gözden yön `v` ile çıkan ışın hedef kutusu `B`'ye ancak ve ancak orijinden `v` ile çıkan ışın
+  `B - S`'e (gözden kutuya bütün farkların kutusu) değdiğinde değer. Tek bir ışın-kutu (slab) sınaması, 10⁻⁴ pay ile.
+  Işın sınırsızdır (client'ın parçaları onun üzerinde); ne kadar uzağa erişildiği `attack-reach`'in işidir. Hedefin
+  olası her durumu ve olası her bakış için ışın değmiyorsa saldırı kanıttır; bulgu, bakışın kutudan en az ne kadar
+  uzaktan geçtiğini (`missBy`) söyler.
+- **İddia yok:** giriş ya da yeniden doğuştan sonra client `PlayerLoaded` diyene kadar (yeni oyuncu o zamana kadar
+  hareket göndermez), sonra kendi dönüşünü gönderene kadar bakış bilinmez (saldırıdan sonra kendi dönüşü gelirse
+  bilinir); binekteyken (yolcunun dönüş paketleri `yRotLast`'ı değiştirmez); izleyici; göz ya da hedef kutusu
+  sınırlanamıyor; envanterin erişimi bilinmiyor; oyuncuyu pozisyonundan sonra bir piston, shulker kutusu ya da
+  shulker itmiş olabilir (`attack-reach` ile aynı koşul, `AttackReachCheck.mayHaveMoved`).
+- **Sınamalar:** `AttackAimCheckTest` bakış vektörünü, ışın-kutu sınamasını, bakış boyunca ve dışındaki saldırıyı,
+  dönüşsüz tiklerde son gönderilen bakışı, yanıt olabilecek bir paketin iki bakışı da tutmasını, ışınlama yanıtının
+  `yRotLast` sayılmamasını (bakış onu izlerse client kendi paketinde gönderirdi), `attack_range` eşyasında kafanın
+  bir önceki tikteki yönünü, tek bakışla iki yandaki varlıklara saldırıyı, saniyede bir bulguyu, piston,
+  izleyici ve yüklenmemiş client istisnalarını ve anlaşılamayan paketle reddi sınar; her kural için negatif kontrol
+  yakalanır. E2E sondası her saldırısında faresini hedefe döndürür (tam fare adımlarıyla) ve bakışını bir tik önceden
+  çevirip husk'a vurarak vakayı açar; yük botları da saldırdıkları ineğe döner.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 

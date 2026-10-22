@@ -13,7 +13,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | Çevrilmiş client'lar için ikinci kenar katmanı yok (`NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
-| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement` orada ayrı sayılır) |
+| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement` orada ayrı sayılır) |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
 | Hareket fiziği (`whynotac-physics`) | Yaya kısmı tamam | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu) lav (Nether'in hızlı lavı dahil) ve iskele dahil) gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü SHADOW'da, canlıların itmesini takımlarıyla (görev #33) ve client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
@@ -65,7 +65,8 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   blok kırma, hotbar) tikin hareketinden önce gelmesi `action-grammar` ile yapıldı (görev #56). Eylem bağlamından
   (`G3`) sunucunun açtığı menü ekrandayken eylem ya da yürüme tuşu (`action-grammar`) ve eşya kullanırken saldırı,
   etkileşim ya da yeni kullanım (`movement`) yapıldı (görev #57).
-- Duvar arkasından vuruş ve ışın üzerinde engel (`C2`).
+- Bakış ve engel (`C2`): saldırılan varlığın tikin bakışıyla kesişmesi `attack-aim` ile yapıldı (görev #58). Kalan:
+  ışın üzerinde blok engeli (duvar arkasından vuruş); blokların seçim (outline) şekilleri gerekir.
 - Blok erişimi ve yüz doğrulama (`W2`), kırma ilerlemesi (`W1`), yerleştirme (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
 

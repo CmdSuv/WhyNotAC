@@ -54,16 +54,14 @@ class LoadBot(pc.Client):
         # A teleport (accept + move to the new spot, sent by the reader thread) and a tick's move (tick
         # thread) must not interleave: a move from the old spot after the accept is "moved too quickly".
         self.move_lock = threading.Lock()
-        self.cows = {}  # entity id -> (x, y, z) as added
         self.attacks = 0
 
+    def cows(self):
+        """Entity id -> (x, y, z) of every cow, where the server last put it (players push them)."""
+        return {i: e[1:] for i, e in list(self.entities.items()) if e[0] == ENTITY_COW}
+
     def handle(self, packet_id, r):
-        if self.state == "play" and packet_id == pc.PLAY_C_ADD_ENTITY:
-            entity_id = r.varint()
-            r.unpack("16s")
-            if r.varint() == ENTITY_COW:
-                self.cows[entity_id] = r.unpack("ddd")
-        elif self.state == "play" and packet_id == pc.PLAY_C_POSITION:
+        if self.state == "play" and packet_id == pc.PLAY_C_POSITION:
             with self.move_lock:
                 super().handle(packet_id, r)
                 self.teleports += 1
@@ -104,10 +102,13 @@ def run_bot(host, port, name, seconds, results, start_gate, stop_file):
                 if tick % 10 == 5 and bot.teleports == seen_teleports and sent is not None:
                     # As Minecraft.tick: the pick and attack come before the tick's movement, from the position sent last.
                     eye = (sent[0], sent[1] + EYE_HEIGHT, sent[2])
-                    near = [i for i, cow in list(bot.cows.items()) if box_distance(eye, cow) <= ATTACK_DISTANCE]
+                    cows = bot.cows()
+                    near = [i for i, cow in cows.items() if box_distance(eye, cow) <= ATTACK_DISTANCE]
                     if near:
                         pc.attack(bot, near[0])  # the attack and its swing back to back, as the client's main thread sends them
                         bot.attacks += 1
+                        # the look that met it: the mouse turned to the cow in the frame before; this tick's packet carries it
+                        yaw = pc.turn_towards(yaw, eye, cows[near[0]], multiplier)
                 if bot.teleports != seen_teleports:  # moved by the server (spreadplayers): walk around the new spot
                     seen_teleports = bot.teleports
                     x0, y0, z0, _, _ = bot.position
