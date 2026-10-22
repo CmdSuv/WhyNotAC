@@ -60,8 +60,11 @@ class MovementCheckTest {
     private static final PlayerState.Keys SPRINT_JUMP = new PlayerState.Keys(true, false, false, false, true, false, true);
     private static final PlayerState.Keys STRAFE_SNEAK = new PlayerState.Keys(false, false, true, false, false, true, false);
 
-    /** Stone below y 64, air above: the replica's world, as the synthetic client sees it. */
-    private static final Colliders.World GROUND = new Colliders.World() {
+    /** Blocks placed on the ground ({@link #place}), as the synthetic client holds them. */
+    private final Map<List<Integer>, Integer> placed = new java.util.HashMap<>();
+
+    /** Stone below y 64, air above, and what was placed: the replica's world, as the synthetic client sees it. */
+    private final Colliders.World GROUND = new Colliders.World() {
         @Override
         public BlockStates states() {
             return STATES;
@@ -69,7 +72,8 @@ class MovementCheckTest {
 
         @Override
         public int blockState(int x, int y, int z) {
-            return y < 64 ? STONE : AIR;
+            Integer p = placed.get(List.of(x, y, z));
+            return p != null ? p : y < 64 ? STONE : AIR;
         }
 
         @Override
@@ -210,7 +214,7 @@ class MovementCheckTest {
         }
         // a new LocalPlayer: the client's defaults
         player = new PlayerState(0.0, 0.0, 0.0, Vec3d.ZERO, -180.0F, 0.0F, false, false, false, false, false, 0.0, false, false, false,
-                PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO);
+                PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO, false, false);
         teleport(0.5, 64.0, 0.5, 30.0F, 0.0F);
         in(new ServerboundPacket.PlayerLoaded());
     }
@@ -225,7 +229,7 @@ class MovementCheckTest {
         player = new PlayerState(x, y, z, Vec3d.ZERO, yaw, pitch, player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
                 player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(), player.sprintModifier(),
                 player.crouching(), player.pose(), player.keys(), player.noJumpDelay(), player.sprintTriggerTime(), player.autoJumpTime(), player.support(),
-                player.onGroundNoBlocks(), player.stuckSpeedMultiplier());
+                player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater());
         in(new ServerboundPacket.AcceptTeleportation(id));
         in(new ServerboundPacket.MovePlayer(x, y, z, yaw, pitch, true, true, false, false));
     }
@@ -405,26 +409,36 @@ class MovementCheckTest {
     private static PlayerState rotate(PlayerState p, float yRot, float xRot) {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
-                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
+                p.swimming(), p.eyeInWater());
     }
 
     private static PlayerState move(PlayerState p, Vec3d by) {
         return new PlayerState(p.x() + by.x(), p.y() + by.y(), p.z() + by.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(),
                 p.horizontalCollision(), p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(),
                 p.sprintModifier(), p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(),
-                p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater());
     }
 
     private static PlayerState withDelta(PlayerState p, Vec3d delta) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
-                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
+                p.swimming(), p.eyeInWater());
     }
 
     private static PlayerState withSprintModifier(PlayerState p, boolean sprintModifier) {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), sprintModifier, p.crouching(), p.pose(), p.keys(),
-                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+                p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
+                p.swimming(), p.eyeInWater());
+    }
+
+    /** The server sets a block; the client handles it before its next tick. */
+    private void place(int x, int y, int z, int state) {
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(x, y, z), state));
+        sync();
+        placed.put(List.of(x, y, z), state);
     }
 
     // --- timeline helpers ---
@@ -837,5 +851,30 @@ class MovementCheckTest {
         assertTrue(ticks.subList(ticks.size() - 2, ticks.size()).stream()
                 .allMatch(t -> t.outcome() != MovementTracker.Outcome.EXPLAINED && t.reason().contains("unknown block at 0 63 0")), String.valueOf(ticks));
         assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void wadingSwimmingAndSinkingInAPoolAreFollowed() throws Exception {
+        int water = STATES.firstStateOf("minecraft:water"); // level=0: a source
+        for (int x = 1; x <= 8; x++) {
+            for (int z = -2; z <= 2; z++) {
+                for (int y = 61; y <= 63; y++) {
+                    place(x, y, z, water);
+                }
+            }
+        }
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        ticks(20, FORWARD, -90.0F); // walks east into the pool and sinks
+        ticks(15, SPRINT, -90.0F); // under water: swims
+        ticks(10, new PlayerState.Keys(false, false, false, false, true, false, false), -90.0F); // rises
+        ticks(10, new PlayerState.Keys(false, false, false, false, false, true, false), -90.0F); // sinks with shift
+        assertTrue(player.eyeInWater() || player.y() < 64.0, String.valueOf(player));
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+        // floating in place without the water's pull
+        tick(NONE, -90.0F, 0.0F, new Vec3d(0.0, 0.03, 0.0));
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
     }
 }

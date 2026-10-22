@@ -125,6 +125,24 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     yerden çite yürüyüp zıplama):** şeridin 590 tikinin hepsi bit bit eşit, 318'i bir çitin, duvarın ya da kapının
     üstünde biter. Tüm oturum: 5458 tikin 5440'ı eşit, 0 fark. Eski davranış (bu bloklarda `Unknown`) testi düşürür:
     268 tik, üstte hiç.
+  - **Su (`baseTick`, `travelInWater`):** tikin başında `updateIsUnderwater` bir önceki tikin gözünü okur
+    (`LocalPlayer.isUnderWater`), `updateFluidHeightAndDoFluidPushing(WATER, 0.014)` kutunun (0.001 içeri) hücrelerinde
+    suyun kutunun dibinden yüksekliğini ve akışların ortalamasını bulur (yükseklik 0.4'ün altındaysa onunla ölçeklenir;
+    oyuncunun itmesi normalleştirilmez, yavaşken en az 0.0045), `updateFluidOnEyes` gözün hücresindeki suyun üstünü,
+    `updateSwimming` yüzmeyi. Akış `FlowingFluid.getFlow` birebir: alçak komşuya doğru (geçilebilir komşunun altındaki suya
+    da), düşen suda sağlam bir yüzün (ya da üstündekinin) yanında aşağı; sağlam yüzler istemciden dökülen tablodan
+    (`STURDY_*`, Paper'ın kayıt defteriyle de aynı). Sığ suda koşu başlamaz ve durur, yüzen koşu `shouldStopSwimSprinting`
+    ile durur, shift suda batırır (−0.04), zıplama su yüksekliği eşiği (0.4) aşınca sıvıda zıplar (+0.04). Yüzerken bakışın
+    eğimi dikey hızı çeker (`Player.travel`). `travelInWater`: yavaşlama 0.8 (koşarken 0.9, yunus lütfuyla 0.96), girdi 0.02,
+    tırmanılabilir duvarda 0.2, `getFluidFallingAdjustedMovement`, duvarda sudan çıkış (0.3). Hareket sırasında suya girilirse
+    `checkFallDamage` suyu yeniden bulur ve iter. Su dışındaki yüzme duruşu sürünmedir: girdi sinsi yürüme gibi yavaşlar. **Son oturum (üç blok derin havuz: içine
+    yürüme, zıplayarak geçme, shift'le batma, su altında yüzme (düz, aşağı, yukarı, yunus lütfuyla), duvarından çıkma;
+    akıntısına karşı yürünen, içinde durulan ve koşulan bir kanal; duvar dibinde bir şelale; bir blok yüksek tünelden
+    sürünerek çıkma):** şeritlerin 1077 tikinin hepsi bit bit eşit: 849'u suda, 153'ü yüzerek, 605'inde göz suda, 170'i
+    kanalın akıntısında, 142'si şelalede, 123'ü sürünerek. Tüm oturum: 6531 tikin 6504'ü eşit, 0 fark. Negatif kontroller
+    (hepsi yakalandı): yavaşlama 0.8 → 0.81, itme 0.014 → 0.015, düşen suyun aşağı akışı yok, yüzmede bakışın çekişi yok,
+    sürünmede yavaşlama yok, hareket içinde suyun yeniden bulunması yok, batma 0.04 → 0.05, sıvıda zıplama 0.04 → 0.05,
+    yunus lütfu 0.96 → 0.95, sığ suda koşu.
   - **Eşdeğer durumlar (`OnFoot.sameForMovement`):** adımın her yerde aynı okuduğu blok durumları: aynı çarpışma
     geometrisi, bayraklar, sürtünme, hız ve zıplama çarpanları, hiçbirinde sıvı yok. Adımın ya da `Colliders`'ın adıyla
     okuduğu bloklar (tırmanılabilir, içinde etkili, slime, yatak, tuzak kapı, çit, duvar, su, lav, hareketli piston)
@@ -137,8 +155,10 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     düşebilir. Destek bloğu hâlâ eski, yüklü chunk'ta olduğu için yerçekimi normaldir. Motor bu tick'i artık
     kanıtsız karşılaştırmaz.
   - **Kapsam dışında `Colliders.Unknown`:**
-    - sıvı ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar), iskele;
-    - yüklenmemiş chunk, sürünme;
+    - su dışındaki sıvılar (lav) ve içinde hareket etkisi olan bloklar (kabarcık sütunu, bal, ağ, böğürtlen, toz kar),
+      iskele, düşen suyun yanında şekli dünyaya bağlı bir blok;
+    - yüklenmemiş chunk (suyun yakınında, client'ın tutup tutmadığı kesin olmayan chunk da), su hareket verimliliği
+      özniteliği (derinlik gezgini);
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 
     Varsayılan öznitelikler (hız dışında) varsayılır; adımın okuduğu efektler (`OnFoot.Effects`: zıplama gücü,

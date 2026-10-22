@@ -41,7 +41,9 @@ public final class Recorder {
     private static Field activeEffects, amplifier;
     // the item in use (LocalPlayer.startedUsingItem, LivingEntity.useItem)
     private static Field startedUsingItem, useItem;
-    private static Method isSprinting, isShiftKeyDown, getPose, isPassenger;
+    // water: the tags on the eye (fluidOnEyes), the fluid heights, Player.wasUnderwater
+    private static Field fluidOnEyes, fluidHeight, wasUnderwater;
+    private static Method isSprinting, isShiftKeyDown, getPose, isPassenger, isSwimming;
 
     private Recorder() {}
 
@@ -89,6 +91,17 @@ public final class Recorder {
             bool(line, "minorHorizontalCollision", minorHorizontalCollision.getBoolean(player));
             f64(line, "fallDistance", fallDistance.getDouble(player));
             bool(line, "wasTouchingWater", wasTouchingWater.getBoolean(player));
+            bool(line, "swimming", (Boolean) isSwimming.invoke(player));
+            // TagKey.toString: "TagKey[minecraft:fluid / minecraft:water]"
+            bool(line, "eyeInWater", String.valueOf(fluidOnEyes.get(player)).contains(" / minecraft:water]"));
+            bool(line, "wasUnderwater", wasUnderwater.getBoolean(player));
+            double water = 0.0;
+            for (java.util.Map.Entry<?, ?> e : ((java.util.Map<?, ?>) fluidHeight.get(player)).entrySet()) {
+                if (String.valueOf(e.getKey()).contains(" / minecraft:water]")) {
+                    water = ((Number) e.getValue()).doubleValue();
+                }
+            }
+            f64(line, "waterHeight", water);
             f32(line, "xxa", xxa.getFloat(player));
             f32(line, "yya", yya.getFloat(player));
             f32(line, "zza", zza.getFloat(player));
@@ -208,6 +221,10 @@ public final class Recorder {
         isShiftKeyDown = method(loader, entity, "isShiftKeyDown()");
         getPose = method(loader, entity, "getPose()");
         isPassenger = method(loader, entity, "isPassenger()");
+        isSwimming = method(loader, entity, "isSwimming()");
+        fluidOnEyes = field(loader, entity, "fluidOnEyes");
+        fluidHeight = field(loader, entity, "fluidHeight");
+        wasUnderwater = field(loader, "net.minecraft.world.entity.player.Player", "wasUnderwater");
     }
 
     private static Field field(ClassLoader loader, String mojangClass, String name) throws ReflectiveOperationException {

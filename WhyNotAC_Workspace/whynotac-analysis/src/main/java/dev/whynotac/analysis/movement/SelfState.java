@@ -38,7 +38,8 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             "minecraft:gravity", 0.08,
             "minecraft:scale", 1.0,
             "minecraft:movement_efficiency", 0.0,
-            "minecraft:sneaking_speed", 0.3);
+            "minecraft:sneaking_speed", 0.3,
+            "minecraft:water_movement_efficiency", 0.0);
     static final int SURVIVAL = 0;
     static final int ADVENTURE = 2;
 
@@ -142,16 +143,17 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
      * {@code handleUpdateMobEffect} ({@code forceAddEffect}: the instance replaced, its amplifier clamped to 0..255)
      * or {@code handleRemoveMobEffect}. The client counts a duration down but never ends an effect itself: it lasts
      * until the server removes it. Effects the on-foot step does not read change nothing (speed and slowness act
-     * through the attribute the server sends; dolphin's grace only in water, outside the step).
+     * through the attribute the server sends).
      */
     SelfState withEffect(String key, int amplifier, boolean active) {
         int level = active ? Math.clamp(amplifier, 0, 255) + 1 : 0;
         OnFoot.Effects e = effects;
         OnFoot.Effects next = switch (key) {
-            case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness());
-            case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness());
-            case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), active, e.blindness());
-            case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), active);
+            case "minecraft:jump_boost" -> new OnFoot.Effects(level, e.levitation(), e.slowFalling(), e.blindness(), e.dolphinsGrace());
+            case "minecraft:levitation" -> new OnFoot.Effects(e.jumpBoost(), level, e.slowFalling(), e.blindness(), e.dolphinsGrace());
+            case "minecraft:slow_falling" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), active, e.blindness(), e.dolphinsGrace());
+            case "minecraft:blindness" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), active, e.dolphinsGrace());
+            case "minecraft:dolphins_grace" -> new OnFoot.Effects(e.jumpBoost(), e.levitation(), e.slowFalling(), e.blindness(), active);
             default -> e;
         };
         if (next.equals(e)) {

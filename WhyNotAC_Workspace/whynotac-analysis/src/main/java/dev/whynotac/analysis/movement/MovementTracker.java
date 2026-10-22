@@ -869,10 +869,11 @@ public final class MovementTracker {
             switch (e.index()) {
                 case 0 -> { // Entity.DATA_SHARED_FLAGS_ID
                     int flags = (int) e.value();
-                    if ((flags & (1 << 4)) != 0 || (flags & (1 << 7)) != 0) {
-                        throw new Lose("swimming or gliding flag set by the server");
+                    if ((flags & (1 << 7)) != 0) {
+                        throw new Lose("gliding flag set by the server");
                     }
                     p = withSprinting(p, (flags & (1 << 3)) != 0); // the flag alone: no modifier change
+                    p = p.withWater((flags & (1 << 4)) != 0, p.eyeInWater()); // swimming, the server's own
                 }
                 case 5 -> noGravity = e.value() != 0; // DATA_NO_GRAVITY
                 case 6 -> { // DATA_POSE
@@ -916,7 +917,7 @@ public final class MovementTracker {
         boolean sprintModifier = speed != null && speed.holdsSprinting();
         PlayerState.Pose pose = keepData ? old.pose() : PlayerState.Pose.STANDING;
         PlayerState player = new PlayerState(0.0, 0.0, 0.0, delta, yRot, xRot, false, false, false, false, false, 0.0, sprinting, sprintModifier, false,
-                pose, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO);
+                pose, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO, keepData && old.swimming(), false); // a new entity's eye holds no fluid
         Hypothesis.Sent sent = keepData ? Hypothesis.Sent.fresh(h.sent().input(), old.sprinting()) : Hypothesis.Sent.fresh(PlayerState.Keys.NONE, false);
         return new Hypothesis(player, self, sent, h.windowMask(), h.autoJumpMask(), h.applied());
     }
@@ -950,7 +951,7 @@ public final class MovementTracker {
         PlayerState moved = new PlayerState(x, y, z, delta.isFinite() ? delta : d, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(),
                 p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(),
                 p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(),
-                p.stuckSpeedMultiplier());
+                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater());
         return moved;
     }
 
@@ -1431,7 +1432,7 @@ public final class MovementTracker {
         }
         PlayerState guess = new PlayerState(x, y, z, new Vec3d(0.0, settled, 0.0), baseSent.yRot(), baseSent.xRot(), true, false, false, true,
                 true, 0.0, baseSent.sprinting(), base.speed().holdsSprinting(), false, PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null,
-                false, Vec3d.ZERO);
+                false, Vec3d.ZERO, false, false); // the step finds the eye; standing still, it does not swim
         try {
             Box box = guess.box();
             if (!base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
@@ -1584,7 +1585,7 @@ public final class MovementTracker {
             int sprintTrigger, int autoJump) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), sprinting, sprintModifier, p.crouching(), pose, p.keys(),
-                p.noJumpDelay(), sprintTrigger, autoJump, p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier());
+                p.noJumpDelay(), sprintTrigger, autoJump, p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater());
     }
 
     private static PlayerState rotated(PlayerState p, float yRot, float xRot) {

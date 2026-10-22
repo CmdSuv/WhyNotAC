@@ -198,7 +198,7 @@ okuduğu sırayla yeniden kurulur:
   sınırları chunk baytlarını da sayar (128 bayt = 1 birim), bellek sınırı korunur.
 - **Veri:** her blok durumu için çarpışma şekli oyunun kendi biçiminde (eksen koordinatları, dolu
   hücreler, kutular, `CubeVoxelShape`/`ArrayVoxelShape` türü), sürtünme, hız ve zıplama çarpanları,
-  sertlik ve sıvı. Veri **resmi client'ın kendisinden** üretilir (`BlockDataDump`, Mojang eşlemeleriyle).
+  sertlik, sıvı ve yatay yüzlerin sağlamlığı (düşen suyun akışı için). Veri **resmi client'ın kendisinden** üretilir (`BlockDataDump`, Mojang eşlemeleriyle).
   Paper'ın çarpışma yamaları vanilla'nın `CubeVoxelShape` kurduğu 9.150 durumu `ArrayVoxelShape`
   olarak kurar; geri kalan her şey aynıdır ve bir test tam olarak bunu sabitler.
 - **Replika:** `ClientChunkCache` birebir: `(2r+1)^2` yuvalı halka tampon, `r = max(2, görüş) + 3`,

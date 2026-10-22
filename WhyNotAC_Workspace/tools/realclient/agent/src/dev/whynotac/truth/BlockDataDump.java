@@ -40,7 +40,7 @@ public final class BlockDataDump {
     private static final Set<String> CLASSES = Set.of(BLOCK, STATE, HOLDER, PROPERTY, VOXEL, DISCRETE, AABB, FLUID_STATE, GETTER, POS, CONTEXT,
             "net.minecraft.SharedConstants", "net.minecraft.WorldVersion", "net.minecraft.server.Bootstrap", "net.minecraft.core.IdMapper",
             "net.minecraft.core.registries.BuiltInRegistries", "net.minecraft.core.Registry", "net.minecraft.world.level.EmptyBlockGetter",
-            "net.minecraft.core.Direction$Axis", "net.minecraft.world.level.material.FlowingFluid", "net.minecraft.world.level.block.LiquidBlock",
+            "net.minecraft.core.Direction$Axis", "net.minecraft.core.Direction", "net.minecraft.world.level.material.FlowingFluid", "net.minecraft.world.level.block.LiquidBlock",
             "net.minecraft.world.level.block.PowderSnowBlock", "net.minecraft.world.level.block.ScaffoldingBlock",
             "net.minecraft.world.phys.shapes.CubeVoxelShape", "net.minecraft.world.phys.shapes.Shapes");
 
@@ -76,6 +76,7 @@ public final class BlockDataDump {
         Object fullBlock = invokeStatic("net.minecraft.world.phys.shapes.Shapes", "block()");
         Object falling = staticField("net.minecraft.world.level.material.FlowingFluid", "FALLING");
         Object[] axes = cls("net.minecraft.core.Direction$Axis").getEnumConstants(); // X, Y, Z
+        Object[] directions = cls("net.minecraft.core.Direction").getEnumConstants(); // DOWN, UP, NORTH, SOUTH, WEST, EAST
 
         Method getBlock = method(STATE, "getBlock()");
         Method collision = method(STATE, "getCollisionShape(" + GETTER + "," + POS + "," + CONTEXT + ")");
@@ -85,6 +86,7 @@ public final class BlockDataDump {
         Method blocksMotion = method(STATE, "blocksMotion()");
         Method tool = method(STATE, "requiresCorrectToolForDrops()");
         Method suffocating = method(STATE, "isSuffocating(" + GETTER + "," + POS + ")");
+        Method sturdy = method(STATE, "isFaceSturdy(" + GETTER + "," + POS + ",net.minecraft.core.Direction)");
         Method destroySpeed = method(STATE, "getDestroySpeed(" + GETTER + "," + POS + ")");
         Method fluidState = method(STATE, "getFluidState()");
         Method values = method(HOLDER, "getValues()");
@@ -118,6 +120,10 @@ public final class BlockDataDump {
             Object collisionShape = collision.invoke(state, emptyGetter, zero, emptyContext);
             flags |= collisionShape == fullBlock ? BlockStates.FULL_BLOCK : 0;
             flags |= (boolean) suffocating.invoke(state, emptyGetter, zero) ? BlockStates.SUFFOCATING : 0;
+            flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[2]) ? BlockStates.STURDY_NORTH : 0;
+            flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[3]) ? BlockStates.STURDY_SOUTH : 0;
+            flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[4]) ? BlockStates.STURDY_WEST : 0;
+            flags |= (boolean) sturdy.invoke(state, emptyGetter, zero, directions[5]) ? BlockStates.STURDY_EAST : 0;
 
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {

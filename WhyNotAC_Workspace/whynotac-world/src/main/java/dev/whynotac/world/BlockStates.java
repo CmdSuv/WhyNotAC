@@ -65,7 +65,16 @@ public final class BlockStates {
      * motion; glass, leaves and others never suffocate, mud and soul sand always do.
      */
     public static final int SUFFOCATING = 1 << 8;
-    private static final String FLAG_LETTERS = "adcormtfs";
+    /**
+     * {@code isFaceSturdy(level, pos, direction)} ({@code SupportType.FULL}) for an empty world, one flag per horizontal
+     * side: what a falling fluid next to the block reads ({@code FlowingFluid.isSolidFace}). For a block whose shape
+     * depends on the world ({@link #DYNAMIC_SHAPE}) only the empty world's answer.
+     */
+    public static final int STURDY_NORTH = 1 << 9;
+    public static final int STURDY_SOUTH = 1 << 10;
+    public static final int STURDY_WEST = 1 << 11;
+    public static final int STURDY_EAST = 1 << 12;
+    private static final String FLAG_LETTERS = "adcormtfsNSWE";
 
     private static volatile BlockStates vanilla;
 
@@ -80,6 +89,10 @@ public final class BlockStates {
     private final float[] jumpFactor;
     private final float[] destroySpeed;
     private final String[] fluid;
+    /** {@link #fluid} read once: the fluid's kind, amount and falling flag ({@link #FLUID_WATER}...). */
+    private final byte[] fluidKind;
+    private final byte[] fluidAmount;
+    private final boolean[] fluidFalling;
     private final Map<String, Integer> firstState;
 
     private BlockStates(String minecraft, List<Shape> shapes, List<State> states) {
@@ -95,6 +108,9 @@ public final class BlockStates {
         jumpFactor = new float[n];
         destroySpeed = new float[n];
         fluid = new String[n];
+        fluidKind = new byte[n];
+        fluidAmount = new byte[n];
+        fluidFalling = new boolean[n];
         firstState = new HashMap<>();
         for (int id = 0; id < n; id++) {
             State s = states.get(id);
@@ -110,6 +126,14 @@ public final class BlockStates {
             jumpFactor[id] = s.jumpFactor;
             destroySpeed[id] = s.destroySpeed;
             fluid[id] = s.fluid;
+            if (!s.fluid.isEmpty()) {
+                String[] f = s.fluid.split("/");
+                String key = f[0];
+                fluidKind[id] = key.equals("minecraft:water") || key.equals("minecraft:flowing_water") ? FLUID_WATER
+                        : key.equals("minecraft:lava") || key.equals("minecraft:flowing_lava") ? FLUID_LAVA : FLUID_OTHER;
+                fluidAmount[id] = Byte.parseByte(f[1]);
+                fluidFalling[id] = f[2].equals("1");
+            }
             firstState.putIfAbsent(s.block, id); // the lowest id; not always the block's default state
         }
     }
@@ -247,6 +271,27 @@ public final class BlockStates {
     /** {@code fluidKey/amount/falling}, or empty for no fluid. */
     public String fluid(int state) {
         return fluid[state];
+    }
+
+    /** No fluid; {@code FluidTags.WATER} (water, flowing water); {@code FluidTags.LAVA}; another fluid. */
+    public static final byte FLUID_NONE = 0;
+    public static final byte FLUID_WATER = 1;
+    public static final byte FLUID_LAVA = 2;
+    public static final byte FLUID_OTHER = 3;
+
+    /** The state's fluid by its tag ({@link #FLUID_NONE}...). */
+    public byte fluidKind(int state) {
+        return fluidKind[state];
+    }
+
+    /** {@code FluidState.getAmount()}: 8 for a source or a falling fluid, 1..7 flowing; 0 for none. */
+    public int fluidAmount(int state) {
+        return fluidAmount[state];
+    }
+
+    /** The fluid state's {@code FALLING} property. */
+    public boolean fluidFalling(int state) {
+        return fluidFalling[state];
     }
 
     /** The lowest state id of {@code block} (for blocks with one state, its only state), or -1. */

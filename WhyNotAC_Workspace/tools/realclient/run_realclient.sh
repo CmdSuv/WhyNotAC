@@ -90,7 +90,12 @@ for c in "forceload add 32 -16 191 16" \
   "fill 80 -61 -16 85 -61 -13 minecraft:slime_block" "setblock 91 -60 -15 minecraft:red_bed[facing=east,part=head]" \
   "setblock 90 -60 -15 minecraft:red_bed[facing=east,part=foot]" \
   "fill 100 -60 5 106 -60 5 minecraft:oak_fence" "setblock 109 -60 5 minecraft:oak_fence" \
-  "fill 100 -60 8 106 -60 8 minecraft:cobblestone_wall" "fill 100 -60 11 104 -60 11 minecraft:oak_fence_gate[facing=north]"; do
+  "fill 100 -60 8 106 -60 8 minecraft:cobblestone_wall" "fill 100 -60 11 104 -60 11 minecraft:oak_fence_gate[facing=north]" \
+  "fill 120 -63 -12 129 -61 -7 minecraft:water" \
+  "fill 133 -60 -11 143 -59 -11 minecraft:stone" "fill 133 -60 -9 143 -59 -9 minecraft:stone" "fill 133 -60 -10 133 -59 -10 minecraft:stone" \
+  "setblock 134 -60 -10 minecraft:water" \
+  "fill 161 -60 -11 161 -56 -9 minecraft:stone" "setblock 160 -56 -10 minecraft:water" \
+  "fill 175 -59 -10 180 -59 -10 minecraft:stone" "fill 175 -60 -11 180 -60 -11 minecraft:stone" "fill 175 -60 -9 180 -60 -9 minecraft:stone"; do
   echo "$c" > "$FIFO"
 done
 sleep 2
@@ -239,6 +244,24 @@ fences 109.5 -58.5 5.5 -/0.5 Shift_L,w/0.8 -/0.5
 fences 100.5 -58.5 8.5 w/1.0 -/0.3 Shift_L,w/1.5 -/0.3 w/1.5/space -/1.0
 fences 100.5 -58.5 11.5 w/0.8 -/0.3 Shift_L,w/1.2 -/0.3 w/1.0/space -/1.0
 fences 97.5 -60 5.5 w/1.0 w/1.0/space -/0.5
+# Water, at z = -9.5: a pool three deep (x 120..129) walked into, crossed jumping, sunk into with shift, swum across
+# sprinting under water (level, looking down, looking up, with dolphin's grace) and climbed out of at its far wall; a
+# channel one block wide (x 134..141) its source floods eastward, walked against the current, stood in and sprinted
+# through (too shallow to sprint in); a waterfall against a stone wall (x 160) stood in and jumped in.
+water() { echo "tp $NAME $1 $2 -9.5 $3 $4" > "$FIFO"; sleep 1.5; shift 4; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+water 119.5 -60 -90 0 w/1.5 -/1.0 w/1.0/space -/0.5 Shift_L/1.0 -/0.5 w/2.0/space -/1.0
+water 121.5 -62.5 -90 0 w,Control_L/1.5 -/1.0
+water 121.5 -61.5 -90 30 w,Control_L/1.5 -/0.5
+water 121.5 -62.8 -90 -30 w,Control_L/1.5 -/1.0
+echo "effect give $NAME minecraft:dolphins_grace 30 0 true" > "$FIFO"
+water 121.5 -62.5 -90 0 w,Control_L/1.5 w/0.5 -/0.5
+echo "effect clear $NAME minecraft:dolphins_grace" > "$FIFO"
+water 142.5 -60 90 0 w/2.5 -/1.5 Shift_L/0.5 -/0.5
+water 143.5 -60 90 0 w,Control_L/2.0 -/1.0
+water 160.5 -60 -90 0 -/1.5 space/1.0 -/1.0 w/1.0 -/0.5
+# Crawling: placed in a tunnel one block high (x 175..180), the player lies down (no pose fits but swimming's), crawls
+# out at the sneaking speed, jumps under the ceiling, and stands up beyond it.
+water 176.5 -60 -90 0 -/0.5 w/0.8 w/0.6/space w/1.2 -/0.5
 # Items in use, on a flat lane at z = 10.5 (right mouse button): a golden apple eaten while sprinting and walking (its
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap

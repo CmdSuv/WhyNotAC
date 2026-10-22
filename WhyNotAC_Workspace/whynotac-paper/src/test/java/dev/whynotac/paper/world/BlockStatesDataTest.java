@@ -96,6 +96,10 @@ class BlockStatesDataTest {
             if (state.isSuffocating(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) {
                 flags |= BlockStates.SUFFOCATING;
             }
+            flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.NORTH) ? BlockStates.STURDY_NORTH : 0;
+            flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.SOUTH) ? BlockStates.STURDY_SOUTH : 0;
+            flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.WEST) ? BlockStates.STURDY_WEST : 0;
+            flags |= state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.EAST) ? BlockStates.STURDY_EAST : 0;
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), flags, block.getFriction(), block.getSpeedFactor(),
                     block.getJumpFactor(), state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO), fluid(state.getFluidState()));

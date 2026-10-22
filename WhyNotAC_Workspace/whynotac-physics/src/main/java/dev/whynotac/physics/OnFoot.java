@@ -11,10 +11,10 @@ import java.util.List;
  * ({@code travelInAir}: friction, the input impulse, {@code Entity.move} with collisions and step-up,
  * gravity and drag) and the pose for the next tick ({@code Player.updatePlayerPose}).
  *
- * <p>The scope is a survival player on foot with default attributes but the speed ({@link Speed}) and the
- * effects the step reads ({@link Effects}), using an item or not ({@link ItemUse}),
- * not riding, flying, gliding or swimming, on blocks without side effects and away from solid entities and
- * the world border. Outside it, or where the client's world is not known, {@link Colliders.Unknown} is
+ * <p>The scope is a survival player on foot, in water or crawling, with default attributes but the speed
+ * ({@link Speed}) and the effects the step reads ({@link Effects}), using an item or not ({@link ItemUse}),
+ * not riding, flying or gliding, on blocks without side effects (water's current aside) and away from lava, solid
+ * entities and the world border. Outside it, or where the client's world is not known, {@link Colliders.Unknown} is
  * thrown: no claim can rest on that tick. Sources: the decompiled client, {@code LocalPlayer},
  * {@code Player}, {@code LivingEntity} and {@code Entity}.
  */
@@ -87,14 +87,19 @@ public final class OnFoot {
      * @param levitation  {@code travelInAir}: the vertical motion pulled toward {@code 0.05} a level, in place of gravity
      * @param slowFalling {@code getEffectiveGravity}: at most {@code 0.01} while not rising; the fall distance reset
      * @param blindness   {@code isMobilityRestricted}: sprinting is not possible
+     * @param dolphinsGrace {@code travelInWater}: the water's slowdown is 0.96
      */
-    public record Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness) {
-        public static final Effects NONE = new Effects(0, 0, false, false);
+    public record Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness, boolean dolphinsGrace) {
+        public static final Effects NONE = new Effects(0, 0, false, false, false);
 
         public Effects {
             if (jumpBoost < 0 || jumpBoost > 256 || levitation < 0 || levitation > 256) {
                 throw new IllegalArgumentException("effect level out of 0..256");
             }
+        }
+
+        public Effects(int jumpBoost, int levitation, boolean slowFalling, boolean blindness) {
+            this(jumpBoost, levitation, slowFalling, blindness, false);
         }
     }
 
@@ -156,6 +161,14 @@ public final class OnFoot {
     private BlockPos support;
     private boolean onGroundNoBlocks;
     private Vec3d stuck;
+    private boolean swimming;
+    /** {@code fluidOnEyes} holds water: set by this tick's {@code updateFluidOnEyes}, read as the last tick's before it. */
+    private boolean eyeInWater;
+    /** {@code Player.wasUnderwater}: what {@code LocalPlayer.isUnderWater} returns this tick. */
+    private boolean wasUnderwater;
+    private boolean wasTouchingWater;
+    /** {@code getFluidHeight(FluidTags.WATER)}. */
+    private double waterHeight;
     private float xxa;
     private float zza;
     private boolean jumping;
@@ -190,6 +203,8 @@ public final class OnFoot {
         support = pre.support();
         onGroundNoBlocks = pre.onGroundNoBlocks();
         stuck = pre.stuckSpeedMultiplier();
+        swimming = pre.swimming();
+        eyeInWater = pre.eyeInWater();
     }
 
     /** The player after one client tick in which the keys were {@code keys}. */
@@ -199,9 +214,6 @@ public final class OnFoot {
 
     /** {@link #tick}, with what the tick read beyond its state. */
     public static Step step(PlayerState pre, PlayerState.Keys keys, Colliders.World world, Conditions conditions) throws Colliders.Unknown {
-        if (pre.pose() == PlayerState.Pose.SWIMMING) {
-            throw new Colliders.Unknown("crawling");
-        }
         OnFoot tick = new OnFoot(pre, world, conditions);
         tick.run(keys);
         return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered, tick.speed);
@@ -254,13 +266,18 @@ public final class OnFoot {
     private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuck);
+                onGroundNoBlocks, stuck, swimming, eyeInWater);
     }
 
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
-        // baseTick's fluid checks use the box deflated by 0.001
+        // --- Player.tick: updateIsUnderwater, from the last tick's eye ---
+        wasUnderwater = eyeInWater;
+        // --- Entity.baseTick: water (no other fluid nor a block that moves the player from inside), the eye, swimming ---
         Box start = pose.box(x, y, z);
         requireNoEffects(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
+        updateInWaterStateAndDoWaterCurrentPushing();
+        updateFluidOnEyes();
+        updateSwimming();
         // --- LocalPlayer.aiStep ---
         if (sprintTriggerTime > 0) {
             sprintTriggerTime--;
@@ -268,7 +285,7 @@ public final class OnFoot {
         boolean previousShift = keys.shift();
         moveVector(keys); // the previous tick's vector, from its keys
         boolean previousForward = moveY > 1.0E-5F;
-        crouching = fits(PlayerState.Pose.CROUCHING) && (previousShift || !fits(PlayerState.Pose.STANDING));
+        crouching = !swimming && fits(PlayerState.Pose.CROUCHING) && (previousShift || !fits(PlayerState.Pose.STANDING));
         keys = polled;
         moveVector(keys);
         if (autoJumpTime > 0) {
@@ -281,9 +298,10 @@ public final class OnFoot {
             sprintTriggerTime = 0;
         }
         boolean forward = moveY > 1.0E-5F;
-        boolean movingSlowly = crouching;
-        boolean sprintPossible = !conditions.effects().blindness() && conditions.foodAllowsSprint(); // isSprintingPossible
-        if (!sprinting && forward && sprintPossible && !slowDueToUse && !movingSlowly) { // canStartSprinting
+        boolean movingSlowly = crouching || pose == PlayerState.Pose.SWIMMING && !wasTouchingWater; // crouching or crawling
+        boolean sprintAllowed = !conditions.effects().blindness() && conditions.foodAllowsSprint();
+        boolean sprintPossible = sprintAllowed && !(wasTouchingWater && !wasUnderwater); // isSprintingPossible: not in shallow water
+        if (!sprinting && forward && sprintPossible && !slowDueToUse && (!movingSlowly || wasUnderwater)) { // canStartSprinting
             if (!previousForward) {
                 readSprintTrigger = true;
                 if (sprintTriggerTime > 0) {
@@ -297,8 +315,17 @@ public final class OnFoot {
                 setSprinting(true);
             }
         }
-        if (sprinting && (!sprintPossible || !forward || horizontalCollision && !minorHorizontalCollision)) { // shouldStopRunSprinting
-            setSprinting(false);
+        if (sprinting) {
+            if (swimming) {
+                if (!sprintAllowed || !wasTouchingWater || !forward && !onGround && !keys.shift()) { // shouldStopSwimSprinting
+                    setSprinting(false);
+                }
+            } else if (!sprintPossible || !forward || horizontalCollision && !minorHorizontalCollision) { // shouldStopRunSprinting
+                setSprinting(false);
+            }
+        }
+        if (wasTouchingWater && keys.shift()) {
+            delta = delta.add(0.0, -0.04F, 0.0); // goDownInWater
         }
 
         // --- LivingEntity.aiStep ---
@@ -318,9 +345,15 @@ public final class OnFoot {
         delta = new Vec3d(dx, dy, dz);
         applyInput(movingSlowly);
         if (jumping) {
-            if (onGround && noJumpDelay == 0) {
-                jumpFromGround();
-                noJumpDelay = 10;
+            boolean inWater = wasTouchingWater && waterHeight > 0.0;
+            double threshold = pose.eyeHeight < 0.4 ? 0.0 : 0.4; // getFluidJumpThreshold
+            if (!inWater || onGround && !(waterHeight > threshold)) {
+                if ((onGround || inWater && waterHeight <= threshold) && noJumpDelay == 0) {
+                    jumpFromGround();
+                    noJumpDelay = 10;
+                }
+            } else {
+                delta = delta.add(0.0, 0.04F, 0.0); // jumpInLiquid
             }
         } else {
             noJumpDelay = 0;
@@ -328,7 +361,19 @@ public final class OnFoot {
         if (conditions.effects().slowFalling() || conditions.effects().levitation() > 0) {
             fallDistance = 0.0; // resetFallDistance
         }
-        travelInAir(new Vec3d(xxa, 0.0, zza));
+        Vec3d input = new Vec3d(xxa, 0.0, zza);
+        if (swimming) { // Player.travel: the look's pitch draws a swimmer up or down
+            double look = -VanillaMath.sin(xRot * VanillaMath.DEG_TO_RAD); // getLookAngle().y
+            double pull = look < -0.2 ? 0.085 : 0.06;
+            if (look <= 0.0 || jumping || states.fluidKind(state(BlockPos.containing(x, y + 1.0 - 0.1, z))) != BlockStates.FLUID_NONE) {
+                delta = delta.add(0.0, (look - delta.y()) * pull, 0.0);
+            }
+        }
+        if (wasTouchingWater) { // LivingEntity.travel: shouldTravelInFluid
+            travelInWater(input);
+        } else {
+            travelInAir(input);
+        }
         applyEffectsFromBlocks();
 
         // --- Player.tick after LivingEntity.tick ---
@@ -455,6 +500,230 @@ public final class OnFoot {
 
     private int minY() throws Colliders.Unknown {
         throw new Colliders.Unknown("movement in an unloaded chunk");
+    }
+
+    /**
+     * {@code LivingEntity.travelInWater} (from {@code travelInFluid}): the water's slowdown (0.8, sprinting 0.9, 0.96 with
+     * dolphin's grace; no water movement efficiency), 0.02 of input, the move, 0.2 up on a climbable block walked into,
+     * gravity as {@code getFluidFallingAdjustedMovement} takes it, and the jump out of the water at a wall.
+     */
+    private void travelInWater(Vec3d input) throws Colliders.Unknown {
+        boolean falling = delta.y() <= 0.0;
+        double startY = y;
+        double gravity = falling && conditions.effects().slowFalling() ? Math.min(GRAVITY, 0.01) : GRAVITY; // getEffectiveGravity
+        float slowDown = sprinting ? 0.9F : 0.8F;
+        float waterSpeed = 0.02F;
+        if (conditions.effects().dolphinsGrace()) {
+            slowDown = 0.96F;
+        }
+        delta = delta.add(Vec3d.inputVector(input, waterSpeed, yRot)); // moveRelative
+        Box before = pose.box(x, y, z);
+        move(delta);
+        requireNoEffects(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
+        Vec3d v = delta;
+        if (horizontalCollision && onClimbable()) {
+            v = new Vec3d(v.x(), 0.2, v.z());
+        }
+        v = v.multiply(slowDown, 0.8F, slowDown);
+        if (gravity != 0.0 && !sprinting) { // getFluidFallingAdjustedMovement
+            double vy;
+            if (falling && Math.abs(v.y() - 0.005) >= 0.003 && Math.abs(v.y() - gravity / 16.0) < 0.003) {
+                vy = -0.003;
+            } else {
+                vy = v.y() - gravity / 16.0;
+            }
+            v = new Vec3d(v.x(), vy, v.z());
+        }
+        delta = v;
+        // jumpOutOfFluid
+        if (horizontalCollision && isFree(delta.x(), delta.y() + 0.6F - y + startY, delta.z())) {
+            delta = new Vec3d(delta.x(), 0.3F, delta.z());
+        }
+    }
+
+    /** {@code Entity.isFree}: the box moved collides with no block and holds no fluid ({@code containsAnyLiquid}). */
+    private boolean isFree(double dx, double dy, double dz) throws Colliders.Unknown {
+        Box box = pose.box(x, y, z).move(dx, dy, dz);
+        if (!Colliders.noCollision(world, box)) {
+            return false;
+        }
+        for (int bx = Colliders.floor(box.minX()); bx < VanillaMath.ceil(box.maxX()); bx++) {
+            for (int by = Colliders.floor(box.minY()); by < VanillaMath.ceil(box.maxY()); by++) {
+                for (int bz = Colliders.floor(box.minZ()); bz < VanillaMath.ceil(box.maxZ()); bz++) {
+                    if (states.fluidKind(state(new BlockPos(bx, by, bz))) != BlockStates.FLUID_NONE) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /** {@code Entity.updateInWaterStateAndDoWaterCurrentPushing}: in water the fall distance is reset. */
+    private void updateInWaterStateAndDoWaterCurrentPushing() throws Colliders.Unknown {
+        if (updateWaterHeightAndDoWaterPushing()) {
+            fallDistance = 0.0; // resetFallDistance
+            wasTouchingWater = true;
+        } else {
+            wasTouchingWater = false;
+        }
+    }
+
+    /**
+     * {@code Entity.updateFluidHeightAndDoFluidPushing(FluidTags.WATER, 0.014)} for a player (pushed, the push not
+     * normalised): over the cells of the box deflated by 0.001, the water's height above the box's bottom and the mean of
+     * the flows of the cells it reaches (scaled by that height below 0.4). A chunk the client may not hold near the box
+     * is not known (the client then skips the water altogether).
+     */
+    private boolean updateWaterHeightAndDoWaterPushing() throws Colliders.Unknown {
+        Box full = pose.box(x, y, z);
+        Box near = full.inflate(1.0, 1.0, 1.0); // touchingUnloadedChunk
+        for (int cx = Colliders.floor(near.minX()) >> 4; cx <= VanillaMath.ceil(near.maxX()) >> 4; cx++) {
+            for (int cz = Colliders.floor(near.minZ()) >> 4; cz <= VanillaMath.ceil(near.maxZ()) >> 4; cz++) {
+                if (!world.isLoaded(cx, cz)) {
+                    throw new Colliders.Unknown("water next to a chunk the client may not hold");
+                }
+            }
+        }
+        Box box = full.inflate(-0.001, -0.001, -0.001);
+        double height = 0.0;
+        boolean touching = false;
+        Vec3d push = Vec3d.ZERO;
+        int count = 0;
+        for (int bx = Colliders.floor(box.minX()); bx < VanillaMath.ceil(box.maxX()); bx++) {
+            for (int by = Colliders.floor(box.minY()); by < VanillaMath.ceil(box.maxY()); by++) {
+                for (int bz = Colliders.floor(box.minZ()); bz < VanillaMath.ceil(box.maxZ()); bz++) {
+                    BlockPos p = new BlockPos(bx, by, bz);
+                    int s = state(p);
+                    if (states.fluidKind(s) != BlockStates.FLUID_WATER) {
+                        continue;
+                    }
+                    double top = by + waterHeight(p, s); // int + float, in float
+                    if (top >= box.minY()) {
+                        touching = true;
+                        height = Math.max(top - box.minY(), height);
+                        Vec3d flow = flow(p, s);
+                        if (height < 0.4) {
+                            flow = flow.scale(height);
+                        }
+                        push = push.add(flow);
+                        count++;
+                    }
+                }
+            }
+        }
+        if (push.length() > 0.0) {
+            if (count > 0) {
+                push = push.scale(1.0 / count);
+            }
+            push = push.scale(0.014);
+            if (Math.abs(delta.x()) < 0.003 && Math.abs(delta.z()) < 0.003 && push.length() < 0.0045000000000000005) {
+                push = push.normalize().scale(0.0045000000000000005);
+            }
+            delta = delta.add(push);
+        }
+        waterHeight = height;
+        return touching;
+    }
+
+    /** {@code FlowingFluid.getHeight}: a full block under water of its own kind, else its own height. */
+    private float waterHeight(BlockPos p, int s) throws Colliders.Unknown {
+        return states.fluidKind(state(p.atY(p.y() + 1))) == BlockStates.FLUID_WATER ? 1.0F : ownHeight(s);
+    }
+
+    /** {@code FluidState.getOwnHeight}: {@code amount / 9}, 0 for no fluid. */
+    private float ownHeight(int s) {
+        return states.fluidAmount(s) / 9.0F;
+    }
+
+    /** {@code Direction.Plane.HORIZONTAL}: north, east, south, west, as x and z steps. */
+    private static final int[][] HORIZONTAL = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+
+    /**
+     * {@code FlowingFluid.getFlow} for water: toward lower neighbours (through a passable neighbour to the water below
+     * it), and for a falling fluid next to a sturdy face (or one above it) mostly down.
+     */
+    private Vec3d flow(BlockPos pos, int s) throws Colliders.Unknown {
+        float own = ownHeight(s);
+        double fx = 0.0;
+        double fz = 0.0;
+        for (int[] d : HORIZONTAL) {
+            BlockPos n = new BlockPos(pos.x() + d[0], pos.y(), pos.z() + d[1]);
+            int ns = state(n);
+            if (!affectsFlow(ns)) {
+                continue;
+            }
+            float f = ownHeight(ns);
+            float g = 0.0F;
+            if (f == 0.0F) {
+                if (!states.has(ns, BlockStates.BLOCKS_MOTION)) {
+                    int below = state(n.atY(n.y() - 1));
+                    if (affectsFlow(below)) {
+                        f = ownHeight(below);
+                        if (f > 0.0F) {
+                            g = own - (f - 0.8888889F);
+                        }
+                    }
+                }
+            } else if (f > 0.0F) {
+                g = own - f;
+            }
+            if (g != 0.0F) {
+                fx += d[0] * g;
+                fz += d[1] * g;
+            }
+        }
+        Vec3d flow = new Vec3d(fx, 0.0, fz);
+        if (states.fluidFalling(s)) {
+            for (int[] d : HORIZONTAL) {
+                BlockPos n = new BlockPos(pos.x() + d[0], pos.y(), pos.z() + d[1]);
+                if (solidFace(n, d) || solidFace(n.atY(n.y() + 1), d)) {
+                    flow = flow.normalize().add(0.0, -6.0, 0.0);
+                    break;
+                }
+            }
+        }
+        return flow.normalize();
+    }
+
+    /** {@code FlowingFluid.affectsFlow}: no fluid, or water. */
+    private boolean affectsFlow(int s) {
+        byte kind = states.fluidKind(s);
+        return kind == BlockStates.FLUID_NONE || kind == BlockStates.FLUID_WATER;
+    }
+
+    /** {@code FlowingFluid.isSolidFace} for a horizontal side: not water, not ice, and the face sturdy. */
+    private boolean solidFace(BlockPos n, int[] d) throws Colliders.Unknown {
+        int s = state(n);
+        if (states.fluidKind(s) == BlockStates.FLUID_WATER) {
+            return false;
+        }
+        String block = states.block(s);
+        if (block.equals("minecraft:ice") || block.equals("minecraft:frosted_ice")) { // IceBlock
+            return false;
+        }
+        if (states.has(s, BlockStates.DYNAMIC_SHAPE)) {
+            throw new Colliders.Unknown(block + " beside falling water (its faces depend on the world)");
+        }
+        int flag = d[1] < 0 ? BlockStates.STURDY_NORTH : d[0] > 0 ? BlockStates.STURDY_EAST : d[1] > 0 ? BlockStates.STURDY_SOUTH : BlockStates.STURDY_WEST;
+        return states.has(s, flag);
+    }
+
+    /** {@code Entity.updateFluidOnEyes}: the eye is in water when the water's top in its cell is above it. */
+    private void updateFluidOnEyes() throws Colliders.Unknown {
+        double eyeY = y + pose.eyeHeight;
+        BlockPos p = BlockPos.containing(x, eyeY, z);
+        int s = state(p);
+        eyeInWater = states.fluidKind(s) == BlockStates.FLUID_WATER && p.y() + waterHeight(p, s) > eyeY;
+    }
+
+    /** {@code Entity.updateSwimming} for the local player ({@code isUnderWater}: {@code wasUnderwater}). */
+    private void updateSwimming() throws Colliders.Unknown {
+        if (swimming) {
+            swimming = sprinting && wasTouchingWater;
+        } else {
+            swimming = sprinting && wasUnderwater && states.fluidKind(state(BlockPos.containing(x, y, z))) == BlockStates.FLUID_WATER;
+        }
     }
 
     /** {@code getFrictionInfluencedSpeed}: on the ground the speed attribute scaled by friction, else the air speed. */
@@ -613,8 +882,11 @@ public final class OnFoot {
         minorHorizontalCollision = horizontalCollision && isHorizontalCollisionMinor(collided);
         BlockPos legacy = onPos(0.2F);
         int legacyState = state(legacy);
-        // checkFallDamage (the box is in air, so not in water)
-        if (collided.y() < 0.0) {
+        // checkFallDamage: LivingEntity's looks for water again when not in it (and pushes), then Entity's counts the fall
+        if (!wasTouchingWater) {
+            updateInWaterStateAndDoWaterCurrentPushing();
+        }
+        if (!wasTouchingWater && collided.y() < 0.0) {
             fallDistance -= (float) collided.y();
         }
         if (onGround) {
@@ -770,7 +1042,7 @@ public final class OnFoot {
     /** {@code Player.updatePlayerPose}, with the current shift key. */
     private void updatePlayerPose() throws Colliders.Unknown {
         if (fits(PlayerState.Pose.SWIMMING)) {
-            PlayerState.Pose desired = keys.shift() ? PlayerState.Pose.CROUCHING : PlayerState.Pose.STANDING;
+            PlayerState.Pose desired = swimming ? PlayerState.Pose.SWIMMING : keys.shift() ? PlayerState.Pose.CROUCHING : PlayerState.Pose.STANDING;
             if (fits(desired)) {
                 pose = desired;
             } else if (fits(PlayerState.Pose.CROUCHING)) {
@@ -848,7 +1120,7 @@ public final class OnFoot {
         return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
     }
 
-    /** No block in the cells the two boxes span holds a fluid or moves the player from inside ({@link #MOVING_INSIDE}). */
+    /** No block in the cells the two boxes span holds a fluid but water or moves the player from inside ({@link #MOVING_INSIDE}). */
     private void requireNoEffects(Box a, Box b, String when) throws Colliders.Unknown {
         int x0 = Colliders.floor(Math.min(a.minX(), b.minX()));
         int x1 = Colliders.floor(Math.max(a.maxX(), b.maxX()));
@@ -860,8 +1132,8 @@ public final class OnFoot {
             for (int by = y0; by <= y1; by++) {
                 for (int bz = z0; bz <= z1; bz++) {
                     int s = state(new BlockPos(bx, by, bz));
-                    String fluid = states.fluid(s);
-                    if (fluid != null && !fluid.isEmpty() || MOVING_INSIDE.contains(states.block(s))) {
+                    byte fluid = states.fluidKind(s);
+                    if (fluid != BlockStates.FLUID_NONE && fluid != BlockStates.FLUID_WATER || MOVING_INSIDE.contains(states.block(s))) {
                         throw new Colliders.Unknown(states.block(s) + " inside the box " + when + " (not modelled)");
                     }
                 }

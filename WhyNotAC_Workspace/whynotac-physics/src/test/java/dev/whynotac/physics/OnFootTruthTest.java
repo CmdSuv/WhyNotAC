@@ -32,7 +32,9 @@ import org.junit.jupiter.api.Test;
  * (sneaking too), jumped across and dropped onto (with shift held too), and a bed jumped and dropped onto.
  * {@code truth-fence.jsonl.gz} holds a fence line, a lone fence post, a low wall line and closed fence gates walked along
  * on top (sneaking to their edges too) and jumped along until the player drops off, and the fence walked and jumped
- * into from the ground. Each tick, run from its start in the same world (rebuilt here from the
+ * into from the ground. {@code truth-water.jsonl.gz} holds a pool walked into, crossed jumping, sunk into with shift, swum
+ * across under water (level, down, up, with dolphin's grace) and left at its wall, a channel's current walked against,
+ * stood in and sprinted through, a waterfall against a wall stood and jumped in, and a tunnel crawled out of. Each tick, run from its start in the same world (rebuilt here from the
  * commands that built the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -70,9 +72,9 @@ class OnFootTruthTest {
 
     /** The course of run_realclient.sh on the flat world: {x0, y0, z0, x1, y1, z1, state}. */
     private static final int[][] COURSE = {
-        {44, -60, -1, 44, -60, 1, blockState("minecraft:smooth_stone_slab", "type=bottom")},
+        {44, -60, -1, 44, -60, 1, blockState("minecraft:smooth_stone_slab", "type=bottom", "waterlogged=false")},
         {45, -60, -1, 46, -60, 1, blockState("minecraft:stone")},
-        {46, -59, -1, 46, -59, 1, blockState("minecraft:smooth_stone_slab", "type=bottom")},
+        {46, -59, -1, 46, -59, 1, blockState("minecraft:smooth_stone_slab", "type=bottom", "waterlogged=false")},
         {52, -61, -1, 62, -61, 1, blockState("minecraft:ice")},
         {70, -61, -1, 74, -61, 1, blockState("minecraft:soul_sand")},
         {82, -60, -2, 82, -59, 2, blockState("minecraft:stone")},
@@ -112,6 +114,43 @@ class OnFootTruthTest {
         return blockState("minecraft:cobblestone_wall", east, "north=none", "south=none", up, "waterlogged=false", west);
     }
 
+    /**
+     * The water lanes as the client held them (course-water.txt.gz: {@code x y z block[properties]}, every block that is
+     * not the flat world's), read from the session's own replica: the pool, the channel's flow and the waterfall's spread.
+     */
+    private static final java.util.Map<Long, Integer> WATER_LANES = readBlocks("course-water.txt.gz");
+
+    private static java.util.Map<Long, Integer> readBlocks(String resource) {
+        java.util.Map<Long, Integer> blocks = new java.util.HashMap<>();
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(
+                new GZIPInputStream(OnFootTruthTest.class.getResourceAsStream(resource)), StandardCharsets.UTF_8))) {
+            for (String line = in.readLine(); line != null; line = in.readLine()) {
+                String[] f = line.split(" ", 4);
+                int open = f[3].indexOf('[');
+                String block = open < 0 ? f[3] : f[3].substring(0, open);
+                String properties = open < 0 ? "" : f[3].substring(open + 1, f[3].length() - 1);
+                int id = -1;
+                for (int s = STATES.firstStateOf(block); s >= 0 && s < STATES.size() && STATES.block(s).equals(block); s++) {
+                    if (STATES.properties(s).equals(properties)) {
+                        id = s;
+                        break;
+                    }
+                }
+                if (id < 0) {
+                    throw new AssertionError(line);
+                }
+                blocks.put(key(Integer.parseInt(f[0]), Integer.parseInt(f[1]), Integer.parseInt(f[2])), id);
+            }
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return blocks;
+    }
+
+    private static long key(int x, int y, int z) {
+        return ((long) x & 0x3FFFFFF) << 38 | ((long) z & 0x3FFFFFF) << 12 | y & 0xFFF;
+    }
+
     private static final Colliders.World COURSE_WORLD = new Colliders.World() {
         @Override
         public BlockStates states() {
@@ -120,6 +159,10 @@ class OnFootTruthTest {
 
         @Override
         public int blockState(int x, int y, int z) {
+            Integer lane = WATER_LANES.get(key(x, y, z));
+            if (lane != null) {
+                return lane;
+            }
             for (int[] c : COURSE) {
                 if (x >= c[0] && x <= c[3] && y >= c[1] && y <= c[4] && z >= c[2] && z <= c[5]) {
                     return c[6];
@@ -190,6 +233,14 @@ class OnFootTruthTest {
     }
 
     @Test
+    void waterAndCrawlingAreTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-water.jsonl.gz", COURSE_WORLD);
+        // ticks in water, swimming, with the eye under water, in the channel's current and the waterfall, and crawling
+        assertTrue(counts[0] > 600 && counts[20] > 300 && counts[21] > 30 && counts[22] > 100 && counts[23] > 30 && counts[24] > 20
+                && counts[25] > 10, java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -200,7 +251,8 @@ class OnFootTruthTest {
      * boost, slow falling, levitation, blindness, then ticks with an item in use, and with one in use while sprinting, then
      * ticks ending in a climbable column, and ticks after a push out of a block, then landings that bounce on the slime
      * pad and on the bed, ticks walking on the slime pad, and landings on it with shift held, then ticks ending on top of a
-     * fence, a wall or a fence gate}.
+     * fence, a wall or a fence gate, then ticks in water, swimming, with the eye under water, in the channel's current and in
+     * the waterfall, and crawling}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -210,7 +262,7 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[20];
+        int[] counts = new int[26];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
@@ -257,6 +309,13 @@ class OnFootTruthTest {
             BlockPos on = expected.support();
             counts[19] += expected.onGround() && on != null && on.y() == -60 && on.x() >= 100 && on.x() <= 109 && (on.z() == 5 || on.z() == 8 || on.z() == 11)
                     ? 1 : 0;
+            boolean inWater = post.contains("\"wasTouchingWater\":true");
+            counts[20] += inWater ? 1 : 0;
+            counts[21] += expected.swimming() ? 1 : 0;
+            counts[22] += expected.eyeInWater() ? 1 : 0;
+            counts[23] += inWater && expected.z() > -10.0 && expected.z() < -9.0 && expected.x() > 134.0 && expected.x() < 142.0 ? 1 : 0;
+            counts[24] += inWater && expected.x() > 159.0 && expected.x() < 161.0 && expected.z() > -10.5 && expected.z() < -8.5 ? 1 : 0;
+            counts[25] += expected.pose() == PlayerState.Pose.SWIMMING && !inWater ? 1 : 0;
         }
         return counts;
     }
@@ -274,7 +333,7 @@ class OnFootTruthTest {
                 bool(line, "verticalCollision"), bool(line, "verticalCollisionBelow"), f64(text(line, "fallDistance")), bool(line, "sprinting"),
                 sprintModifier(line), bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
                 number(line, "sprintTriggerTime"), number(line, "autoJumpTime"), supportPos, bool(line, "onGroundNoBlocks"),
-                vec(list(line, "stuckSpeedMultiplier")));
+                vec(list(line, "stuckSpeedMultiplier")), line.contains("\"swimming\":true"), line.contains("\"eyeInWater\":true"));
     }
 
     /** The recorded active effects ({@code "effects":{"minecraft:jump_boost":1,...}}, newer files only), by amplifier. */
@@ -284,6 +343,7 @@ class OnFootTruthTest {
         int levitation = 0;
         boolean slowFalling = false;
         boolean blindness = false;
+        boolean dolphinsGrace = false;
         if (m.find() && !m.group(1).isEmpty()) {
             for (String entry : m.group(1).split(",")) {
                 String[] kv = entry.split("\":");
@@ -294,11 +354,12 @@ class OnFootTruthTest {
                     case "minecraft:levitation" -> levitation = level;
                     case "minecraft:slow_falling" -> slowFalling = true;
                     case "minecraft:blindness" -> blindness = true;
+                    case "minecraft:dolphins_grace" -> dolphinsGrace = true;
                     default -> { } // not read by the step (a golden apple's absorption and regeneration): the ticks show it
                 }
             }
         }
-        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness);
+        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness, dolphinsGrace);
     }
 
     /** The item in use at the tick's start (newer files only): its prototype's {@code use_effects}; null when none. */

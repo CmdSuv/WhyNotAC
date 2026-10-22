@@ -450,6 +450,8 @@ public class MovementTruth {
         same(d, "autoJumpTime", p.autoJumpTime(), e.autoJumpTime());
         same(d, "support", p.support(), e.support());
         same(d, "onGroundNoBlocks", p.onGroundNoBlocks(), e.onGroundNoBlocks());
+        same(d, "swimming", p.swimming(), e.swimming());
+        same(d, "eyeInWater", p.eyeInWater(), e.eyeInWater());
         return d;
     }
 
@@ -476,7 +478,8 @@ public class MovementTruth {
                 ((Number) r.get("noJumpDelay")).intValue(), ((Number) r.get("sprintTriggerTime")).intValue(), ((Number) r.get("autoJumpTime")).intValue(),
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),
-                (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")));
+                (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), Boolean.TRUE.equals(r.get("swimming")),
+                Boolean.TRUE.equals(r.get("eyeInWater")));
     }
 
     /** The recorded effects the on-foot step reads (older truth files: none); null if one was not recorded by name. */
@@ -487,6 +490,7 @@ public class MovementTruth {
         int levitation = 0;
         boolean slowFalling = false;
         boolean blindness = false;
+        boolean dolphinsGrace = false;
         for (Map.Entry<String, Object> e : active.entrySet()) {
             int level = ((Number) e.getValue()).intValue() + 1;
             switch (e.getKey()) {
@@ -494,6 +498,7 @@ public class MovementTruth {
                 case "minecraft:levitation" -> levitation = level;
                 case "minecraft:slow_falling" -> slowFalling = true;
                 case "minecraft:blindness" -> blindness = true;
+                case "minecraft:dolphins_grace" -> dolphinsGrace = true;
                 default -> {
                     if (e.getKey().startsWith("unparsed:")) {
                         return null;
@@ -501,7 +506,7 @@ public class MovementTruth {
                 }
             }
         }
-        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness);
+        return new OnFoot.Effects(jumpBoost, levitation, slowFalling, blindness, dolphinsGrace);
     }
 
     /**

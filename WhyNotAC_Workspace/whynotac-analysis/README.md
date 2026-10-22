@@ -24,17 +24,20 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **Sunucunun gönderdikleri:** ışınlama, `SetEntityMotion` (set), patlama itmesi (add), öznitelikler, açlık
   (`SetHealth`), kendi bayrak ve duruş yankısı (`SetEntityData`), yetenekler, oyun modu, efektler, dünya sınırı,
   binek ve kamera.
-- **Efektler:** adımın okuduğu dördü client'ın tuttuğu güçle izlenir (`OnFoot.Effects`): zıplama gücü
+- **Efektler:** adımın okuduğu beşi client'ın tuttuğu güçle izlenir (`OnFoot.Effects`): zıplama gücü
   (zıplamada ve otomatik zıplamanın erişiminde), yavaş düşüş (yükselmezken yerçekimi en çok 0.01, düşüş mesafesi
-  sıfırlanır), havada süzülme (yerçekiminin yerine) ve körlük (koşulamaz). Client bir efekti kendisi bitirmez:
+  sıfırlanır), havada süzülme (yerçekiminin yerine), körlük (koşulamaz) ve yunus lütfu (suda yavaşlama 0.96). Client bir efekti kendisi bitirmez:
   süresini sayar ama sunucu kaldırana kadar tutar, bu yüzden varlık ve güç yalnızca sunucunun paketlerinden
-  gelir. Hız ve yavaşlık özniteliğe sunucu üzerinden etki eder; yunus lütfu yalnızca suda (adımın dışında).
+  gelir. Hız ve yavaşlık özniteliğe sunucu üzerinden etki eder.
 - **Hız değiştiricileri (`SpeedAttribute`, `ModifierTable`):** client değiştiricileri işlem başına fastutil
   `Object2ObjectOpenHashMap` içinde tutar ve değeri o tablonun sırasıyla çarpar; sıra değerin son bitleridir.
   Tablo birebir kopyalanır (32 yuva, `HashCommon.mix(Identifier.hashCode())`, doğrusal yoklama, `shiftKeys`
   silmesi, son yuvadan geriye yineleme): hız ve yavaşlık efektleri, eklentilerin değiştiricileri ve koşma
   birlikte kesin. `ModifierTableTest` gerçek fastutil tablosuyla 2000 rastgele ekleme/silme dizisinde aynı sırayı
   ister. Tabloyu büyütecek (25.) değiştirici ve bilinmeyen işlem iddia dışıdır.
+- **Su:** hipotez yüzme bayrağını ve gözün suda olup olmadığını taşır (`PlayerState.swimming`, `eyeInWater`); adım
+  ikisini de dünyadan yeniden hesaplar. Sunucunun kendi yüzme bayrağı yankısı (`SetEntityData`) client'ın bayrağının
+  yerine geçer ve izlenir. Su hareket verimliliği özniteliği (derinlik gezgini) varsayılanın dışındaysa iddia yoktur.
 - **Görünmeyen seçenekler:** çift W penceresi (0..10) ve otomatik zıplama maske olarak taşınır, yalnızca
   okunduklarında dallanır; maskeleri dışında aynı durumlar birleşir.
 - **Eşya kullanımı (`Using`):** client'ın kendi kullanımı (`LocalPlayer.startedUsingItem`), elindeki yığının
@@ -61,7 +64,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   `pushableBy`'ın kurallarıyla verilir ve client'ın o tick tutabileceği her takım durumunda aynı olmalıdır. Bir
   oyuncunun ya da evcil bir hayvanın takımı adından bilinmez: her takım denenir. Birden çok iticinin sırası
   izlenmez, her sıra bir hipotezdir (en çok 3 itici).
-- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (sıvı, iskele...), çarpışan ya da kendi yoluyla iten bir
+- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (lav, kabarcık sütunu, iskele...), çarpışan ya da kendi yoluyla iten bir
   varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
   boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
   böyle), itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
@@ -77,8 +80,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
   az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
-  ve kapı üstü): 5478 tikin 5455'i iddia edildi, 0 açıklanamayan, 2767/2767 tick'te client'ın durumu kümede, 24
-  itme izlendi. Kalan 22 tik,
+  ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme): 6552 tikin 6504'ü iddia edildi, 0 açıklanamayan,
+  3534/3534 tick'te client'ın durumu kümede, 24 itme izlendi. Kalanlar uzak ışınlamalardan sonra client'ın henüz
+  işlemediği chunk'lardır. Kalan 22 tik,
   uzak bir ışınlamadan sonra yeniden gönderilen ve client'ın henüz işlemediği chunk'tır. Eşdeğer durumlar
   izlenmeden önce buz pistinin altında çimenin yayılması da 98 tik daha iddiasız bırakıyordu. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya
   da 0.05'i float yerine double alan model açıklanamayan tick verir. Efekt modellerinin bilinçli
@@ -89,7 +93,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   kılıcın arkasından kalkan ve bırakması, mızrakla koşma, çapadan önce kaldırılmış kalkanla yürüme, bir köylünün ve
   iki köylünün itmesi ve hiç çarpışmayan takımda itilmemek açıklanır; client'ın belki işlemediği bir takım değişikliği
   iddiayı yalnızca karar verdiği yerde bitirir; altındaki toprak çimene dönerken (iki durum adım için aynı) izlenir,
-  havaya dönebilecek blokta iddia yoktur. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
+  havaya dönebilecek blokta iddia yoktur; bir havuza yürüyüp batan, su altında yüzen, yükselen ve shift'le batan oyuncu
+  izlenir, suyun çekişi olmadan yerinde süzülmek kanıttır. 0.01 blok fazla hareket, havada asılı kalma, uygulanmayan savrulma,
   yok sayılan yavaşlık, verilmemiş zıplama gücüyle zıplama, körken koşma, yerken tam hızla yürüme ve itmeye karşı
   durmak kanıttır. `ClientPushersTest` ve `ClientTeamsTest` itici sorgusunu (sıra, tick, belirsizlik) ve takım
   kurallarını tek tek sınar.

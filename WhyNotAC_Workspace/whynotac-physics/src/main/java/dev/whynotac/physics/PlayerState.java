@@ -14,24 +14,38 @@ import dev.whynotac.math.vector.Vec3d;
  * @param support           {@code mainSupportingBlockPos}, null when empty
  * @param stuckSpeedMultiplier set by blocks the box was inside last tick (cobwebs, berry bushes); zero otherwise
  * @param fallDistance      NaN when not known: every use of it then makes the tick {@link Colliders.Unknown}
+ * @param swimming          the shared swimming flag ({@code isSwimming}): set by {@code updateSwimming}, but the server
+ *                          can echo its own
+ * @param eyeInWater        {@code isEyeInFluid(FluidTags.WATER)}: the eye was in water at the last tick's start
+ *                          ({@code updateFluidOnEyes}); the next tick's {@code isUnderWater} reads it
  */
 public record PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround,
         boolean horizontalCollision, boolean minorHorizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow,
         double fallDistance, boolean sprinting, boolean sprintModifier, boolean crouching, Pose pose, Keys keys, int noJumpDelay, int sprintTriggerTime,
-        int autoJumpTime, BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier) {
+        int autoJumpTime, BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, boolean swimming, boolean eyeInWater) {
 
-    /** The poses the on-foot step handles. */
+    /** This state with the water flags. */
+    public PlayerState withWater(boolean swimming, boolean eyeInWater) {
+        return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
+                verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater);
+    }
+
+    /** The poses the on-foot step handles ({@code Player.POSES}; SWIMMING is crawling too). */
     public enum Pose {
-        STANDING(0.6F, 1.8F),
-        CROUCHING(0.6F, 1.5F),
-        SWIMMING(0.6F, 0.6F);
+        STANDING(0.6F, 1.8F, 1.62F),
+        CROUCHING(0.6F, 1.5F, 1.27F),
+        SWIMMING(0.6F, 0.6F, 0.4F);
 
         final float width;
         final float height;
+        /** {@code EntityDimensions.eyeHeight}. */
+        final float eyeHeight;
 
-        Pose(float width, float height) {
+        Pose(float width, float height, float eyeHeight) {
             this.width = width;
             this.height = height;
+            this.eyeHeight = eyeHeight;
         }
 
         /** {@code EntityDimensions.makeBoundingBox(position)}: the box is rebuilt from the position, not moved. */
