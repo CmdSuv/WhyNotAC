@@ -197,7 +197,10 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   yeni oyuncuyu, bineği ve kaldırılmış bineğin ışınlanmasını, başka kamerayı ve sonrasını da; 41 mutasyonun hepsi
   yakalanır (yerde olmayış için 16). Alet kuralları `item-prototypes.tsv`'nin son sütunudur (sunucunun
   kayıt defterinden, `ItemPrototypesDataTest`). Gerçek client'ın elle kırdığı toprakta üst sınırların toplamı bitişin
-  tikinde tam 1.0'dır (client'ın kendi toplamı: 15 artış), çim bloğunda 1.22: ikisi de tam değerlendirildi, vaka yok. E2E
+  tikinde tam 1.0'dır (client'ın kendi toplamı: 15 artış), çim bloğunda 1.22: ikisi de tam değerlendirildi, vaka yok.
+  Zıplarken dümdüz aşağı kazdığı çim (66 artış, 60'ı havada ÷5) ve toprakta (elindeki eşya değişince yeniden başlayan
+  kazı: 57 artış, 52'si havada) üst sınırlar 1.000001 ve 1.027'dir (`BreakAudit.java`): bayrak tam client'ın okuduğu tikte
+  sayılıyor. E2E
   sondası duvarın taşını elle kazmaya başlar ve bir tik sonra bitirir: `break-time` vakası açılır.
 
 ### `prediction-sequence` (`PredictionSequenceCheck`)

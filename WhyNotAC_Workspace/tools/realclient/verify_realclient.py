@@ -188,9 +188,12 @@ def main():
           f"closed: {menu} {under} {after}")
     # The shield: from its use (the off hand's, behind the sword) to its release the client sent no swing, no attack, no
     # interaction and no other use, though the last block was clicked under three times; that block's release is
-    # followed by the one click's swing.
+    # followed by the one click's swing. (In the nether, at the end, a right click raises the shield once more.)
+    nether = next((e["sequence"] for e in events if e["type"] == "Outbound" and e["packet"].get("type") == "Respawn"
+                   and (e["packet"].get("dimension") or {}).get("key") == "minecraft:the_nether"), None)
+    overworld = [e["packet"] for e in events if e["type"] == "Inbound" and (nether is None or e["sequence"] < nether)]
     blocks, current, after_last = [], None, None
-    for p in inbound:
+    for p in overworld:
         if p["type"] == "UseItem" and p["hand"] == "OFF_HAND" and current is None:
             current = []
         elif current is not None and p["type"] == "PlayerAction" and p["action"] == "RELEASE_USE_ITEM":
