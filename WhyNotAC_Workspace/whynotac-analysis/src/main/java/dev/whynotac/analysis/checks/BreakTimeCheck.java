@@ -14,6 +14,7 @@ import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientSelf;
+import dev.whynotac.world.ClientTags;
 import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.ItemPrototypes;
 import dev.whynotac.world.Replicas;
@@ -40,8 +41,9 @@ import java.util.TreeMap;
  * {@code block_break_speed}, times {@code submerged_mining_speed} with the eye in water, divided by 5 off the ground.
  * Every factor is taken at its largest over what the client may hold at that tick (the replicas' windows): the item at
  * the finish (it has the start's item and components, or the dig would have restarted), the block's states before the
- * start's own prediction, the effects and attributes, on the ground, the eye in water only where that is faster, and,
- * the server's tags not being followed, any rule naming a tag as possibly holding the block. Floats round monotonically,
+ * start's own prediction, the effects and attributes, on the ground, the eye in water only where that is faster, and
+ * a rule naming a tag as holding the block as the client's tags say ({@code ClientTags}: possibly, where the client may
+ * hold it or not, or its tags are not known). Floats round monotonically,
  * so the client's sum is at most the sum of those largest increments: a finish before that sum reaches 1 is impossible
  * for a vanilla client.
  *
@@ -53,7 +55,7 @@ import java.util.TreeMap;
 public final class BreakTimeCheck implements TimelineListener {
 
     public static final String ID = "break-time";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final String TOOL = "minecraft:tool";
 
@@ -171,6 +173,7 @@ public final class BreakTimeCheck implements TimelineListener {
         }
         BlockStates table = world.states();
         ItemPrototypes prototypes = ItemPrototypes.vanilla();
+        ClientTags tags = replicas.tags().tags(session);
         Bound largest = null;
         for (int state : states) {
             if (!table.isValid(state)) {
@@ -184,6 +187,8 @@ public final class BreakTimeCheck implements TimelineListener {
                 continue; // BlockBehaviour.getDestroyProgress: 0
             }
             String block = table.block(state);
+            int blockId = table.blockId(state);
+            TagLookup lookup = tag -> tags.holds(ClientTags.BLOCK, tag, blockId);
             boolean required = table.has(state, BlockStates.TOOL_REQUIRED);
             for (Stack stack : stacks) {
                 ItemPrototypes.Tool tool;
@@ -198,8 +203,8 @@ public final class BreakTimeCheck implements TimelineListener {
                     }
                     tool = prototype.tool();
                 }
-                float speed = tool == null ? 1.0F : maxSpeed(tool, block);
-                boolean correct = !required || tool != null && mayBeCorrect(tool, block);
+                float speed = tool == null ? 1.0F : maxSpeed(tool, block, lookup);
+                boolean correct = !required || tool != null && mayBeCorrect(tool, block, lookup);
                 float increment = increment(speed, hardness, correct, mining);
                 if (largest == null || increment > largest.increment()) {
                     largest = new Bound(increment, block, hardness, stack.isEmpty() ? "empty" : stack.item(), speed, correct, mining);
@@ -235,17 +240,22 @@ public final class BreakTimeCheck implements TimelineListener {
         return f / hardness / (float) (correct ? 30 : 100);
     }
 
+    /** Whether a tag holds the block in what the client may hold: TRUE, FALSE, or null (either). */
+    interface TagLookup {
+        Boolean holds(String tag);
+    }
+
     /**
      * The largest speed {@code Tool.getMiningSpeed} may give the block: the first rule with a speed whose blocks hold it,
-     * a rule naming a tag possibly holding it (the server's tags are not followed), else the default.
+     * every rule up to it whose tag may hold it, else the default.
      */
-    static float maxSpeed(ItemPrototypes.Tool tool, String block) {
+    static float maxSpeed(ItemPrototypes.Tool tool, String block, TagLookup tags) {
         float max = Float.NEGATIVE_INFINITY;
         for (ItemPrototypes.Rule rule : tool.rules()) {
             if (rule.speed() == null) {
                 continue;
             }
-            Boolean holds = holds(rule, block);
+            Boolean holds = holds(rule, block, tags);
             if (Boolean.FALSE.equals(holds)) {
                 continue;
             }
@@ -258,12 +268,12 @@ public final class BreakTimeCheck implements TimelineListener {
     }
 
     /** Whether {@code Tool.isCorrectForDrops} may be true for the block, the same way. */
-    static boolean mayBeCorrect(ItemPrototypes.Tool tool, String block) {
+    static boolean mayBeCorrect(ItemPrototypes.Tool tool, String block, TagLookup tags) {
         for (ItemPrototypes.Rule rule : tool.rules()) {
             if (rule.correctForDrops() == null) {
                 continue;
             }
-            Boolean holds = holds(rule, block);
+            Boolean holds = holds(rule, block, tags);
             if (Boolean.FALSE.equals(holds)) {
                 continue;
             }
@@ -277,9 +287,9 @@ public final class BreakTimeCheck implements TimelineListener {
         return false;
     }
 
-    /** Whether the rule's blocks hold the block: a list says, a tag may (null). */
-    private static Boolean holds(ItemPrototypes.Rule rule, String block) {
-        return rule.tag() == null ? rule.blocks().contains(block) : null;
+    /** Whether the rule's blocks hold the block: a list says, a tag as the client's tags say. */
+    private static Boolean holds(ItemPrototypes.Rule rule, String block, TagLookup tags) {
+        return rule.tag() == null ? Boolean.valueOf(rule.blocks().contains(block)) : tags.holds(rule.tag()); // boxed: null stays null
     }
 
     private void report(PlayerSession session, State state, Dig dig, Bound bound, float progress, TimelineEvent.Inbound at) {

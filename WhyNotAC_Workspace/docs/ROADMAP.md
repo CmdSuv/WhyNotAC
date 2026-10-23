@@ -71,9 +71,10 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 - Blok erişimi ve yüz doğrulama (`W2`): eşya kullanımının dönüşü tikin bakışıyla bit bit aynı ve bloğa tıklamanın
   imleci bakışın o bloğun outline'ına girdiği yerde, girebileceği yüzde, menzilde ve araya blok girmeden (`use-aim`,
   görev #60) yapıldı; kırma paketlerinin bloğu ve yüzü de aynı seçimden. Kırma ilerlemesi (`W1`, `break-time`, görev #61):
-  bitiş, client'ın her çarpanın en büyük değeriyle float toplamı 1'e ulaşmadan gelemez; yapıldı. Kalan: sunucunun blok
-  etiketlerini (`update_tags`) izleyip alet kurallarını kesinleştirmek, yerde olmayışı (÷5) client'ın kendi bayrağıyla
-  saymak. Yerleştirme (`W3`).
+  bitiş, client'ın her çarpanın en büyük değeriyle float toplamı 1'e ulaşmadan gelemez; alet kurallarının etiketleri
+  client'ın sunucudan aldıklarıyla (`update_tags`, `ClientTags`, görev #62; hareket kontrolü de etiketler motorunkilerden
+  başka olabildikçe iddia etmez). Yapıldı. Kalan: yerde olmayışı (÷5) client'ın kendi bayrağıyla saymak. Yerleştirme
+  (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
 
 ## Faz 4 — Doğrulama ve veri

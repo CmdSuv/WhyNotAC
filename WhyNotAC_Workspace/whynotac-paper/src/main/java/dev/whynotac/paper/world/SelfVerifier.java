@@ -23,7 +23,8 @@ import org.bukkit.plugin.Plugin;
  * server's: the position the eye is based on (the server accepts the client's position), the
  * {@code entity_interaction_range} and scale values (the replica's intervals must contain the server's),
  * the game mode (creative or spectator on the server must be possible in the replica) and the vehicle and
- * camera (on the server, the replica must not claim an eye).
+ * camera (on the server, the replica must not claim an eye). It also says whether the client certainly holds the
+ * tags the movement engine takes as vanilla ({@code engineTags=vanilla}, else the first that may differ).
  *
  * <p>The replica follows the network and the server is ahead of it, so a mismatch counts only once the
  * server's side stood still for a round (two ticks).
@@ -33,12 +34,12 @@ public final class SelfVerifier {
     /** One verification's outcome, also printed as one line. */
     public record Result(String player, boolean matches, boolean changing, String eye, boolean positionEqual, String range, double serverRange,
             boolean rangeContains, String scale, double serverScale, boolean scaleContains, int serverMode, boolean modeClaim,
-            boolean modeConsistent, int rounds, List<String> differences) {
+            boolean modeConsistent, int rounds, String engineTags, List<String> differences) {
         public String line() {
             return "WhyNotAC self " + player + ": matches=" + matches + " changing=" + changing + " eye=" + eye.replace(' ', '_') + " positionEqual="
                     + positionEqual + " range=" + range + " serverRange=" + format(serverRange) + " rangeContains=" + rangeContains + " scale=" + scale
                     + " serverScale=" + format(serverScale) + " scaleContains=" + scaleContains + " serverMode=" + serverMode + " mayBeCreativeOrSpectator="
-                    + modeClaim + " modeConsistent=" + modeConsistent + " rounds=" + rounds;
+                    + modeClaim + " modeConsistent=" + modeConsistent + " rounds=" + rounds + " engineTags=" + engineTags;
         }
 
         public boolean clean() {
@@ -46,7 +47,7 @@ public final class SelfVerifier {
         }
     }
 
-    private record Snapshot(String eye, Vec3d sent, double[] range, double[] scale, boolean modeClaim) {}
+    private record Snapshot(String eye, Vec3d sent, double[] range, double[] scale, boolean modeClaim, String engineTags) {}
 
     private record ServerSide(Vec3d position, double range, double scale, int mode, boolean passenger, boolean camera) {}
 
@@ -55,12 +56,17 @@ public final class SelfVerifier {
     private static final double SLACK = 1e-9;
 
     private final PacketInterceptor interceptor;
+    private static final dev.whynotac.analysis.movement.EngineTags ENGINE_TAGS =
+            new dev.whynotac.analysis.movement.EngineTags(dev.whynotac.world.BlockStates.vanilla());
+
     private final ClientSelfTracker tracker;
+    private final dev.whynotac.world.ClientTagsTracker tags;
     private final Plugin plugin;
 
-    public SelfVerifier(PacketInterceptor interceptor, ClientSelfTracker tracker, Plugin plugin) {
+    public SelfVerifier(PacketInterceptor interceptor, ClientSelfTracker tracker, dev.whynotac.world.ClientTagsTracker tags, Plugin plugin) {
         this.interceptor = interceptor;
         this.tracker = tracker;
+        this.tags = tags;
         this.plugin = plugin;
     }
 
@@ -75,8 +81,9 @@ public final class SelfVerifier {
     }
 
     private void round(Player target, PlayerSession session, ServerSide previous, int round, Consumer<Result> done, Consumer<String> failed) {
+        // the query runs on the session's analysis thread, where the tags replica is too
         tracker.query(session, self -> new Snapshot(self.eyeState(), self.sentPosition(), self.interactionRangeBounds(), self.scaleBounds(),
-                        self.mayBeCreativeOrSpectator()))
+                        self.mayBeCreativeOrSpectator(), java.util.Objects.requireNonNullElse(ENGINE_TAGS.mayDiffer(tags.tags(session)), "vanilla")))
                 .orTimeout(5, TimeUnit.SECONDS)
                 .whenComplete((snapshot, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (error != null) {
@@ -127,7 +134,8 @@ public final class SelfVerifier {
         boolean matches = differences.isEmpty();
         boolean changing = !matches && !server.equals(previous);
         return new Result(name, matches, changing, snapshot.eye(), positionEqual, interval(snapshot.range()), server.range(), rangeContains,
-                interval(snapshot.scale()), server.scale(), scaleContains, server.mode(), snapshot.modeClaim(), modeConsistent, round, differences);
+                interval(snapshot.scale()), server.scale(), scaleContains, server.mode(), snapshot.modeClaim(), modeConsistent, round,
+                snapshot.engineTags(), differences);
     }
 
     private static String interval(double[] bounds) {

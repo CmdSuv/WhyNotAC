@@ -174,7 +174,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   yorgunluğu çarpanı; `block_break_speed`; göz sudaysa `submerged_mining_speed`; yerde değilse ÷5. Her çarpan o tikte
   client'ın tutabileceği en büyük değeriyle alınır: bitişteki eşya (başlangıcınkiyle aynı eşya ve bileşenler, yoksa kazı
   yeniden başlardı), bloğun başlangıcın kendi tahmininden önceki durumları, efektler ve öznitelikler (`ClientSelf`), yerde,
-  göz yalnızca daha hızlıysa suda; sunucunun etiketleri izlenmediğinden bir etiketi adlandıran kural bloğu tutabilir sayılır.
+  göz yalnızca daha hızlıysa suda; bir etiketi adlandıran kural client'ın etiketlerine göre (`ClientTags`: tutup tutmadığı
+  kesin değilse ya da etiketler bilinmiyorsa tutabilir sayılır).
   Float yuvarlaması tekdüze olduğundan client'ın toplamı bu en büyük artışların toplamını aşamaz.
 - **İddia yok:** blok bilinmiyorsa (yerleşmemiş chunk, orada önceki bir tahmin, blokları bilinmeyen eşya kullanımı, kazı
   sırasında başka bir blok eylemi), eşya bilinmiyorsa (izlenmeyen yuva, stack'in kendi `tool` bileşeni, tablonun bilmediği
@@ -188,6 +189,13 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   sondası duvarın taşını elle kazmaya başlar ve bir tik sonra bitirir: `break-time` vakası açılır.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
+
+- **Etiketler (`EngineTags`):** motor vanilla 1.21.11'in etiketlerini varsayar: `minecraft:climbable` tam olarak
+  `OnFoot.CLIMBABLE`, `minecraft:fences` ve `minecraft:walls` adı `*_fence` ve `*_wall` olan bloklar, sıvı etiketleri
+  `minecraft:water` ve `minecraft:lava` su/akan su ve lav/akan lav, `minecraft:powder_snow_walkable_mobs` oyuncuyu
+  tutmaz. Client'ın etiketleri (`ClientTags`, sunucunun `update_tags`'i) iddianın çapasından beri bunlardan başka olmuş
+  olabiliyorsa bulgu açılmaz (tik açıklanamamış kalır, iddia edilmez). Vanilla sunucuda E2E ve gerçek client'ın
+  `/whynotac self` çıktısı `engineTags=vanilla` der.
 
 - **Hipotez kümesi:** client'ın kendi oyuncusu tick tick, olabileceği durumların kümesi olarak izlenir
   (`Hypothesis`: fizik durumu, oyuncunun geri kalanı, client'ın en son gönderdikleri, sunucunun göremediği

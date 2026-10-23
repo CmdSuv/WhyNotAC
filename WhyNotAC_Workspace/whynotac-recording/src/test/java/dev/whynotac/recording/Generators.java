@@ -201,6 +201,17 @@ public final class Generators {
                     anyDouble(), anyDouble(), anyDouble(), vec(), random.nextBoolean() ? vec() : null,
                     (byte) random.nextInt(), (byte) random.nextInt(), (byte) random.nextInt(), anyInt());
             case "RemoveEntities" -> new ClientboundPacket.RemoveEntities(ints());
+            case "UpdateTags" -> {
+                List<ClientboundPacket.UpdateTags.RegistryTags> registries = new java.util.ArrayList<>();
+                for (int r = random.nextInt(3); r > 0; r--) {
+                    List<ClientboundPacket.UpdateTags.Tag> tags = new java.util.ArrayList<>();
+                    for (int t = random.nextInt(4); t > 0; t--) {
+                        tags.add(new ClientboundPacket.UpdateTags.Tag(anyString(), ints()));
+                    }
+                    registries.add(new ClientboundPacket.UpdateTags.RegistryTags(anyString(), tags));
+                }
+                yield new ClientboundPacket.UpdateTags(registries);
+            }
             case "MoveEntity" -> {
                 boolean position = random.nextBoolean();
                 boolean rotation = !position || random.nextBoolean();

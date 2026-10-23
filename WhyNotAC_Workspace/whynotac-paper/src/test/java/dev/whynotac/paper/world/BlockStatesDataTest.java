@@ -185,6 +185,7 @@ class BlockStatesDataTest {
         BlockStates shipped = BlockStates.vanilla();
         assertEquals(server.minecraftVersion(), shipped.minecraftVersion());
         assertEquals(server.size(), shipped.size(), "block state count");
+        assertEquals(BuiltInRegistries.BLOCK.size(), shipped.blockCount(), "block count");
         int kindOnly = 0;
         for (int id = 0; id < server.size(); id++) {
             String where = "state " + id + " (" + server.block(id) + "[" + server.properties(id) + "])";
@@ -196,6 +197,7 @@ class BlockStatesDataTest {
             assertEquals(server.jumpFactor(id), shipped.jumpFactor(id), where);
             assertEquals(server.destroySpeed(id), shipped.destroySpeed(id), where);
             assertEquals(server.fluid(id), shipped.fluid(id), where);
+            assertEquals(BuiltInRegistries.BLOCK.getId(Block.stateById(id).getBlock()), shipped.blockId(id), where + ": block registry id");
             assertTrue(shipped.outlineShape(id).sameGeometry(server.outlineShape(id)), where + ": outline geometry differs");
             Shape ours = shipped.collisionShape(id);
             Shape theirs = server.collisionShape(id);

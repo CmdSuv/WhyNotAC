@@ -26,6 +26,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;
+import net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket;
 import net.minecraft.network.protocol.common.ServerboundClientInformationPacket;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
@@ -144,6 +145,8 @@ public final class PacketTranslator {
     private static final VarHandle SECTION_POS;
     private static final VarHandle SECTION_POSITIONS;
     private static final VarHandle SECTION_STATES;
+    /** {@code TagNetworkSerialization.NetworkPayload.tags}: package-private, no getter. */
+    private static final VarHandle TAG_PAYLOAD_TAGS;
 
     static {
         try {
@@ -169,6 +172,8 @@ public final class PacketTranslator {
             SET_CAMERA_ID = MethodHandles.privateLookupIn(ClientboundSetCameraPacket.class, MethodHandles.lookup())
                     .findVarHandle(ClientboundSetCameraPacket.class, "cameraId", int.class);
             ROTATE_HEAD_Y_HEAD_ROT = head.findVarHandle(ClientboundRotateHeadPacket.class, "yHeadRot", byte.class);
+            TAG_PAYLOAD_TAGS = MethodHandles.privateLookupIn(net.minecraft.tags.TagNetworkSerialization.NetworkPayload.class, MethodHandles.lookup())
+                    .findVarHandle(net.minecraft.tags.TagNetworkSerialization.NetworkPayload.class, "tags", Map.class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -236,7 +241,7 @@ public final class PacketTranslator {
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
             "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
             "mount_screen_open", "container_close", "entity_event", "set_camera", "set_health", "initialize_border", "set_border_center",
-            "set_border_lerp_size", "set_border_size", "set_player_team");
+            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags");
 
     /**
      * Packets about other entities that come by the hundred per tick: the edge decodes them (the client's
@@ -269,6 +274,7 @@ public final class PacketTranslator {
             ClientboundContainerSetSlotPacket.class, ClientboundSetCursorItemPacket.class,
             ClientboundSetPlayerInventoryPacket.class, ClientboundSetHeldSlotPacket.class,
             ClientboundOpenScreenPacket.class, ClientboundMountScreenOpenPacket.class,
+            ClientboundUpdateTagsPacket.class,
             ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class, ClientboundSetCameraPacket.class,
             ClientboundSetHealthPacket.class, ClientboundInitializeBorderPacket.class, ClientboundSetBorderCenterPacket.class,
             ClientboundSetBorderLerpSizePacket.class, ClientboundSetBorderSizePacket.class, ClientboundSetPlayerTeamPacket.class);
@@ -496,6 +502,28 @@ public final class PacketTranslator {
 
     // --- clientbound -------------------------------------------------------------------------------
 
+    /**
+     * Every registry's tags as the payload holds them, registries and tags in name order (the packet's maps have none:
+     * both views then translate it alike), each tag's ids as sent.
+     */
+    @SuppressWarnings("unchecked")
+    static ClientboundPacket.UpdateTags updateTags(ClientboundUpdateTagsPacket packet) {
+        List<ClientboundPacket.UpdateTags.RegistryTags> registries = new ArrayList<>(packet.getTags().size());
+        for (Map.Entry<net.minecraft.resources.ResourceKey<? extends net.minecraft.core.Registry<?>>, net.minecraft.tags.TagNetworkSerialization.NetworkPayload> entry
+                : packet.getTags().entrySet()) {
+            Map<net.minecraft.resources.Identifier, it.unimi.dsi.fastutil.ints.IntList> payload =
+                    (Map<net.minecraft.resources.Identifier, it.unimi.dsi.fastutil.ints.IntList>) TAG_PAYLOAD_TAGS.get(entry.getValue());
+            List<ClientboundPacket.UpdateTags.Tag> tags = new ArrayList<>(payload.size());
+            for (Map.Entry<net.minecraft.resources.Identifier, it.unimi.dsi.fastutil.ints.IntList> tag : payload.entrySet()) {
+                tags.add(new ClientboundPacket.UpdateTags.Tag(tag.getKey().toString(), tag.getValue().toIntArray()));
+            }
+            tags.sort(java.util.Comparator.comparing(ClientboundPacket.UpdateTags.Tag::name));
+            registries.add(new ClientboundPacket.UpdateTags.RegistryTags(entry.getKey().identifier().toString(), tags));
+        }
+        registries.sort(java.util.Comparator.comparing(ClientboundPacket.UpdateTags.RegistryTags::registry));
+        return new ClientboundPacket.UpdateTags(registries);
+    }
+
     public ClientboundPacket outbound(Packet<?> packet) {
         return outbound(packet, false);
     }
@@ -596,6 +624,7 @@ public final class PacketTranslator {
                     mount.getContainerId(), mount.getInventoryColumns(), mount.getEntityId());
             case ClientboundContainerClosePacket close -> new ClientboundPacket.ContainerClose(close.getContainerId());
             case ClientboundSetPlayerTeamPacket team -> playerTeam(team, fromWire);
+            case ClientboundUpdateTagsPacket tags -> updateTags(tags);
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }

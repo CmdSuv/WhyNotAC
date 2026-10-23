@@ -150,6 +150,8 @@ public final class RecordingFormat {
     public static final int CB_LOGIN_LAVA = 59;
     /** Respawn with the dimension (with its lava speed), the game mode and what the client keeps. */
     public static final int CB_RESPAWN_LAVA = 60;
+    /** Every registry sent, each with its tags and their ids. */
+    public static final int CB_UPDATE_TAGS = 61;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

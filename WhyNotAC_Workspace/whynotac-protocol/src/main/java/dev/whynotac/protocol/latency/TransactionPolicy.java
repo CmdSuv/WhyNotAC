@@ -81,6 +81,9 @@ public final class TransactionPolicy {
             // Mounting and dismounting change the player's own physics (which side is a passenger needs state: always).
             case ClientboundPacket.SetPassengers ignored -> true;
             case ClientboundPacket.MoveVehicle ignored -> true; // moves the vehicle the player controls
+            // Tags decide what the player climbs, stands on and swims in, and how fast it mines. Mostly in the configuration
+            // phase, where no transaction is sent; in play (a reload) the flush brackets place them.
+            case ClientboundPacket.UpdateTags ignored -> false;
             case ClientboundPacket.Untranslatable ignored -> true; // unknown effect: bracket it like a physics change
         };
     }

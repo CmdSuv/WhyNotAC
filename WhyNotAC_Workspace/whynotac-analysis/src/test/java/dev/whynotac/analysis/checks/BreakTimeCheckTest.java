@@ -45,6 +45,7 @@ class BreakTimeCheckTest {
     private static final int SELF = 1;
     private static final long SECOND = 1_000_000_000L;
     private static final Stack PICKAXE = new Stack("minecraft:diamond_pickaxe", 1, List.of(), List.of(), null, false);
+    private static final BreakTimeCheck.TagLookup UNKNOWN_TAGS = tag -> null;
 
     private final List<Evidence> evidence = new ArrayList<>();
     private final List<Admissibility> rejected = new ArrayList<>();
@@ -222,17 +223,44 @@ class BreakTimeCheckTest {
     void aToolsSpeedIsItsFirstRuleThatMayHoldTheBlock() {
         ItemPrototypes items = ItemPrototypes.vanilla();
         ItemPrototypes.Tool pickaxe = items.get("minecraft:diamond_pickaxe").tool();
-        assertEquals(8.0F, BreakTimeCheck.maxSpeed(pickaxe, "minecraft:stone"), "#mineable/pickaxe may hold it: the server's tags");
-        assertTrue(BreakTimeCheck.mayBeCorrect(pickaxe, "minecraft:stone"));
+        assertEquals(8.0F, BreakTimeCheck.maxSpeed(pickaxe, "minecraft:stone", UNKNOWN_TAGS), "#mineable/pickaxe may hold it: the server's tags");
+        assertTrue(BreakTimeCheck.mayBeCorrect(pickaxe, "minecraft:stone", UNKNOWN_TAGS));
         ItemPrototypes.Tool shears = items.get("minecraft:shears").tool();
-        assertEquals(15.0F, BreakTimeCheck.maxSpeed(shears, "minecraft:cobweb"), "the cobweb rule names it: the first rule decides");
-        assertTrue(BreakTimeCheck.mayBeCorrect(shears, "minecraft:cobweb"));
-        assertEquals(2.0F, BreakTimeCheck.maxSpeed(shears, "minecraft:vine") >= 2.0F ? 2.0F : 0F);
+        assertEquals(15.0F, BreakTimeCheck.maxSpeed(shears, "minecraft:cobweb", UNKNOWN_TAGS), "the cobweb rule names it: the first rule decides");
+        assertTrue(BreakTimeCheck.mayBeCorrect(shears, "minecraft:cobweb", UNKNOWN_TAGS));
+        assertEquals(2.0F, BreakTimeCheck.maxSpeed(shears, "minecraft:vine", UNKNOWN_TAGS) >= 2.0F ? 2.0F : 0F);
         assertEquals(1.0F, items.get("minecraft:mace").tool().defaultMiningSpeed());
-        assertEquals(1.0F, BreakTimeCheck.maxSpeed(items.get("minecraft:mace").tool(), "minecraft:stone"));
-        assertTrue(!BreakTimeCheck.mayBeCorrect(items.get("minecraft:mace").tool(), "minecraft:stone"));
-        assertEquals(Float.MAX_VALUE, BreakTimeCheck.maxSpeed(items.get("minecraft:iron_sword").tool(), "minecraft:dirt"),
+        assertEquals(1.0F, BreakTimeCheck.maxSpeed(items.get("minecraft:mace").tool(), "minecraft:stone", UNKNOWN_TAGS));
+        assertTrue(!BreakTimeCheck.mayBeCorrect(items.get("minecraft:mace").tool(), "minecraft:stone", UNKNOWN_TAGS));
+        assertEquals(Float.MAX_VALUE, BreakTimeCheck.maxSpeed(items.get("minecraft:iron_sword").tool(), "minecraft:dirt", UNKNOWN_TAGS),
                 "#sword_instantly_mines may hold it");
+    }
+
+    @Test
+    void aTagRuleDecidesAsTheClientsTagsSay() {
+        ItemPrototypes.Tool pickaxe = ItemPrototypes.vanilla().get("minecraft:diamond_pickaxe").tool();
+        assertEquals(1.0F, BreakTimeCheck.maxSpeed(pickaxe, "minecraft:dirt", tag -> Boolean.FALSE), "no tag holds it: the default");
+        assertTrue(!BreakTimeCheck.mayBeCorrect(pickaxe, "minecraft:dirt", tag -> Boolean.FALSE));
+        assertEquals(8.0F, BreakTimeCheck.maxSpeed(pickaxe, "minecraft:stone", tag -> tag.equals("minecraft:mineable/pickaxe")));
+        assertTrue(!BreakTimeCheck.mayBeCorrect(pickaxe, "minecraft:obsidian", tag -> true), "incorrect_for_diamond_tool comes first");
+    }
+
+    @Test
+    void thePickaxeOnDirtIsAHandOnceTheTagsSaySo() {
+        hold(PICKAXE);
+        sync();
+        digFor(3); // the server's tags not known: #mineable/pickaxe may hold dirt, 8 / 0.5 / 30 a tick
+        assertEquals(List.of(), evidence);
+        int stone = STATES.blockId(STATES.firstStateOf("minecraft:stone"));
+        out(new ClientboundPacket.UpdateTags(List.of(new ClientboundPacket.UpdateTags.RegistryTags("minecraft:block", List.of(
+                new ClientboundPacket.UpdateTags.Tag("minecraft:mineable/pickaxe", new int[] {stone}),
+                new ClientboundPacket.UpdateTags.Tag("minecraft:incorrect_for_diamond_tool", new int[0]))))));
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        digFor(3); // dirt is in no rule's tag: the default speed 1, 15 increments
+        assertEquals(1, evidence.size());
+        assertEquals("1.0", evidence.getFirst().details().get("toolSpeed"));
     }
 
     // --- digging ---

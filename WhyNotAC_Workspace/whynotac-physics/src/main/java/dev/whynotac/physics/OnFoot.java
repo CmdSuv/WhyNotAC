@@ -40,7 +40,7 @@ public final class OnFoot {
     /** Its collision and its hold depend on the player's boots and fall ({@code PowderSnowBlock}): not followed. */
     static final String POWDER_SNOW = "minecraft:powder_snow";
     /** {@code BlockTags.CLIMBABLE}; trapdoors can be ladders too ({@code trapdoorUsableAsLadder}). */
-    static final java.util.Set<String> CLIMBABLE = java.util.Set.of("minecraft:ladder", "minecraft:vine", "minecraft:scaffolding",
+    public static final java.util.Set<String> CLIMBABLE = java.util.Set.of("minecraft:ladder", "minecraft:vine", "minecraft:scaffolding",
             "minecraft:weeping_vines", "minecraft:weeping_vines_plant", "minecraft:twisting_vines", "minecraft:twisting_vines_plant",
             "minecraft:cave_vines", "minecraft:cave_vines_plant");
 

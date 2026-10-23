@@ -110,6 +110,9 @@ public final class BlockStates {
     private final byte[] fluidAmount;
     private final boolean[] fluidFalling;
     private final Map<String, Integer> firstState;
+    /** Per state, its block's registry id; per block id, its key. */
+    private final int[] blockId;
+    private final List<String> blockKeys;
 
     private BlockStates(String minecraft, List<Shape> shapes, List<State> states) {
         this.minecraft = minecraft;
@@ -139,6 +142,8 @@ public final class BlockStates {
         fluidAmount = new byte[n];
         fluidFalling = new boolean[n];
         firstState = new HashMap<>();
+        blockId = new int[n];
+        List<String> keys = new java.util.ArrayList<>();
         for (int id = 0; id < n; id++) {
             State s = states.get(id);
             if (s.shape < 0 || s.shape >= this.shapes.length || s.outline < 0 || s.outline >= this.shapes.length) {
@@ -163,7 +168,13 @@ public final class BlockStates {
                 fluidFalling[id] = f[2].equals("1");
             }
             firstState.putIfAbsent(s.block, id); // the lowest id; not always the block's default state
+            // Block.BLOCK_STATE_REGISTRY lists every block's states together, the blocks in their registry order
+            if (keys.isEmpty() || !keys.getLast().equals(s.block)) {
+                keys.add(s.block);
+            }
+            blockId[id] = keys.size() - 1;
         }
+        blockKeys = List.copyOf(keys);
     }
 
     /** The data for the Minecraft version WhyNotAC supports, loaded once from the resource. */
@@ -348,6 +359,20 @@ public final class BlockStates {
     }
 
     /** The lowest state id of {@code block} (for blocks with one state, its only state), or -1. */
+    /** The registry id of the state's block ({@code BuiltInRegistries.BLOCK}: what block tags list). */
+    public int blockId(int state) {
+        return blockId[state];
+    }
+
+    /** The key of the block with this registry id, or null. */
+    public String blockKey(int id) {
+        return id >= 0 && id < blockKeys.size() ? blockKeys.get(id) : null;
+    }
+
+    public int blockCount() {
+        return blockKeys.size();
+    }
+
     public int firstStateOf(String block) {
         return firstState.getOrDefault(block, -1);
     }

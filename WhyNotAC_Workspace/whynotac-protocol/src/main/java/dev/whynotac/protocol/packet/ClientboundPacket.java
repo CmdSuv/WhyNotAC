@@ -479,6 +479,41 @@ public sealed interface ClientboundPacket {
     /** {@code ClientboundSetBorderSizePacket}: the size, at once. */
     record SetBorderSize(double size) implements ClientboundPacket {}
 
+    /**
+     * {@code ClientboundUpdateTagsPacket}, in the configuration phase and in play: for each registry sent, every tag and
+     * the registry ids it holds ({@code TagNetworkSerialization.NetworkPayload}). In play the client replaces each sent
+     * registry's tags with these ({@code handleUpdateTags}: {@code prepareTagReload}, a tag left out is empty); the
+     * registries left out keep theirs. In configuration they make the play registries' tags.
+     */
+    record UpdateTags(List<RegistryTags> registries) implements ClientboundPacket {
+        public UpdateTags {
+            registries = List.copyOf(registries);
+        }
+
+        public record RegistryTags(String registry, List<Tag> tags) {
+            public RegistryTags {
+                tags = List.copyOf(tags);
+            }
+        }
+
+        public record Tag(String name, int[] ids) {
+            @Override
+            public boolean equals(Object other) {
+                return other instanceof Tag t && t.name.equals(name) && Arrays.equals(t.ids, ids);
+            }
+
+            @Override
+            public int hashCode() {
+                return name.hashCode() * 31 + Arrays.hashCode(ids);
+            }
+
+            @Override
+            public String toString() {
+                return "Tag[name=" + name + ", ids=" + Arrays.toString(ids) + "]";
+            }
+        }
+    }
+
     record Unmodeled(String type) implements ClientboundPacket {}
 
     /**

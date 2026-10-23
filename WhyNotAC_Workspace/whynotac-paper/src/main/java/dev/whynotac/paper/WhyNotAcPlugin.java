@@ -57,6 +57,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private ClientEntitiesTracker entitiesTracker;
     private ClientInventoryTracker inventoryTracker;
     private ClientSelfTracker selfTracker;
+    private dev.whynotac.world.ClientTagsTracker tagsTracker;
     private Alerts alerts;
     private final AtomicLong listenerErrors = new AtomicLong();
     private final TickCost transactionLoop = new TickCost();
@@ -101,6 +102,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         entitiesTracker = replicas.entities();
         inventoryTracker = replicas.inventory();
         selfTracker = replicas.self();
+        tagsTracker = replicas.tags();
         Checks.all(verdict, replicas).forEach(registry::addListener);
         if (recordings != null) {
             Bukkit.getScheduler().runTaskTimerAsynchronously(this, recordings::scheduleRetention, 20L * 3600, 20L * 3600);
@@ -138,7 +140,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
-                new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, this),
+                new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, tagsTracker, this),
                 new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, this), this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));

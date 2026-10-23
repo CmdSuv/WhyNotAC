@@ -5,6 +5,7 @@ import dev.whynotac.analysis.evidence.AdmissibilityTracker;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.movement.EngineTags;
 import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ServerboundPacket;
@@ -25,7 +26,9 @@ import java.util.TreeMap;
  * when no state the client may have been in sends what it sent: the position to the bit, the flags, the
  * sprint and input packets. Items in use slow it as their use effects say; while one is in use, {@code handleKeybinds}
  * neither attacks nor starts a use, so a tick that does is explained only by a state not using one. Whatever the step does not model (fluids, climbing, a use on a block,
- * vehicles, pushing entities, blocks still changing, the world border) ends the claim until the next anchor.
+ * vehicles, pushing entities, blocks still changing, the world border) ends the claim until the next anchor. Nor is
+ * anything claimed over a span in which the client may have held other tags than the engine takes as vanilla
+ * ({@link EngineTags}: what it climbs, stands on and swims in, from the server's {@code update_tags}).
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
  * rounds it differently) produces this too; fly, speed, step, no-slow, jump and velocity cheats on foot all
@@ -34,7 +37,8 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
+    private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     private static final Object STATE = new Object();
@@ -52,12 +56,24 @@ public final class MovementCheck implements TimelineListener {
         final MovementTracker tracker = new MovementTracker();
         long lastReportNanos = Long.MIN_VALUE;
         long unexplainedSinceReport;
+        /** {@link EngineTags#mayDiffer} for the tags' revision it was asked at; the last sequence at which it was not null. */
+        long tagsRevision = Long.MIN_VALUE;
+        String tagsDiffer = "not asked";
+        long lastTagsDiffer = Long.MIN_VALUE;
     }
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
+        dev.whynotac.world.ClientTags tags = replicas.tags().tags(session);
+        if (tags.revision() != state.tagsRevision) {
+            state.tagsRevision = tags.revision();
+            state.tagsDiffer = ENGINE_TAGS.mayDiffer(tags);
+        }
+        if (state.tagsDiffer != null) {
+            state.lastTagsDiffer = event.sequence();
+        }
         MovementTracker.Tick tick = state.tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session),
                 replicas.inventory().inventory(session));
         if (tick != null && tick.outcome() == MovementTracker.Outcome.UNEXPLAINED) {
@@ -66,6 +82,9 @@ public final class MovementCheck implements TimelineListener {
     }
 
     private void report(PlayerSession session, State state, MovementTracker.Tick tick) {
+        if (state.lastTagsDiffer >= tick.since()) {
+            return; // the client may have held other tags than the engine's since the claim's anchor
+        }
         state.unexplainedSinceReport++;
         if (state.lastReportNanos != Long.MIN_VALUE && tick.nanoTime() - state.lastReportNanos < REPORT_INTERVAL_NANOS) {
             return;

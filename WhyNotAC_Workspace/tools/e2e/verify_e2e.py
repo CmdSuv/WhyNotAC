@@ -353,7 +353,7 @@ def verify_cases(probe, log, work_dir, check):
 
 def verify_self(log, check):
     """The client's own player WhyNotAC rebuilt (eye, reach and scale attributes, game mode) is the server's."""
-    m = re.search(r"WhyNotAC self WhyNotProbe: (.*)", log)
+    m = re.search(r"WhyNotAC self WhyNotProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
     check(m is not None, "/whynotac self answered")
     if not m:
         return
@@ -364,6 +364,8 @@ def verify_self(log, check):
           f"entity_interaction_range and scale are the server's (range {fields.get('range')}, scale {fields.get('scale')})")
     check(fields.get("modeConsistent") == "true" and fields.get("mayBeCreativeOrSpectator") == "false" and fields.get("serverMode") == "0",
           "survival on both sides: the replica rules out creative and spectator")
+    check(fields.get("engineTags") == "vanilla",
+          f"the vanilla server's tags (sent in the configuration phase) are those the movement engine takes as vanilla: {fields.get('engineTags')}")
 
 
 def verify_world(log, dump_path, check):

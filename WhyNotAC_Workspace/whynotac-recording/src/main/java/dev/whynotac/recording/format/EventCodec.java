@@ -716,6 +716,21 @@ public final class EventCodec {
                         }
                     }
                 }
+                case ClientboundPacket.UpdateTags t -> {
+                    body.writeVarInt(CB_UPDATE_TAGS);
+                    body.writeVarInt(t.registries().size());
+                    for (ClientboundPacket.UpdateTags.RegistryTags registry : t.registries()) {
+                        string(registry.registry());
+                        body.writeVarInt(registry.tags().size());
+                        for (ClientboundPacket.UpdateTags.Tag tag : registry.tags()) {
+                            string(tag.name());
+                            body.writeVarInt(tag.ids().length);
+                            for (int id : tag.ids()) {
+                                body.writeZigZag(id);
+                            }
+                        }
+                    }
+                }
                 case ClientboundPacket.MobEffect e -> {
                     body.writeVarInt(CB_MOB_EFFECT);
                     body.writeZigZag(e.entityId());
@@ -1265,6 +1280,21 @@ public final class EventCodec {
                         attributes.add(new ClientboundPacket.UpdateAttributes.Attribute(key, base, modifiers));
                     }
                     yield new ClientboundPacket.UpdateAttributes(entityId, attributes);
+                }
+                case CB_UPDATE_TAGS -> {
+                    int registryCount = boundedCount(in);
+                    List<ClientboundPacket.UpdateTags.RegistryTags> registries = new ArrayList<>(registryCount);
+                    for (int r = 0; r < registryCount; r++) {
+                        String registry = string(in);
+                        int tagCount = boundedCount(in);
+                        List<ClientboundPacket.UpdateTags.Tag> tags = new ArrayList<>(tagCount);
+                        for (int t = 0; t < tagCount; t++) {
+                            String name = string(in);
+                            tags.add(new ClientboundPacket.UpdateTags.Tag(name, ids(in)));
+                        }
+                        registries.add(new ClientboundPacket.UpdateTags.RegistryTags(registry, tags));
+                    }
+                    yield new ClientboundPacket.UpdateTags(registries);
                 }
                 case CB_MOB_EFFECT -> new ClientboundPacket.MobEffect(zint(in), string(in), zint(in), zint(in), zint(in));
                 case CB_REMOVE_MOB_EFFECT -> new ClientboundPacket.RemoveMobEffect(zint(in), string(in));

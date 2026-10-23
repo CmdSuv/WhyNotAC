@@ -210,6 +210,7 @@ class MovementCheckTest {
         deliver(new ClientFact(seq++, now, Fact.TRANSLATOR, "none", Trust.FORMAT_BOUND, "test"));
         deliver(new ClientFact(seq++, now, Fact.TRANSACTION_ORIGIN, "CLIENT", Trust.FORMAT_BOUND, "test"));
         deliver(new TimelineEvent.Bound(seq++, now, ME, "me", SELF));
+        out(VanillaTagsPacket.packet()); // the configuration phase
         out(new ClientboundPacket.Login(SELF, 8, OVERWORLD, 0));
         out(new ClientboundPacket.ChunkCacheCenter(0, 0));
         for (int x = -2; x <= 2; x++) {
@@ -541,6 +542,28 @@ class MovementCheckTest {
         assertEquals(MovementCheck.ID, e.check());
         assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
         assertTrue(e.details().get("offset").startsWith("0.000000,0.000000,0.01"), e.details().toString());
+    }
+
+    @Test
+    void noFindingWhileTheClientMayHoldOtherTagsThanTheEngines() throws Exception {
+        // a datapack makes stone climbable: the engine's step is not the client's
+        ClientboundPacket.UpdateTags vanilla = VanillaTagsPacket.packet();
+        List<ClientboundPacket.UpdateTags.RegistryTags> registries = new ArrayList<>(vanilla.registries());
+        ClientboundPacket.UpdateTags.RegistryTags blocks = registries.getFirst();
+        List<ClientboundPacket.UpdateTags.Tag> tags = new ArrayList<>(blocks.tags());
+        int[] climbable = tags.getFirst().ids();
+        int[] more = java.util.Arrays.copyOf(climbable, climbable.length + 1);
+        more[climbable.length] = STATES.blockId(STATES.firstStateOf("minecraft:stone"));
+        tags.set(0, new ClientboundPacket.UpdateTags.Tag("minecraft:climbable", more));
+        registries.set(0, new ClientboundPacket.UpdateTags.RegistryTags("minecraft:block", tags));
+        out(new ClientboundPacket.UpdateTags(registries)); // a reload in play
+        out(vanilla); // and back, both processed: the claim's span (from the login) still reaches back to the other tags
+        sync();
+        ticks(5, NONE, 30.0F);
+        ticks(20, FORWARD, 30.0F);
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.01));
+        assertEquals(List.of(), evidence, "the client may have climbed what the engine does not");
+        assertEquals(1, count(MovementTracker.Outcome.UNEXPLAINED), "the tick is still unexplained, only not claimed");
     }
 
     @Test

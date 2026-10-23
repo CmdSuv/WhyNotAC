@@ -89,7 +89,7 @@ class ProtocolSurfaceTest {
             "set_display_objective", "set_experience", "set_objective", "set_score", "set_simulation_distance",
             "set_subtitle_text", "set_time", "set_title_text", "set_titles_animation", "show_dialog", "sound", "sound_entity", "stop_sound",
             "store_cookie", "system_chat", "tab_list", "tag_query", "take_item_entity", "test_instance_block_status", "transfer",
-            "update_advancements", "update_recipes", "update_tags", "waypoint");
+            "update_advancements", "update_recipes", "waypoint");
 
     private static Set<String> packetIds(net.minecraft.network.ProtocolInfo.DetailsProvider protocol) {
         Set<String> ids = new TreeSet<>();
