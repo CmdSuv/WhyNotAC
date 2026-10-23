@@ -28,6 +28,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,7 @@ class BreakTimeCheckTest {
 
     private final List<Evidence> evidence = new ArrayList<>();
     private final List<Admissibility> rejected = new ArrayList<>();
+    private final List<BreakTimeCheck.Judgement> judged = new ArrayList<>();
     private PlayerSession session;
     private long seq;
     private long now;
@@ -70,7 +72,7 @@ class BreakTimeCheckTest {
             public void rejected(PlayerSession s, String check, Admissibility a) {
                 rejected.add(a);
             }
-        }, replicas));
+        }, replicas, judged::add));
         session = registry.openReplay("test");
         deliver(new TimelineEvent.Observation(seq++, now, Source.WIRE, Source.WIRE, 774, "edge decoding"));
         deliver(new ClientFact(seq++, now, Fact.IDENTITY, "UNAUTHENTICATED", Trust.CLAIMED, "test"));
@@ -164,6 +166,16 @@ class BreakTimeCheckTest {
         tick();
     }
 
+    /** A tick whose movement sent this onGround flag: the next tick's keybinds read it. */
+    private void flag(boolean onGround) {
+        in(move(onGround));
+        tick();
+    }
+
+    private static ServerboundPacket.MovePlayer move(boolean onGround) {
+        return new ServerboundPacket.MovePlayer(0.5, 64.0, 0.5, 0F, 0F, true, false, onGround, false);
+    }
+
     /** A dig that finishes after {@code increments} of the client's increments (the start's tick counts). */
     private void digFor(int increments) {
         start();
@@ -203,20 +215,24 @@ class BreakTimeCheckTest {
     @Test
     void theIncrementIsTheClientsOwnFloatArithmetic() {
         dev.whynotac.world.ClientSelf.MiningBounds plain = new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 0.0, 1.0, 0.2);
-        assertEquals(1.0F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true, plain));
-        assertEquals(1.0F / 1.5F / 100.0F, BreakTimeCheck.increment(1.0F, 1.5F, false, plain));
+        assertEquals(1.0F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true, plain, false));
+        assertEquals(1.0F / 1.5F / 100.0F, BreakTimeCheck.increment(1.0F, 1.5F, false, plain, false));
         // efficiency adds to a speed above 1 only; haste II multiplies by 1.4, mining fatigue I by 0.3
         assertEquals((8.0F + 26.0F) / 1.5F / 30.0F, BreakTimeCheck.increment(8.0F, 1.5F, true,
-                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 26.0, 1.0, 0.2)));
+                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 26.0, 1.0, 0.2), false));
         assertEquals(1.0F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true,
-                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 26.0, 1.0, 0.2)));
+                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 26.0, 1.0, 0.2), false));
         assertEquals(8.0F * (1.0F + 2 * 0.2F) / 1.5F / 30.0F, BreakTimeCheck.increment(8.0F, 1.5F, true,
-                new dev.whynotac.world.ClientSelf.MiningBounds(1, -1, 0.0, 1.0, 0.2)));
+                new dev.whynotac.world.ClientSelf.MiningBounds(1, -1, 0.0, 1.0, 0.2), false));
         assertEquals(1.0F * 0.3F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true,
-                new dev.whynotac.world.ClientSelf.MiningBounds(-1, 0, 0.0, 1.0, 0.2)));
+                new dev.whynotac.world.ClientSelf.MiningBounds(-1, 0, 0.0, 1.0, 0.2), false));
         // a submerged speed above 1 may apply (the eye in water), below 1 never makes it faster
         assertEquals(1.0F * 2.0F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true,
-                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 0.0, 1.0, 2.0)));
+                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 0.0, 1.0, 2.0), false));
+        // off the ground a fifth, after every other factor
+        assertEquals(1.0F / 5.0F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true, plain, true));
+        assertEquals(1.0F * 2.0F / 5.0F / 0.5F / 30.0F, BreakTimeCheck.increment(1.0F, 0.5F, true,
+                new dev.whynotac.world.ClientSelf.MiningBounds(-1, -1, 0.0, 1.0, 2.0), true));
     }
 
     @Test
@@ -281,6 +297,26 @@ class BreakTimeCheckTest {
         assertEquals("14", e.details().get("ticks"));
         assertEquals("empty", e.details().get("item"));
         assertTrue(Float.parseFloat(e.details().get("maxProgress")) < 1.0F);
+    }
+
+    @Test
+    void everyFinishIsJudgedForAudits() {
+        digFor(15);
+        stop(); // no start of it
+        tick();
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        flag(false);
+        digFor(14);
+        assertEquals(List.of("within", "no dig followed", "early"), judged.stream().map(BreakTimeCheck.Judgement::outcome).toList());
+        BreakTimeCheck.Judgement within = judged.getFirst();
+        assertEquals(15, within.ticks());
+        assertEquals(0, within.offGroundTicks());
+        assertEquals(1.0F, within.maxProgress(), "the client's own sum: 15 increments of 1 / 0.5 / 30 reach 1 exactly");
+        assertTrue(Float.isNaN(judged.get(1).maxProgress()));
+        assertEquals(14, judged.get(2).offGroundTicks());
+        assertTrue(judged.get(2).maxProgress() < 0.2F);
     }
 
     @Test
@@ -473,5 +509,132 @@ class BreakTimeCheckTest {
         digFor(2);
         assertEquals(2, evidence.size());
         assertEquals("2", evidence.get(1).details().get("earlyFinishes"));
+    }
+
+    // --- off the ground ---
+
+    @Test
+    void offTheGroundDirtByHandTakesSeventySix() {
+        flag(false);
+        digFor(76); // the float sum of 75 fifths of 1 / 0.5 / 30 is just below 1
+        assertEquals(List.of(), evidence);
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        digFor(75);
+        assertEquals(1, evidence.size());
+        assertEquals("75", evidence.getFirst().details().get("offGroundTicks"));
+        now += 2 * SECOND;
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        flag(true);
+        digFor(15);
+        assertEquals(1, evidence.size(), "on the ground again");
+    }
+
+    @Test
+    void theFlagCountsFromTheTickAfterItWasSent() {
+        // the start's own tick reads the flag of the tick before it (on the ground), the ticks after it the one its movement sent
+        start();
+        in(move(false));
+        tick();
+        ticks(70);
+        stop();
+        tick();
+        assertEquals(List.of(), evidence, "one increment on the ground and 71 off it");
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        flag(true);
+        start();
+        in(move(false));
+        tick();
+        ticks(69);
+        stop();
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("70", evidence.getFirst().details().get("offGroundTicks"));
+    }
+
+    @Test
+    void theAnswersToATeleportOrARotationAreNotTheClientsFlag() {
+        // handleMovePlayer answers with onGround false and leaves the client's own as it was: on the ground here
+        out(new ClientboundPacket.PlayerPosition(1, new Vec3d(0.5, 64.0, 0.5), Vec3d.ZERO, 0F, 0F, Set.of()));
+        in(new ServerboundPacket.AcceptTeleportation(1));
+        in(new ServerboundPacket.MovePlayer(0.5, 64.0, 0.5, 0F, 0F, true, true, false, false));
+        tick();
+        digFor(15);
+        assertEquals(List.of(), evidence, "after a teleport");
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        // handleRotatePlayer too
+        out(new ClientboundPacket.PlayerRotation(90F, false, 0F, false));
+        in(new ServerboundPacket.MovePlayer(0, 0, 0, 90F, 0F, false, true, false, false));
+        tick();
+        digFor(15);
+        assertEquals(List.of(), evidence, "after a rotation");
+        acknowledged();
+        put("minecraft:dirt");
+        sync();
+        flag(false); // sent after the client processed both: its own
+        digFor(15);
+        assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void aTeleportOfThePlayersOwnEntitySetsTheFlagTheNextKeybindsRead() {
+        flag(false);
+        out(new ClientboundPacket.TeleportEntity(SELF, new Vec3d(0.5, 64.0, 0.5), Vec3d.ZERO, 0F, 0F, Set.of(), true));
+        digFor(15);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aNewPlayerSentNoFlagYet() {
+        flag(false);
+        out(new ClientboundPacket.Respawn(OVERWORLD, 0, 0));
+        chunks();
+        put("minecraft:dirt");
+        hold(Stack.EMPTY);
+        sync();
+        digFor(15);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void noClaimWhileThePlayerMayRideNorFromTheAnswerToItsRemovedVehiclesTeleport() {
+        out(new ClientboundPacket.SetPassengers(99, new int[] {SELF}));
+        sync();
+        flag(false); // a passenger's tick sets it false: the claim would hold, it is not made
+        digFor(15);
+        assertEquals(List.of(), evidence, "riding");
+        acknowledged();
+        put("minecraft:dirt");
+        out(new ClientboundPacket.RemoveEntities(new int[] {99}));
+        sync();
+        flag(true);
+        // a teleport of the removed vehicle moves the player and answers with onGround false (handleTeleportEntity)
+        out(new ClientboundPacket.TeleportEntity(99, new Vec3d(5.5, 64.0, 5.5), Vec3d.ZERO, 0F, 0F, Set.of(), false));
+        in(new ServerboundPacket.MovePlayer(5.5, 64.0, 5.5, 0F, 0F, true, true, false, false));
+        tick();
+        digFor(15);
+        assertEquals(List.of(), evidence, "the answer to a removed vehicle's teleport");
+    }
+
+    @Test
+    void noClaimWhileTheCameraIsAnotherEntity() {
+        out(new ClientboundPacket.SetCamera(99));
+        sync();
+        flag(false); // nothing is sent while another entity is the camera: the player may have landed since
+        digFor(15);
+        assertEquals(List.of(), evidence, "another camera");
+        acknowledged();
+        put("minecraft:dirt");
+        out(new ClientboundPacket.SetCamera(SELF));
+        sync();
+        digFor(15);
+        assertEquals(List.of(), evidence, "the first tick after it reads a flag not sent yet");
     }
 }

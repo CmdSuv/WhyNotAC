@@ -43,6 +43,23 @@ import java.util.UUID;
  * {@code entity_interaction_range}, {@code block_interaction_range} and {@code scale} follow {@code UpdateAttributes} for the player's id,
  * and respawn keeps their modifiers only if the server says so (otherwise the base values).
  *
+ * <h2>On the ground</h2>
+ * {@code Player.getDestroySpeed} reads {@code onGround} in the tick's keybinds: the value the previous tick's movement
+ * left ({@code Entity.move} sets it every tick for the local player), which that tick's {@code sendPosition} sent (every
+ * movement packet carries it, and a change alone sends {@code StatusOnly}). Between them only {@code TeleportEntity} for
+ * the player's own id sets it ({@code EntityPositionSync} and {@code MoveEntity} skip the local player). Some flags are
+ * not the client's: {@code handleMovePlayer}, {@code handleRotatePlayer} and the teleport of a removed vehicle answer
+ * with false, without touching it. While another entity is the camera nothing is sent, and the first tick after it
+ * reads a flag not sent yet. So the last flag sent is what the keybinds read unless one of those packets, a camera
+ * change, a new player or a packet WhyNotAC cannot read may have come to the client after it; while the player may
+ * ride or watch another entity, it is not claimed.
+ *
+ * <h2>Levels</h2>
+ * The client numbers its block predictions per {@code ClientLevel} ({@code BlockStatePredictionHandler}): a new one at
+ * every login, and at a respawn only into another dimension ({@code handleRespawn}). Which one a respawn makes follows
+ * from the dimension before it in server order, as the client processes them; a respawn or packet whose dimension
+ * WhyNotAC does not know may or may not have made one.
+ *
  * <p>Confined to the session's analysis thread.
  */
 public final class ClientSelf {
@@ -152,6 +169,28 @@ public final class ClientSelf {
     private long sentCertain;
     /** Sequences of ops after which the position is not the one sent (ascending). */
     private final ArrayDeque<Long> resets = new ArrayDeque<>();
+    // --- the player's onGround ---------------------------------------------------------------------------------
+    private boolean groundSent;
+    private boolean groundFlag;
+    /** {@link #certain} when the flag was sent: ops before it are in it. */
+    private long groundCertain;
+    /** The last op after which a flag sent may not be the client's {@code onGround}. */
+    private long lastGroundReset = Long.MIN_VALUE;
+    /**
+     * The player may have ridden since the login: a teleport of a vehicle removed under it moves the player and answers
+     * with a flag that is not its own ({@code handleTeleportEntity}, {@code removedPlayerVehicleId}).
+     */
+    private boolean rodeSinceLogin;
+
+    // --- the client's levels ----------------------------------------------------------------------------------
+    /** New levels not certainly processed yet: {sequence, 1 if certainly a new level, 0 if possibly}. */
+    private final ArrayDeque<long[]> levelChanges = new ArrayDeque<>();
+    /** Among the changes the client certainly processed: those certainly new levels, and all of them. */
+    private long levelsCertain;
+    private long levelsPossible;
+    /** The dimension of the client's level in server order; null when not known. */
+    private String levelDimension;
+
     /** The last login or respawn, and whether the client said it loaded the world since (certainly after it). */
     private long lastNewPlayer = Long.MIN_VALUE;
     private boolean loaded;
@@ -189,6 +228,9 @@ public final class ClientSelf {
                 localMode.set(seq, login.gameMode() >= 0 ? gameType(login.gameMode()) : UNKNOWN);
                 camera.set(seq, 1);
                 vehicle.set(seq, NONE);
+                rodeSinceLogin = false; // a new ClientPacketListener: no removed vehicle
+                levelChange(seq, true); // handleLogin: always a new ClientLevel
+                levelDimension = login.dimension() == null ? null : login.dimension().key();
                 // The mining state is a fresh player's at every login: a login ends a configuration phase, which the
                 // client enters with no player (from the login phase, or from play through handleConfigurationStart,
                 // whose clearClientLevel drops the player), so handleLogin makes a new one.
@@ -210,6 +252,14 @@ public final class ClientSelf {
                 newPlayer(seq);
             }
             case ClientboundPacket.Respawn respawn -> {
+                // A new ClientLevel only into another dimension (handleRespawn compares with the player's level).
+                String key = respawn.dimension() == null ? null : respawn.dimension().key();
+                if (key == null || levelDimension == null) {
+                    levelChange(seq, false);
+                } else if (!key.equals(levelDimension)) {
+                    levelChange(seq, true);
+                }
+                levelDimension = key;
                 // Always a new LocalPlayer: no vehicle, its own camera, the list entry looked up afresh.
                 listEntryReplaced = false;
                 listMode.set(seq, listedMode());
@@ -269,7 +319,10 @@ public final class ClientSelf {
                     }
                 }
             }
-            case ClientboundPacket.SetCamera set -> camera.set(seq, set.entityId() == selfId && selfId != NONE ? 1 : 0);
+            case ClientboundPacket.SetCamera set -> {
+                camera.set(seq, set.entityId() == selfId && selfId != NONE ? 1 : 0);
+                groundReset(seq);
+            }
             case ClientboundPacket.SetPassengers passengers -> {
                 int now = vehicle.head();
                 boolean rides = false;
@@ -278,6 +331,7 @@ public final class ClientSelf {
                 }
                 if (rides && now != passengers.vehicleId()) {
                     vehicle.set(seq, passengers.vehicleId());
+                    rodeSinceLogin = true;
                     reset(seq);
                 } else if (!rides && now == passengers.vehicleId()) {
                     vehicle.set(seq, NONE);
@@ -293,7 +347,16 @@ public final class ClientSelf {
                     }
                 }
             }
-            case ClientboundPacket.TeleportEntity teleport when teleport.entityId() == selfId -> reset(seq);
+            case ClientboundPacket.TeleportEntity teleport -> {
+                if (teleport.entityId() == selfId) {
+                    reset(seq);
+                    groundReset(seq); // setOnGround with the packet's flag
+                } else if (rodeSinceLogin) {
+                    groundReset(seq); // it may be a removed vehicle's
+                }
+            }
+            case ClientboundPacket.PlayerPosition ignored -> groundReset(seq); // answered with onGround false
+            case ClientboundPacket.PlayerRotation ignored -> groundReset(seq); // answered with onGround false
             case ClientboundPacket.EntityPositionSync sync when sync.entityId() == selfId -> reset(seq);
             case ClientboundPacket.MoveEntity move when move.entityId() == selfId -> reset(seq);
             case ClientboundPacket.BlockChangedAck ignored -> reset(seq); // may roll the player back
@@ -337,7 +400,11 @@ public final class ClientSelf {
                 // anything may have changed
                 unknownMining(seq);
                 reset(seq);
+                groundReset(seq);
+                levelChange(seq, false); // it may have been a respawn
+                levelDimension = null;
                 vehicle.set(seq, UNKNOWN);
+                rodeSinceLogin = true;
                 camera.set(seq, 0);
                 localMode.set(seq, UNKNOWN);
                 listMode.set(seq, MODE_UNKNOWN);
@@ -426,6 +493,7 @@ public final class ClientSelf {
 
     private void newPlayer(long seq) {
         reset(seq);
+        groundReset(seq);
         lastNewPlayer = seq;
         loaded = false;
     }
@@ -439,11 +507,28 @@ public final class ClientSelf {
         }
     }
 
+    private void groundReset(long seq) {
+        lastGroundReset = seq;
+    }
+
+    private void levelChange(long seq, boolean certainly) {
+        levelChanges.add(new long[] {seq, certainly ? 1 : 0});
+        if (levelChanges.size() > MAX_RESETS) {
+            // too many to follow: the oldest counts as possibly processed and possibly new (wider, still sound)
+            levelChanges.pollFirst();
+            levelsPossible++;
+        }
+    }
+
     private void lose(long seq) {
         unknownMining(seq);
         reset(seq);
+        groundReset(seq);
+        levelChange(seq, false);
+        levelDimension = null;
         sent = false;
         vehicle.set(seq, UNKNOWN);
+        rodeSinceLogin = true;
         camera.set(seq, 0);
         localMode.set(seq, UNKNOWN);
         listMode.set(seq, MODE_UNKNOWN);
@@ -456,16 +541,21 @@ public final class ClientSelf {
 
     private void onInbound(long seq, long nanoTime, ServerboundPacket packet) {
         switch (packet) {
-            case ServerboundPacket.MovePlayer move when move.hasPosition() && !move.hasNonFiniteValue() -> {
-                sent = true;
-                sentX = move.x();
-                sentY = move.y();
-                sentZ = move.z();
-                sentSequence = seq;
-                sentNanoTime = nanoTime;
-                sentCertain = certain;
-                while (!resets.isEmpty() && resets.peekFirst() < sentCertain) {
-                    resets.pollFirst(); // processed before this position was sent: in it
+            case ServerboundPacket.MovePlayer move -> {
+                groundSent = true; // every shape carries onGround
+                groundFlag = move.onGround();
+                groundCertain = certain;
+                if (move.hasPosition() && !move.hasNonFiniteValue()) {
+                    sent = true;
+                    sentX = move.x();
+                    sentY = move.y();
+                    sentZ = move.z();
+                    sentSequence = seq;
+                    sentNanoTime = nanoTime;
+                    sentCertain = certain;
+                    while (!resets.isEmpty() && resets.peekFirst() < sentCertain) {
+                        resets.pollFirst(); // processed before this position was sent: in it
+                    }
                 }
             }
             case ServerboundPacket.PlayerLoaded ignored -> loaded = certain > lastNewPlayer;
@@ -495,6 +585,11 @@ public final class ClientSelf {
             pings.pollFirst();
         }
         certain = Math.max(certain, seq);
+        while (!levelChanges.isEmpty() && levelChanges.peekFirst()[0] < certain) {
+            long[] change = levelChanges.pollFirst();
+            levelsCertain += change[1];
+            levelsPossible++;
+        }
         vehicle.prune(certain);
         camera.prune(certain);
         localMode.prune(certain);
@@ -579,6 +674,43 @@ public final class ClientSelf {
             }
         }
         return "known";
+    }
+
+    /** The last {@code onGround} flag the client sent and {@link #certain} when it did. */
+    public record Ground(boolean onGround, long certain) {}
+
+    /**
+     * The flag the client's keybinds read in its next tick, taken at the end of a tick ({@code ClientTickEnd}: that
+     * tick's movement was sent before it); null before any.
+     */
+    public Ground ground() {
+        return groundSent ? new Ground(groundFlag, groundCertain) : null;
+    }
+
+    /**
+     * Whether the client's {@code onGround} was certainly false when its keybinds read a flag {@link #ground()} gave:
+     * the flag says so, nothing that may have come to the client since may have set it or sent another, and the player
+     * may neither ride nor watch another entity.
+     */
+    public boolean certainlyOffGround(Ground ground) {
+        long end = windowEnd();
+        return ground != null && !ground.onGround() && lastGroundReset < ground.certain()
+                && !vehicle.mayBeOtherThan(certain, end, NONE) && !camera.mayBeOtherThan(certain, end, 1);
+    }
+
+    /**
+     * How many new levels the client has made now ({@code ClientLevel}: every login, a respawn into another dimension):
+     * {@code [low, high]}, the low end counting only the levels it certainly processed and certainly made.
+     */
+    public long[] levels() {
+        long end = windowEnd();
+        long high = levelsPossible;
+        for (long[] change : levelChanges) {
+            if (change[0] < end) {
+                high++;
+            }
+        }
+        return new long[] {levelsCertain, high};
     }
 
     /** Whether the player may be riding now (a passenger's rotation and position follow its vehicle). */

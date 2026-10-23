@@ -13,7 +13,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | Çevrilmiş client'lar için ikinci kenar katmanı yok (`NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
-| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
+| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `prediction-sequence` (P-M), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
 | Hareket fiziği (`whynotac-physics`) | Yaya kısmı tamam | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu) lav (Nether'in hızlı lavı dahil) ve iskele dahil) gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü SHADOW'da, canlıların itmesini takımlarıyla (görev #33) ve client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
@@ -73,9 +73,16 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   görev #60) yapıldı; kırma paketlerinin bloğu ve yüzü de aynı seçimden. Kırma ilerlemesi (`W1`, `break-time`, görev #61):
   bitiş, client'ın her çarpanın en büyük değeriyle float toplamı 1'e ulaşmadan gelemez; alet kurallarının etiketleri
   client'ın sunucudan aldıklarıyla (`update_tags`, `ClientTags`, görev #62; hareket kontrolü de etiketler motorunkilerden
-  başka olabildikçe iddia etmez). Yapıldı. Kalan: yerde olmayışı (÷5) client'ın kendi bayrağıyla saymak. Yerleştirme
-  (`W3`).
-- Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
+  başka olabildikçe iddia etmez); yerde olmayış (÷5) client'ın kendi `onGround` bayrağıyla, sahte cevaplar ve araya
+  girebilen paketler dışında sayılır (görev #63). Yapıldı. Yerleştirme (`W3`): blok tahminlerinin numaraları client'ın
+  kendi sayımıyla (`prediction-sequence`, görev #64; yeni dünyada 1'den) yapıldı. Yerleştirilen bloğun durumunu sunucu
+  kendisi hesaplar (`BlockPlaceContext`: tıklama ve oyuncunun sunucudaki dönüşü); ikisi de `use-aim` ile tikin seçimine
+  ve bakışına bağlı, bu yüzden ayrı bir kontrol gerekmez.
+- Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
+  (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
+  client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
+  (`tick-framing`) ya da hiçbir vanilla client'ın gönderemeyeceği konum veya `onGround` bayrağıdır (`movement`, yaya
+  motorunun kapsamında bit bit). Kalan: motorun kapsamı dışındaki hareketler (elytra, binek, dünya sınırı, toz kar).
 
 ## Faz 4 — Doğrulama ve veri
 

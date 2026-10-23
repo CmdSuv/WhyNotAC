@@ -369,11 +369,20 @@ echo "tp $NAME 76.5 -60 20.5 0 0" > "$FIFO"; sleep 1.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1/1.6 -/0.5; sleep 0.5
 echo "tp $NAME 76.5 -60 20.5 0 45" > "$FIFO"; sleep 1.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1/1.6 -/0.5; sleep 0.5
+# Digging while jumping, straight down (x 86, z 20): the grass and the dirt under it, each mostly off the ground, where
+# Player.getDestroySpeed divides by 5 (break-time counts a fifth where the client's own flag says so; BreakAudit.java).
+echo "tp $NAME 86.5 -60 20.5 0 90" > "$FIFO"; sleep 1.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1,space/10.0 -/0.5; sleep 0.5
 # Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
 # y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at
 # x 13 floods eight blocks east, walked into from the east against the current, stood in and jumped in. The session ends
 # there.
 nether() { echo "execute in minecraft:the_nether run tp $NAME $1 $2 $3 $4 0" > "$FIFO"; sleep 2.5; shift 4; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+# In the nether a new ClientLevel numbers its block predictions from 1 again (prediction-sequence): a right click on the
+# glass floor with the empty main hand (the shield in the off hand: useItemOn for each hand, then the shield's use).
+echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"
+echo "execute in minecraft:the_nether run tp $NAME 2.5 103 2.5 -90 60" > "$FIFO"; sleep 2.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button3/0.3 -/0.5; sleep 0.5
 nether 2.5 103 6.5 -90 -/1.5 w/2.5 -/1.0 space/1.5 -/0.5
 nether 20.5 103 10.5 90 -/0.5 w/3.0 -/2.0 space/1.0 -/0.5
 sleep 0.5
@@ -392,6 +401,8 @@ java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/dump.j
 java -cp "$JARS" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
 # Every attack, assessed as the attack-reach check does (in reach, out of reach, or no claim and why).
 java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/ReachAudit.java" "$RECORDING" > "$WORK_DIR/reach-audit.jsonl"
+# Every block finish, as the break-time check judged it (within, early, not known), with its ticks off the ground.
+java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/BreakAudit.java" "$RECORDING" > "$WORK_DIR/break-audit.jsonl"
 cat "$WORK_DIR/check.json"
 echo "--- verification"
 STATUS=0

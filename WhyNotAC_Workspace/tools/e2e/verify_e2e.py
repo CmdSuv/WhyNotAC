@@ -255,10 +255,11 @@ def verify_cases(probe, log, work_dir, check):
     finishes = probe.get("finishes", [])
     check(len(finishes) == 1 and len(digs) == 2 and finishes[0]["tick"] == digs[0]["tick"] + 1,
           f"the probe finished its honest dig the tick after starting it: {finishes}")
-    check(len(dossiers) == 10 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+    check(len(dossiers) == 11 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
           and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("action-grammar", [])) == 1
-          and len(by_check.get("attack-aim", [])) == 2 and len(by_check.get("use-aim", [])) == 3 and len(by_check.get("break-time", [])) == 1,
-          f"exactly ten cases opened, one per violation (none for the attacks in reach and in the look, the honest use, click and dig): "
+          and len(by_check.get("attack-aim", [])) == 2 and len(by_check.get("use-aim", [])) == 3 and len(by_check.get("break-time", [])) == 1
+          and len(by_check.get("prediction-sequence", [])) == 1,
+          f"exactly eleven cases opened, one per violation (none for the attacks in reach and in the look, the honest use, click and dig): "
           f"{sorted((d['check'], d['summary']) for d in dossiers)}")
     broken = by_check.get("break-time", [None])[0]
     if broken and finishes:
@@ -267,6 +268,13 @@ def verify_cases(probe, log, work_dir, check):
               and dd.get("state") == "minecraft:stone" and dd.get("item") == "empty" and dd.get("ticks") == "2" and dd.get("correctTool") == "false"
               and float(dd.get("maxProgress", "1")) < 0.02,
               f"the break-time case is the stone finished by hand after 2 ticks, at most 2 / 1.5 / 100 of it broken (P-M): {broken['summary']}")
+    misnumbered = probe.get("misnumbered", [])
+    numbered = by_check.get("prediction-sequence", [None])[0]
+    check(len(misnumbered) == 1 and numbered is not None and numbered["evidenceClass"] == "P-M"
+          and numbered["details"].get("packet") == "RELEASE_USE_ITEM" and numbered["details"].get("expected") == "0"
+          and numbered["details"].get("sequence") == str(misnumbered[0]["sequence"]),
+          f"the prediction-sequence case is the release numbered {misnumbered[0]['sequence'] if misnumbered else '?'}, which the vanilla "
+          f"client builds with 0 (P-M), and none for the probe's own predictions numbered 1, 2, ...: {numbered and numbered['summary']}")
     framing = by_check.get("tick-framing", [None])[0]
     if framing:
         check(framing["evidenceClass"] == "P-M" and framing["details"].get("movePackets") == "2"
@@ -342,13 +350,15 @@ def verify_cases(probe, log, work_dir, check):
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
     # a re-run finds every finding of the dossier's check in the recording: attack-aim has two
-    check(len(verified) == len(dossiers) == 10 and all(v["verified"] is True
+    check(len(verified) == len(dossiers) == 11 and all(v["verified"] is True
                                                       and v["evidenceInRecording"] == len(by_check.get(v["expected"].split("@")[0], [])) for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
+    # the command lists the ten newest (of the eleven)
+    newest = sorted(dossiers, key=lambda d: d["created"], reverse=True)[:10]
     check(re.search(r"WhyNotAC cases \(newest first\): 10", log) is not None
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)
-                  for d in dossiers),
-          "/whynotac cases lists all ten")
+                  for d in newest),
+          "/whynotac cases lists the ten newest")
 
 
 def verify_self(log, check):

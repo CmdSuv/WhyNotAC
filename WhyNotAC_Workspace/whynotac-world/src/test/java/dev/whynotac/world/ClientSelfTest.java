@@ -1,5 +1,6 @@
 package dev.whynotac.world;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -365,5 +366,52 @@ class ClientSelfTest {
         assertNull(self.eye());
         assertTrue(self.mayBeCreativeOrSpectator());
         assertEquals(64.0, self.maxInteractionRange());
+    }
+
+    private static ServerboundPacket.MovePlayer status(boolean onGround) {
+        return new ServerboundPacket.MovePlayer(0, 0, 0, 0F, 0F, false, false, onGround, false);
+    }
+
+    @Test
+    void theLastFlagSentIsWhatTheNextKeybindsReadUntilSomethingMaySetOrAnswerIt() {
+        assertFalse(self.certainlyOffGround(null));
+        in(status(false)); // StatusOnly: a change alone
+        tick();
+        ClientSelf.Ground before = self.ground();
+        assertFalse(before.onGround());
+        assertTrue(self.certainlyOffGround(before));
+        out(new ClientboundPacket.PlayerRotation(0F, true, 0F, true));
+        assertFalse(self.certainlyOffGround(before), "the client may have processed it since");
+        in(new ServerboundPacket.MovePlayer(0, 0, 0, 0F, 0F, false, true, false, false));
+        assertFalse(self.certainlyOffGround(self.ground()), "its answer is false whatever the client's own");
+        sync();
+        in(status(false));
+        assertTrue(self.certainlyOffGround(self.ground()), "sent after the client processed it");
+        out(new ClientboundPacket.SetPassengers(9, new int[] {SELF}));
+        assertFalse(self.certainlyOffGround(self.ground()), "it may ride");
+    }
+
+    @Test
+    void theLevelsTheClientMadeFollowLoginsAndRespawnsIntoAnotherDimension() {
+        assertArrayEquals(new long[] {1, 1}, self.levels(), "the login, processed");
+        out(new ClientboundPacket.Respawn(new ClientboundPacket.Dimension("minecraft:the_nether", 0, 256), SURVIVAL, 0));
+        assertArrayEquals(new long[] {1, 2}, self.levels(), "another dimension, not processed for sure");
+        sync();
+        assertArrayEquals(new long[] {2, 2}, self.levels());
+        out(new ClientboundPacket.Respawn(new ClientboundPacket.Dimension("minecraft:the_nether", 0, 256), SURVIVAL, 0));
+        sync();
+        assertArrayEquals(new long[] {2, 2}, self.levels(), "the same dimension keeps the level");
+        out(new ClientboundPacket.Respawn(null, SURVIVAL, 0));
+        sync();
+        assertArrayEquals(new long[] {2, 3}, self.levels(), "a dimension not known: possibly");
+        out(new ClientboundPacket.Respawn(OVERWORLD, SURVIVAL, 0));
+        sync();
+        assertArrayEquals(new long[] {2, 4}, self.levels(), "after it, the one before is not known either");
+        out(new ClientboundPacket.Login(SELF, 8, OVERWORLD, SURVIVAL));
+        int unanswered = ping();
+        out(new ClientboundPacket.Respawn(new ClientboundPacket.Dimension("minecraft:the_end", 0, 256), SURVIVAL, 0));
+        assertArrayEquals(new long[] {2, 5}, self.levels(), "after the first unanswered ping: not processed yet");
+        ack(unanswered);
+        assertArrayEquals(new long[] {3, 6}, self.levels());
     }
 }

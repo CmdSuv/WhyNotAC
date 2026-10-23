@@ -23,6 +23,7 @@ public final class Checks {
             AttackAimCheck.ID, AttackAimCheck::new,
             UseAimCheck.ID, UseAimCheck::new,
             BreakTimeCheck.ID, BreakTimeCheck::new,
+            PredictionSequenceCheck.ID, PredictionSequenceCheck::new,
             ActionGrammarCheck.ID, ActionGrammarCheck::new,
             MovementCheck.ID, MovementCheck::new);
     private static final Map<String, Integer> VERSIONS = Map.of(
@@ -32,6 +33,7 @@ public final class Checks {
             AttackAimCheck.ID, AttackAimCheck.VERSION,
             UseAimCheck.ID, UseAimCheck.VERSION,
             BreakTimeCheck.ID, BreakTimeCheck.VERSION,
+            PredictionSequenceCheck.ID, PredictionSequenceCheck.VERSION,
             ActionGrammarCheck.ID, ActionGrammarCheck.VERSION,
             MovementCheck.ID, MovementCheck.VERSION);
 
@@ -40,8 +42,8 @@ public final class Checks {
     /** Every check, in a fixed order, reporting to {@code sink}; register them after {@code replicas}' trackers. */
     public static List<TimelineListener> all(EvidenceSink sink, Replicas replicas) {
         return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink), new AttackReachCheck(sink, replicas), new AttackAimCheck(sink, replicas),
-                new UseAimCheck(sink, replicas), new BreakTimeCheck(sink, replicas), new ActionGrammarCheck(sink, replicas),
-                new MovementCheck(sink, replicas));
+                new UseAimCheck(sink, replicas), new BreakTimeCheck(sink, replicas), new PredictionSequenceCheck(sink, replicas),
+                new ActionGrammarCheck(sink, replicas), new MovementCheck(sink, replicas));
     }
 
     /** The check with this id, behind a fresh set of the replicas it may read, or null. */

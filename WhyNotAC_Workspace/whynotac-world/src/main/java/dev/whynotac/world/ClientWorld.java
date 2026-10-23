@@ -248,9 +248,10 @@ public final class ClientWorld {
                 BlockFace face = use.face();
                 predict(p.x() + face.stepX(), p.y() + face.stepY(), p.z() + face.stepZ(), use.sequence(), true);
             }
+            // ABORT_DESTROY_BLOCK predicts nothing: MultiPlayerGameMode sends it outside startPrediction and changes no block
+            // (only the crack overlay), and the server's handleBlockBreakAction changes none either.
             case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK
-                    || action.action() == ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK
-                    || action.action() == ServerboundPacket.PlayerAction.Action.ABORT_DESTROY_BLOCK ->
+                    || action.action() == ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK ->
                     predict(action.position().x(), action.position().y(), action.position().z(), action.sequence(), false);
             // A plain item use (buckets, lily pads...) may place a block where the client's ray hits, which only physics can locate.
             case ServerboundPacket.UseItem use -> unlocatedPredictions.add(use.sequence());

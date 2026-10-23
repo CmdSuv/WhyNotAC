@@ -60,6 +60,42 @@ def verify_reach(events, work, check):
               f"the sword's attack was assessed, strictly within the interaction range: {sword['distance']:.4f} < {sword['allowed']:.4f}")
 
 
+def verify_break(work, check):
+    """Every block the real client finished, judged by the break-time check within the progress it may have reached; the
+    ones it dug jumping counted a fifth (off the ground) on most of their ticks, by the client's own onGround flag."""
+    path = os.path.join(work, "break-audit.jsonl")
+    audit = [json.loads(line) for line in open(path) if line.strip()] if os.path.exists(path) else []
+    check(len(audit) >= 4 and all(a["outcome"] == "within" for a in audit),
+          f"every block the real client finished was judged within the progress it may have reached "
+          f"(outcome, ticks, off the ground, largest progress): {[(a['outcome'], a['ticks'], a['offGroundTicks'], a['maxProgress']) for a in audit]}")
+    jumping = [a for a in audit if a["offGroundTicks"] * 2 > a["ticks"]]
+    check(len(jumping) >= 2, f"the blocks it dug jumping were counted off the ground on most of their ticks: "
+          f"{[(a['ticks'], a['offGroundTicks'], a['maxProgress']) for a in jumping]}")
+
+
+def verify_sequence(events, check):
+    """The vanilla client's block predictions, numbered as prediction-sequence follows them: 1, 2, ... in each new level
+    (the login's), and 1 again once it processed the respawn into the nether; every other action 0."""
+    numbers, level, nether_at, unpredicted = [], 0, None, []
+    for e in events:
+        p = e.get("packet") or {}
+        if e["type"] == "Outbound" and p.get("type") == "Respawn" and (p.get("dimension") or {}).get("key") == "minecraft:the_nether" \
+                and nether_at is None:
+            nether_at = e["sequence"]
+        if e["type"] != "Inbound":
+            continue
+        if p.get("type") in ("UseItemOn", "UseItem") or p.get("type") == "PlayerAction" and p["action"] in ("START_DESTROY_BLOCK", "STOP_DESTROY_BLOCK"):
+            numbers.append((e["sequence"], p["sequence"]))
+        elif p.get("type") == "PlayerAction" and p["sequence"] != 0:
+            unpredicted.append(p)
+    before = [n for s, n in numbers if nether_at is None or s < nether_at]
+    after = [n for s, n in numbers if nether_at is not None and s > nether_at]
+    check(before == list(range(1, len(before) + 1)) and len(before) >= 10 and after[:1] == [1]
+          and after == list(range(1, len(after) + 1)) and not unpredicted,
+          f"the client numbered its block predictions 1, 2, ... ({len(before)} in the overworld) and from 1 again in the nether "
+          f"({after}), every other action 0 ({len(unpredicted)} not)")
+
+
 def main():
     work = sys.argv[1]
     failures = []
@@ -200,6 +236,8 @@ def main():
     rejected = {name: not aligned(c["yaw_counts"], mouse["horizontal"])[0] for name, c in result["negative_controls"].items()}
     check(all(rejected.values()), f"the same data rejects every wrong model (negative controls): {rejected}")
     verify_reach(events, work, check)
+    verify_break(work, check)
+    verify_sequence(events, check)
     m = re.search(r"WhyNotAC self RealProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
     fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
     check(m is not None and fields.get("matches") == "true" and fields.get("eye") == "known" and fields.get("positionEqual") == "true"

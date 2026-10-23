@@ -62,11 +62,19 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > açmadı.
 >
 > **Kırma süresi (`break-time`, P-M):** vanilla client kırma ilerlemesini tik başına en çok bir kez ve kendi float
-> aritmetiğiyle toplar (alet hızı, verimlilik, haste, madencilik yorgunluğu, `block_break_speed`, su altı, sertlik, doğru
-> alet); `STOP_DESTROY_BLOCK`'u ancak toplam 1'e ulaştığı tik gönderir. Her çarpan client'ın o tikte tutabileceği en büyük
-> değeriyle alınır (alet kurallarının etiketleri client'ın sunucudan aldığı etiketlerden); bu üst sınırla bile 1'e
-> ulaşmadan gelen bitiş, hızlı kırma (FastBreak) kanıtıdır. Gerçek client'ın elle kırdığı toprak ve çim vaka açmadı;
-> E2E'de taşı (elle 151 tik) başladıktan bir tik sonra bitiren sonda açtı.
+> aritmetiğiyle toplar (alet hızı, verimlilik, haste, madencilik yorgunluğu, `block_break_speed`, su altı, yerde olmayış,
+> sertlik, doğru alet); `STOP_DESTROY_BLOCK`'u ancak toplam 1'e ulaştığı tik gönderir. Her çarpan client'ın o tikte
+> tutabileceği en büyük değeriyle alınır (alet kurallarının etiketleri client'ın sunucudan aldığı etiketlerden; havada
+> olduğu yalnızca kendi `onGround` bayrağı bunu kesin söylediğinde); bu üst sınırla bile 1'e ulaşmadan gelen bitiş, hızlı
+> kırma (FastBreak) kanıtıdır. Gerçek client'ın elle kırdığı toprak ve çim, zıplarken kazdığı çim ve toprak da vaka
+> açmadı (havada 60 tik ÷5 sayılan çimde üst sınır 1.000001: neredeyse tam client'ın kendi toplamı); E2E'de taşı (elle
+> 151 tik) başladıktan bir tik sonra bitiren sonda açtı.
+>
+> **Tahmin numaraları (`prediction-sequence`, P-M):** vanilla client blok değişikliği tahmin ettiği her paketi (kırmaya
+> başlama ve bitirme, bloğa ve havaya kullanma) dünyasının sıradaki numarasıyla gönderir; her yeni dünyada (login, başka
+> boyuta respawn) 1'den başlar, başka hiçbir eylem numara taşımaz. Bir modülün kendi kurup gönderdiği paket (0 ya da
+> tekrar eden numara) bunu bozar. Gerçek client'ın numaraları nether'e geçişte yeniden 1'den başladı, vaka açılmadı;
+> E2E'de numaralı bırakma paketi gönderen sonda açtı.
 >
 > **Sunucunun etiketleri (`update_tags`):** client neye tırmandığını, neyin üstünde durduğunu, nerede yüzdüğünü ve aletinin
 > hangi bloğu kazdığını sunucunun gönderdiği etiketlerden bilir; veri paketi bunları değiştirebilir. WhyNotAC paketi
@@ -103,7 +111,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 552 test
+./gradlew build                       # tüm modüller + 576 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 
 /**
  * Break time (W1, {@code break-time}, P-M): a {@code STOP_DESTROY_BLOCK} sooner than the vanilla client's own progress
@@ -41,9 +42,11 @@ import java.util.TreeMap;
  * {@code block_break_speed}, times {@code submerged_mining_speed} with the eye in water, divided by 5 off the ground.
  * Every factor is taken at its largest over what the client may hold at that tick (the replicas' windows): the item at
  * the finish (it has the start's item and components, or the dig would have restarted), the block's states before the
- * start's own prediction, the effects and attributes, on the ground, the eye in water only where that is faster, and
- * a rule naming a tag as holding the block as the client's tags say ({@code ClientTags}: possibly, where the client may
- * hold it or not, or its tags are not known). Floats round monotonically,
+ * start's own prediction, the effects and attributes, the eye in water only where that is faster, a rule naming a tag
+ * as holding the block as the client's tags say ({@code ClientTags}: possibly, where the client may hold it or not, or
+ * its tags are not known), and on the ground unless the flag the tick's keybinds read was certainly false
+ * ({@code ClientSelf.certainlyOffGround}: the last one the client sent before the tick, taken at the previous tick's
+ * end). Floats round monotonically,
  * so the client's sum is at most the sum of those largest increments: a finish before that sum reaches 1 is impossible
  * for a vanilla client.
  *
@@ -55,7 +58,7 @@ import java.util.TreeMap;
 public final class BreakTimeCheck implements TimelineListener {
 
     public static final String ID = "break-time";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final String TOOL = "minecraft:tool";
 
@@ -63,11 +66,26 @@ public final class BreakTimeCheck implements TimelineListener {
 
     private final EvidenceSink sink;
     private final Replicas replicas;
+    private final Consumer<Judgement> judged;
 
     public BreakTimeCheck(EvidenceSink sink, Replicas replicas) {
+        this(sink, replicas, judgement -> { });
+    }
+
+    /** With every finish's judgement handed to {@code judged} too (audits). */
+    public BreakTimeCheck(EvidenceSink sink, Replicas replicas, Consumer<Judgement> judged) {
         this.sink = sink;
         this.replicas = replicas;
+        this.judged = judged;
     }
+
+    /**
+     * What the check made of one {@code STOP_DESTROY_BLOCK}: {@code within} the progress the client may have reached,
+     * {@code early}, {@code not known} (something the increment reads), or {@code no dig followed} (no start of that
+     * block, or one given up when something became unknown). The ticks are the dig's increments, those a fifth (off the
+     * ground) among them, and the largest progress (NaN when not judged).
+     */
+    public record Judgement(long sequence, String outcome, int ticks, int offGroundTicks, float maxProgress) {}
 
     /** The dig the client may be making: the block, the start's prediction sequence and where it is in the timeline. */
     private static final class Dig {
@@ -78,6 +96,8 @@ public final class BreakTimeCheck implements TimelineListener {
         /** The largest progress the client may have reached by the last tick end. */
         float progress;
         int tickEnds;
+        /** Tick ends whose increment was divided by 5 (certainly off the ground). */
+        int offGroundTicks;
         /** The largest increment of any tick, and its factors, for the report. */
         Bound largest;
 
@@ -92,12 +112,15 @@ public final class BreakTimeCheck implements TimelineListener {
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
         Dig dig;
+        /** The flag the keybinds of the tick now running read: the last one sent before the last tick end. */
+        ClientSelf.Ground ground;
         long lastReportNanos = Long.MIN_VALUE;
         long sinceReport;
     }
 
     /** The largest increment of one tick and what gave it. */
-    record Bound(float increment, String block, float hardness, String item, float toolSpeed, boolean correct, ClientSelf.MiningBounds mining) {}
+    record Bound(float increment, String block, float hardness, String item, float toolSpeed, boolean correct, ClientSelf.MiningBounds mining,
+            boolean offGround) {}
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
@@ -121,14 +144,20 @@ public final class BreakTimeCheck implements TimelineListener {
                     case STOP_DESTROY_BLOCK -> {
                         Dig dig = state.dig;
                         state.dig = null;
-                        if (dig != null && dig.pos.equals(action.position())) {
-                            Bound bound = bound(session, dig);
-                            if (bound != null) {
-                                float progress = dig.progress + bound.increment(); // MultiPlayerGameMode: destroyProgress += ...
-                                if (progress < 1.0F) {
-                                    report(session, state, dig, bound, progress, in);
-                                }
-                            }
+                        if (dig == null || !dig.pos.equals(action.position())) {
+                            judged.accept(new Judgement(in.sequence(), "no dig followed", 0, 0, Float.NaN));
+                            return;
+                        }
+                        Bound bound = bound(session, dig, replicas.self().self(session).certainlyOffGround(state.ground));
+                        if (bound == null) {
+                            judged.accept(new Judgement(in.sequence(), "not known", dig.tickEnds + 1, dig.offGroundTicks, Float.NaN));
+                            return;
+                        }
+                        float progress = dig.progress + bound.increment(); // MultiPlayerGameMode: destroyProgress += ...
+                        judged.accept(new Judgement(in.sequence(), progress < 1.0F ? "early" : "within", dig.tickEnds + 1,
+                                dig.offGroundTicks + (bound.offGround() ? 1 : 0), progress));
+                        if (progress < 1.0F) {
+                            report(session, state, dig, bound, progress, in);
                         }
                     }
                     default -> { }
@@ -137,26 +166,31 @@ public final class BreakTimeCheck implements TimelineListener {
             case ServerboundPacket.UseItemOn ignored -> state.dig = null; // its prediction may change the block
             case ServerboundPacket.UseItem ignored -> state.dig = null;
             case ServerboundPacket.ClientTickEnd ignored -> {
+                ClientSelf self = replicas.self().self(session);
                 Dig dig = state.dig;
                 if (dig != null) {
-                    Bound bound = bound(session, dig);
+                    Bound bound = bound(session, dig, self.certainlyOffGround(state.ground));
                     if (bound == null) {
                         state.dig = null;
                     } else {
                         dig.progress = dig.progress + bound.increment();
                         dig.tickEnds++;
+                        if (bound.offGround()) {
+                            dig.offGroundTicks++;
+                        }
                         if (dig.largest == null || bound.increment() > dig.largest.increment()) {
                             dig.largest = bound;
                         }
                     }
                 }
+                state.ground = self.ground(); // the tick's movement came before its end: what the next tick reads
             }
             default -> { }
         }
     }
 
     /** The largest increment the client may have added in the tick now, or null if something it reads is not known. */
-    private Bound bound(PlayerSession session, Dig dig) {
+    private Bound bound(PlayerSession session, Dig dig, boolean offGround) {
         ClientSelf self = replicas.self().self(session);
         if (self.mayBeCreativeOrSpectator()) {
             return null;
@@ -205,17 +239,17 @@ public final class BreakTimeCheck implements TimelineListener {
                 }
                 float speed = tool == null ? 1.0F : maxSpeed(tool, block, lookup);
                 boolean correct = !required || tool != null && mayBeCorrect(tool, block, lookup);
-                float increment = increment(speed, hardness, correct, mining);
+                float increment = increment(speed, hardness, correct, mining, offGround);
                 if (largest == null || increment > largest.increment()) {
-                    largest = new Bound(increment, block, hardness, stack.isEmpty() ? "empty" : stack.item(), speed, correct, mining);
+                    largest = new Bound(increment, block, hardness, stack.isEmpty() ? "empty" : stack.item(), speed, correct, mining, offGround);
                 }
             }
         }
-        return largest != null ? largest : new Bound(0.0F, "air", Float.NaN, "-", Float.NaN, false, mining);
+        return largest != null ? largest : new Bound(0.0F, "air", Float.NaN, "-", Float.NaN, false, mining, offGround);
     }
 
     /** {@code BlockBehaviour.getDestroyProgress} with {@code Player.getDestroySpeed} at the largest factors, in its float order. */
-    static float increment(float toolSpeed, float hardness, boolean correct, ClientSelf.MiningBounds mining) {
+    static float increment(float toolSpeed, float hardness, boolean correct, ClientSelf.MiningBounds mining, boolean offGround) {
         float f = toolSpeed;
         if (f > 1.0F) {
             f += (float) mining.maxMiningEfficiency();
@@ -236,7 +270,9 @@ public final class BreakTimeCheck implements TimelineListener {
         if (submerged > 1.0F) {
             f *= submerged; // the eye may be in water
         }
-        // on the ground: no division by 5
+        if (offGround) {
+            f /= 5.0F;
+        }
         return f / hardness / (float) (correct ? 30 : 100);
     }
 
@@ -313,6 +349,7 @@ public final class BreakTimeCheck implements TimelineListener {
         details.put("toolSpeed", Float.toString(largest.toolSpeed()));
         details.put("correctTool", Boolean.toString(largest.correct()));
         details.put("ticks", Integer.toString(dig.tickEnds + 1));
+        details.put("offGroundTicks", Integer.toString(dig.offGroundTicks + (bound.offGround() ? 1 : 0)));
         details.put("maxProgress", Float.toString(progress));
         details.put("maxIncrement", Float.toString(largest.increment()));
         ClientSelf.MiningBounds m = largest.mining();

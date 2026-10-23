@@ -572,6 +572,17 @@ class ClientWorldTest {
     }
 
     @Test
+    void anAbortPredictsNothing() {
+        // the dig restarted (the held item changed): the abort, unnumbered, then the new start
+        login(10, OVERWORLD);
+        loadStone(0, 0);
+        sync();
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.ABORT_DESTROY_BLOCK, new BlockPosition(5, 10, 5), BlockFace.UP, 0));
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(5, 10, 5), BlockFace.UP, 4));
+        assertArrayEquals(new int[] {STONE}, world.possibleStatesBefore(5, 10, 5, 4));
+    }
+
+    @Test
     void anItemUseWhoseBlocksCannotBeLocatedHidesTheWorldAfterIt() {
         airWorld();
         put(3, 65, 0, STONE);

@@ -12,6 +12,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
 | `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) ya da tikin seçiminin yapamayacağı bir blok tıklaması (`UseItemOn`: bakışın dışında, giremeyeceği bir yüzde, outline'ın dışında (havaya), menzil dışında ya da blokların ardında) ya da kırma (`START`/`STOP_DESTROY_BLOCK`: bakışın değmediği, giremediği yüzden, outline'ı olmayan, uzaktaki ya da duvarın ardındaki blok) |
 | `break-time` | P-M | Vanilla client'ın kırma ilerlemesinin izin verdiğinden erken `STOP_DESTROY_BLOCK` (hızlı kırma): her çarpanın client'ın tutabileceği en büyük değeriyle bile float toplamı 1'e ulaşmamışken |
+| `prediction-sequence` | P-M | Vanilla client'ın numaralamadığı blok eylemi: tahmin edilen paket (`START`/`STOP_DESTROY_BLOCK`, `UseItemOn`, `UseItem`) bir öncekinin ardından gelen numarayı ya da yeni bir dünyada 1'i taşımıyor (bir modülün kendi kurup gönderdiği paket); tahmin edilmeyen eylem (iptal, atma, bırakma) 0 dışında numara taşıyor |
 | `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
@@ -173,20 +174,54 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   1) 1'in üstündeyse artı `mining_efficiency`; haste ya da conduit power altında `1 + (amp + 1) * 0.2`; madencilik
   yorgunluğu çarpanı; `block_break_speed`; göz sudaysa `submerged_mining_speed`; yerde değilse ÷5. Her çarpan o tikte
   client'ın tutabileceği en büyük değeriyle alınır: bitişteki eşya (başlangıcınkiyle aynı eşya ve bileşenler, yoksa kazı
-  yeniden başlardı), bloğun başlangıcın kendi tahmininden önceki durumları, efektler ve öznitelikler (`ClientSelf`), yerde,
-  göz yalnızca daha hızlıysa suda; bir etiketi adlandıran kural client'ın etiketlerine göre (`ClientTags`: tutup tutmadığı
-  kesin değilse ya da etiketler bilinmiyorsa tutabilir sayılır).
-  Float yuvarlaması tekdüze olduğundan client'ın toplamı bu en büyük artışların toplamını aşamaz.
+  yeniden başlardı), bloğun başlangıcın kendi tahmininden önceki durumları, efektler ve öznitelikler (`ClientSelf`), göz
+  yalnızca daha hızlıysa suda; bir etiketi adlandıran kural client'ın etiketlerine göre (`ClientTags`: tutup tutmadığı
+  kesin değilse ya da etiketler bilinmiyorsa tutabilir sayılır); tikin tuşlarının okuduğu `onGround` kesin `false`
+  değilse yerde. Float yuvarlaması tekdüze olduğundan client'ın toplamı bu en büyük artışların toplamını aşamaz.
+- **Yerde mi (`ClientSelf.certainlyOffGround`):** tikin tuşları (`handleKeybinds`) önceki tikin hareketinin bıraktığı
+  `onGround`'u okur (`Entity.move` yerel oyuncu için her tik yazar); o tikin `sendPosition`'ı onu göndermiştir (her
+  hareket paketi taşır, yalnız değişimi `StatusOnly` gönderir). Bu yüzden bayrak bir önceki tikin sonunda
+  (`ClientTickEnd`) alınır ve sonraki tikin artışında sayılır. Aradaki paketlerden yalnızca oyuncunun kendi kimliğine
+  `TeleportEntity` onu yazar (`EntityPositionSync` ve `MoveEntity` yerel oyuncuyu atlar). Bazı bayraklar client'ın değildir:
+  `handleMovePlayer`, `handleRotatePlayer` ve kaldırılmış bineğin ışınlanması `false` ile cevap verir, kendi bayrağına
+  dokunmadan. Başka varlık kamerayken hiçbir şey gönderilmez. Bunlardan biri, yeni oyuncu ya da okunamayan paket
+  bayraktan sonra client'a gelmiş olabildikçe, ve oyuncu binebildikçe ya da kamera başkası olabildikçe ÷5 sayılmaz.
 - **İddia yok:** blok bilinmiyorsa (yerleşmemiş chunk, orada önceki bir tahmin, blokları bilinmeyen eşya kullanımı, kazı
   sırasında başka bir blok eylemi), eşya bilinmiyorsa (izlenmeyen yuva, stack'in kendi `tool` bileşeni, tablonun bilmediği
   eşya), dig-speed efekti izlenmiyorsa, yaratıcı ya da izleyici olabilirse; login ve respawn kazıyı unutur.
 - **Sınamalar:** `BreakTimeCheckTest` elle toprağı (15 artış) ve taşı (float toplamıyla 151), elmas kazmayla taşı (6, haste
   II ile 5), onaylanmamış ve onaylanmış yorgunluğu, verimliliği, `block_break_speed`'i, kazı sırasında değişen bloğu, kazı
   sırasındaki tıklamayı, stack'in kendi aletini, yaratıcıyı, iptali, respawn'ı, başka bloğun bitişini ve saniyede en çok
-  bir bulguyu sınar; 25 mutasyonun hepsi yakalanır. Alet kuralları `item-prototypes.tsv`'nin son sütunudur (sunucunun
+  bir bulguyu sınar; havada elle toprağı (float toplamıyla 76), bayrağın gönderildiği tikten sonraki tikte sayılmasını
+  (başlangıç tiki yerde, sonrası havada: 72), ışınlanma ve döndürme cevaplarını, oyuncunun kendi varlığının ışınlanmasını,
+  yeni oyuncuyu, bineği ve kaldırılmış bineğin ışınlanmasını, başka kamerayı ve sonrasını da; 41 mutasyonun hepsi
+  yakalanır (yerde olmayış için 16). Alet kuralları `item-prototypes.tsv`'nin son sütunudur (sunucunun
   kayıt defterinden, `ItemPrototypesDataTest`). Gerçek client'ın elle kırdığı toprakta üst sınırların toplamı bitişin
   tikinde tam 1.0'dır (client'ın kendi toplamı: 15 artış), çim bloğunda 1.22: ikisi de tam değerlendirildi, vaka yok. E2E
   sondası duvarın taşını elle kazmaya başlar ve bir tik sonra bitirir: `break-time` vakası açılır.
+
+### `prediction-sequence` (`PredictionSequenceCheck`)
+
+- **Kural (decompiled 1.21.11):** client'ın blok değişikliği tahmin ettiği her paket
+  `MultiPlayerGameMode.startPrediction`'dan geçer; o, dünyanın `BlockStatePredictionHandler`'ının sıradaki numarasını
+  alır (`currentSequenceNr++`) ve pakete yazar: `START_DESTROY_BLOCK` (hayatta kalma ve yaratıcı), `STOP_DESTROY_BLOCK`,
+  `UseItemOn`, `UseItem`. Numaraya başka hiçbir şey dokunmaz ve her `ClientLevel` 0'dan başlar: her login'de yeni dünya,
+  respawn'da yalnızca boyut değişince (`handleRespawn`). Diğer bütün oyuncu eylemleri (`ABORT_DESTROY_BLOCK`, atma, el
+  değiştirme, kullanılan eşyayı bırakma, mızrak dürtmesi) numarasız kurulur ve 0 taşır.
+- **Hangi dünyada:** `ClientSelf.levels` client'ın kendi sırasında kaç yeni dünya yapmış olabileceğini aralık olarak
+  izler (kesin işlenmiş ve kesin yeni olanlar, işlenmiş olabilecek her şey; boyutu bilinmeyen respawn ya da okunamayan
+  paket yalnızca üst ucu artırır). Bir sonraki numara ancak önceki paketteki aralık hâlâ geçerli olabiliyorsa, 1 ancak o
+  zamandan beri yeni bir dünya yapılmış olabiliyorsa mümkündür; gönderilen numara aralığı daraltır.
+- **İddia yok:** oturumun ilk tahmin edilen paketi ve kayıp olaylardan, okunamayan bir paketten ya da bilinmeyen bir
+  eylemden sonraki ilk paket sayımı yeniden başlatır (orada yalnızca 1'in altı iddia edilir: hiçbir dünya öyle
+  numaralamaz). Yanlış numaradan sonra sayım gönderilenden sürer. Saniyede en çok bir bulgu.
+- **Sınamalar:** `PredictionSequenceCheckTest` vanilla numaralarını (vaka yok), 0 ve tekrar eden numarayı, numaralı
+  bırakmayı, başka boyuta respawn'ı (işlenmeden önce eski sayım, sonra 1; kesin işlendikten sonra eski sayım bulgu),
+  respawn'dan önceki numaraların hangi dünyayı söylediğini, yeniden başlayıp süren sayımı, aynı boyutta respawn'ı, her
+  login'i, bilinmeyen boyutu, okunamayan paketi, kayıp olayları ve saniyede bir bulguyu sınar; `ClientSelfTest` dünya
+  aralığını. 17 mutasyonun hepsi yakalanır. İptal hiçbir şey tahmin etmez (`ClientWorld` artık onu tahmin saymaz:
+  elindeki eşya değişince yeniden başlayan kazı bilinir kalır). Gerçek client'ın bütün tahminleri 1, 2, ... ve
+  nether'e respawn'dan sonra yeniden 1'den numaralandı, vaka açılmadı; E2E sondasının numaralı bırakması vaka açtı.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 

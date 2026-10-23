@@ -21,6 +21,8 @@ can be verified live:
   * digging the wall on its far face, empty-handed (tick 437) -> a use-aim case for the face (P-M, shadow)
   * finishing the honest dig of the stone wall the tick after starting it, empty-handed (tick 427) -> a break-time case
     (P-M, shadow): by hand stone takes the vanilla client 151 ticks
+  * releasing the used item with a block-prediction number (tick 455) -> a prediction-sequence case (P-M, shadow): the
+    vanilla client builds every action it predicts nothing for with 0
 
 After each use it sends its position once more (ticks 384, 405, 421, 431 and 441: the server's acknowledgement of a use may
 roll a player back), clicks the wall once where the vanilla pick puts the cursor (tick 395) and starts digging it on the
@@ -369,6 +371,9 @@ DIG_TICK, DIG_VIOLATION_TICK = 426, 437
 # Violation 12: STOP_DESTROY_BLOCK of the honest dig the tick after it started (2 of the 151 increments stone takes by hand).
 FAST_FINISH_TICK = DIG_TICK + 1
 EMPTY_HAND_TICKS = (CLICK_TICK, CLICK_VIOLATION_TICK, DIG_TICK, DIG_VIOLATION_TICK)
+# Violation 13: RELEASE_USE_ITEM (nothing is in use: the server ignores it) numbered as the next prediction. Its own
+# predictions (the uses, clicks, starts and the finish) are numbered 1, 2, ... as MultiPlayerGameMode.startPrediction does.
+SEQUENCE_VIOLATION_TICK = 455
 # Mth.SIN, as the game fills it: the view vector and the pick's cursor are computed exactly as the client does.
 SIN_TABLE = []
 
@@ -484,6 +489,7 @@ def main():
     anchors = []  # the yaw bits of the position packets at ANCHOR_TICKS
     digs = []
     finishes = []
+    misnumbered = []
     start = time.monotonic()
     while client.alive and time.monotonic() - start < seconds:
         # As Minecraft.tick: attacks come from handleKeybinds, before the tick's input and movement packets. The client
@@ -566,6 +572,9 @@ def main():
             packed = (wall[0] & 0x3FFFFFF) << 38 | (wall[2] & 0x3FFFFFF) << 12 | (wall[1] & 0xFFF)
             client.send(PLAY_S_PLAYER_ACTION, varint(2) + struct.pack(">QB", packed, 5) + varint(use_sequence))
             finishes.append({"tick": tick, "block": wall, "face": "EAST"})
+        if inventory_step == 3 and tick == SEQUENCE_VIOLATION_TICK:
+            client.send(PLAY_S_PLAYER_ACTION, varint(5) + struct.pack(">QB", 0, 0) + varint(use_sequence + 1))  # BlockPos.ZERO, DOWN
+            misnumbered.append({"tick": tick, "action": "RELEASE_USE_ITEM", "sequence": use_sequence + 1})
         if inventory_step == 3 and (tick - 1 in EMPTY_HAND_TICKS or tick + 1 in EMPTY_HAND_TICKS):
             client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 0 if tick + 1 in EMPTY_HAND_TICKS else 2))
         if inventory_step == 3 and tick in (WALL_VIOLATION_TICK - 1, WALL_VIOLATION_TICK + 1):
@@ -642,6 +651,7 @@ def main():
         "anchor_yaw_bits": anchors,
         "digs": digs,
         "finishes": finishes,
+        "misnumbered": misnumbered,
         "last_yaw": repr(last_to),
         "last_yaw_delta_exact": repr(last_to - last_from),
         "last_counts": last_counts,
