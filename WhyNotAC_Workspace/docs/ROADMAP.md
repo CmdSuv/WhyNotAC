@@ -13,7 +13,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | Çevrilmiş client'lar için ikinci kenar katmanı yok (`NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
-| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
+| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
 | Hareket fiziği (`whynotac-physics`) | Yaya kısmı tamam | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu) lav (Nether'in hızlı lavı dahil) ve iskele dahil) gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü SHADOW'da, canlıların itmesini takımlarıyla (görev #33) ve client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
@@ -70,7 +70,10 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   şekilleri resmi client'tan.
 - Blok erişimi ve yüz doğrulama (`W2`): eşya kullanımının dönüşü tikin bakışıyla bit bit aynı ve bloğa tıklamanın
   imleci bakışın o bloğun outline'ına girdiği yerde, girebileceği yüzde, menzilde ve araya blok girmeden (`use-aim`,
-  görev #60) yapıldı; kırma paketlerinin bloğu ve yüzü de aynı seçimden. Kırma ilerlemesi (`W1`), yerleştirme (`W3`).
+  görev #60) yapıldı; kırma paketlerinin bloğu ve yüzü de aynı seçimden. Kırma ilerlemesi (`W1`, `break-time`, görev #61):
+  bitiş, client'ın her çarpanın en büyük değeriyle float toplamı 1'e ulaşmadan gelemez; yapıldı. Kalan: sunucunun blok
+  etiketlerini (`update_tags`) izleyip alet kurallarını kesinleştirmek, yerde olmayışı (÷5) client'ın kendi bayrağıyla
+  saymak. Yerleştirme (`W3`).
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`).
 
 ## Faz 4 — Doğrulama ve veri

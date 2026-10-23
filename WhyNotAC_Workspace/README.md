@@ -60,6 +60,13 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > tıklaması vaka açmadı; E2E'de 45° sapmış dönüşle kullanan, imleci bakışından kaydırarak duvara tıklayan ve duvarı arka
 > yüzünden kırmaya başlayan sonda açtı, imleci oyunun aritmetiğiyle bit bit hesaplanmış tıklaması ve ön yüzden kırması
 > açmadı.
+>
+> **Kırma süresi (`break-time`, P-M):** vanilla client kırma ilerlemesini tik başına en çok bir kez ve kendi float
+> aritmetiğiyle toplar (alet hızı, verimlilik, haste, madencilik yorgunluğu, `block_break_speed`, su altı, sertlik, doğru
+> alet); `STOP_DESTROY_BLOCK`'u ancak toplam 1'e ulaştığı tik gönderir. Her çarpan client'ın o tikte tutabileceği en büyük
+> değeriyle alınır (sunucunun etiketleri izlenmediği için bir etiket kuralı bloğu tutabilir sayılır); bu üst sınırla bile 1'e
+> ulaşmadan gelen bitiş, hızlı kırma (FastBreak) kanıtıdır. Gerçek client'ın elle kırdığı toprak ve çim vaka açmadı;
+> E2E'de taşı (elle 151 tik) başladıktan bir tik sonra bitiren sonda açtı.
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md) · [Faz 2b-8](docs/phases/PHASE-2B-8-REPORT.md)
 
 ## Belgeler
@@ -89,7 +96,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 528 test
+./gradlew build                       # tüm modüller + 542 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

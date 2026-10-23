@@ -52,6 +52,13 @@ public final class ClientSelf {
     public static final String INTERACTION_RANGE = "minecraft:entity_interaction_range";
     public static final String BLOCK_RANGE = "minecraft:block_interaction_range";
     public static final String SCALE = "minecraft:scale";
+    public static final String MINING_EFFICIENCY = "minecraft:mining_efficiency";
+    public static final String BLOCK_BREAK_SPEED = "minecraft:block_break_speed";
+    public static final String SUBMERGED_MINING_SPEED = "minecraft:submerged_mining_speed";
+    /** The effects {@code Player.getDestroySpeed} reads ({@code MobEffectUtil.hasDigSpeed}, {@code getDigSpeedAmplification}). */
+    public static final String HASTE = "minecraft:haste";
+    public static final String CONDUIT_POWER = "minecraft:conduit_power";
+    public static final String MINING_FATIGUE = "minecraft:mining_fatigue";
     /** {@code Player.createAttributes} and the attributes' ranges ({@code Attributes}). */
     static final double DEFAULT_INTERACTION_RANGE = 3.0;
     static final double MIN_INTERACTION_RANGE = 0.0;
@@ -60,6 +67,15 @@ public final class ClientSelf {
     static final double DEFAULT_SCALE = 1.0;
     static final double MIN_SCALE = 0.0625;
     static final double MAX_SCALE = 16.0;
+    /** {@code Attributes}: the mining attributes' defaults and ranges. */
+    static final double DEFAULT_MINING_EFFICIENCY = 0.0;
+    static final double MAX_MINING_EFFICIENCY = 1024.0;
+    static final double DEFAULT_BLOCK_BREAK_SPEED = 1.0;
+    static final double MAX_BLOCK_BREAK_SPEED = 1024.0;
+    static final double DEFAULT_SUBMERGED_MINING_SPEED = 0.2;
+    static final double MAX_SUBMERGED_MINING_SPEED = 20.0;
+    /** {@code MobEffectInstance}: the amplifier is clamped to this. */
+    static final int MAX_AMPLIFIER = 255;
     /** {@code Avatar.POSES}: the scaled eye heights (standing and crouching above, the 0.6-tall poses below). */
     static final float EYE_STANDING = 1.62F;
     static final float EYE_CROUCHING = 1.27F;
@@ -112,6 +128,18 @@ public final class ClientSelf {
     private double blockBase = DEFAULT_BLOCK_RANGE;
     private double scaleBase = DEFAULT_SCALE;
     private boolean basesKnown = true;
+    /**
+     * The mining attributes, live values; a respawn keeps them or takes their bases ({@code miningBases}: the bases the
+     * server last sent, null when not known).
+     */
+    private final Ranges miningEfficiency = new Ranges(DEFAULT_MINING_EFFICIENCY);
+    private final Ranges blockBreakSpeed = new Ranges(DEFAULT_BLOCK_BREAK_SPEED);
+    private final Ranges submergedMiningSpeed = new Ranges(DEFAULT_SUBMERGED_MINING_SPEED);
+    private double[] miningBases = {DEFAULT_MINING_EFFICIENCY, DEFAULT_BLOCK_BREAK_SPEED, DEFAULT_SUBMERGED_MINING_SPEED};
+    /** The amplifier of each effect the destroy speed reads, NONE without it, UNKNOWN when not followed. */
+    private final Versioned haste = new Versioned(NONE);
+    private final Versioned conduitPower = new Versioned(NONE);
+    private final Versioned miningFatigue = new Versioned(NONE);
 
     // --- the player's own position ------------------------------------------------------------------------
     private boolean sent;
@@ -161,6 +189,10 @@ public final class ClientSelf {
                 localMode.set(seq, login.gameMode() >= 0 ? gameType(login.gameMode()) : UNKNOWN);
                 camera.set(seq, 1);
                 vehicle.set(seq, NONE);
+                // The mining state is a fresh player's at every login: a login ends a configuration phase, which the
+                // client enters with no player (from the login phase, or from play through handleConfigurationStart,
+                // whose clearClientLevel drops the player), so handleLogin makes a new one.
+                freshMining(seq);
                 if (first) {
                     interactionRange.set(seq, DEFAULT_INTERACTION_RANGE, DEFAULT_INTERACTION_RANGE);
                     blockRange.set(seq, DEFAULT_BLOCK_RANGE, DEFAULT_BLOCK_RANGE);
@@ -185,6 +217,11 @@ public final class ClientSelf {
                 camera.set(seq, 1);
                 vehicle.set(seq, NONE);
                 int keep = respawn.dataToKeep();
+                // a new LocalPlayer: no effect is copied from the old one
+                haste.set(seq, NONE);
+                conduitPower.set(seq, NONE);
+                miningFatigue.set(seq, NONE);
+                respawnMining(seq, keep);
                 if (keep < 0) {
                     // not recorded: kept or base only
                     interactionRange.widen(seq, interactionBase);
@@ -274,11 +311,31 @@ public final class ClientSelf {
                         double[] range = AttributeValues.range(attribute, MIN_SCALE, MAX_SCALE);
                         scale.set(seq, range[0], range[1]);
                         scaleBase = clamp(attribute.base(), MIN_SCALE, MAX_SCALE);
+                    } else if (attribute.key().equals(MINING_EFFICIENCY)) {
+                        miningAttribute(seq, 0, miningEfficiency, attribute, 0.0, MAX_MINING_EFFICIENCY);
+                    } else if (attribute.key().equals(BLOCK_BREAK_SPEED)) {
+                        miningAttribute(seq, 1, blockBreakSpeed, attribute, 0.0, MAX_BLOCK_BREAK_SPEED);
+                    } else if (attribute.key().equals(SUBMERGED_MINING_SPEED)) {
+                        miningAttribute(seq, 2, submergedMiningSpeed, attribute, 0.0, MAX_SUBMERGED_MINING_SPEED);
                     }
+                }
+            }
+            case ClientboundPacket.MobEffect effect when effect.entityId() == selfId && selfId != NONE -> {
+                // handleUpdateMobEffect: forceAddEffect replaces the instance; MobEffectInstance clamps the amplifier
+                Versioned v = miningEffect(effect.effectKey());
+                if (v != null) {
+                    v.set(seq, Math.max(0, Math.min(MAX_AMPLIFIER, effect.amplifier())));
+                }
+            }
+            case ClientboundPacket.RemoveMobEffect remove when remove.entityId() == selfId && selfId != NONE -> {
+                Versioned v = miningEffect(remove.effectKey());
+                if (v != null) {
+                    v.set(seq, NONE);
                 }
             }
             case ClientboundPacket.Untranslatable ignored -> {
                 // anything may have changed
+                unknownMining(seq);
                 reset(seq);
                 vehicle.set(seq, UNKNOWN);
                 camera.set(seq, 0);
@@ -292,6 +349,61 @@ public final class ClientSelf {
             }
             default -> { }
         }
+    }
+
+    private Versioned miningEffect(String key) {
+        return switch (key) {
+            case HASTE -> haste;
+            case CONDUIT_POWER -> conduitPower;
+            case MINING_FATIGUE -> miningFatigue;
+            default -> null;
+        };
+    }
+
+    private void miningAttribute(long seq, int index, Ranges ranges, ClientboundPacket.UpdateAttributes.Attribute attribute, double min, double max) {
+        double[] range = AttributeValues.range(attribute, min, max);
+        ranges.set(seq, range[0], range[1]);
+        if (miningBases != null) {
+            miningBases[index] = clamp(attribute.base(), min, max);
+        }
+    }
+
+    private void freshMining(long seq) {
+        miningEfficiency.set(seq, DEFAULT_MINING_EFFICIENCY, DEFAULT_MINING_EFFICIENCY);
+        blockBreakSpeed.set(seq, DEFAULT_BLOCK_BREAK_SPEED, DEFAULT_BLOCK_BREAK_SPEED);
+        submergedMiningSpeed.set(seq, DEFAULT_SUBMERGED_MINING_SPEED, DEFAULT_SUBMERGED_MINING_SPEED);
+        miningBases = new double[] {DEFAULT_MINING_EFFICIENCY, DEFAULT_BLOCK_BREAK_SPEED, DEFAULT_SUBMERGED_MINING_SPEED};
+        haste.set(seq, NONE);
+        conduitPower.set(seq, NONE);
+        miningFatigue.set(seq, NONE);
+    }
+
+    /** {@code handleRespawn}: the old player's attributes ({@code assignAllValues}) or their bases ({@code assignBaseValues}). */
+    private void respawnMining(long seq, int keep) {
+        Ranges[] all = {miningEfficiency, blockBreakSpeed, submergedMiningSpeed};
+        double[] max = {MAX_MINING_EFFICIENCY, MAX_BLOCK_BREAK_SPEED, MAX_SUBMERGED_MINING_SPEED};
+        for (int i = 0; i < all.length; i++) {
+            if (keep >= 0 && (keep & ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS) != 0) {
+                continue; // the same values
+            }
+            if (miningBases == null) {
+                all[i].unknown(seq, 0.0, max[i]);
+            } else if (keep < 0) {
+                all[i].widen(seq, miningBases[i]);
+            } else {
+                all[i].set(seq, miningBases[i], miningBases[i]);
+            }
+        }
+    }
+
+    private void unknownMining(long seq) {
+        miningEfficiency.unknown(seq, 0.0, MAX_MINING_EFFICIENCY);
+        blockBreakSpeed.unknown(seq, 0.0, MAX_BLOCK_BREAK_SPEED);
+        submergedMiningSpeed.unknown(seq, 0.0, MAX_SUBMERGED_MINING_SPEED);
+        miningBases = null;
+        haste.set(seq, UNKNOWN);
+        conduitPower.set(seq, UNKNOWN);
+        miningFatigue.set(seq, UNKNOWN);
     }
 
     /** {@code GameType.byId}: an id out of range is survival ({@code OutOfBoundsStrategy.ZERO}). */
@@ -328,6 +440,7 @@ public final class ClientSelf {
     }
 
     private void lose(long seq) {
+        unknownMining(seq);
         reset(seq);
         sent = false;
         vehicle.set(seq, UNKNOWN);
@@ -388,6 +501,12 @@ public final class ClientSelf {
         listMode.prune(certain);
         interactionRange.prune(certain);
         blockRange.prune(certain);
+        miningEfficiency.prune(certain);
+        blockBreakSpeed.prune(certain);
+        submergedMiningSpeed.prune(certain);
+        haste.prune(certain);
+        conduitPower.prune(certain);
+        miningFatigue.prune(certain);
     }
 
     private long windowEnd() {
@@ -475,6 +594,42 @@ public final class ClientSelf {
     /** {@code [low, high]} of the {@code entity_interaction_range} the client may have now. */
     public double[] interactionRangeBounds() {
         return interactionRange.hull(certain, windowEnd());
+    }
+
+    /**
+     * What {@code Player.getDestroySpeed} may read now, as bounds: the largest dig-speed amplifier ({@code max} of haste's and
+     * conduit power's; -1: neither effect, {@link Integer#MAX_VALUE}: not known), the smallest mining fatigue amplifier
+     * (-1: possibly none, which includes not known), and the largest {@code mining_efficiency}, {@code block_break_speed}
+     * and {@code submerged_mining_speed}.
+     */
+    public record MiningBounds(int maxDigSpeedAmplifier, int minFatigueAmplifier, double maxMiningEfficiency, double maxBlockBreakSpeed,
+            double maxSubmergedMiningSpeed) {}
+
+    /** {@link MiningBounds} over everything the client may hold now. */
+    public MiningBounds miningBounds() {
+        long end = windowEnd();
+        int dig = -1;
+        for (Versioned v : new Versioned[] {haste, conduitPower}) {
+            int[] values = v.values(certain, end);
+            if (values == null) {
+                dig = Integer.MAX_VALUE;
+                break;
+            }
+            for (int value : values) {
+                dig = value == UNKNOWN ? Integer.MAX_VALUE : Math.max(dig, value);
+            }
+        }
+        int fatigue = Integer.MAX_VALUE;
+        int[] values = miningFatigue.values(certain, end);
+        if (values == null) {
+            fatigue = -1;
+        } else {
+            for (int value : values) {
+                fatigue = value == UNKNOWN || value == NONE ? -1 : Math.min(fatigue, value);
+            }
+        }
+        return new MiningBounds(dig, fatigue, miningEfficiency.hull(certain, end)[1], blockBreakSpeed.hull(certain, end)[1],
+                submergedMiningSpeed.hull(certain, end)[1]);
     }
 
     /** {@code [low, high]} of the scales the player's cached dimensions may have now. */
@@ -598,6 +753,26 @@ public final class ClientSelf {
                 }
             }
             return v != value;
+        }
+
+        /** The values some prefix ending in {@code [certain, end)} gives (repeats allowed); null when any value may be. */
+        int[] values(long certain, long end) {
+            if (certain <= overflow) {
+                return null;
+            }
+            java.util.List<Integer> out = new ArrayList<>();
+            int v = base;
+            for (long[] c : changes) {
+                if (c[0] >= end) {
+                    break;
+                }
+                if (c[0] >= certain) {
+                    out.add(v);
+                }
+                v = (int) c[1];
+            }
+            out.add(v);
+            return out.stream().mapToInt(Integer::intValue).toArray();
         }
 
         /** Whether some prefix ending in {@code [certain, end)} gives one of {@code values}. */

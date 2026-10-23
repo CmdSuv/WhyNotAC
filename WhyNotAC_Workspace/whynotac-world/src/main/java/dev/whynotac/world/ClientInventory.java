@@ -608,6 +608,31 @@ public final class ClientInventory {
     }
 
     /**
+     * Every stack the client's main hand may hold now (the slots of {@link #mainHandReach}), and {@link Stack#EMPTY} as
+     * well where it may have been used up or turned into another: what a use leaves is built from an item constant or
+     * the item's own remainder ({@link VanillaUseEffects}), none of which has a tool, so it mines as an empty hand does.
+     * Null if one of those slots is not known.
+     */
+    public Set<Stack> mainHandStacks() {
+        Set<Stack> out = new LinkedHashSet<>();
+        for (State s : possible()) {
+            for (int k = 0; k < HOTBAR; k++) {
+                if (s.selected == UNKNOWN || s.selected == k) {
+                    Stack stack = s.get(k);
+                    if (stack == null) {
+                        return null;
+                    }
+                    out.add(stack);
+                    if (s.mayBeNone[k]) {
+                        out.add(Stack.EMPTY);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
      * Every reach the main hand may have had at this client tick's pick ({@code GameRenderer.pick} runs at
      * the start of the tick, before the hotbar keys of that tick): every hotbar slot selected at the last
      * tick end or since.

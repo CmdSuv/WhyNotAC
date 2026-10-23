@@ -11,6 +11,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `client-clock` | P-M | Client'ın kendi saatinin izin verdiğinden fazla tick |
 | `attack-reach` | P-A | Hiçbir vanilla client'ın erişemeyeceği bir varlığa saldırı |
 | `use-aim` | P-M | Tikin bakışından başka bir dönüşle eşya kullanımı (`UseItem`: yalnızca sunucu için dönen, sessizce nişan alan client) ya da tikin seçiminin yapamayacağı bir blok tıklaması (`UseItemOn`: bakışın dışında, giremeyeceği bir yüzde, outline'ın dışında (havaya), menzil dışında ya da blokların ardında) ya da kırma (`START`/`STOP_DESTROY_BLOCK`: bakışın değmediği, giremediği yüzden, outline'ı olmayan, uzaktaki ya da duvarın ardındaki blok) |
+| `break-time` | P-M | Vanilla client'ın kırma ilerlemesinin izin verdiğinden erken `STOP_DESTROY_BLOCK` (hızlı kırma): her çarpanın client'ın tutabileceği en büyük değeriyle bile float toplamı 1'e ulaşmamışken |
 | `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
@@ -160,6 +161,31 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   kullanır; duvara önce oyunun sinüs tablosu ve `AABB.clip` aritmetiğiyle bit bit hesaplanmış imleçle, sonra imleci
   bakışından 0.4 kaydırarak tıklar, duvarı önce bakışının girdiği doğu yüzünden, sonra arka (batı) yüzünden kırmaya
   başlar: yalnızca ikinci kullanım, ikinci tıklama ve ikinci kırma vaka açar.
+
+### `break-time` (`BreakTimeCheck`)
+
+- **Kural (decompiled 1.21.11, `MultiPlayerGameMode`):** `START_DESTROY_BLOCK` ilerlemeyi sıfırlar (hemen kırılan blok
+  bitiş göndermez). Saldırı tuşu aynı blokta ve aynı eşya ve bileşenlerle (`sameDestroyTarget`) tutuldukça her tik
+  `continueDestroyBlock` `getDestroyProgress`'i ekler, ilk kez başlangıcın kendi tikinde (`continueAttack`, `startAttack`'ten
+  sonra); toplam 1'e ulaştığı tik `STOP_DESTROY_BLOCK` gider. Tik başına en çok bir artış vardır ve tuşları işleyen her tik
+  `ClientTickEnd` ile biter: bitişe kadar en çok başlangıçtan beri her tik sonu için bir artış, artı bitişin kendi tiki.
+- **Artış:** `Player.getDestroySpeed / sertlik / (doğru alet ? 30 : 100)`, float: aletin hızı (`Tool.getMiningSpeed`, aletsiz
+  1) 1'in üstündeyse artı `mining_efficiency`; haste ya da conduit power altında `1 + (amp + 1) * 0.2`; madencilik
+  yorgunluğu çarpanı; `block_break_speed`; göz sudaysa `submerged_mining_speed`; yerde değilse ÷5. Her çarpan o tikte
+  client'ın tutabileceği en büyük değeriyle alınır: bitişteki eşya (başlangıcınkiyle aynı eşya ve bileşenler, yoksa kazı
+  yeniden başlardı), bloğun başlangıcın kendi tahmininden önceki durumları, efektler ve öznitelikler (`ClientSelf`), yerde,
+  göz yalnızca daha hızlıysa suda; sunucunun etiketleri izlenmediğinden bir etiketi adlandıran kural bloğu tutabilir sayılır.
+  Float yuvarlaması tekdüze olduğundan client'ın toplamı bu en büyük artışların toplamını aşamaz.
+- **İddia yok:** blok bilinmiyorsa (yerleşmemiş chunk, orada önceki bir tahmin, blokları bilinmeyen eşya kullanımı, kazı
+  sırasında başka bir blok eylemi), eşya bilinmiyorsa (izlenmeyen yuva, stack'in kendi `tool` bileşeni, tablonun bilmediği
+  eşya), dig-speed efekti izlenmiyorsa, yaratıcı ya da izleyici olabilirse; login ve respawn kazıyı unutur.
+- **Sınamalar:** `BreakTimeCheckTest` elle toprağı (15 artış) ve taşı (float toplamıyla 151), elmas kazmayla taşı (6, haste
+  II ile 5), onaylanmamış ve onaylanmış yorgunluğu, verimliliği, `block_break_speed`'i, kazı sırasında değişen bloğu, kazı
+  sırasındaki tıklamayı, stack'in kendi aletini, yaratıcıyı, iptali, respawn'ı, başka bloğun bitişini ve saniyede en çok
+  bir bulguyu sınar; 25 mutasyonun hepsi yakalanır. Alet kuralları `item-prototypes.tsv`'nin son sütunudur (sunucunun
+  kayıt defterinden, `ItemPrototypesDataTest`). Gerçek client'ın elle kırdığı toprakta üst sınırların toplamı bitişin
+  tikinde tam 1.0'dır (client'ın kendi toplamı: 15 artış), çim bloğunda 1.22: ikisi de tam değerlendirildi, vaka yok. E2E
+  sondası duvarın taşını elle kazmaya başlar ve bir tik sonra bitirir: `break-time` vakası açılır.
 
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 

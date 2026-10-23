@@ -82,6 +82,24 @@ class ItemPrototypesDataTest {
         return true;
     }
 
+    /**
+     * The tool cell: the default mining speed, then each rule in order as {@code blocks=speed=correctForDrops}, its blocks a
+     * tag ({@code #key}) or the block keys in the set's order.
+     */
+    private static String tool(net.minecraft.world.item.component.Tool tool) {
+        if (tool == null) {
+            return "-";
+        }
+        StringBuilder sb = new StringBuilder(Float.toString(tool.defaultMiningSpeed()));
+        for (net.minecraft.world.item.component.Tool.Rule rule : tool.rules()) {
+            String blocks = rule.blocks().unwrapKey().map(tag -> "#" + tag.location())
+                    .orElseGet(() -> String.join(",", rule.blocks().stream().map(b -> b.unwrapKey().orElseThrow().identifier().toString()).toList()));
+            sb.append('|').append(blocks).append('=').append(rule.speed().map(String::valueOf).orElse("-")).append('=')
+                    .append(rule.correctForDrops().map(String::valueOf).orElse("-"));
+        }
+        return sb.toString();
+    }
+
     @Test
     void theShippedPrototypesAreTheGamesOwn() throws IOException {
         List<String> lines = new ArrayList<>();
@@ -107,7 +125,7 @@ class ItemPrototypesDataTest {
                     net.minecraft.world.item.component.UseEffects.DEFAULT);
             String useEffects = (use.canSprint() ? "sprint" : "slow") + ":" + use.speedMultiplier();
             lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap + "\t" + piercing + "\t" + stable + "\t" + useEffects
-                    + "\t" + useKind(item));
+                    + "\t" + useKind(item) + "\t" + tool(item.components().get(DataComponents.TOOL)));
         }
         lines.sort(null);
         String table = String.join("\n", lines) + "\n";

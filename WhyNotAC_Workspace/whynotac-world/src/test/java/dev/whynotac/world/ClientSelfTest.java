@@ -301,6 +301,65 @@ class ClientSelfTest {
     }
 
     @Test
+    void theDigSpeedEffectsAndFatigueFollowTheirPacketsInEveryPrefix() {
+        assertEquals(new ClientSelf.MiningBounds(-1, -1, 0.0, 1.0, 0.2), self.miningBounds(), "Player.createAttributes, no effect");
+        out(new ClientboundPacket.MobEffect(SELF, ClientSelf.HASTE, 1, 600, 0));
+        out(new ClientboundPacket.MobEffect(SELF, ClientSelf.MINING_FATIGUE, 2, 600, 0));
+        out(new ClientboundPacket.MobEffect(SELF + 1, ClientSelf.CONDUIT_POWER, 9, 600, 0)); // another entity's
+        int after = ping();
+        assertEquals(1, self.miningBounds().maxDigSpeedAmplifier(), "haste II may be processed");
+        assertEquals(-1, self.miningBounds().minFatigueAmplifier(), "the fatigue may not be");
+        ack(after);
+        assertEquals(1, self.miningBounds().maxDigSpeedAmplifier());
+        assertEquals(2, self.miningBounds().minFatigueAmplifier());
+        out(new ClientboundPacket.MobEffect(SELF, ClientSelf.CONDUIT_POWER, 3, 600, 0));
+        out(new ClientboundPacket.MobEffect(SELF, ClientSelf.HASTE, 300, 600, 0));
+        sync();
+        assertEquals(255, self.miningBounds().maxDigSpeedAmplifier(), "MobEffectInstance clamps the amplifier");
+        out(new ClientboundPacket.RemoveMobEffect(SELF, ClientSelf.HASTE));
+        out(new ClientboundPacket.RemoveMobEffect(SELF, ClientSelf.MINING_FATIGUE));
+        sync();
+        assertEquals(3, self.miningBounds().maxDigSpeedAmplifier(), "conduit power is left");
+        assertEquals(-1, self.miningBounds().minFatigueAmplifier());
+        out(new ClientboundPacket.Respawn(OVERWORLD, SURVIVAL, ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS | ClientboundPacket.Respawn.KEEP_ENTITY_DATA));
+        sync();
+        assertEquals(-1, self.miningBounds().maxDigSpeedAmplifier(), "handleRespawn copies no effect to the new player");
+    }
+
+    @Test
+    void theMiningAttributesFollowTheirPacketsAndRespawns() {
+        out(attribute(ClientSelf.MINING_EFFICIENCY, 0.0,
+                new ClientboundPacket.UpdateAttributes.Modifier("minecraft:enchantment.efficiency/mainhand", 26.0, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE)));
+        out(attribute(ClientSelf.BLOCK_BREAK_SPEED, 1.5));
+        out(attribute(ClientSelf.SUBMERGED_MINING_SPEED, 0.2,
+                new ClientboundPacket.UpdateAttributes.Modifier("test:gills", 1.0, ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE)));
+        sync();
+        assertEquals(new ClientSelf.MiningBounds(-1, -1, 26.0, 1.5, 1.2), self.miningBounds());
+        out(new ClientboundPacket.Respawn(OVERWORLD, SURVIVAL, ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS));
+        sync();
+        assertEquals(26.0, self.miningBounds().maxMiningEfficiency(), "assignAllValues");
+        out(new ClientboundPacket.Respawn(OVERWORLD, SURVIVAL, 0));
+        sync();
+        assertEquals(new ClientSelf.MiningBounds(-1, -1, 0.0, 1.5, 0.2), self.miningBounds(), "assignBaseValues: the bases without modifiers");
+        out(new ClientboundPacket.Login(SELF, 8, OVERWORLD, SURVIVAL));
+        sync();
+        assertEquals(new ClientSelf.MiningBounds(-1, -1, 0.0, 1.0, 0.2), self.miningBounds(), "a login's player is a new one");
+    }
+
+    @Test
+    void aPacketNotUnderstoodLeavesTheDigSpeedUnknown() {
+        out(new ClientboundPacket.Untranslatable("game/update_mob_effect"));
+        sync();
+        assertEquals(Integer.MAX_VALUE, self.miningBounds().maxDigSpeedAmplifier());
+        assertEquals(-1, self.miningBounds().minFatigueAmplifier());
+        assertEquals(1024.0, self.miningBounds().maxBlockBreakSpeed());
+        out(new ClientboundPacket.Respawn(OVERWORLD, SURVIVAL, ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS));
+        sync();
+        assertEquals(-1, self.miningBounds().maxDigSpeedAmplifier(), "a new player has no effect");
+        assertEquals(1024.0, self.miningBounds().maxBlockBreakSpeed(), "but keeps the attributes not known");
+    }
+
+    @Test
     void lostEventsLoseEverything() {
         self.onEvent(new TimelineEvent.Gap(sequence++, sequence, 10));
         assertNull(self.eye());
