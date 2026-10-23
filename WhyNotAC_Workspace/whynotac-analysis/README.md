@@ -268,10 +268,21 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   bir süzülme eşyasıyla, yoksa eşyasız çalışır (envanter gerekmez). Paket tikte birden çoksa, ya da paket
   varken adım süzülmeye başlamıyorsa (yerde, zaten süzülürken) ya da adım başlıyorken paket yoksa tick açıklanmaz.
   Sunucunun ortak bayraklarının 7. biti (`SetEntityData` 0) client'ın süzülmesini başlatır ya da bitirir, işlendiği
-  sırayla. Yakında olabilecek bir havai fişek roketi (süzülürken ya da başlarken; roket oyuncudan sonra tick'ler ve
-  bir sonraki tikte iter) iddiayı bitirir: itmesi henüz izlenmez. Durma çapası, client hâlâ süzülüyor olabildikçe
+  sırayla. Durma çapası, client hâlâ süzülüyor olabildikçe
   (tabanın son işlenen bayrakları süzülme diyorsa ya da client'ın başlattığı süzülmeden sonra bayrak işlenmediyse)
   kurulmaz: süzülen ama duran oyuncu (dik aşağı bakan) yürüyen sanılmaz.
+- **Havai fişek roketi (`ClientEntities.rocketsBoosting`):** süzülürken kullanılan roketi yalnızca sunucu doğurur;
+  client'a eşleme paketinde bağlı olduğu varlıkla gelir (`DATA_ATTACHED_TO_TARGET`, veri 9, yalnızca yapılırken
+  atanır). Oyuncudan sonra eklendiği için oyuncudan sonra tick'ler (`FireworkRocketEntity.tick`): oyuncu süzülüyorsa
+  (adımın bıraktığı bayrak) hareketine bakışına doğru `l·0.1 + (l·1.5 − d)·0.5` ekler, bir sonraki tikin adımı bunu
+  taşır. Client'ta patlamaz: `RemoveEntities` gelene dek iter. Takipçi her tikte oyuncuya bağlı ve o tikte tick'lemiş
+  roketleri sayar (donmamış, oyuncunun çevresindeki her chunk tick'liyor) ve itmeyi o kadar kez uygular; itmeler
+  hareketin aynı fonksiyonudur, sıraları önemsizdir. Başka bir varlığa bağlı ya da kendi başına uçan roket itmez.
+  İddia yok: bağlı olup olmadığı, tick'leyip tick'lemediği ya da var olup olmadığı kesin olmayan bir roket (verisi
+  replika onu kaybetmişken gelen, oyuncudan önce eklenmiş, chunk'ı belki tick'lemeyen), ve aynı tikte hem roket hem
+  canlı itmesi (tick listesindeki sıraları izlenmez). `MovementCheckTest`: bir, sonra iki, sonra yine bir roketle
+  süzülme ve iniş izlenir; client'ın belki henüz tutmadığı bir roket iddiayı oyuncu yeniden durana dek bitirir; roket
+  yokken roketin vereceği hız kanıttır; başka varlığa bağlı roket oyuncuyu itmez.
 - **Eşya kullanımı (`Using`):** client'ın kendi kullanımı (`LocalPlayer.startedUsingItem`), elindeki yığının
   `use_effects`'iyle (`ItemPrototypes`: oyunun tablosu; varsayılan 0.2 yavaşlatma, koşma başlamaz; mızraklar koşar,
   yavaşlamaz). Tuş eylemleri oyuncunun tick'inden önce: `UseItem` kullanımı başlatabilir ya da başlatmayabilir
@@ -308,8 +319,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (toz kar, lav hızı bilinmeyen boyutta lav akıntısı...), çarpışan ya da kendi yoluyla iten bir
   varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
   boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
-  böyle), süzülen ya da süzülmeye başlayan oyuncunun yakınında olabilecek bir havai fişek roketi, itip itmediğine
-  takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
+  böyle), oyuncuya bağlı olup olmadığı ya da tick'leyip tick'lemediği kesin olmayan bir havai fişek roketi, aynı tikte
+  roket ve canlı itmesi, itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
   her durum adım için aynıysa, ör. çimenin yayıldığı toprak, blok bilinir: `ClientWorld.possibleStates`,
   `OnFoot.sameForMovement`), piston, dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
@@ -320,12 +331,13 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
   durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
-  az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
+  az bir canlı itmesi ve bir roket itmesi izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
   ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme; ağlar, çalılar, bal ve kabarcık sütunları;
-  Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü; elytra ile beş süzülme ve inişleri):
-  11 212 tikin 10 632'si iddia edildi, 0 açıklanamayan, 5794/5794 tick'te client'ın durumu kümede, 26 itme izlendi.
-  Kalanlar uzak ışınlamalardan ve Nether'e geçişten sonra client'ın henüz işlemediği chunk'lardır (bir önceki oturumda
+  Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü; elytra ile altı süzülme, biri roketle,
+  ve inişleri): 11 542 tikin 11 033'ü iddia edildi, 0 açıklanamayan, 5925/5925 tick'te client'ın durumu kümede, 25
+  canlı itmesi ve 46 roket itmesi izlendi. Kalanlar çoğunlukla uzak ışınlamalardan ve Nether'e geçişten sonra client'ın
+  henüz işlemediği chunk'lar ve bloğa eşya kullanımıdır (bir önceki oturumda
   32 tik de konumu kesin bilinmeyen, dünyayla doğmuş bir koyunun yakınlığıydı). İlk elytra oturumunda süzülmenin 34
   tiki de iddiasız kaldı: yay şeridinin bir oku izlenemez olmuştu ve varlık replikası türünü unutup onu "roket
   olabilir" saymıştı; yerinde kaybolan aday artık türünü korur. Eşdeğer durumlar izlenmeden önce buz pistinin altında çimenin yayılması

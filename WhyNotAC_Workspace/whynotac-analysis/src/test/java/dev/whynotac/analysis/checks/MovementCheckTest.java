@@ -126,6 +126,8 @@ class MovementCheckTest {
     private OnFoot.ItemUse use;
     /** Villagers without AI (they stay where they were added; added after the player, they tick after it): {x, y, z}. */
     private final List<double[]> villagers = new ArrayList<>();
+    /** Firework rockets attached to the player, as the client holds them (added after it: they tick after it). */
+    private int rockets;
     /** Whether their pushes reach the player (teams); {@code ignorePushes}: the client drops them. */
     private boolean pushedByVillagers = true;
     private boolean ignorePushes;
@@ -297,6 +299,7 @@ class MovementCheckTest {
         sentOnGround = post.onGround();
         sentCollision = post.horizontalCollision();
         villagersPush();
+        rocketsBoost();
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
         if (sprintSent && serverSendsSpeed) {
@@ -463,6 +466,27 @@ class MovementCheckTest {
                 player = withDelta(player, new Vec3d(m.x() + -d, m.y() + 0.0, m.z() + -e));
             }
         }
+    }
+
+    /**
+     * {@code FireworkRocketEntity.tick} for each rocket attached to the player, after its tick: a gliding player is
+     * boosted toward its look ({@code getLookAngle}).
+     */
+    private void rocketsBoost() {
+        for (int i = 0; i < rockets && player.fallFlying(); i++) {
+            Vec3d look = Vec3d.viewVector(player.xRot(), player.yRot());
+            Vec3d d = player.deltaMovement();
+            player = withDelta(player, new Vec3d(d.x() + (look.x() * 0.1 + (look.x() * 1.5 - d.x()) * 0.5),
+                    d.y() + (look.y() * 0.1 + (look.y() * 1.5 - d.y()) * 0.5), d.z() + (look.z() * 0.1 + (look.z() * 1.5 - d.z()) * 0.5)));
+        }
+    }
+
+    /** The server adds a firework rocket at the player, attached to {@code target} (the server's pairing: entity and data). */
+    private void rocket(int id, int target) {
+        out(new ClientboundPacket.AddEntity(id, new UUID(2, id), "minecraft:firework_rocket", player.x(), player.y(), player.z(), Vec3d.ZERO, null,
+                (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.SetEntityData(id, List.of(new ClientboundPacket.SetEntityData.DataEntry(9,
+                ClientboundPacket.SetEntityData.Kind.OPTIONAL_UNSIGNED_INT, target)), 0));
     }
 
     private void ticks(int count, PlayerState.Keys keys, float yRot) throws Colliders.Unknown {
@@ -1143,37 +1167,42 @@ class MovementCheckTest {
     }
 
     /**
-     * The server adds a firework rocket at the gliding player; the client glides on boosted (by a nudge up: the engine
-     * does not model the boost yet), the rocket goes, and the glide turns down to the ground. Returns the yaw.
+     * The server adds a firework rocket attached to the gliding player and the client ticks with it before the ping
+     * after it is answered (whether it already holds it is not known), then without it; the glide turns down to the
+     * ground. Returns the yaw.
      */
     private float boostedGlide() throws Colliders.Unknown {
-        out(new ClientboundPacket.AddEntity(50, new UUID(2, 50), "minecraft:firework_rocket", player.x(), player.y(), player.z(), Vec3d.ZERO, null,
-                (byte) 0, (byte) 0, (byte) 0, SELF));
-        sync();
+        rocket(50, SELF); // not answered for yet
         float yaw = -90.0F;
-        for (int i = 0; i < 10; i++) {
-            tick(NONE, yaw -= 4.0F, 10.0F, new Vec3d(0.0, 0.05, 0.0));
+        tick(NONE, yaw -= 9.0F, 10.0F, Vec3d.ZERO); // the client had not processed it: no boost
+        sync();
+        rockets = 1;
+        for (int i = 0; i < 6; i++) {
+            tick(NONE, yaw -= 9.0F, 10.0F, Vec3d.ZERO); // a tight turn keeps the fast glide over the loaded chunks
         }
         out(new ClientboundPacket.RemoveEntities(new int[] {50}));
         sync();
+        rockets = 0;
         for (int i = 0; i < 400 && !player.onGround(); i++) {
-            tick(NONE, yaw -= 4.0F, 10.0F, Vec3d.ZERO);
+            tick(NONE, yaw -= 9.0F, 10.0F, Vec3d.ZERO);
         }
         assertTrue(player.onGround() && player.fallFlying(), String.valueOf(player));
         return yaw;
     }
 
     @Test
-    void aFireworkRocketNearAGlideEndsTheClaimUntilThePlayerStandsAgain() throws Exception {
+    void aFireworkRocketTheClientMayNotHoldYetEndsTheClaimUntilThePlayerStandsAgain() throws Exception {
         startGlide();
         ticks(10, NONE, -90.0F);
         int boosted = ticks.size();
         float yaw = boostedGlide();
         land(yaw);
         assertEquals(List.of(), evidence, String.valueOf(ticks.subList(boosted, boosted + 12)));
-        assertEquals(MovementTracker.Outcome.NO_CLAIM, ticks.get(boosted).outcome(), String.valueOf(ticks.get(boosted)));
-        assertTrue(ticks.subList(boosted + 1, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.UNTRACKED),
-                String.valueOf(ticks.subList(boosted, ticks.size())));
+        // the player's own tick is explained; what the rocket did after it is not known, and the next ticks are not followed
+        assertEquals(MovementTracker.Outcome.EXPLAINED, ticks.get(boosted).outcome(), String.valueOf(ticks.get(boosted)));
+        assertEquals(0, ticks.get(boosted).hypotheses());
+        assertTrue(ticks.subList(boosted + 1, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.UNTRACKED
+                && t.reason().startsWith("a firework rocket may boost the gliding player")), String.valueOf(ticks.subList(boosted, ticks.size())));
         // standing still after the server ended the glide, it is tracked again
         int anchoredAt = ticks.size();
         ticks(40, NONE, yaw);
@@ -1182,6 +1211,72 @@ class MovementCheckTest {
                 String.valueOf(ticks.subList(anchoredAt, ticks.size())));
         tick(SPRINT_JUMP, yaw, 0.0F, new Vec3d(0.05, 0.0, 0.0));
         assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void fireworkRocketBoostsAreFollowedOneByOne() throws Exception {
+        startGlide();
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        rocket(50, SELF);
+        sync();
+        rockets = 1;
+        float yaw = -90.0F;
+        for (int i = 0; i < 6; i++) {
+            tick(NONE, yaw -= 9.0F, -10.0F, Vec3d.ZERO); // boosted upward along the look, turning tight
+        }
+        rocket(51, SELF); // a second one: both boost each tick
+        sync();
+        rockets = 2;
+        for (int i = 0; i < 4; i++) {
+            tick(NONE, yaw -= 9.0F, 5.0F, Vec3d.ZERO);
+        }
+        out(new ClientboundPacket.RemoveEntities(new int[] {51}));
+        sync();
+        rockets = 1;
+        for (int i = 0; i < 400 && !player.onGround(); i++) {
+            tick(NONE, yaw -= 9.0F, 25.0F, Vec3d.ZERO); // the other one boosts it down to the ground
+        }
+        land(yaw); // once the server ended the glide, the rocket still attached boosts nothing
+        out(new ClientboundPacket.RemoveEntities(new int[] {50}));
+        sync();
+        rockets = 0;
+        ticks(5, FORWARD, yaw);
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void aBoostWithoutARocketIsAFinding() throws Exception {
+        startGlide();
+        ticks(5, NONE, -90.0F);
+        rockets = 1; // the client boosts itself: no rocket was added
+        ticks(2, NONE, -90.0F);
+        rockets = 0;
+        ticks(2, NONE, -90.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks.subList(ticks.size() - 4, ticks.size())));
+    }
+
+    @Test
+    void aRocketAttachedToAnotherEntityDoesNotBoostThePlayer() throws Exception {
+        startGlide();
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        villager(60, 30.0, 64.0, 30.0);
+        rocket(50, 60); // boosting another entity, flying alongside
+        rocket(51, -1); // and one shot by a crossbow (not attached)
+        sync();
+        for (int i = 0; i < 400 && !player.onGround(); i++) {
+            tick(NONE, -90.0F + i * 3.0F, 10.0F, Vec3d.ZERO);
+        }
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+        rockets = 1; // the client boosts itself by another's rocket
+        tick(NONE, 0.0F, 10.0F, Vec3d.ZERO);
+        tick(NONE, 0.0F, 10.0F, Vec3d.ZERO);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks.subList(ticks.size() - 2, ticks.size())));
     }
 
     @Test

@@ -70,6 +70,16 @@ public final class ClientEntities {
     /** The attribute the size scales with ({@code Attributes.SCALE}). */
     static final String SCALE_ATTRIBUTE = "minecraft:scale";
     private static final int DATA_POSE = 6;
+    /**
+     * {@code EntityType.FIREWORK_ROCKET} and its {@code DATA_ATTACHED_TO_TARGET} (an {@code OptionalInt}: the entity it
+     * is attached to; {@code FireworkRocketEntity} defines it second after {@code Entity}'s eight).
+     */
+    public static final String FIREWORK_ROCKET = "minecraft:firework_rocket";
+    public static final int DATA_ROCKET_ATTACHED = 9;
+    /** Not in the packet ({@code Op.Data.attached}). */
+    private static final int UNSET = Integer.MIN_VALUE;
+    /** A rocket's target set while the candidate was lost: not known. */
+    private static final int ATTACHED_UNKNOWN = Integer.MIN_VALUE + 1;
 
     /** Whether the client has an entity with a given id. */
     public enum Existence { PRESENT, ABSENT, MAYBE, UNKNOWN }
@@ -433,6 +443,7 @@ public final class ClientEntities {
         int dataSet = 0;
         int data0 = 0;
         int data1 = 0;
+        int attached = UNSET;
         EntitySizes.Entry size = sizes.entry(head.type);
         int babyIndex = size == null ? -1 : size.babyIndex();
         List<EntitySizes.DataField> fields = size == null ? List.of() : size.data();
@@ -443,6 +454,9 @@ public final class ClientEntities {
                 flags = (int) entry.value() & 0xFF;
             } else if (entry.index() == babyIndex && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
                 baby = entry.value() != 0 ? 1 : 0; // the flag isBaby() reads (DATA_BABY_ID of the type's class)
+            } else if (FIREWORK_ROCKET.equals(head.type) && entry.index() == DATA_ROCKET_ATTACHED
+                    && entry.kind() == ClientboundPacket.SetEntityData.Kind.OPTIONAL_UNSIGNED_INT) {
+                attached = (int) Math.max(entry.value(), NONE); // empty: -1
             } else {
                 // the values the type's size reads (slime size, armor stand flags, interaction width and height, ...)
                 for (int i = 0; i < fields.size(); i++) {
@@ -459,8 +473,8 @@ public final class ClientEntities {
                 }
             }
         }
-        if (pose != NONE || flags != NONE || baby != NONE || dataSet != 0) {
-            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1));
+        if (pose != NONE || flags != NONE || baby != NONE || dataSet != 0 || attached != UNSET) {
+            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1, attached));
         }
     }
 
@@ -938,6 +952,9 @@ public final class ClientEntities {
                 out.add(s);
             }
             case Op.Data data -> {
+                if (s.lostAll && data.attached() != UNSET) {
+                    s.attached = ATTACHED_UNKNOWN;
+                }
                 if (s.present && !s.lostAll) {
                     if (data.pose() != NONE) {
                         s.pose = data.pose();
@@ -956,6 +973,9 @@ public final class ClientEntities {
                     }
                     if ((data.dataSet() & 2) != 0) {
                         s.data1 = data.data1();
+                    }
+                    if (data.attached() != UNSET) {
+                        s.attached = data.attached();
                     }
                 }
                 out.add(s);
@@ -1187,6 +1207,17 @@ public final class ClientEntities {
             return;
         }
         if (s.lostPosition) {
+            if (FIREWORK_ROCKET.equals(s.type) && s.attached == selfId && selfId != NONE) {
+                // FireworkRocketEntity.tick places it at the player it is attached to (boosting a glide): it stays where the
+                // player is, so it ticks where the player's chunk does, which rocketsBoosting decides
+                Tri frozen = notFrozen(lower, upper);
+                s.ticked = frozen == Tri.TRUE;
+                s.tickedKnown = frozen != Tri.MAYBE;
+                s.tickLower = lower;
+                s.tickUpper = upper;
+                out.add(s);
+                return;
+            }
             if (!s.kind.living()) {
                 s.lostAll = true; // wherever it went, it may have fallen out of the world and been discarded (checkBelowWorld)
             }
@@ -1683,6 +1714,95 @@ public final class ClientEntities {
         return whyNotKnown;
     }
 
+    /** How far from the player, on either axis, an attached rocket's chunk is looked at ({@link #rocketsBoosting}): a tick's glide and the hand. */
+    static final double ROCKET_CHUNK_MARGIN = 4.0;
+
+    /**
+     * How many firework rockets attached to the client's own player boosted it in the client's last tick
+     * ({@code FireworkRocketEntity.tick}: each adds to a gliding player's motion), the player being at {@code (x, z)}
+     * after its own tick; null when not known (see {@link #whyNotKnown}). A rocket counts when it is present, attached
+     * to the player (its target in the entity data), added after the player was made (it ticks after it and its target
+     * is this player), and ticked: not frozen, and every chunk within {@link #ROCKET_CHUNK_MARGIN} of the player
+     * ticking (the rocket sits where the player was). Not known: a rocket that may or may not be attached, ticked or
+     * present, one from before the player was made, an entity of a type not known, or entities lost.
+     */
+    public Integer rocketsBoosting(int self, double x, double z) {
+        if (!complete) {
+            whyNotKnown = "entities WhyNotAC lost track of";
+            return null;
+        }
+        int count = 0;
+        for (Track track : tracks.values()) {
+            if (track.id == self) {
+                continue;
+            }
+            Head head = heads.get(track.id);
+            Boolean boosts = null;
+            for (State st : track.candidates) {
+                boolean b;
+                try {
+                    b = boosts(st, head, self, x, z);
+                } catch (NotKnown unknown) {
+                    whyNotKnown = unknown.getMessage();
+                    return null;
+                }
+                if (boosts != null && boosts != b) {
+                    whyNotKnown = "a firework rocket that may or may not have boosted the player";
+                    return null;
+                }
+                boosts = b;
+            }
+            if (Boolean.TRUE.equals(boosts)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** One candidate's boost ({@link #rocketsBoosting}); throws where it is not known. */
+    private boolean boosts(State st, Head head, int self, double x, double z) throws NotKnown {
+        if (!st.lostAll && !st.present) {
+            return false;
+        }
+        String type = st.type != null ? st.type : head != null ? head.type : null;
+        if (type != null && types.known(type) && !FIREWORK_ROCKET.equals(type)) {
+            return false;
+        }
+        if (type == null || st.lostAll && st.type == null) {
+            throw new NotKnown("an entity WhyNotAC lost track of");
+        }
+        // a rocket: its target is set once, when it is made (FireworkRocketEntity's constructor, the pairing data)
+        if (st.attached == ATTACHED_UNKNOWN) {
+            throw new NotKnown("a firework rocket whose target is not known");
+        }
+        if (st.attached != self) {
+            return false; // flying by itself (lost in place, as it moves itself) or attached to another entity
+        }
+        if (st.lostAll) {
+            throw new NotKnown("a firework rocket attached to the player WhyNotAC lost track of");
+        }
+        if (selfCreated >= certain || st.addedSeq <= selfCreated) {
+            throw new NotKnown("a firework rocket attached to the player from before the player was made");
+        }
+        if (!st.tickedKnown) {
+            throw new NotKnown("a firework rocket attached to the player that may or may not have ticked");
+        }
+        if (!st.ticked) {
+            return false;
+        }
+        Tri ticking = null;
+        for (int cx = VanillaMath.floor(x - ROCKET_CHUNK_MARGIN) >> 4; cx <= VanillaMath.floor(x + ROCKET_CHUNK_MARGIN) >> 4; cx++) {
+            for (int cz = VanillaMath.floor(z - ROCKET_CHUNK_MARGIN) >> 4; cz <= VanillaMath.floor(z + ROCKET_CHUNK_MARGIN) >> 4; cz++) {
+                Tri chunk = chunks.ticking(ClientWorld.chunkKey(cx, cz), st.tickLower, st.tickUpper);
+                if (ticking != null && chunk != ticking || chunk == Tri.MAYBE) {
+                    throw new NotKnown("a firework rocket attached to the player near chunks that may not tick");
+                }
+                ticking = chunk;
+            }
+        }
+        return ticking == Tri.TRUE;
+    }
+
     /** One candidate's push at the box ({@link #pushers}): the pusher, or null for none; throws where it is not known. */
     private Pusher push(int id, State st, Head head, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
             boolean beforeSelf, double unknownRadius) throws NotKnown {
@@ -2022,7 +2142,8 @@ public final class ClientEntities {
         record HeadRotation(long seq, float yHeadRot) implements Op {}
 
         /** -1: not in the packet. {@code baby}: 0 or 1. {@code dataSet}: which of the size's data values are in it (bit 0, bit 1). */
-        record Data(long seq, int pose, int flags, int baby, int dataSet, int data0, int data1) implements Op {}
+        /** {@code attached}: a firework rocket's target ({@code -1}: none), {@code UNSET} when the packet does not set it. */
+        record Data(long seq, int pose, int flags, int baby, int dataSet, int data0, int data1, int attached) implements Op {}
 
         /** The scale attribute's value; NaN when it is not known exactly. */
         record Scale(long seq, double value) implements Op {}
@@ -2106,6 +2227,14 @@ public final class ClientEntities {
         /** The entity ticked in the client's last tick ({@code ClientLevel.tickEntities}); {@code tickedKnown} false once candidates that disagree on it were merged. */
         boolean ticked;
         boolean tickedKnown = true;
+        /** A firework rocket's {@code DATA_ATTACHED_TO_TARGET}: the entity id, or {@code -1} for none. */
+        int attached = NONE;
+        /**
+         * The prefixes its last tick could fall in, for a rocket attached to the player ({@link #rocketsBoosting}): its
+         * chunk is where the player was, which the replica does not hold.
+         */
+        long tickLower;
+        long tickUpper;
         /** The sequence of the {@code AddEntity} that made this entity object: where it joined the client's tick list relative to the player. */
         long addedSeq = Long.MIN_VALUE;
         UUID uuid;
@@ -2220,6 +2349,9 @@ public final class ClientEntities {
             c.headTarget = headTarget;
             c.ticked = ticked;
             c.tickedKnown = tickedKnown;
+            c.attached = attached;
+            c.tickLower = tickLower;
+            c.tickUpper = tickUpper;
             c.addedSeq = addedSeq;
             c.uuid = uuid;
             c.applied = applied;
@@ -2235,13 +2367,14 @@ public final class ClientEntities {
                 return true;
             }
             if (lostAll) {
-                return java.util.Objects.equals(type, o.type); // lost in place: the type stays known
+                return java.util.Objects.equals(type, o.type) && attached == o.attached; // lost in place: the type stays known
             }
             if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || addedSeq != o.addedSeq || minY != o.minY
                     || lostPosition != o.lostPosition
                     || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
                     || Double.compare(scaleLow, o.scaleLow) != 0 || Double.compare(scaleHigh, o.scaleHigh) != 0
-                    || data0 != o.data0 || data1 != o.data1 || anim != o.anim || animO != o.animO || spectator != o.spectator) {
+                    || data0 != o.data0 || data1 != o.data1 || anim != o.anim || animO != o.animO || spectator != o.spectator
+                    || attached != o.attached) {
                 return false;
             }
             if (lostPosition) {
@@ -2263,6 +2396,8 @@ public final class ClientEntities {
             }
             onGroundKnown &= o.onGroundKnown && onGround == o.onGround;
             tickedKnown &= o.tickedKnown && ticked == o.ticked;
+            tickLower = Math.min(tickLower, o.tickLower);
+            tickUpper = Math.max(tickUpper, o.tickUpper);
             if (lostPosition) {
                 return;
             }

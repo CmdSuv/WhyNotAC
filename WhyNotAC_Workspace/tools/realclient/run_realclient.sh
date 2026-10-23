@@ -379,7 +379,9 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1,space/10.0 -/0.5; sleep 0.5
 # ground, where the server ends it (its shared flags); from the ground a jump, then a second press at its top, starts a
 # short glide; then 20 blocks up looking 5 degrees down with W held throughout (travelFallFlying takes no input); 20 blocks up
 # diving at 34.2 degrees, where x86_64's Math.cos is not fdlibm's (PlatformCos), the sprint keys pressed once it glides
-# (no sprint starts while gliding); 15 blocks up looking 15 degrees up (the climb).
+# (no sprint starts while gliding); 15 blocks up looking 15 degrees up (the climb). Last, a firework rocket used once
+# while gliding (the right button): the server attaches it to the player, and its tick on the client boosts the glide
+# (FireworkRocketEntity.tick) until the server removes it.
 glide() { echo "tp $NAME $1 -60 45.5 -90 0" > "$FIFO"; sleep 1.5; echo "tp $NAME $1 $2 45.5 -90 $3" > "$FIFO"; sleep 0.3; shift 3
   python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
 echo "item replace entity $NAME armor.chest with minecraft:elytra" > "$FIFO"; sleep 0.5
@@ -388,6 +390,9 @@ glide 40.5 -60 0 space/0.1 -/0.2 space/0.2 -/2.0
 glide 40.5 -40 5 w/0.4 w,space/0.2 w/6.0 -/1.0
 glide 40.5 -40 34.2 -/0.4 space/0.2 w,Control_L/3.0 -/1.0
 glide 40.5 -45 -15 -/0.4 space/0.2 -/10.0
+echo "item replace entity $NAME weapon.mainhand with minecraft:firework_rocket 16" > "$FIFO"; sleep 0.5
+glide 40.5 -30 10 -/0.4 space/0.2 -/0.3 Button3/0.1 -/12.0
+echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 echo "item replace entity $NAME armor.chest with minecraft:air" > "$FIFO"; sleep 0.5
 # Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
 # y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at

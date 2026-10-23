@@ -44,7 +44,7 @@ import java.util.TreeMap;
  * would: at every tick whose movement packet it explained, the client's own state after the tick must be one of
  * its hypotheses as they stood when the client sent it ({@code truthMissing} counts those where it is not), no tick
  * may be unexplained, and the pushes of living entities it followed ({@code pushesFollowed}; the session walks into
- * villagers) must be more than none.
+ * villagers) and the firework rocket boosts ({@code rocketBoosts}; it glides with one) must each be more than none.
  *
  * <p>usage: java -cp WhyNotAC.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on any difference
  */
@@ -96,7 +96,8 @@ public class MovementTruth {
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
                 && ((Number) result.get("gliding")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
-                && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0;
+                && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
+                && ((Number) tracker.get("rocketBoosts")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -174,6 +175,7 @@ public class MovementTruth {
         out.put("truthMissing", counts[2]);
         out.put("unexplained", counts[3]);
         out.put("pushesFollowed", tracker.pushesFollowed());
+        out.put("rocketBoosts", tracker.rocketBoosts());
         out.put("examples", examples);
         return out;
     }

@@ -26,7 +26,7 @@ ancak **hiçbir** meşru hipotez gözlemi açıklayamadığında kanıt doğar.
 5. **1.21.11 savaş mekanikleri:** Mace (düşüş mesafesi, smash, Wind Burst ile yukarı fırlatma),
    Wind Charge (patlama itmesi), Trident Riptide (yaw/pitch ve seviyeden hesaplanan itme, yağmur/su
    koşulu), Spear (`KineticWeapon`/`PiercingWeapon` bileşenleri, `LUNGE` büyüsü, `STAB` eylemi),
-   Elytra (süzülme: tamam; roket itmesi), binekler.
+   Elytra (süzülme ve roket itmesi: tamam), binekler.
 
 Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynaktan okunacak ve
 `whynotac-conformance` içinde gerçek oyun koduna karşı diferansiyel test edilecek.
@@ -216,8 +216,9 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     havada geçer; değilse bakış vektörü, eğimin `Math.cos`'unun karesi, alçalma, tırmanma (`3.2`), bakışa doğru yatay
     yaklaşma ve `0.99F, 0.98F, 0.99F`, client'ın sırasıyla. Süzülürken blok hız çarpanı 1, sudan çıkmışken koşma
     başlamaz, `checkFallDistanceAccumulation` dikey hız −0.5'in üstündeyken düşüşü 1'e indirir. Süzülmeyi yalnızca
-    sunucunun ortak bayrakları (7. bit) bitirir: client yere değdikten sonra da süzülerek kayar. Sıvıya süzülmek ve
-    roket itmesi kapsam dışıdır.
+    sunucunun ortak bayrakları (7. bit) bitirir: client yere değdikten sonra da süzülerek kayar. Sıvıya süzülmek kapsam
+    dışıdır. Roket itmesi adımın dışındadır: oyuncuya bağlı roket oyuncudan sonra tick'ler (`FireworkRocketEntity.tick`)
+    ve hareketine bakışına doğru ekler; takipçi bunu adımın bıraktığı duruma uygular (`MovementTracker.rocketBoost`).
     - **Platformun kosinüsü (`PlatformCos`):** oyun burada tablo değil `Math.cos` kullanır ve HotSpot onu CPU'ya
       göre bir intrinsic yapar. `X86_64` (`stubGenerator_x86_64_cos.cpp`, Intel'in libm'i: π/32 indirgemesi, 64
       girişli tablo, SSE şeritleri) ve `AARCH64` (`macroAssembler_aarch64_trig.cpp`: fdlibm çekirdekleri, fused
@@ -233,9 +234,10 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
       `Unknown`'du: süzülmeler ve 1 bloğu aşan her düşüş.
     - **Son oturum (göğüste elytra; 30 blok yukarıdan 20° aşağı bakarak düşüp havada zıplamayla süzülme ve yere
       iniş; yerden zıplayıp tepesinde ikinci basışla kısa bir süzülme; W basılıyken 20 bloktan süzülme; x86_64'ün
-      kosinüsünün fdlibm'inkinden ayrıldığı 34.2°'lik dalış, süzülürken koşma tuşlarıyla; 15° yukarı bakarak süzülme):**
-      beş süzülmenin 162 tikinin hepsi bit bit eşit. Tüm oturum: 11 166 tikin 10 995'i eşit, 0 fark. Negatif kontroller
-      (hepsi yakalandı): sürüklenme 0.99 → 0.98 (162 fark), kaldırma 0.75 → 0.76 (162), alçalma 0.1 → 0.11 (162), bakışa
+      kosinüsünün fdlibm'inkinden ayrıldığı 34.2°'lik dalış, süzülürken koşma tuşlarıyla; 15° yukarı bakarak süzülme;
+      10° aşağı bakarak süzülürken bir roket):** altı süzülmenin 252 tikinin hepsi bit bit eşit (roketin ittiği tikler
+      dahil: itme bir sonraki tikin başlangıç durumundadır). Tüm oturum: 11 506 tikin 11 359'u eşit, 0 fark. Negatif
+      kontroller (beş süzülmelik bir önceki oturumda, hepsi yakalandı): sürüklenme 0.99 → 0.98 (162 fark), kaldırma 0.75 → 0.76 (162), alçalma 0.1 → 0.11 (162), bakışa
       dönüş 0.1 → 0.11 (162), tırmanma 3.2 → 3.3 (13), düşüşü 1'e indirmemek (96), basılı tutulan zıplamayla ya da yerde
       başlamak (1'er), süzülme duruşunu almamak (162), süzülürken koşmaya başlayabilmek (18), x86_64 yerine fdlibm'in
       kosinüsü (17). Süzülürken blok hız çarpanı bu veride ayırt edilmez (yer çimen); `GlideTest` ruh kumunda ister.

@@ -82,8 +82,8 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
   (`tick-framing`) ya da hiçbir vanilla client'ın gönderemeyeceği konum veya `onGround` bayrağıdır (`movement`, yaya
-  motorunun kapsamında bit bit). Elytra ile süzülme motorda (bit bit, client'ın CPU'sunun `Math.cos`'u dahil); roket itmesi kalan. Kalan: motorun
-  kapsamı dışındaki hareketler (roket itmesi, binek, dünya sınırı, toz kar).
+  motorunun kapsamında bit bit). Elytra ile süzülme (bit bit, client'ın CPU'sunun `Math.cos`'u dahil) ve havai fişek
+  roketinin itmesi motorda. Kalan: motorun kapsamı dışındaki hareketler (binek, dünya sınırı, toz kar).
 
 ## Faz 4 — Doğrulama ve veri
 

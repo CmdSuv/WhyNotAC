@@ -105,8 +105,15 @@ def verify_glide(events, check):
     flags = [entry["value"] & 0x80 != 0 for e in events if e["type"] == "Outbound" and (e.get("packet") or {}).get("type") == "SetEntityData"
              and e["packet"]["entityId"] == me for entry in e["packet"]["entries"] if entry["index"] == 0]
     ends = sum(1 for a, b in zip(flags, flags[1:]) if a and not b)
-    check(len(starts) == 5 and flags.count(True) >= 5 and ends == 5,
-          f"five glides: the client started each ({len(starts)} START_FALL_FLYING), the server echoed the flag and ended each "
+    rockets = [e["packet"]["entityId"] for e in events if e["type"] == "Outbound" and (e.get("packet") or {}).get("type") == "AddEntity"
+               and e["packet"]["typeId"] == "minecraft:firework_rocket"]
+    # DATA_ATTACHED_TO_TARGET: in the pairing bundle, and again in the next tracker update (the constructor left it dirty)
+    targets = [x["value"] for e in events if e["type"] == "Outbound" and (e.get("packet") or {}).get("type") == "SetEntityData"
+               and e["packet"]["entityId"] in rockets for x in e["packet"]["entries"] if x["index"] == 9]
+    check(len(rockets) == 1 and len(targets) > 0 and all(t == me for t in targets),
+          f"the rocket used while gliding was attached to the player by the server ({len(rockets)} rockets, targets {targets})")
+    check(len(starts) == 6 and flags.count(True) >= 6 and ends == 6,
+          f"six glides: the client started each ({len(starts)} START_FALL_FLYING), the server echoed the flag and ended each "
           f"on the ground ({ends} ends)")
 
 

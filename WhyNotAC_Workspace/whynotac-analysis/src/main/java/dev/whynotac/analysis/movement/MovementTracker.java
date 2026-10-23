@@ -102,12 +102,6 @@ public final class MovementTracker {
     static final int MOVER_MARGIN = 1;
     /** Entities pushing or blocking the player: their boxes searched this much beyond where the player may be. */
     static final double ENTITY_MARGIN = 1.5;
-    static final String FIREWORK_ROCKET = "minecraft:firework_rocket";
-    /**
-     * An attached rocket is where the player is on the client; the server's position for it follows the server's view of
-     * the player, which may lag behind a fast glide: any rocket within this counts.
-     */
-    static final double ROCKET_RADIUS = 32.0;
     /** The world border collides within a few blocks ({@code WorldBorder.isInsideCloseToBorder}); this much is kept free. */
     static final double BORDER_MARGIN = 16.0;
     /** {@code sendPosition}'s threshold, squared as {@code Mth.square(2.0E-4)}. */
@@ -154,6 +148,7 @@ public final class MovementTracker {
     private List<Hypothesis> hypotheses;
     private List<Hypothesis> sent = List.of();
     private long pushesFollowed;
+    private long rocketBoosts;
     private long since = Long.MIN_VALUE;
     /** While untracked: the player's state as far as the server knows it for certain, and what it last sent. */
     private SelfState base = SelfState.INITIAL;
@@ -200,6 +195,11 @@ public final class MovementTracker {
     /** States a push of a living entity changed, since the start (diagnostics). */
     public long pushesFollowed() {
         return pushesFollowed;
+    }
+
+    /** The firework rocket boosts followed so far ({@link #boosted}). */
+    public long rocketBoosts() {
+        return rocketBoosts;
     }
 
     /** Why the player is not tracked, or null while it is. */
@@ -568,7 +568,7 @@ public final class MovementTracker {
                 starts.removeIf(a -> a.self().using() != null);
                 actedWhileUsing = any && starts.isEmpty();
             }
-            view.checkSurroundings(starts, in.glideStarts > 0);
+            view.checkSurroundings(starts);
             Map<StepKey, OnFoot.Step> steps = new HashMap<>();
             for (Hypothesis a : starts) {
                 simulate(a, in, view, next, steps, predictions);
@@ -628,7 +628,7 @@ public final class MovementTracker {
                 throw new Lose("an entity that may push the player is near: " + view.entities.whyNotKnown());
             }
             if (pushers.isEmpty() || !pushable(h, view)) {
-                addIfNew(out, h);
+                addIfNew(out, boosted(h, beforeSelf, false, view));
                 continue;
             }
             List<ClientEntities.Pusher> landing = new ArrayList<>(pushers.size());
@@ -649,13 +649,48 @@ public final class MovementTracker {
                 for (ClientEntities.Pusher pusher : order) {
                     d = pushedBy(d, p.x(), p.z(), pusher.x(), pusher.z());
                 }
-                addIfNew(out, h.withPlayer(withDelta(p, d)));
+                addIfNew(out, boosted(h.withPlayer(withDelta(p, d)), beforeSelf, !landing.isEmpty(), view));
             }
             if (!landing.isEmpty()) {
                 pushesFollowed++;
             }
         }
         return out;
+    }
+
+    /**
+     * After the player's tick: each firework rocket attached to it ({@code FireworkRocketEntity.tick}, ticking after it,
+     * {@link ClientEntities#rocketsBoosting}) boosts a gliding player toward its look ({@code getLookAngle}) for the
+     * next tick. A rocket boost and a push in the same tick end the claim: their order (the tick list's) is not followed.
+     */
+    private Hypothesis boosted(Hypothesis h, boolean beforeSelf, boolean pushed, View view) throws Lose {
+        PlayerState p = h.player();
+        if (beforeSelf || !p.fallFlying()) {
+            return h; // isFallFlying, as the player's tick left it
+        }
+        Integer rockets = view.entities.rocketsBoosting(selfId, p.x(), p.z());
+        if (rockets == null) {
+            throw new Lose("a firework rocket may boost the gliding player: " + view.entities.whyNotKnown());
+        }
+        if (rockets == 0) {
+            return h;
+        }
+        if (pushed) {
+            throw new Lose("a firework rocket boost and a push in one tick");
+        }
+        Vec3d look = Vec3d.viewVector(p.xRot(), p.yRot());
+        Vec3d d = p.deltaMovement();
+        for (int i = 0; i < rockets; i++) {
+            d = rocketBoost(d, look); // each rocket's the same function of the motion: their order does not matter
+        }
+        rocketBoosts += rockets;
+        return h.withPlayer(withDelta(p, d));
+    }
+
+    /** {@code FireworkRocketEntity.tick}'s boost of a gliding entity looking along {@code look}, as the client computes it. */
+    static Vec3d rocketBoost(Vec3d d, Vec3d look) {
+        return d.add(look.x() * 0.1 + (look.x() * 1.5 - d.x()) * 0.5, look.y() * 0.1 + (look.y() * 1.5 - d.y()) * 0.5,
+                look.z() * 0.1 + (look.z() * 1.5 - d.z()) * 0.5);
     }
 
     /** {@code LivingEntity.isPushable} for the player: alive, not a spectator, not on a climbable block (unless flying). */
@@ -1638,7 +1673,7 @@ public final class MovementTracker {
          * No entity that collides (or pushes otherwise than living entities in their tick, which {@link #pushed} follows), no
          * piston, the world border far, around everywhere the player may be this tick.
          */
-        void checkSurroundings(List<Hypothesis> starts, boolean glideStarts) throws Lose {
+        void checkSurroundings(List<Hypothesis> starts) throws Lose {
             double minX = Double.POSITIVE_INFINITY;
             double minY = Double.POSITIVE_INFINITY;
             double minZ = Double.POSITIVE_INFINITY;
@@ -1655,10 +1690,6 @@ public final class MovementTracker {
                 Box box = p.box();
                 if (!h.self().border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN + reach)) {
                     throw new Lose("near the world border");
-                }
-                // FireworkRocketEntity.tick, after the player's: an attached rocket boosts a gliding player for the next tick
-                if ((p.fallFlying() || glideStarts) && entities.mayHaveNear(FIREWORK_ROCKET, p.x(), p.y(), p.z(), ROCKET_RADIUS + reach, Long.MIN_VALUE)) {
-                    throw new Lose("a firework rocket may boost the gliding player");
                 }
                 minX = Math.min(minX, box.minX() - reach);
                 minY = Math.min(minY, box.minY() - reach);

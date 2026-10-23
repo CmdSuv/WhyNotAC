@@ -81,9 +81,11 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > bayrağıyla bitmesi. Oyun burada `Math.cos` kullanır; JVM onu CPU'ya göre farklı hesaplar (x86_64 ile Apple silicon
 > float eğimlerin yaklaşık %0,06'sında son bitte ayrılır). İki intrinsic de komut komut aktarıldı ve her float eğimde (2,14 milyar
 > girdi) gerçek JVM'lerle (aarch64'ü QEMU altında) bit bit aynı; takipçi client'ın CPU'sunu da görünmeyen bir seçenek
-> olarak izler. Gerçek client'ın beş süzülmesi (162 tik, biri x86_64'ün kosinüsünün
-> ayrıldığı eğimde) bit bit eşit; sentetik testte daha uzağa süzülme, başlatılamayacak
-> yerde başlatma ve paketsiz süzülme kanıt oldu. Roket itmesi henüz izlenmez: yakında roket olabiliyorsa iddia yoktur.
+> olarak izler. Havai fişek roketinin itmesi de izlenir: client'ta oyuncuya bağlı roket oyuncudan sonra tick'ler ve
+> süzülen oyuncuyu bakışına doğru iter; takipçi bağlı roketleri sayar ve itmeyi client'ın aritmetiğiyle uygular, bağlı
+> olup olmadığı ya da tick'leyip tick'lemediği kesin olmayan bir rokette iddiadan çekilir. Gerçek client'ın altı
+> süzülmesi (252 tik, biri x86_64'ün kosinüsünün ayrıldığı eğimde, biri roketle: 46 itme izlendi) bit bit eşit;
+> sentetik testte daha uzağa süzülme, başlatılamayacak yerde başlatma, paketsiz süzülme ve roket yokken roket hızı kanıt oldu.
 >
 > **Sunucunun etiketleri (`update_tags`):** client neye tırmandığını, neyin üstünde durduğunu, nerede yüzdüğünü ve aletinin
 > hangi bloğu kazdığını sunucunun gönderdiği etiketlerden bilir; veri paketi bunları değiştirebilir. WhyNotAC paketi
@@ -120,7 +122,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 599 test
+./gradlew build                       # tüm modüller + 603 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
