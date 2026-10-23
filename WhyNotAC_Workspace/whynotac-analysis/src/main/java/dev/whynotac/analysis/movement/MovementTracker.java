@@ -1,5 +1,6 @@
 package dev.whynotac.analysis.movement;
 
+import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.Box;
@@ -101,6 +102,12 @@ public final class MovementTracker {
     static final int MOVER_MARGIN = 1;
     /** Entities pushing or blocking the player: their boxes searched this much beyond where the player may be. */
     static final double ENTITY_MARGIN = 1.5;
+    static final String FIREWORK_ROCKET = "minecraft:firework_rocket";
+    /**
+     * An attached rocket is where the player is on the client; the server's position for it follows the server's view of
+     * the player, which may lag behind a fast glide: any rocket within this counts.
+     */
+    static final double ROCKET_RADIUS = 32.0;
     /** The world border collides within a few blocks ({@code WorldBorder.isInsideCloseToBorder}); this much is kept free. */
     static final double BORDER_MARGIN = 16.0;
     /** {@code sendPosition}'s threshold, squared as {@code Mth.square(2.0E-4)}. */
@@ -155,6 +162,14 @@ public final class MovementTracker {
     private String lostReason = "no login yet";
     /** False after lost events: the base may have missed packets, so only a new player anchors again. */
     private boolean baseReliable = true;
+    /**
+     * The base's gliding flag: the server's shared flags the client certainly processed last ({@link #lastBaseFlags}), or
+     * a new player's. The client sets it itself when it starts gliding ({@link #lastGlideStart}): an anchor waits for
+     * shared flags the client processed after that.
+     */
+    private boolean baseMayGlide;
+    private long lastBaseFlags = Long.MIN_VALUE;
+    private long lastGlideStart = Long.MIN_VALUE;
 
     // --- the settle anchor's bookkeeping (from what the client sent) --------------------------------------------------
     private PlayerState.Keys currentKeys = PlayerState.Keys.NONE;
@@ -409,6 +424,8 @@ public final class MovementTracker {
         int inputs;
         ServerboundPacket.PlayerCommand sprint;
         int sprints;
+        /** {@code START_FALL_FLYING}: the tick started gliding ({@code LocalPlayer.aiStep}, {@code tryToStartFallFlying}). */
+        int glideStarts;
         ServerboundPacket.MovePlayer move;
         int moves;
         int attacks;
@@ -462,6 +479,10 @@ public final class MovementTracker {
                         case START_SPRINTING, STOP_SPRINTING -> {
                             t.sprint = command;
                             t.sprints++;
+                        }
+                        case START_FALL_FLYING -> {
+                            t.glideStarts++;
+                            lastGlideStart = in.sequence();
                         }
                         case OPEN_INVENTORY -> { }
                         default -> t.unmodelled = "player command " + command.action();
@@ -547,7 +568,7 @@ public final class MovementTracker {
                 starts.removeIf(a -> a.self().using() != null);
                 actedWhileUsing = any && starts.isEmpty();
             }
-            view.checkSurroundings(starts);
+            view.checkSurroundings(starts, in.glideStarts > 0);
             Map<StepKey, OnFoot.Step> steps = new HashMap<>();
             for (Hypothesis a : starts) {
                 simulate(a, in, view, next, steps, predictions);
@@ -716,17 +737,18 @@ public final class MovementTracker {
      * States equal but for the options' masks become one with the masks' union: the options are the client's
      * own and fixed, so the union allows at least every combination either allowed.
      */
-    private static List<Hypothesis> merged(Set<Hypothesis> states) {
+    static List<Hypothesis> merged(Set<Hypothesis> states) {
         Map<Hypothesis, int[]> masks = new LinkedHashMap<>();
         for (Hypothesis h : states) {
-            int[] m = masks.computeIfAbsent(new Hypothesis(h.player(), h.self(), h.sent(), 0, 0, h.applied()), k -> new int[2]);
+            int[] m = masks.computeIfAbsent(new Hypothesis(h.player(), h.self(), h.sent(), 0, 0, 0, h.applied()), k -> new int[3]);
             m[0] |= h.windowMask();
             m[1] |= h.autoJumpMask();
+            m[2] |= h.cosineMask();
         }
         List<Hypothesis> out = new ArrayList<>(masks.size());
         for (Map.Entry<Hypothesis, int[]> e : masks.entrySet()) {
             Hypothesis k = e.getKey();
-            out.add(new Hypothesis(k.player(), k.self(), k.sent(), e.getValue()[0], e.getValue()[1], k.applied()));
+            out.add(new Hypothesis(k.player(), k.self(), k.sent(), e.getValue()[0], e.getValue()[1], e.getValue()[2], k.applied()));
         }
         return List.copyOf(out);
     }
@@ -745,7 +767,7 @@ public final class MovementTracker {
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
     private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, OnFoot.Effects effects,
-            OnFoot.ItemUse use, int window) {}
+            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine) {}
 
     private void lose(String reason) {
         hypotheses = null; // the base goes on from what the server knows for certain
@@ -885,9 +907,7 @@ public final class MovementTracker {
             switch (e.index()) {
                 case 0 -> { // Entity.DATA_SHARED_FLAGS_ID
                     int flags = (int) e.value();
-                    if ((flags & (1 << 7)) != 0) {
-                        throw new Lose("gliding flag set by the server");
-                    }
+                    p = p.withFallFlying((flags & (1 << 7)) != 0); // the server's gliding flag: it starts or ends the client's glide
                     p = withSprinting(p, (flags & (1 << 3)) != 0); // the flag alone: no modifier change
                     p = p.withWater((flags & (1 << 4)) != 0, p.eyeInWater()); // swimming, the server's own
                 }
@@ -899,6 +919,7 @@ public final class MovementTracker {
                         case STANDING -> withPose(p, PlayerState.Pose.STANDING);
                         case CROUCHING -> withPose(p, PlayerState.Pose.CROUCHING);
                         case SWIMMING -> withPose(p, PlayerState.Pose.SWIMMING);
+                        case FALL_FLYING -> withPose(p, PlayerState.Pose.FALL_FLYING);
                         default -> throw new Lose("pose " + pose + " set by the server");
                     };
                 }
@@ -933,9 +954,10 @@ public final class MovementTracker {
         boolean sprintModifier = speed != null && speed.holdsSprinting();
         PlayerState.Pose pose = keepData ? old.pose() : PlayerState.Pose.STANDING;
         PlayerState player = new PlayerState(0.0, 0.0, 0.0, delta, yRot, xRot, false, false, false, false, false, 0.0, sprinting, sprintModifier, false,
-                pose, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO, keepData && old.swimming(), false); // a new entity's eye holds no fluid
+                pose, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO, keepData && old.swimming(), false, // a new entity's eye holds no fluid
+                keepData && old.fallFlying()); // the entity data, with its flags
         Hypothesis.Sent sent = keepData ? Hypothesis.Sent.fresh(h.sent().input(), old.sprinting()) : Hypothesis.Sent.fresh(PlayerState.Keys.NONE, false);
-        return new Hypothesis(player, self, sent, h.windowMask(), h.autoJumpMask(), h.applied());
+        return new Hypothesis(player, self, sent, h.windowMask(), h.autoJumpMask(), h.cosineMask(), h.applied());
     }
 
     private Hypothesis respawned(Hypothesis h, ClientboundPacket.Respawn respawn) throws Lose {
@@ -967,7 +989,7 @@ public final class MovementTracker {
         PlayerState moved = new PlayerState(x, y, z, delta.isFinite() ? delta : d, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(),
                 p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(),
                 p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(),
-                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater());
+                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying());
         return moved;
     }
 
@@ -1000,9 +1022,11 @@ public final class MovementTracker {
         if (in.unmodelled != null) {
             throw new Lose(in.unmodelled);
         }
-        if (in.inputs > 1 || in.sprints > 1 || in.moves > 1) {
-            throw new Lose("several input, sprint or movement packets in one tick");
+        if (in.inputs > 1 || in.sprints > 1 || in.moves > 1 || in.glideStarts > 1) {
+            throw new Lose("several input, sprint, gliding or movement packets in one tick");
         }
+        // the client sends START_FALL_FLYING exactly when tryToStartFallFlying succeeded: with it, it had a glider
+        boolean glider = in.glideStarts > 0;
         Hypothesis.Sent sent = h.sent();
         PlayerState.Keys keys = in.input != null ? keys(in.input) : sent.input();
         if (in.input != null && keys.equals(sent.input())) {
@@ -1039,51 +1063,96 @@ public final class MovementTracker {
         starts = updatingUsingItem(starts, in);
         boolean autoJump = self.firstTick() || (h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON) != 0;
         int window = Integer.numberOfTrailingZeros(h.windowMask());
+        PlatformCos[] platforms = PlatformCos.values();
         for (Start begin : starts) {
-            PlayerState start = begin.player();
-            OnFoot.ItemUse use = begin.using() == null ? null : begin.using().effects();
-            StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), use, window);
-            OnFoot.Step step = steps.get(key);
-            if (step != null && !step.readSprintTrigger()) {
-                // the same step: only this state's own counter counted down (or was cleared by shift or backward)
-                boolean slowDueToUse = use != null && !use.canSprint();
-                int counter = start.keys().shift() || slowDueToUse || keys.backward() ? 0 : Math.max(start.sprintTriggerTime() - 1, 0);
-                step = new OnFoot.Step(withSprintTrigger(step.state(), counter), false, false, step.autoJumpTriggered(), step.speed());
-            } else {
-                try {
-                    step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects(),
-                            use));
-                } catch (Colliders.Unknown e) {
-                    throw new Lose(e.getMessage());
-                }
-                steps.putIfAbsent(key, step);
+            PlatformCos any = platforms[Integer.numberOfTrailingZeros(h.cosineMask())];
+            OnFoot.Step first = step(begin, keys, view, self, autoJump, window, glider, any, steps);
+            if (!first.readCosine()) {
+                successors(h, self, in, begin, first, glider, keys, h.cosineMask(), out, predictions);
+                continue;
             }
-            SelfState after = self.afterFirstTick().withSpeed((SpeedAttribute) step.speed()).withUsing(begin.using());
-            List<Hypothesis> variants = new ArrayList<>();
-            int jumpMask = self.firstTick() ? h.autoJumpMask() : step.autoJumpTriggered() ? h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON : h.autoJumpMask();
-            PlayerState s = step.state();
-            if (step.readSprintWindow()) {
-                for (int option = 0; option <= 10; option++) {
-                    if ((h.windowMask() & (1 << option)) != 0) {
-                        variants.add(new Hypothesis(withSprintTrigger(s, option), self, sent, 1 << option, jumpMask, h.applied()));
+            // a glide: Math.cos is the client's CPU's; each cosine the platforms still possible give at this pitch is a step
+            for (int left = h.cosineMask(); left != 0; ) {
+                PlatformCos p = platforms[Integer.numberOfTrailingZeros(left)];
+                long cosine = Double.doubleToRawLongBits(OnFoot.glideCosine(p, begin.player().xRot()));
+                int same = 0;
+                for (int m = left; m != 0; m &= m - 1) {
+                    PlatformCos q = platforms[Integer.numberOfTrailingZeros(m)];
+                    if (Double.doubleToRawLongBits(OnFoot.glideCosine(q, begin.player().xRot())) == cosine) {
+                        same |= 1 << q.ordinal();
                     }
                 }
-            } else {
-                variants.add(new Hypothesis(s, self, sent, h.windowMask(), jumpMask, h.applied()));
+                OnFoot.Step step = p == any ? first : step(begin, keys, view, self, autoJump, window, glider, p, steps);
+                successors(h, self, in, begin, step, glider, keys, same, out, predictions);
+                left &= ~same;
             }
-            if (step.autoJumpTriggered() && !self.firstTick() && (h.autoJumpMask() & Hypothesis.AUTO_JUMP_OFF) != 0) {
-                int count = variants.size();
-                for (int i = 0; i < count; i++) {
-                    Hypothesis v = variants.get(i);
-                    variants.add(new Hypothesis(withAutoJump(v.player(), 0), self, sent, v.windowMask(), Hypothesis.AUTO_JUMP_OFF, h.applied()));
+        }
+    }
+
+    /**
+     * The step from {@code begin}: from {@code steps} when only the double-tap counter differs (it only counts down
+     * unless the tick met a forward press it could start sprinting on), else run.
+     */
+    private OnFoot.Step step(Start begin, PlayerState.Keys keys, View view, SelfState self, boolean autoJump, int window, boolean glider,
+            PlatformCos cosine, Map<StepKey, OnFoot.Step> steps) throws Lose {
+        PlayerState start = begin.player();
+        OnFoot.ItemUse use = begin.using() == null ? null : begin.using().effects();
+        StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), use, window,
+                glider, cosine);
+        OnFoot.Step step = steps.get(key);
+        if (step != null && !step.readSprintTrigger()) {
+            // the same step: only this state's own counter counted down (or was cleared by shift or backward)
+            boolean slowDueToUse = use != null && !use.canSprint();
+            int counter = start.keys().shift() || slowDueToUse || keys.backward() ? 0 : Math.max(start.sprintTriggerTime() - 1, 0);
+            return new OnFoot.Step(withSprintTrigger(step.state(), counter), false, false, step.autoJumpTriggered(), step.speed(),
+                    step.startedGliding(), step.readCosine());
+        }
+        try {
+            step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects(),
+                    use, glider, cosine));
+        } catch (Colliders.Unknown e) {
+            throw new Lose(e.getMessage());
+        }
+        steps.putIfAbsent(key, step);
+        return step;
+    }
+
+    /**
+     * The hypotheses after {@code step} from {@code begin} that send what the client sent, with the options the step read;
+     * {@code cosineMask}: the platforms whose {@code Math.cos} the step took.
+     */
+    private void successors(Hypothesis h, SelfState self, TickInput in, Start begin, OnFoot.Step step, boolean glider, PlayerState.Keys keys,
+            int cosineMask, Set<Hypothesis> out, List<PlayerState> predictions) {
+        Hypothesis.Sent sent = h.sent();
+        if (step.startedGliding() != glider) {
+            return; // START_FALL_FLYING sent without the start, or a start without it
+        }
+        SelfState after = self.afterFirstTick().withSpeed((SpeedAttribute) step.speed()).withUsing(begin.using());
+        List<Hypothesis> variants = new ArrayList<>();
+        int jumpMask = self.firstTick() ? h.autoJumpMask() : step.autoJumpTriggered() ? h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON : h.autoJumpMask();
+        PlayerState s = step.state();
+        if (step.readSprintWindow()) {
+            for (int option = 0; option <= 10; option++) {
+                if ((h.windowMask() & (1 << option)) != 0) {
+                    variants.add(new Hypothesis(withSprintTrigger(s, option), self, sent, 1 << option, jumpMask, cosineMask, h.applied()));
                 }
             }
-            for (Hypothesis v : variants) {
-                predictions.add(v.player());
-                Hypothesis.Sent sentAfter = observe(v.player(), sent, keys, in);
-                if (sentAfter != null) {
-                    out.add(new Hypothesis(v.player(), after, sentAfter, v.windowMask(), v.autoJumpMask(), h.applied()));
-                }
+        } else {
+            variants.add(new Hypothesis(s, self, sent, h.windowMask(), jumpMask, cosineMask, h.applied()));
+        }
+        if (step.autoJumpTriggered() && !self.firstTick() && (h.autoJumpMask() & Hypothesis.AUTO_JUMP_OFF) != 0) {
+            int count = variants.size();
+            for (int i = 0; i < count; i++) {
+                Hypothesis v = variants.get(i);
+                variants.add(new Hypothesis(withAutoJump(v.player(), 0), self, sent, v.windowMask(), Hypothesis.AUTO_JUMP_OFF, cosineMask,
+                        h.applied()));
+            }
+        }
+        for (Hypothesis v : variants) {
+            predictions.add(v.player());
+            Hypothesis.Sent sentAfter = observe(v.player(), sent, keys, in);
+            if (sentAfter != null) {
+                out.add(new Hypothesis(v.player(), after, sentAfter, v.windowMask(), v.autoJumpMask(), cosineMask, h.applied()));
             }
         }
     }
@@ -1321,7 +1390,7 @@ public final class MovementTracker {
      * player those packets made (login, or a respawn keeping no entity data), positioned after its packet, or null.
      */
     private Hypothesis advanceBase(long must) {
-        Hypothesis b = new Hypothesis(null, base, baseSent, Hypothesis.ALL_WINDOWS, Hypothesis.AUTO_JUMP_ANY, baseApplied);
+        Hypothesis b = new Hypothesis(null, base, baseSent, Hypothesis.ALL_WINDOWS, Hypothesis.AUTO_JUMP_ANY, Hypothesis.ALL_COSINES, baseApplied);
         Hypothesis fresh = null;
         for (long i = baseApplied; i < must; i++) {
             ClientboundPacket packet = pendingAt(i).packet();
@@ -1329,6 +1398,21 @@ public final class MovementTracker {
                 b = applyBase(b, packet).withApplied(i + 1);
             } catch (Lose e) {
                 b = b.withApplied(i + 1);
+            }
+            switch (packet) {
+                case ClientboundPacket.Login ignored -> baseMayGlide = false;
+                case ClientboundPacket.Respawn r when r.dataToKeep() < 0 -> baseMayGlide = true; // what it keeps is not known
+                case ClientboundPacket.Respawn r when (r.dataToKeep() & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) == 0 -> baseMayGlide = false;
+                case ClientboundPacket.SetEntityData data -> {
+                    for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
+                        if (e.index() == 0) {
+                            baseMayGlide = (e.value() & (1 << 7)) != 0;
+                            lastBaseFlags = pendingAt(i).sequence();
+                        }
+                    }
+                }
+                case ClientboundPacket.Untranslatable ignored -> baseMayGlide = true;
+                default -> { }
             }
             boolean newPlayer = packet instanceof ClientboundPacket.Login
                     || packet instanceof ClientboundPacket.Respawn r && r.dataToKeep() >= 0 && (r.dataToKeep() & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) == 0;
@@ -1430,6 +1514,9 @@ public final class MovementTracker {
                 || move.horizontalCollision() || base.outOfScope() != null) {
             return null;
         }
+        if (baseMayGlide || lastGlideStart != Long.MIN_VALUE && lastBaseFlags < lastGlideStart) {
+            return null; // the client may still glide: only the server's flags, processed after its start, end it
+        }
         View view = new View(world, entities, selfId);
         double x = move.x();
         double y = move.y();
@@ -1464,7 +1551,7 @@ public final class MovementTracker {
                 return null;
             }
             return new Hypothesis(first, base, baseSent, Hypothesis.ALL_WINDOWS, base.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY,
-                    baseApplied);
+                    Hypothesis.ALL_COSINES, baseApplied);
         } catch (Colliders.Unknown | Lose e) {
             return null;
         }
@@ -1551,7 +1638,7 @@ public final class MovementTracker {
          * No entity that collides (or pushes otherwise than living entities in their tick, which {@link #pushed} follows), no
          * piston, the world border far, around everywhere the player may be this tick.
          */
-        void checkSurroundings(List<Hypothesis> starts) throws Lose {
+        void checkSurroundings(List<Hypothesis> starts, boolean glideStarts) throws Lose {
             double minX = Double.POSITIVE_INFINITY;
             double minY = Double.POSITIVE_INFINITY;
             double minZ = Double.POSITIVE_INFINITY;
@@ -1568,6 +1655,10 @@ public final class MovementTracker {
                 Box box = p.box();
                 if (!h.self().border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN + reach)) {
                     throw new Lose("near the world border");
+                }
+                // FireworkRocketEntity.tick, after the player's: an attached rocket boosts a gliding player for the next tick
+                if ((p.fallFlying() || glideStarts) && entities.mayHaveNear(FIREWORK_ROCKET, p.x(), p.y(), p.z(), ROCKET_RADIUS + reach, Long.MIN_VALUE)) {
+                    throw new Lose("a firework rocket may boost the gliding player");
                 }
                 minX = Math.min(minX, box.minX() - reach);
                 minY = Math.min(minY, box.minY() - reach);
@@ -1607,7 +1698,8 @@ public final class MovementTracker {
             int sprintTrigger, int autoJump) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), sprinting, sprintModifier, p.crouching(), pose, p.keys(),
-                p.noJumpDelay(), sprintTrigger, autoJump, p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater());
+                p.noJumpDelay(), sprintTrigger, autoJump, p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(),
+                p.fallFlying());
     }
 
     private static PlayerState rotated(PlayerState p, float yRot, float xRot) {

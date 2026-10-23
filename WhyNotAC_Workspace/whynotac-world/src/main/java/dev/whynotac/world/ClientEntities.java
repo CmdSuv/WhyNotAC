@@ -1517,7 +1517,8 @@ public final class ClientEntities {
                 if (near[0] || st.known() && !st.present()) {
                     return;
                 }
-                String t = st.known() ? st.type() : head != null ? head.type : null;
+                // a candidate lost in place keeps its type (as in push)
+                String t = st.type() != null ? st.type() : head != null ? head.type : null;
                 if (t != null && !t.equals(type)) {
                     return;
                 }

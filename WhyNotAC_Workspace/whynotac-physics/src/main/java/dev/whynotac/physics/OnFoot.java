@@ -1,5 +1,6 @@
 package dev.whynotac.physics;
 
+import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.world.BlockStates;
@@ -11,9 +12,10 @@ import java.util.List;
  * ({@code travelInAir}: friction, the input impulse, {@code Entity.move} with collisions and step-up,
  * gravity and drag) and the pose for the next tick ({@code Player.updatePlayerPose}).
  *
- * <p>The scope is a survival player on foot, in water or lava or crawling, with default attributes but the speed
- * ({@link Speed}) and the effects the step reads ({@link Effects}), using an item or not ({@link ItemUse}),
- * not riding, flying or gliding, away from powder snow, solid entities and the world border; the fluids' currents and
+ * <p>The scope is a survival player on foot, in water or lava or crawling, or gliding with an elytra in the air
+ * ({@code travelFallFlying}), with default attributes but the speed ({@link Speed}) and the effects the step reads
+ * ({@link Effects}), using an item or not ({@link ItemUse}), not riding or flying, not gliding in a fluid, away from
+ * powder snow, solid entities and the world border; the fluids' currents and
  * the blocks that move the player from inside (cobwebs, berry bushes, honey slides, bubble columns) are followed.
  * Outside it, or where the client's world is not known, {@link Colliders.Unknown} is thrown: no claim can rest on that
  * tick. Sources: the decompiled client, {@code LocalPlayer},
@@ -43,6 +45,13 @@ public final class OnFoot {
     public static final java.util.Set<String> CLIMBABLE = java.util.Set.of("minecraft:ladder", "minecraft:vine", "minecraft:scaffolding",
             "minecraft:weeping_vines", "minecraft:weeping_vines_plant", "minecraft:twisting_vines", "minecraft:twisting_vines_plant",
             "minecraft:cave_vines", "minecraft:cave_vines_plant");
+    /** {@code BlockTags.FALL_DAMAGE_RESETTING}: the climbable blocks, sweet berry bushes and cobwebs. */
+    public static final java.util.Set<String> FALL_DAMAGE_RESETTING = java.util.stream.Stream.concat(CLIMBABLE.stream(),
+            java.util.stream.Stream.of("minecraft:sweet_berry_bush", "minecraft:cobweb")).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    /** {@code BlockTags.CAN_GLIDE_THROUGH} (its {@code #cave_vines} expanded): not climbable while gliding. */
+    public static final java.util.Set<String> CAN_GLIDE_THROUGH = java.util.Set.of("minecraft:vine", "minecraft:twisting_vines",
+            "minecraft:twisting_vines_plant", "minecraft:weeping_vines", "minecraft:weeping_vines_plant", "minecraft:cave_vines",
+            "minecraft:cave_vines_plant");
 
     /**
      * What the step needs beyond the player and the world.
@@ -53,8 +62,13 @@ public final class OnFoot {
      * @param speed            the movement speed attribute's value ({@code AttributeInstance.getValue})
      * @param effects          the player's active effects the step reads
      * @param use              the item the player is using during the tick, or null
+     * @param glider           an item in its equippable slot can glide ({@code LivingEntity.canGlideUsing}: the glider
+     *                         component, not about to break): a new jump press in the air then starts gliding
+     * @param cosine           the client's {@code Math.cos} ({@link PlatformCos}): a glide reads it
+     *                         ({@code updateFallFlyingMovement}), and it is an intrinsic of the client's CPU
      */
-    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use) {
+    public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
+            boolean glider, PlatformCos cosine) {
         public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE, null);
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
@@ -67,6 +81,15 @@ public final class OnFoot {
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects) {
             this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, null);
+        }
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, false);
+        }
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
+                boolean glider) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, PlatformCos.X86_64);
         }
     }
 
@@ -130,8 +153,21 @@ public final class OnFoot {
      * @param readSprintWindow   the tick started the double-tap window: {@code sprintTriggerTime} was set to the option
      * @param autoJumpTriggered  with auto-jump enabled, the tick set {@code autoJumpTime} to 1 (the next tick jumps)
      * @param speed              the speed attribute after the tick's {@code setSprinting} calls
+     * @param startedGliding     the tick started gliding: the client sent {@code START_FALL_FLYING}
+     * @param readCosine         the tick glided: its motion depended on the client's {@code Math.cos}
+     *                           ({@link Conditions#cosine}, {@link #glideCosine})
      */
-    public record Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered, Speed speed) {}
+    public record Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered, Speed speed,
+            boolean startedGliding, boolean readCosine) {
+        public Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered, Speed speed) {
+            this(state, readSprintTrigger, readSprintWindow, autoJumpTriggered, speed, false, false);
+        }
+
+        public Step(PlayerState state, boolean readSprintTrigger, boolean readSprintWindow, boolean autoJumpTriggered, Speed speed,
+                boolean startedGliding) {
+            this(state, readSprintTrigger, readSprintWindow, autoJumpTriggered, speed, startedGliding, false);
+        }
+    }
 
     private final Colliders.World world;
     private final BlockStates states;
@@ -166,6 +202,9 @@ public final class OnFoot {
     private boolean onGroundNoBlocks;
     private Vec3d stuck;
     private boolean swimming;
+    private boolean fallFlying;
+    private boolean startedGliding;
+    private boolean readCosine;
     /** {@code fluidOnEyes} holds water: set by this tick's {@code updateFluidOnEyes}, read as the last tick's before it. */
     private boolean eyeInWater;
     /** {@code Player.wasUnderwater}: what {@code LocalPlayer.isUnderWater} returns this tick. */
@@ -218,6 +257,7 @@ public final class OnFoot {
         stuck = pre.stuckSpeedMultiplier();
         swimming = pre.swimming();
         eyeInWater = pre.eyeInWater();
+        fallFlying = pre.fallFlying();
         oldPosition = new Vec3d(x, y, z);
     }
 
@@ -230,7 +270,8 @@ public final class OnFoot {
     public static Step step(PlayerState pre, PlayerState.Keys keys, Colliders.World world, Conditions conditions) throws Colliders.Unknown {
         OnFoot tick = new OnFoot(pre, world, conditions);
         tick.run(keys);
-        return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered, tick.speed);
+        return new Step(tick.state(), tick.readSprintTrigger, tick.readSprintWindow, tick.autoJumpTriggered, tick.speed, tick.startedGliding,
+                tick.readCosine);
     }
 
     /**
@@ -280,7 +321,7 @@ public final class OnFoot {
     private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuck, swimming, eyeInWater);
+                onGroundNoBlocks, stuck, swimming, eyeInWater, fallFlying);
     }
 
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
@@ -300,6 +341,7 @@ public final class OnFoot {
             sprintTriggerTime--;
         }
         boolean previousShift = keys.shift();
+        boolean previousJump = keys.jump(); // aiStep reads the keys before input.tick()
         moveVector(keys); // the previous tick's vector, from its keys
         boolean previousForward = moveY > 1.0E-5F;
         crouching = !swimming && fits(PlayerState.Pose.CROUCHING) && (previousShift || !fits(PlayerState.Pose.STANDING));
@@ -315,10 +357,11 @@ public final class OnFoot {
             sprintTriggerTime = 0;
         }
         boolean forward = moveY > 1.0E-5F;
-        boolean movingSlowly = crouching || pose == PlayerState.Pose.SWIMMING && !wasTouchingWater; // crouching or crawling
+        // isMovingSlowly: crouching or crawling (isVisuallyCrawling: visually swimming, which a glide's pose is once it stopped)
+        boolean movingSlowly = crouching || (pose == PlayerState.Pose.SWIMMING || !fallFlying && pose == PlayerState.Pose.FALL_FLYING) && !wasTouchingWater;
         boolean sprintAllowed = !conditions.effects().blindness() && conditions.foodAllowsSprint();
         boolean sprintPossible = sprintAllowed && !(wasTouchingWater && !wasUnderwater); // isSprintingPossible: not in shallow water
-        if (!sprinting && forward && sprintPossible && !slowDueToUse && (!movingSlowly || wasUnderwater)) { // canStartSprinting
+        if (!sprinting && forward && sprintPossible && !slowDueToUse && (!fallFlying || wasUnderwater) && (!movingSlowly || wasUnderwater)) { // canStartSprinting
             if (!previousForward) {
                 readSprintTrigger = true;
                 if (sprintTriggerTime > 0) {
@@ -340,6 +383,12 @@ public final class OnFoot {
             } else if (!sprintPossible || !forward || horizontalCollision && !minorHorizontalCollision) { // shouldStopRunSprinting
                 setSprinting(false);
             }
+        }
+        // a new jump press: tryToStartFallFlying (not gliding, canGlide: in the air, no levitation, a glider; not in water)
+        if (keys.jump() && !previousJump && !onClimbable() && !fallFlying && !onGround && conditions.effects().levitation() == 0 && conditions.glider()
+                && !wasTouchingWater) {
+            fallFlying = true; // startFallFlying, and START_FALL_FLYING sent
+            startedGliding = true;
         }
         if (wasTouchingWater && keys.shift()) {
             delta = delta.add(0.0, -0.04F, 0.0); // goDownInWater
@@ -381,6 +430,9 @@ public final class OnFoot {
         } else {
             noJumpDelay = 0;
         }
+        if (fallFlying && delta.y() > -0.5 && fallDistance > 1.0) {
+            fallDistance = 1.0; // updateFallFlying: checkFallDistanceAccumulation (the rest is the server's)
+        }
         if (conditions.effects().slowFalling() || conditions.effects().levitation() > 0) {
             fallDistance = 0.0; // resetFallDistance
         }
@@ -392,10 +444,15 @@ public final class OnFoot {
                 delta = delta.add(0.0, (look - delta.y()) * pull, 0.0);
             }
         }
-        if (wasTouchingWater) { // LivingEntity.travel: shouldTravelInFluid, then travelInFluid
+        if (fallFlying && (wasTouchingWater || lavaHeight > 0.0)) {
+            throw new Colliders.Unknown("gliding in a fluid");
+        }
+        if (wasTouchingWater) { // LivingEntity.travel: shouldTravelInFluid, then travelInFluid, gliding, the air
             travelInWater(input);
         } else if (lavaHeight > 0.0) {
             travelInLava(input);
+        } else if (fallFlying) {
+            travelFallFlying(input);
         } else {
             travelInAir(input);
         }
@@ -520,6 +577,49 @@ public final class OnFoot {
             vy = 0.0;
         }
         delta = new Vec3d(moved.x() * drag, vy * 0.98F, moved.z() * drag);
+    }
+
+    /** {@code LivingEntity.travelFallFlying}: a climbable block ends the glide after a step in the air. */
+    private void travelFallFlying(Vec3d input) throws Colliders.Unknown {
+        if (onClimbable()) {
+            travelInAir(input);
+            fallFlying = false; // stopFallFlying
+            return;
+        }
+        delta = updateFallFlyingMovement(delta);
+        Box before = pose.box(x, y, z);
+        move(delta);
+        requireInScope(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
+    }
+
+    /** The {@code Math.cos} of a glide at this pitch on {@code platform}: {@code updateFallFlyingMovement}'s, of the float pitch. */
+    public static double glideCosine(PlatformCos platform, float xRot) {
+        return platform.cos(xRot * (float) (Math.PI / 180.0));
+    }
+
+    /** {@code LivingEntity.updateFallFlyingMovement}, in its own order and precision ({@code Math.cos} of the float pitch). */
+    private Vec3d updateFallFlyingMovement(Vec3d d) {
+        Vec3d look = Vec3d.viewVector(xRot, yRot); // getLookAngle
+        float pitch = xRot * (float) (Math.PI / 180.0);
+        double lookHorizontal = Math.sqrt(look.x() * look.x() + look.z() * look.z());
+        double speed = d.horizontalDistance();
+        double gravity = d.y() <= 0.0 && conditions.effects().slowFalling() ? Math.min(GRAVITY, 0.01) : GRAVITY; // getEffectiveGravity
+        double cosPitch = glideCosine(conditions.cosine(), xRot);
+        readCosine = true;
+        double lift = cosPitch * cosPitch; // Mth.square
+        d = d.add(0.0, gravity * (-1.0 + lift * 0.75), 0.0);
+        if (d.y() < 0.0 && lookHorizontal > 0.0) {
+            double sink = d.y() * -0.1 * lift;
+            d = d.add(look.x() * sink / lookHorizontal, sink, look.z() * sink / lookHorizontal);
+        }
+        if (pitch < 0.0F && lookHorizontal > 0.0) {
+            double climb = speed * -VanillaMath.sin(pitch) * 0.04;
+            d = d.add(-look.x() * climb / lookHorizontal, climb * 3.2, -look.z() * climb / lookHorizontal);
+        }
+        if (lookHorizontal > 0.0) {
+            d = d.add((look.x() / lookHorizontal * speed - d.x()) * 0.1, 0.0, (look.z() / lookHorizontal * speed - d.z()) * 0.1);
+        }
+        return d.multiply(0.99F, 0.98F, 0.99F);
     }
 
     private int minY() throws Colliders.Unknown {
@@ -937,6 +1037,43 @@ public final class OnFoot {
         return new Colliders.Context(y, keys.shift());
     }
 
+    /** The most cells a move's ray is followed through ({@link #mayResetTheFall}); beyond, it is not followed. */
+    private static final int MAX_RAY_CELLS = 512;
+
+    /**
+     * {@code Entity.move}: a move of a block or more while falling casts a ray from the feet along it, at most 8 long
+     * ({@code Level.clip} with {@code ClipContext.Block.FALLDAMAGE_RESETTING}, {@code ClipContext.Fluid.WATER}), and the
+     * fall resets where it meets a block of {@link #FALL_DAMAGE_RESETTING} (its shape a full block) or water. Where it
+     * meets them is not modelled: false only if no cell the move's ray can pass through ({@code traverseBlocks}: within
+     * the move's bounds) holds either.
+     */
+    private boolean mayResetTheFall(Vec3d move) throws Colliders.Unknown {
+        double margin = 1.0E-6; // traverseBlocks starts and ends 1.0E-7 beyond the segment's ends
+        int fromX = (int) Math.floor(Math.min(x, x + move.x()) - margin);
+        int fromY = (int) Math.floor(Math.min(y, y + move.y()) - margin);
+        int fromZ = (int) Math.floor(Math.min(z, z + move.z()) - margin);
+        int toX = (int) Math.floor(Math.max(x, x + move.x()) + margin);
+        int toY = (int) Math.floor(Math.max(y, y + move.y()) + margin);
+        int toZ = (int) Math.floor(Math.max(z, z + move.z()) + margin);
+        if ((long) (toX - fromX + 1) * (toY - fromY + 1) * (toZ - fromZ + 1) > MAX_RAY_CELLS) {
+            return true;
+        }
+        for (int bx = fromX; bx <= toX; bx++) {
+            for (int bz = fromZ; bz <= toZ; bz++) {
+                if (!world.isLoaded(bx >> 4, bz >> 4)) {
+                    return true; // the client's ray may meet what it holds there
+                }
+                for (int by = fromY; by <= toY; by++) {
+                    int s = state(new BlockPos(bx, by, bz));
+                    if (FALL_DAMAGE_RESETTING.contains(states.block(s)) || states.fluidKind(s) == BlockStates.FLUID_WATER) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     /** {@code blockState.getCollisionShape(level, pos, CollisionContext.of(player))}, unmoved. */
     private Voxels collisionShape(BlockPos pos) throws Colliders.Unknown {
         return Voxels.of(Colliders.playerShape(states, state(pos), context(), pos.x(), pos.y(), pos.z()));
@@ -954,7 +1091,7 @@ public final class OnFoot {
         Vec3d collided = Collide.collide(world, context(), box, movement, onGround, STEP_HEIGHT, List.of());
         double length = collided.lengthSqr();
         if (length > 1.0E-7 || movement.lengthSqr() - length < 1.0E-7) {
-            if (fallDistance != 0.0 && length >= 1.0) {
+            if (fallDistance != 0.0 && length >= 1.0 && mayResetTheFall(collided)) {
                 throw new Colliders.Unknown("a fall reset by a ray (not modelled)");
             }
             Vec3d from = new Vec3d(x, y, z);
@@ -1084,8 +1221,12 @@ public final class OnFoot {
         }
     }
 
-    /** {@code LocalPlayer.isHorizontalCollisionMinor}: the collision is within 8 degrees of the walking direction. */
-    private boolean isHorizontalCollisionMinor(Vec3d movement) {
+    /**
+     * {@code LocalPlayer.isHorizontalCollisionMinor}: the collision is within 8 degrees of the walking direction. The
+     * client's {@code Math.acos} (HotSpot's is {@code StrictMath.acos}) may be another JVM's, within an ulp of the exact
+     * value as this one is: an angle within two ulps of the threshold may compare either way and is not followed.
+     */
+    private boolean isHorizontalCollisionMinor(Vec3d movement) throws Colliders.Unknown {
         float radians = yRot * VanillaMath.DEG_TO_RAD;
         double sin = VanillaMath.sin(radians);
         double cos = VanillaMath.cos(radians);
@@ -1096,13 +1237,19 @@ public final class OnFoot {
         if (!(walk < 1.0E-5F) && !(moved < 1.0E-5F)) {
             double dot = wx * movement.x() + wz * movement.z();
             double angle = StrictMath.acos(dot / Math.sqrt(walk * moved));
+            if (Math.abs(angle - 0.13962634F) <= 2.0 * Math.ulp(angle)) {
+                throw new Colliders.Unknown("a minor collision at its threshold, as another JVM's acos may compare");
+            }
             return angle < 0.13962634F;
         }
         return false;
     }
 
-    /** {@code Entity.getBlockSpeedFactor} (no movement-efficiency attribute, not flying or gliding). */
+    /** {@code Player.getBlockSpeedFactor}: 1 while gliding, else {@code Entity}'s (no movement-efficiency attribute, not flying). */
     private float blockSpeedFactor() throws Colliders.Unknown {
+        if (fallFlying) {
+            return 1.0F;
+        }
         int feet = state(BlockPos.containing(x, y, z));
         float factor = states.speedFactor(feet);
         String block = states.block(feet);
@@ -1259,7 +1406,8 @@ public final class OnFoot {
     /** {@code Player.updatePlayerPose}, with the current shift key. */
     private void updatePlayerPose() throws Colliders.Unknown {
         if (fits(PlayerState.Pose.SWIMMING)) {
-            PlayerState.Pose desired = swimming ? PlayerState.Pose.SWIMMING : keys.shift() ? PlayerState.Pose.CROUCHING : PlayerState.Pose.STANDING;
+            PlayerState.Pose desired = swimming ? PlayerState.Pose.SWIMMING : fallFlying ? PlayerState.Pose.FALL_FLYING
+                    : keys.shift() ? PlayerState.Pose.CROUCHING : PlayerState.Pose.STANDING; // getDesiredPose
             if (fits(desired)) {
                 pose = desired;
             } else if (fits(PlayerState.Pose.CROUCHING)) {
@@ -1367,6 +1515,9 @@ public final class OnFoot {
         BlockPos feet = BlockPos.containing(x, y, z);
         int s = state(feet);
         String block = states.block(s);
+        if (fallFlying && CAN_GLIDE_THROUGH.contains(block)) {
+            return false;
+        }
         if (CLIMBABLE.contains(block)) {
             return true;
         }

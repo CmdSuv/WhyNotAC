@@ -373,6 +373,22 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1/1.6 -/0.5; sleep 0.5
 # Player.getDestroySpeed divides by 5 (break-time counts a fifth where the client's own flag says so; BreakAudit.java).
 echo "tp $NAME 86.5 -60 20.5 0 90" > "$FIFO"; sleep 1.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1,space/10.0 -/0.5; sleep 0.5
+# Gliding with an elytra in the chest slot, east along z = 45.5 (clear of the course; the ground first, so its chunks
+# arrive): placed 30 blocks up looking 20 degrees down, the player falls, a press of the jump key in the air starts the
+# glide (LocalPlayer.aiStep, tryToStartFallFlying: the client sends START_FALL_FLYING), and it glides down to the
+# ground, where the server ends it (its shared flags); from the ground a jump, then a second press at its top, starts a
+# short glide; then 20 blocks up looking 5 degrees down with W held throughout (travelFallFlying takes no input); 20 blocks up
+# diving at 34.2 degrees, where x86_64's Math.cos is not fdlibm's (PlatformCos), the sprint keys pressed once it glides
+# (no sprint starts while gliding); 15 blocks up looking 15 degrees up (the climb).
+glide() { echo "tp $NAME $1 -60 45.5 -90 0" > "$FIFO"; sleep 1.5; echo "tp $NAME $1 $2 45.5 -90 $3" > "$FIFO"; sleep 0.3; shift 3
+  python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+echo "item replace entity $NAME armor.chest with minecraft:elytra" > "$FIFO"; sleep 0.5
+glide 40.5 -30 20 -/0.4 space/0.2 -/8.0
+glide 40.5 -60 0 space/0.1 -/0.2 space/0.2 -/2.0
+glide 40.5 -40 5 w/0.4 w,space/0.2 w/6.0 -/1.0
+glide 40.5 -40 34.2 -/0.4 space/0.2 w,Control_L/3.0 -/1.0
+glide 40.5 -45 -15 -/0.4 space/0.2 -/10.0
+echo "item replace entity $NAME armor.chest with minecraft:air" > "$FIFO"; sleep 0.5
 # Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
 # y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at
 # x 13 floods eight blocks east, walked into from the east against the current, stood in and jumped in. The session ends

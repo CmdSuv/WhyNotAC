@@ -1,6 +1,7 @@
 package dev.whynotac.analysis.checks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.whynotac.analysis.evidence.Admissibility;
@@ -8,6 +9,7 @@ import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.analysis.movement.MovementTracker;
+import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.Box;
@@ -39,6 +41,8 @@ import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * The check over a client that runs the same on-foot step and sends what {@code LocalPlayer} sends: its own
@@ -59,6 +63,7 @@ class MovementCheckTest {
     private static final PlayerState.Keys SPRINT = new PlayerState.Keys(true, false, false, false, false, false, true);
     private static final PlayerState.Keys SPRINT_JUMP = new PlayerState.Keys(true, false, false, false, true, false, true);
     private static final PlayerState.Keys STRAFE_SNEAK = new PlayerState.Keys(false, false, true, false, false, true, false);
+    private static final PlayerState.Keys JUMP = new PlayerState.Keys(false, false, false, false, true, false, false);
 
     /** Blocks placed on the ground ({@link #place}), as the synthetic client holds them. */
     private final Map<List<Integer>, Integer> placed = new java.util.HashMap<>();
@@ -112,6 +117,11 @@ class MovementCheckTest {
     private PlayerState.Keys sentInput = NONE;
     private final ClientSpeed speed = new ClientSpeed();
     private OnFoot.Effects effects = OnFoot.Effects.NONE;
+    /** The synthetic client wears an elytra that can glide, and whether it tells the server when it starts. */
+    private boolean elytra;
+    private boolean sendsGlideStart = true;
+    /** The synthetic client's CPU: its {@code Math.cos}. */
+    private PlatformCos platform = PlatformCos.X86_64;
     /** The item the synthetic client uses (null: none), and what it sends from its keybinds at the start of the next tick. */
     private OnFoot.ItemUse use;
     /** Villagers without AI (they stay where they were added; added after the player, they tick after it): {x, y, z}. */
@@ -235,7 +245,7 @@ class MovementCheckTest {
         player = new PlayerState(x, y, z, Vec3d.ZERO, yaw, pitch, player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
                 player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(), player.sprintModifier(),
                 player.crouching(), player.pose(), player.keys(), player.noJumpDelay(), player.sprintTriggerTime(), player.autoJumpTime(), player.support(),
-                player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater());
+                player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(), player.fallFlying());
         in(new ServerboundPacket.AcceptTeleportation(id));
         in(new ServerboundPacket.MovePlayer(x, y, z, yaw, pitch, true, true, false, false));
     }
@@ -245,8 +255,13 @@ class MovementCheckTest {
         keybinds.forEach(this::in); // Minecraft.handleKeybinds, before the player's tick
         keybinds.clear();
         PlayerState pre = rotate(player, yRot, xRot);
-        PlayerState post = OnFoot.tick(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects, use));
+        OnFoot.Step step = OnFoot.step(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects, use,
+                elytra, platform));
+        PlayerState post = step.state();
         firstTick = false;
+        if (step.startedGliding() && sendsGlideStart) {
+            in(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_FALL_FLYING, 0)); // LocalPlayer.aiStep
+        }
         if (!cheat.equals(Vec3d.ZERO)) {
             post = move(post, cheat);
         }
@@ -350,6 +365,49 @@ class MovementCheckTest {
         sync();
     }
 
+    /** The server's shared flags (sprinting, gliding) as the client holds them, handled before its next tick. */
+    private void sharedFlags(boolean gliding) {
+        out(new ClientboundPacket.SetEntityData(SELF, List.of(new ClientboundPacket.SetEntityData.DataEntry(0, ClientboundPacket.SetEntityData.Kind.BYTE,
+                (player.sprinting() ? 1 << 3 : 0) | (gliding ? 1 << 7 : 0))), 0));
+        sync();
+        player = player.withFallFlying(gliding);
+    }
+
+    /**
+     * From high up, a jump press starts a glide that turns {@code turn} degrees a tick, looking {@code pitch(i)} down in
+     * its tick {@code i} (up when negative), until the player lands; the server echoes the start, then ends the glide the
+     * tick after the landing.
+     */
+    private void glide(float turn, java.util.function.IntToDoubleFunction pitch) throws Colliders.Unknown {
+        startGlide();
+        float yaw = -90.0F;
+        for (int i = 0; i < 400 && !player.onGround(); i++) {
+            tick(NONE, yaw -= turn, (float) pitch.applyAsDouble(i), Vec3d.ZERO);
+        }
+        assertTrue(player.onGround() && player.fallFlying(), String.valueOf(player));
+        land(yaw);
+    }
+
+    /** A jump press in the air over the ground, facing east, starts the glide; the server echoes it a tick later. */
+    private void startGlide() throws Colliders.Unknown {
+        elytra = true;
+        teleport(0.5, 100.0, 16.5, -90.0F, 0.0F);
+        ticks(5, NONE, -90.0F);
+        tick(JUMP, -90.0F, 10.0F, Vec3d.ZERO);
+        assertTrue(player.fallFlying(), String.valueOf(player));
+        tick(NONE, -90.0F, 10.0F, Vec3d.ZERO);
+        sharedFlags(true); // the server's echo of tryToStartFallFlying
+    }
+
+    /** On the ground, gliding still: a tick sliding on, then the server ends the glide and the player stands. */
+    private void land(float yaw) throws Colliders.Unknown {
+        tick(NONE, yaw, 0.0F, Vec3d.ZERO);
+        sharedFlags(false); // LivingEntity.updateFallFlying on the server: it cannot glide on the ground
+        ticks(20, NONE, yaw);
+        assertFalse(player.fallFlying());
+        assertEquals(PlayerState.Pose.STANDING, player.pose());
+    }
+
     private static ServerboundPacket.UseItem useItem(Hand hand) {
         return new ServerboundPacket.UseItem(hand, 1, 30.0F, 0.0F);
     }
@@ -417,28 +475,28 @@ class MovementCheckTest {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater());
+                p.swimming(), p.eyeInWater(), p.fallFlying());
     }
 
     private static PlayerState move(PlayerState p, Vec3d by) {
         return new PlayerState(p.x() + by.x(), p.y() + by.y(), p.z() + by.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(),
                 p.horizontalCollision(), p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(),
                 p.sprintModifier(), p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(),
-                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater());
+                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying());
     }
 
     private static PlayerState withDelta(PlayerState p, Vec3d delta) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater());
+                p.swimming(), p.eyeInWater(), p.fallFlying());
     }
 
     private static PlayerState withSprintModifier(PlayerState p, boolean sprintModifier) {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), sprintModifier, p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater());
+                p.swimming(), p.eyeInWater(), p.fallFlying());
     }
 
     /** The server sets a block; the client handles it before its next tick. */
@@ -1045,5 +1103,122 @@ class MovementCheckTest {
         ticks(5, FORWARD, -90.0F);
         tick(FORWARD, -90.0F, 0.0F, new Vec3d(0.1, 0.0, 0.0));
         assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void aGlideFromHighUpIsFollowedToItsLanding() throws Exception {
+        int from = ticks.size();
+        glide(4.0F, i -> 10.0F);
+        glide(-6.5F, i -> i % 50 < 30 ? 40.0F : -25.0F); // diving and pulling up
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void glidingFurtherThanTheGlideCarriesIsAFinding() throws Exception {
+        startGlide();
+        ticks(20, NONE, -90.0F);
+        tick(NONE, -90.0F, 10.0F, new Vec3d(0.03, 0.0, 0.0));
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void aGlideStartTheClientCouldNotMakeIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        keybinds.add(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_FALL_FLYING, 0)); // on the ground
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 2, ticks.size())));
+    }
+
+    @Test
+    void aGlideWithoutItsStartIsAFinding() throws Exception {
+        elytra = true;
+        teleport(0.5, 100.0, 16.5, -90.0F, 0.0F);
+        ticks(5, NONE, -90.0F);
+        sendsGlideStart = false; // it glides, but the server is not told
+        tick(JUMP, -90.0F, 10.0F, Vec3d.ZERO);
+        ticks(3, NONE, -90.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks.subList(ticks.size() - 4, ticks.size())));
+    }
+
+    /**
+     * The server adds a firework rocket at the gliding player; the client glides on boosted (by a nudge up: the engine
+     * does not model the boost yet), the rocket goes, and the glide turns down to the ground. Returns the yaw.
+     */
+    private float boostedGlide() throws Colliders.Unknown {
+        out(new ClientboundPacket.AddEntity(50, new UUID(2, 50), "minecraft:firework_rocket", player.x(), player.y(), player.z(), Vec3d.ZERO, null,
+                (byte) 0, (byte) 0, (byte) 0, SELF));
+        sync();
+        float yaw = -90.0F;
+        for (int i = 0; i < 10; i++) {
+            tick(NONE, yaw -= 4.0F, 10.0F, new Vec3d(0.0, 0.05, 0.0));
+        }
+        out(new ClientboundPacket.RemoveEntities(new int[] {50}));
+        sync();
+        for (int i = 0; i < 400 && !player.onGround(); i++) {
+            tick(NONE, yaw -= 4.0F, 10.0F, Vec3d.ZERO);
+        }
+        assertTrue(player.onGround() && player.fallFlying(), String.valueOf(player));
+        return yaw;
+    }
+
+    @Test
+    void aFireworkRocketNearAGlideEndsTheClaimUntilThePlayerStandsAgain() throws Exception {
+        startGlide();
+        ticks(10, NONE, -90.0F);
+        int boosted = ticks.size();
+        float yaw = boostedGlide();
+        land(yaw);
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(boosted, boosted + 12)));
+        assertEquals(MovementTracker.Outcome.NO_CLAIM, ticks.get(boosted).outcome(), String.valueOf(ticks.get(boosted)));
+        assertTrue(ticks.subList(boosted + 1, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.UNTRACKED),
+                String.valueOf(ticks.subList(boosted, ticks.size())));
+        // standing still after the server ended the glide, it is tracked again
+        int anchoredAt = ticks.size();
+        ticks(40, NONE, yaw);
+        ticks(10, SPRINT_JUMP, yaw);
+        assertTrue(ticks.subList(ticks.size() - 10, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(anchoredAt, ticks.size())));
+        tick(SPRINT_JUMP, yaw, 0.0F, new Vec3d(0.05, 0.0, 0.0));
+        assertEquals(1, evidence.size());
+    }
+
+    @Test
+    void aPlayerThatMayStillGlideIsNotAnchoredWhereItStandsStill() throws Exception {
+        startGlide();
+        ticks(10, NONE, -90.0F);
+        float yaw = boostedGlide();
+        teleport(0.5, 64.0, 0.5, yaw, 90.0F); // the server stops the slide; the glide goes on
+        assertTrue(player.fallFlying());
+        int still = ticks.size();
+        for (int i = 0; i < 40; i++) {
+            tick(NONE, yaw, 90.0F, Vec3d.ZERO); // looking straight down, the glide does not move it
+        }
+        for (int i = 0; i < 10; i++) {
+            tick(NONE, yaw, 0.0F, Vec3d.ZERO); // looking ahead, it slides on
+        }
+        assertTrue(player.fallFlying() && Math.abs(player.x() - 0.5) + Math.abs(player.z() - 0.5) > 0.01, String.valueOf(player));
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(still, ticks.size())));
+        assertTrue(ticks.subList(still, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.UNTRACKED),
+                String.valueOf(ticks.subList(still, ticks.size())));
+        land(yaw);
+        ticks(40, NONE, yaw);
+        ticks(10, SPRINT_JUMP, yaw);
+        assertTrue(ticks.subList(ticks.size() - 10, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(ticks.size() - 60, ticks.size())));
+        assertEquals(List.of(), evidence);
+    }
+
+    @ParameterizedTest
+    @EnumSource(PlatformCos.class)
+    void aGlideOnEveryPlatformIsFollowed(PlatformCos cpu) throws Exception {
+        platform = cpu; // Math.cos is the client's CPU's intrinsic, the same all session
+        int from = ticks.size();
+        glide(4.0F, i -> 34.2F); // x86_64's cosine is not the others' here
+        glide(-6.5F, i -> i % 50 < 30 ? 62.7F : -25.05F); // aarch64's is not here
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
     }
 }

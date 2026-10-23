@@ -96,6 +96,20 @@ def verify_sequence(events, check):
           f"({after}), every other action 0 ({len(unpredicted)} not)")
 
 
+def verify_glide(events, check):
+    """The elytra legs: a START_FALL_FLYING for each glide the client started, the server's shared flags echoing it
+    (bit 7) and then ending it on the ground."""
+    me = next(e["packet"]["entityId"] for e in events if e["type"] == "Outbound" and (e.get("packet") or {}).get("type") == "Login")
+    starts = [e for e in events if e["type"] == "Inbound" and (e.get("packet") or {}).get("type") == "PlayerCommand"
+              and e["packet"]["action"] == "START_FALL_FLYING"]
+    flags = [entry["value"] & 0x80 != 0 for e in events if e["type"] == "Outbound" and (e.get("packet") or {}).get("type") == "SetEntityData"
+             and e["packet"]["entityId"] == me for entry in e["packet"]["entries"] if entry["index"] == 0]
+    ends = sum(1 for a, b in zip(flags, flags[1:]) if a and not b)
+    check(len(starts) == 5 and flags.count(True) >= 5 and ends == 5,
+          f"five glides: the client started each ({len(starts)} START_FALL_FLYING), the server echoed the flag and ended each "
+          f"on the ground ({ends} ends)")
+
+
 def main():
     work = sys.argv[1]
     failures = []
@@ -241,6 +255,7 @@ def main():
     verify_reach(events, work, check)
     verify_break(work, check)
     verify_sequence(events, check)
+    verify_glide(events, check)
     m = re.search(r"WhyNotAC self RealProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
     fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
     check(m is not None and fields.get("matches") == "true" and fields.get("eye") == "known" and fields.get("positionEqual") == "true"

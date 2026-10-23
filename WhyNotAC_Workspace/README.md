@@ -76,11 +76,20 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > tekrar eden numara) bunu bozar. Gerçek client'ın numaraları nether'e geçişte yeniden 1'den başladı, vaka açılmadı;
 > E2E'de numaralı bırakma paketi gönderen sonda açtı.
 >
+> **Elytra ile süzülme (`movement`):** hareket motoru süzülmeyi de client'ın kendi aritmetiğiyle bit bit hesaplar:
+> havada yeni bir zıplama basışıyla başlaması (client `START_FALL_FLYING` gönderir), bakış ve eğimle hareketi, sunucunun
+> bayrağıyla bitmesi. Oyun burada `Math.cos` kullanır; JVM onu CPU'ya göre farklı hesaplar (x86_64 ile Apple silicon
+> float eğimlerin yaklaşık %0,06'sında son bitte ayrılır). İki intrinsic de komut komut aktarıldı ve her float eğimde (2,14 milyar
+> girdi) gerçek JVM'lerle (aarch64'ü QEMU altında) bit bit aynı; takipçi client'ın CPU'sunu da görünmeyen bir seçenek
+> olarak izler. Gerçek client'ın beş süzülmesi (162 tik, biri x86_64'ün kosinüsünün
+> ayrıldığı eğimde) bit bit eşit; sentetik testte daha uzağa süzülme, başlatılamayacak
+> yerde başlatma ve paketsiz süzülme kanıt oldu. Roket itmesi henüz izlenmez: yakında roket olabiliyorsa iddia yoktur.
+>
 > **Sunucunun etiketleri (`update_tags`):** client neye tırmandığını, neyin üstünde durduğunu, nerede yüzdüğünü ve aletinin
 > hangi bloğu kazdığını sunucunun gönderdiği etiketlerden bilir; veri paketi bunları değiştirebilir. WhyNotAC paketi
 > yapılandırma evresinde de kenardan çözer, kaydeder ve client'ın etiketlerini işlediği sırayla izler (`ClientTags`).
-> Hareket motoru vanilla etiketlerini varsayar (`climbable`, `fences`, `walls`, `water`, `lava`,
-> `powder_snow_walkable_mobs`): client başka etiketler tutmuş olabildiği sürece hareket iddiası yoktur. Vanilla sunucuda
+> Hareket motoru vanilla etiketlerini varsayar (`climbable`, `can_glide_through`, `fall_damage_resetting`, `fences`,
+> `walls`, `water`, `lava`, `powder_snow_walkable_mobs`): client başka etiketler tutmuş olabildiği sürece hareket iddiası yoktur. Vanilla sunucuda
 > (E2E ve gerçek client) bu etiketler motorunkilerle birebir aynıdır.
 > Raporlar: [Faz 1](docs/phases/PHASE-1-REPORT.md) · [Faz 2a](docs/phases/PHASE-2A-REPORT.md) · [Faz 2b-1](docs/phases/PHASE-2B-1-REPORT.md) · [Slice 0](docs/phases/SLICE-0-REPORT.md) · [Faz 2b-3](docs/phases/PHASE-2B-3-REPORT.md) · [Faz 2b-5](docs/phases/PHASE-2B-5-REPORT.md) · [Faz 2b-6](docs/phases/PHASE-2B-6-REPORT.md) · [Faz 2b-7](docs/phases/PHASE-2B-7-REPORT.md) · [Faz 2b-8](docs/phases/PHASE-2B-8-REPORT.md)
 
@@ -111,7 +120,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 576 test
+./gradlew build                       # tüm modüller + 599 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

@@ -96,6 +96,14 @@ tablosuz çağrılar var (1.21.11 decompile):
 karşılaştırmaları iki dalı da hipotez kümesine eklemeli. Ayrıca tüm hareket kodunda `Math.*`
 transandantal çağrılarının bir envanteri çıkarılıp uygunluk testine bağlanmalı.
 
+**Durum (2026-10-23):** ±1 ulp aralığı denendi: konumlar son bitte aynı kalınca hipotezler patlıyor (64'ü aşıyor).
+Yerine gerçek platformlar aktarıldı: `PlatformCos.X86_64` (HotSpot'un Intel libm stub'ı) ve `AARCH64` (fdlibm'in FMA'lı
+portu), komut komut; `FDLIBM` `StrictMath.cos`. [−π/2, π/2]'deki 2 140 282 808 float eğimin hepsinde x86_64 aktarımı bu
+makinenin HotSpot'uyla, aarch64 aktarımı QEMU altında koşan aarch64 HotSpot'la bit bit aynı. Takipçi client'ın
+platformunu bir maske olarak taşır ve yalnızca kosinüslerin ayrıldığı eğimlerde dallanır. `Math.acos` HotSpot'ta
+`StrictMath.acos`'tur (intrinsic değil); başka bir JVM'in acos'u için eşiğin iki ulp yakınındaki açı izlenmez.
+Sinüs tablosu her uyumlu JVM'de aynıdır (her girişin iki komşu double'ı da aynı float'a yuvarlanır).
+
 ## 4. Yüksek: Sessiz delikler ve kırılgan enum eşlemeleri
 
 - `WhyNotChannelHandler.channelRead`: çeviri istisna fırlatırsa paket oyuna iletilir ama

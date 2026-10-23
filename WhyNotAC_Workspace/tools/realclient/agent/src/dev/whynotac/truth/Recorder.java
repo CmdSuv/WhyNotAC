@@ -50,6 +50,9 @@ public final class Recorder {
     // water: the tags on the eye (fluidOnEyes), the fluid heights, Player.wasUnderwater
     private static Field fluidOnEyes, fluidHeight, wasUnderwater;
     private static Method isSprinting, isShiftKeyDown, getPose, isPassenger, isSwimming;
+    // gliding: the shared flag, and whether an equipped item can glide (the item part of LivingEntity.canGlide)
+    private static Method isFallFlying, getItemBySlot, canGlideUsing;
+    private static Object[] equipmentSlots;
 
     private Recorder() {}
 
@@ -112,6 +115,8 @@ public final class Recorder {
             f64(line, "fallDistance", fallDistance.getDouble(player));
             bool(line, "wasTouchingWater", wasTouchingWater.getBoolean(player));
             bool(line, "swimming", (Boolean) isSwimming.invoke(player));
+            bool(line, "fallFlying", (Boolean) isFallFlying.invoke(player)); // the shared flag 7
+            bool(line, "glider", glider(player));
             // TagKey.toString: "TagKey[minecraft:fluid / minecraft:water]"
             bool(line, "eyeInWater", String.valueOf(fluidOnEyes.get(player)).contains(" / minecraft:water]"));
             bool(line, "wasUnderwater", wasUnderwater.getBoolean(player));
@@ -242,6 +247,12 @@ public final class Recorder {
         getPose = method(loader, entity, "getPose()");
         isPassenger = method(loader, entity, "isPassenger()");
         isSwimming = method(loader, entity, "isSwimming()");
+        isFallFlying = method(loader, living, "isFallFlying()");
+        Class<?> slot = Class.forName(mappings.get("net.minecraft.world.entity.EquipmentSlot").obf(), false, loader);
+        Class<?> stack = Class.forName(mappings.get("net.minecraft.world.item.ItemStack").obf(), false, loader);
+        equipmentSlots = slot.getEnumConstants();
+        getItemBySlot = method(loader, living, "getItemBySlot(net.minecraft.world.entity.EquipmentSlot)", slot);
+        canGlideUsing = method(loader, living, "canGlideUsing(net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot)", stack, slot);
         fluidOnEyes = field(loader, entity, "fluidOnEyes");
         fluidHeight = field(loader, entity, "fluidHeight");
         wasUnderwater = field(loader, "net.minecraft.world.entity.player.Player", "wasUnderwater");
@@ -254,11 +265,21 @@ public final class Recorder {
         return f;
     }
 
-    private static Method method(ClassLoader loader, String mojangClass, String signature) throws ReflectiveOperationException {
+    private static Method method(ClassLoader loader, String mojangClass, String signature, Class<?>... parameters) throws ReflectiveOperationException {
         Class<?> owner = Class.forName(mappings.get(mojangClass).obf(), false, loader);
-        Method m = owner.getDeclaredMethod(mappings.method(mojangClass, signature));
+        Method m = owner.getDeclaredMethod(mappings.method(mojangClass, signature), parameters);
         m.setAccessible(true);
         return m;
+    }
+
+    /** {@code LivingEntity.canGlide}'s item part: an equipped item that can glide in its slot (an elytra not about to break). */
+    private static boolean glider(Object player) throws ReflectiveOperationException {
+        for (Object slot : equipmentSlots) {
+            if ((Boolean) canGlideUsing.invoke(null, getItemBySlot.invoke(player, slot), slot)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

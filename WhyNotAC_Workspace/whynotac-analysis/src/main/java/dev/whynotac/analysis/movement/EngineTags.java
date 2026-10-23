@@ -13,6 +13,9 @@ import java.util.List;
  *
  * <ul>
  *   <li>{@code minecraft:climbable} ({@code LivingEntity.onClimbable}): exactly {@link OnFoot#CLIMBABLE}.
+ *   <li>{@code minecraft:can_glide_through} ({@code onClimbable} while gliding): exactly {@link OnFoot#CAN_GLIDE_THROUGH}.
+ *   <li>{@code minecraft:fall_damage_resetting} ({@code Entity.move}'s ray in a fast fall): exactly
+ *       {@link OnFoot#FALL_DAMAGE_RESETTING}.
  *   <li>{@code minecraft:fences} and {@code minecraft:walls} ({@code Entity.getOnPos}): exactly the blocks named
  *       {@code *_fence} and {@code *_wall}, as the engine finds them.
  *   <li>The fluid tags {@code minecraft:water} and {@code minecraft:lava} ({@code updateFluidHeightAndDoFluidPushing},
@@ -31,14 +34,15 @@ public final class EngineTags {
     public static final int PLAYER = 155;
 
     private final int[] climbable;
+    private final int[] canGlideThrough;
+    private final int[] fallDamageResetting;
     private final int[] fences;
     private final int[] walls;
 
     public EngineTags(BlockStates states) {
-        List<Integer> c = new ArrayList<>();
-        for (String block : OnFoot.CLIMBABLE) {
-            c.add(states.blockId(states.firstStateOf(block)));
-        }
+        climbable = ids(states, OnFoot.CLIMBABLE);
+        canGlideThrough = ids(states, OnFoot.CAN_GLIDE_THROUGH);
+        fallDamageResetting = ids(states, OnFoot.FALL_DAMAGE_RESETTING);
         List<Integer> f = new ArrayList<>();
         List<Integer> w = new ArrayList<>();
         for (int id = 0; id < states.blockCount(); id++) {
@@ -49,15 +53,24 @@ public final class EngineTags {
                 w.add(id);
             }
         }
-        climbable = c.stream().mapToInt(Integer::intValue).toArray();
         fences = f.stream().mapToInt(Integer::intValue).toArray();
         walls = w.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    private static int[] ids(BlockStates states, java.util.Set<String> blocks) {
+        return blocks.stream().mapToInt(block -> states.blockId(states.firstStateOf(block))).toArray();
     }
 
     /** The first of these tags the client may hold otherwise now, or null if it certainly holds them all as the engine takes them. */
     public String mayDiffer(ClientTags tags) {
         if (!tags.certainlyExactly(ClientTags.BLOCK, "minecraft:climbable", climbable)) {
             return "minecraft:climbable";
+        }
+        if (!tags.certainlyExactly(ClientTags.BLOCK, "minecraft:can_glide_through", canGlideThrough)) {
+            return "minecraft:can_glide_through";
+        }
+        if (!tags.certainlyExactly(ClientTags.BLOCK, "minecraft:fall_damage_resetting", fallDamageResetting)) {
+            return "minecraft:fall_damage_resetting";
         }
         if (!tags.certainlyExactly(ClientTags.BLOCK, "minecraft:fences", fences)) {
             return "minecraft:fences";

@@ -18,6 +18,14 @@ final class VanillaTagsPacket {
         for (String block : OnFoot.CLIMBABLE) {
             climbable.add(states.blockId(states.firstStateOf(block)));
         }
+        List<Integer> canGlideThrough = new ArrayList<>();
+        for (String block : OnFoot.CAN_GLIDE_THROUGH) {
+            canGlideThrough.add(states.blockId(states.firstStateOf(block)));
+        }
+        List<Integer> fallDamageResetting = new ArrayList<>();
+        for (String block : OnFoot.FALL_DAMAGE_RESETTING) {
+            fallDamageResetting.add(states.blockId(states.firstStateOf(block)));
+        }
         List<Integer> fences = new ArrayList<>();
         List<Integer> walls = new ArrayList<>();
         for (int id = 0; id < states.blockCount(); id++) {
@@ -29,6 +37,7 @@ final class VanillaTagsPacket {
         }
         return new ClientboundPacket.UpdateTags(List.of(
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:block", List.of(tag("minecraft:climbable", climbable),
+                        tag("minecraft:can_glide_through", canGlideThrough), tag("minecraft:fall_damage_resetting", fallDamageResetting),
                         tag("minecraft:fences", fences), tag("minecraft:walls", walls))),
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:entity_type", List.of(tag("minecraft:powder_snow_walkable_mobs", List.of()))),
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:fluid", List.of(

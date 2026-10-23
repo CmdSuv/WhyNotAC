@@ -649,4 +649,16 @@ class ClientEntitiesTest {
         assertEquals(adult, onlySize(5));
         assertEquals(adult.box(0.5, 64.0, 0.5), onlyBounds(5));
     }
+
+    @Test
+    void anEntityLostInPlaceIsStillOfItsType() {
+        out(add(8, "minecraft:arrow", 4.5, 64.0, 0.5));
+        sync();
+        out(new ClientboundPacket.TeleportEntity(8, null, Vec3d.ZERO, 0, 0, java.util.Set.of(), true)); // an old recording: the id only
+        sync();
+        tick(); // a projectile whose position is lost may have left the world: lost, but an arrow still
+        out(new ClientboundPacket.RemoveEntities(new int[] {8})); // not processed yet
+        assertTrue(entities.mayHaveNear("minecraft:arrow", 4.5, 64.0, 0.5, 1.0, Long.MIN_VALUE));
+        assertTrue(!entities.mayHaveNear("minecraft:firework_rocket", 4.5, 64.0, 0.5, 1.0, Long.MIN_VALUE), "an arrow is not a rocket");
+    }
 }

@@ -26,7 +26,7 @@ ancak **hiçbir** meşru hipotez gözlemi açıklayamadığında kanıt doğar.
 5. **1.21.11 savaş mekanikleri:** Mace (düşüş mesafesi, smash, Wind Burst ile yukarı fırlatma),
    Wind Charge (patlama itmesi), Trident Riptide (yaw/pitch ve seviyeden hesaplanan itme, yağmur/su
    koşulu), Spear (`KineticWeapon`/`PiercingWeapon` bileşenleri, `LUNGE` büyüsü, `STAB` eylemi),
-   Elytra (süzülme, roket itmesi), binekler.
+   Elytra (süzülme: tamam; roket itmesi), binekler.
 
 Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynaktan okunacak ve
 `whynotac-conformance` içinde gerçek oyun koduna karşı diferansiyel test edilecek.
@@ -207,6 +207,38 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     blok, chunk ya da görüş aralığı bilinmez. Uzak bir ışınlamadan sonra client chunk'ı işlemeden bir tick
     düşebilir. Destek bloğu hâlâ eski, yüklü chunk'ta olduğu için yerçekimi normaldir. Motor bu tick'i artık
     kanıtsız karşılaştırmaz.
+  - **Elytra ile süzülme (`travelFallFlying`, `updateFallFlyingMovement`):** `LocalPlayer.aiStep` yeni bir zıplama
+    basışında (önceki tikte tuş basılı değilken), tırmanmıyorken `tryToStartFallFlying`'i dener: zaten süzülmüyor,
+    havada, binekte değil, havada süzülme efekti yok, kuşanılmış bir süzülme eşyası var (`Conditions.glider`:
+    `canGlideUsing`, kırılmak üzere değil), suda değil. Başarınca client `START_FALL_FLYING` gönderir; bayrak ve duruş
+    (`FALL_FLYING`: 0.6 × 0.6, göz 0.4) aynı tikte geçer (`Step.startedGliding`). Hareket sıvılardan sonra
+    `travelFallFlying`'dir: tırmanılabilir bir blokta (`can_glide_through` dışında: sarmaşıklar) süzülme biter ve tik
+    havada geçer; değilse bakış vektörü, eğimin `Math.cos`'unun karesi, alçalma, tırmanma (`3.2`), bakışa doğru yatay
+    yaklaşma ve `0.99F, 0.98F, 0.99F`, client'ın sırasıyla. Süzülürken blok hız çarpanı 1, sudan çıkmışken koşma
+    başlamaz, `checkFallDistanceAccumulation` dikey hız −0.5'in üstündeyken düşüşü 1'e indirir. Süzülmeyi yalnızca
+    sunucunun ortak bayrakları (7. bit) bitirir: client yere değdikten sonra da süzülerek kayar. Sıvıya süzülmek ve
+    roket itmesi kapsam dışıdır.
+    - **Platformun kosinüsü (`PlatformCos`):** oyun burada tablo değil `Math.cos` kullanır ve HotSpot onu CPU'ya
+      göre bir intrinsic yapar. `X86_64` (`stubGenerator_x86_64_cos.cpp`, Intel'in libm'i: π/32 indirgemesi, 64
+      girişli tablo, SSE şeritleri) ve `AARCH64` (`macroAssembler_aarch64_trig.cpp`: fdlibm çekirdekleri, fused
+      multiply-add ile) komut komut aktarıldı, `FDLIBM` `StrictMath.cos`'tur. [−π/2, π/2]'deki her float eğimde
+      (2 140 282 808 girdi) `X86_64` bu makinenin x86_64 HotSpot'uyla, `AARCH64` QEMU altında koşan aarch64 HotSpot
+      (Temurin 21.0.13) ile bit bit aynıdır. Platformlar birbirinden farklıdır: x86_64 fdlibm'den 1 397 840, aarch64
+      239 002, ikisi birbirinden 1 362 054 girdide. Adım platformu dışarıdan alır (`Conditions.cosine`, varsayılan
+      `X86_64`); süzülen bir tik bunu okuduğunu söyler (`Step.readCosine`).
+    - **Düşüşü sıfırlayan ışın (`Entity.move`):** düşerken bir blok ya da daha uzun bir hareket, ayaktan hareket
+      boyunca (en çok 8) `FALLDAMAGE_RESETTING` bloklarına (`fall_damage_resetting`: tırmanılabilirler, çalı, ağ; tam
+      blok) ve suya bir ışın atar, değerse düşüş sıfırlanır. Işının geçebileceği her hücrede (hareketin sınırları
+      içinde) ikisi de yoksa ışın hiçbir şeye değmez ve adım sürer; varsa `Unknown`. Önceden böyle her hareket
+      `Unknown`'du: süzülmeler ve 1 bloğu aşan her düşüş.
+    - **Son oturum (göğüste elytra; 30 blok yukarıdan 20° aşağı bakarak düşüp havada zıplamayla süzülme ve yere
+      iniş; yerden zıplayıp tepesinde ikinci basışla kısa bir süzülme; W basılıyken 20 bloktan süzülme; x86_64'ün
+      kosinüsünün fdlibm'inkinden ayrıldığı 34.2°'lik dalış, süzülürken koşma tuşlarıyla; 15° yukarı bakarak süzülme):**
+      beş süzülmenin 162 tikinin hepsi bit bit eşit. Tüm oturum: 11 166 tikin 10 995'i eşit, 0 fark. Negatif kontroller
+      (hepsi yakalandı): sürüklenme 0.99 → 0.98 (162 fark), kaldırma 0.75 → 0.76 (162), alçalma 0.1 → 0.11 (162), bakışa
+      dönüş 0.1 → 0.11 (162), tırmanma 3.2 → 3.3 (13), düşüşü 1'e indirmemek (96), basılı tutulan zıplamayla ya da yerde
+      başlamak (1'er), süzülme duruşunu almamak (162), süzülürken koşmaya başlayabilmek (18), x86_64 yerine fdlibm'in
+      kosinüsü (17). Süzülürken blok hız çarpanı bu veride ayırt edilmez (yer çimen); `GlideTest` ruh kumunda ister.
   - **Kapsam dışında `Colliders.Unknown`:**
     - su ve lav dışındaki sıvılar, toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), düşen
       bir sıvının ya da bir kabarcık sütununun yanında/üstünde şekli dünyaya bağlı bir blok, hızı bilinmeyen bir boyutta

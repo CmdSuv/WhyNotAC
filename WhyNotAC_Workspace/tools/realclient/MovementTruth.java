@@ -1,5 +1,6 @@
 import dev.whynotac.analysis.movement.Hypothesis;
 import dev.whynotac.analysis.movement.MovementTracker;
+import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.BlockPos;
 import dev.whynotac.physics.Colliders;
@@ -93,6 +94,7 @@ public class MovementTruth {
         result.put("tracker", tracker);
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
+                && ((Number) result.get("gliding")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0;
         System.exit(clean ? 0 : 1);
@@ -102,6 +104,9 @@ public class MovementTruth {
      * The movement check's tracker over the recording: outcomes by reason, and at every explained tick that
      * sent a movement packet whether the client's own state after it (the k-th such tick of the truth) is a hypothesis.
      */
+    /** The client ran on this machine: its Math.cos is this JVM's (null: none of the platforms the engine knows). */
+    private static final PlatformCos CLIENT_COSINE = java.util.Objects.requireNonNull(PlatformCos.current(), "this JVM's Math.cos");
+
     private static Map<String, Object> track(Path recording, List<PlayerState> sentTicks) throws Exception {
         Replicas replicas = Replicas.vanilla();
         MovementTracker tracker = new MovementTracker();
@@ -322,6 +327,7 @@ public class MovementTruth {
         long mismatched;
         long effectTicks;
         long useTicks;
+        long glideTicks;
         final Map<String, Long> unknown = new TreeMap<>();
         final Map<String, Long> differingFields = new TreeMap<>();
         final List<String> examples = new ArrayList<>();
@@ -398,8 +404,13 @@ public class MovementTruth {
                 if (use != null) {
                     useTicks++;
                 }
+                if (before.fallFlying() || expected.fallFlying()) {
+                    glideTicks++;
+                }
+                // an equipped item that can glide (older truth files: none)
+                boolean glider = Boolean.TRUE.equals(pre.get("glider"));
                 PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use, glider, CLIENT_COSINE));
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
                     matched++;
@@ -425,6 +436,7 @@ public class MovementTruth {
             out.put("mismatched", mismatched);
             out.put("withEffects", effectTicks);
             out.put("usingItem", useTicks);
+            out.put("gliding", glideTicks);
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
             out.put("examples", examples);
@@ -457,6 +469,7 @@ public class MovementTruth {
         same(d, "onGroundNoBlocks", p.onGroundNoBlocks(), e.onGroundNoBlocks());
         same(d, "swimming", p.swimming(), e.swimming());
         same(d, "eyeInWater", p.eyeInWater(), e.eyeInWater());
+        same(d, "fallFlying", p.fallFlying(), e.fallFlying());
         return d;
     }
 
@@ -484,7 +497,7 @@ public class MovementTruth {
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), Boolean.TRUE.equals(r.get("swimming")),
-                Boolean.TRUE.equals(r.get("eyeInWater")));
+                Boolean.TRUE.equals(r.get("eyeInWater")), Boolean.TRUE.equals(r.get("fallFlying")));
     }
 
     /** The recorded effects the on-foot step reads (older truth files: none); null if one was not recorded by name. */

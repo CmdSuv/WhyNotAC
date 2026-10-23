@@ -229,7 +229,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 ### `movement` (`MovementCheck`, `movement/MovementTracker`)
 
 - **Etiketler (`EngineTags`):** motor vanilla 1.21.11'in etiketlerini varsayar: `minecraft:climbable` tam olarak
-  `OnFoot.CLIMBABLE`, `minecraft:fences` ve `minecraft:walls` adı `*_fence` ve `*_wall` olan bloklar, sıvı etiketleri
+  `OnFoot.CLIMBABLE`, `minecraft:can_glide_through` tam olarak `OnFoot.CAN_GLIDE_THROUGH`,
+  `minecraft:fall_damage_resetting` tam olarak `OnFoot.FALL_DAMAGE_RESETTING`, `minecraft:fences` ve `minecraft:walls` adı `*_fence` ve `*_wall` olan bloklar, sıvı etiketleri
   `minecraft:water` ve `minecraft:lava` su/akan su ve lav/akan lav, `minecraft:powder_snow_walkable_mobs` oyuncuyu
   tutmaz. Client'ın etiketleri (`ClientTags`, sunucunun `update_tags`'i) iddianın çapasından beri bunlardan başka olmuş
   olabiliyorsa bulgu açılmaz (tik açıklanamamış kalır, iddia edilmez). Vanilla sunucuda E2E ve gerçek client'ın
@@ -259,8 +260,18 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **Su:** hipotez yüzme bayrağını ve gözün suda olup olmadığını taşır (`PlayerState.swimming`, `eyeInWater`); adım
   ikisini de dünyadan yeniden hesaplar. Sunucunun kendi yüzme bayrağı yankısı (`SetEntityData`) client'ın bayrağının
   yerine geçer ve izlenir. Su hareket verimliliği özniteliği (derinlik gezgini) varsayılanın dışındaysa iddia yoktur.
-- **Görünmeyen seçenekler:** çift W penceresi (0..10) ve otomatik zıplama maske olarak taşınır, yalnızca
-  okunduklarında dallanır; maskeleri dışında aynı durumlar birleşir.
+- **Görünmeyen seçenekler:** çift W penceresi (0..10), otomatik zıplama ve client'ın CPU'su (süzülmenin `Math.cos`'u:
+  `PlatformCos`, `Hypothesis.cosineMask`) maske olarak taşınır, yalnızca okunduklarında dallanır; maskeleri dışında aynı
+  durumlar birleşir. Süzülen bir tikte hâlâ olası platformlar o eğimdeki kosinüslerine göre gruplanır, her farklı
+  kosinüs bir adımdır (çoğu eğimde hepsi aynıdır). Bir oturumda CPU değişmez: bir kez ayrılan platform geri gelmez.
+- **Süzülme:** client `START_FALL_FLYING`'i tam olarak `tryToStartFallFlying` başardığında gönderir; paket varsa adım
+  bir süzülme eşyasıyla, yoksa eşyasız çalışır (envanter gerekmez). Paket tikte birden çoksa, ya da paket
+  varken adım süzülmeye başlamıyorsa (yerde, zaten süzülürken) ya da adım başlıyorken paket yoksa tick açıklanmaz.
+  Sunucunun ortak bayraklarının 7. biti (`SetEntityData` 0) client'ın süzülmesini başlatır ya da bitirir, işlendiği
+  sırayla. Yakında olabilecek bir havai fişek roketi (süzülürken ya da başlarken; roket oyuncudan sonra tick'ler ve
+  bir sonraki tikte iter) iddiayı bitirir: itmesi henüz izlenmez. Durma çapası, client hâlâ süzülüyor olabildikçe
+  (tabanın son işlenen bayrakları süzülme diyorsa ya da client'ın başlattığı süzülmeden sonra bayrak işlenmediyse)
+  kurulmaz: süzülen ama duran oyuncu (dik aşağı bakan) yürüyen sanılmaz.
 - **Eşya kullanımı (`Using`):** client'ın kendi kullanımı (`LocalPlayer.startedUsingItem`), elindeki yığının
   `use_effects`'iyle (`ItemPrototypes`: oyunun tablosu; varsayılan 0.2 yavaşlatma, koşma başlamaz; mızraklar koşar,
   yavaşlamaz). Tuş eylemleri oyuncunun tick'inden önce: `UseItem` kullanımı başlatabilir ya da başlatmayabilir
@@ -297,7 +308,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (toz kar, lav hızı bilinmeyen boyutta lav akıntısı...), çarpışan ya da kendi yoluyla iten bir
   varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
   boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
-  böyle), itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
+  böyle), süzülen ya da süzülmeye başlayan oyuncunun yakınında olabilecek bir havai fişek roketi, itip itmediğine
+  takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
   her durum adım için aynıysa, ör. çimenin yayıldığı toprak, blok bilinir: `ClientWorld.possibleStates`,
   `OnFoot.sameForMovement`), piston, dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
@@ -311,10 +323,12 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   az bir itme izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
   ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme; ağlar, çalılar, bal ve kabarcık sütunları;
-  Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü): 9498 tikin 9429'u iddia edildi, 0
-  açıklanamayan, 5328/5328 tick'te client'ın durumu kümede, 37 itme izlendi. Kalanlar uzak ışınlamalardan ve Nether'e geçişten sonra
-  client'ın henüz işlemediği chunk'lardır (bir önceki oturumda 32 tik de konumu kesin bilinmeyen, dünyayla doğmuş
-  bir koyunun yakınlığıydı). Eşdeğer durumlar izlenmeden önce buz pistinin altında çimenin yayılması
+  Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü; elytra ile beş süzülme ve inişleri):
+  11 212 tikin 10 632'si iddia edildi, 0 açıklanamayan, 5794/5794 tick'te client'ın durumu kümede, 26 itme izlendi.
+  Kalanlar uzak ışınlamalardan ve Nether'e geçişten sonra client'ın henüz işlemediği chunk'lardır (bir önceki oturumda
+  32 tik de konumu kesin bilinmeyen, dünyayla doğmuş bir koyunun yakınlığıydı). İlk elytra oturumunda süzülmenin 34
+  tiki de iddiasız kaldı: yay şeridinin bir oku izlenemez olmuştu ve varlık replikası türünü unutup onu "roket
+  olabilir" saymıştı; yerinde kaybolan aday artık türünü korur. Eşdeğer durumlar izlenmeden önce buz pistinin altında çimenin yayılması
   da 98 tik daha iddiasız bırakıyordu. Bir parkur hatası da öğreticiydi: ateş direnci oyuncu magmanın üstündeyken
   kalkınca sunucu hasarla birlikte oyuncunun hızını gönderir (`SetEntityMotion`); takipçi bunu izlemez, iddiadan
   çekilir ve oyuncu durunca yeniden bağlanır. İtmeyi hiç uygulamayan, oyuncudan sonra tick'leyenlerinkini bir sonraki tick'in başına koyan ya

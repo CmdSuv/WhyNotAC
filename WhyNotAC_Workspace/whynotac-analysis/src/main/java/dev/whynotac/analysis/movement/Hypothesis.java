@@ -1,5 +1,6 @@
 package dev.whynotac.analysis.movement;
 
+import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.physics.PlayerState;
 
 /**
@@ -9,14 +10,16 @@ import dev.whynotac.physics.PlayerState;
  *
  * @param windowMask   the {@code sprintWindow} option values (bit per value 0..10) still possible
  * @param autoJumpMask bit 0: auto-jump may be off; bit 1: it may be on
+ * @param cosineMask   the platforms ({@link PlatformCos}, bit per ordinal) whose {@code Math.cos} the client's may be
  * @param applied      index of the first queued packet about the player this state has not processed
  */
-public record Hypothesis(PlayerState player, SelfState self, Sent sent, int windowMask, int autoJumpMask, long applied) {
+public record Hypothesis(PlayerState player, SelfState self, Sent sent, int windowMask, int autoJumpMask, int cosineMask, long applied) {
 
     static final int ALL_WINDOWS = (1 << 11) - 1;
     static final int AUTO_JUMP_OFF = 1;
     static final int AUTO_JUMP_ON = 2;
     static final int AUTO_JUMP_ANY = AUTO_JUMP_OFF | AUTO_JUMP_ON;
+    static final int ALL_COSINES = (1 << PlatformCos.values().length) - 1;
 
     /**
      * {@code LocalPlayer}'s record of what it last sent ({@code sendPosition}, {@code sendIsSprintingIfNeeded},
@@ -32,14 +35,14 @@ public record Hypothesis(PlayerState player, SelfState self, Sent sent, int wind
     }
 
     Hypothesis withPlayer(PlayerState p) {
-        return new Hypothesis(p, self, sent, windowMask, autoJumpMask, applied);
+        return new Hypothesis(p, self, sent, windowMask, autoJumpMask, cosineMask, applied);
     }
 
     Hypothesis withSelf(SelfState s) {
-        return new Hypothesis(player, s, sent, windowMask, autoJumpMask, applied);
+        return new Hypothesis(player, s, sent, windowMask, autoJumpMask, cosineMask, applied);
     }
 
     Hypothesis withApplied(long index) {
-        return new Hypothesis(player, self, sent, windowMask, autoJumpMask, index);
+        return new Hypothesis(player, self, sent, windowMask, autoJumpMask, cosineMask, index);
     }
 }
