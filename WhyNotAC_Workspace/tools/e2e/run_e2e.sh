@@ -12,8 +12,8 @@
 set -euo pipefail
 WORK_DIR=$(mkdir -p "$1" && cd "$1" && pwd)
 # Long enough that the queries below (PROBE_SECONDS - 2 seconds after the probe starts) come after its last block action
-# and the position it sends after it (tick 441), in the ticks it only idles: the eye is known then.
-PROBE_SECONDS=${2:-28}
+# and the position it sends after it (tick 461), in the ticks it only idles: the eye is known then.
+PROBE_SECONDS=${2:-30}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PAPER_JAR=paper-1.21.11-132.jar

@@ -18,13 +18,13 @@ can be verified live:
   * an attack on the llama behind a wall, empty-handed (tick 315) -> an attack-aim case through blocks (P-M, shadow)
   * a use of the stick with a rotation 45 degrees off the look (tick 374) -> a use-aim case (P-M, shadow)
   * a click on the wall with the cursor off the look, empty-handed (tick 416) -> a use-aim case for the look (P-M, shadow)
-  * digging the wall on its far face, empty-handed (tick 437) -> a use-aim case for the face (P-M, shadow)
+  * digging the wall on its far face, empty-handed (tick 457) -> a use-aim case for the face (P-M, shadow)
   * finishing the honest dig of the stone wall the tick after starting it, empty-handed (tick 427) -> a break-time case
     (P-M, shadow): by hand stone takes the vanilla client 151 ticks
-  * releasing the used item with a block-prediction number (tick 455) -> a prediction-sequence case (P-M, shadow): the
+  * releasing the used item with a block-prediction number (tick 475) -> a prediction-sequence case (P-M, shadow): the
     vanilla client builds every action it predicts nothing for with 0
 
-After each use it sends its position once more (ticks 384, 405, 421, 431 and 441: the server's acknowledgement of a use may
+After each use it sends its position once more (ticks 384, 405, 421, 431 and 461: the server's acknowledgement of a use may
 roll a player back), clicks the wall once where the vanilla pick puts the cursor (tick 395) and starts digging it on the
 face its look enters (tick 426), which must open nothing.
 
@@ -365,15 +365,16 @@ WALL_VIOLATION_TICK = 315
 # the attacks: the server's BlockChangedAck for a use may roll the player back, and the probe sends no position after.
 USE_TICK, USE_AIM_VIOLATION_TICK = 367, 374
 # The position again after the uses, then an honest click on the wall and violation 10: the cursor 0.4 off the look.
-ANCHOR_TICKS, CLICK_TICK, CLICK_VIOLATION_TICK = (384, 405, 421, 431, 441), 395, 416
-# An honest START_DESTROY_BLOCK on the wall's face towards the probe, then violation 11: the same on its far face.
-DIG_TICK, DIG_VIOLATION_TICK = 426, 437
+ANCHOR_TICKS, CLICK_TICK, CLICK_VIOLATION_TICK = (384, 405, 421, 431, 461), 395, 416
+# An honest START_DESTROY_BLOCK on the wall's face towards the probe, then violation 11: the same on its far face. use-aim
+# opens at most one case a second: its three violations are 2 s apart, so a probe running late does not merge two.
+DIG_TICK, DIG_VIOLATION_TICK = 426, 457
 # Violation 12: STOP_DESTROY_BLOCK of the honest dig the tick after it started (2 of the 151 increments stone takes by hand).
 FAST_FINISH_TICK = DIG_TICK + 1
 EMPTY_HAND_TICKS = (CLICK_TICK, CLICK_VIOLATION_TICK, DIG_TICK, DIG_VIOLATION_TICK)
 # Violation 13: RELEASE_USE_ITEM (nothing is in use: the server ignores it) numbered as the next prediction. Its own
 # predictions (the uses, clicks, starts and the finish) are numbered 1, 2, ... as MultiPlayerGameMode.startPrediction does.
-SEQUENCE_VIOLATION_TICK = 455
+SEQUENCE_VIOLATION_TICK = 475
 # Mth.SIN, as the game fills it: the view vector and the pick's cursor are computed exactly as the client does.
 SIN_TABLE = []
 
