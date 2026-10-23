@@ -24,11 +24,11 @@ import java.util.TreeSet;
  * @param vehicle         the entity the player rides ({@code -1}: none)
  * @param using           the item the client is using, or null ({@code LocalPlayer.isUsingItem}: the client's own, which
  *                        the server's living-entity flags start or stop when they differ)
- * @param border          the world border
+ * @param border          the world border of the client's level ({@link ClientBorder})
  */
 public record SelfState(boolean ticking, boolean positionKnown, boolean firstTick, int food, float health, int gameMode, boolean flying, boolean mayFly,
         OnFoot.Effects effects, SpeedAttribute speed, Set<String> otherAttributes, boolean camera, int vehicle, boolean noGravity,
-        Using using, boolean frozen, Border border) {
+        Using using, boolean frozen, ClientBorder border) {
 
     static final String MOVEMENT_SPEED = "minecraft:movement_speed";
     /** Attributes the on-foot step reads, with the client's default value (decompiled {@code Attributes}). */
@@ -47,26 +47,14 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
         otherAttributes = Set.copyOf(otherAttributes);
     }
 
-    /** The world border ({@code WorldBorder}); a lerping size is bounded by its two ends. */
-    public record Border(double centerX, double centerZ, double minSize, double maxSize) {
-        /** {@code WorldBorder}'s defaults: centred on 0, 0, as wide as the world. */
-        static final Border DEFAULT = new Border(0.0, 0.0, 5.9999968E7, 5.9999968E7);
-
-        /** Whether the box (x and z bounds) stays at least {@code margin} inside the border for every size it may have. */
-        boolean farFrom(double minX, double minZ, double maxX, double maxZ, double margin) {
-            double half = minSize / 2.0;
-            return minX - margin > centerX - half && maxX + margin < centerX + half && minZ - margin > centerZ - half && maxZ + margin < centerZ + half;
-        }
-    }
-
     /** A new player's own state before any packet about it: the client's defaults. */
-    static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, Border border) {
+    static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, ClientBorder border) {
         return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, null, false,
                 border);
     }
 
     /** Before the login: nothing known about the session yet. */
-    static final SelfState INITIAL = fresh(-1, SpeedAttribute.DEFAULT, Set.of(), Border.DEFAULT);
+    static final SelfState INITIAL = fresh(-1, SpeedAttribute.DEFAULT, Set.of(), ClientBorder.fresh(null));
 
     /** Why the on-foot step cannot run now, or null. */
     String outOfScope() {
@@ -212,7 +200,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
                         vehicle, noGravity, newUsing, frozen, border);
     }
 
-    SelfState withBorder(Border newBorder) {
+    SelfState withBorder(ClientBorder newBorder) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
                 noGravity, using, frozen, newBorder);
     }

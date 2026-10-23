@@ -83,7 +83,8 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
   (`tick-framing`) ya da hiçbir vanilla client'ın gönderemeyeceği konum veya `onGround` bayrağıdır (`movement`, yaya
   motorunun kapsamında bit bit). Elytra ile süzülme (bit bit, client'ın CPU'sunun `Math.cos`'u dahil) ve havai fişek
-  roketinin itmesi motorda. Kalan: motorun kapsamı dışındaki hareketler (binek, dünya sınırı, toz kar).
+  roketinin itmesi motorda, dünya sınırı da (sabit ve lerp'li, client'ın tikleriyle). Kalan: motorun kapsamı dışındaki
+  hareketler (binek, toz kar).
 
 ## Faz 4 — Doğrulama ve veri
 

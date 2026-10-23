@@ -35,8 +35,19 @@ public final class Colliders {
     /**
      * {@code EntityCollisionContext} for the player, as far as block shapes read it: the feet's height when the context
      * was made ({@code getY()}) and whether the player descends ({@code isDescending}: the shift key). Null: not known.
+     * For the world border ({@code isInsideCloseToBorder(entity, box)}): where the player is ({@code getX()},
+     * {@code getZ()}) and the client's border; a null border is far.
      */
-    public record Context(double entityBottom, boolean descending) {}
+    public record Context(double entityBottom, boolean descending, double entityX, double entityZ, Border border) {
+        public Context(double entityBottom, boolean descending) {
+            this(entityBottom, descending, 0.0, 0.0, null);
+        }
+
+        /** {@code borderCollision(player, box)}: the border's shape when the player is close to it, else null. */
+        Voxels border(Box box) {
+            return border != null && border.closeTo(entityX, entityZ, box) ? border.shape() : null;
+        }
+    }
 
     /** A collision shape the client has that WhyNotAC cannot reproduce. */
     public static final class Unknown extends Exception {
@@ -47,19 +58,30 @@ public final class Colliders {
 
     private Colliders() {}
 
-    /** {@code Entity.collectColliders(player, level, entityColliders, box)}. The world border must be far (not modelled yet). */
+    /** {@code Entity.collectColliders(player, level, entityColliders, box)}: the entities, the border when close, the blocks. */
     public static List<Voxels> collect(World world, Context context, List<Voxels> entityColliders, Box box) throws Unknown {
         List<Voxels> colliders = new ArrayList<>(entityColliders.size() + 8);
         colliders.addAll(entityColliders);
+        Voxels border = context == null ? null : context.border(box);
+        if (border != null) {
+            colliders.add(border);
+        }
         blocks(world, context, box, colliders);
         return colliders;
     }
 
-    /** {@code CollisionGetter.noCollision(player, box)} with no solid entity near and the world border far: no block shape in the box. */
+    /**
+     * {@code CollisionGetter.noCollision(player, box)} with no solid entity near: no block shape in the box, and the
+     * border's shape, when the player is close to it, not overlapping the box ({@code noBorderCollision}).
+     */
     public static boolean noCollision(World world, Context context, Box box) throws Unknown {
         List<Voxels> shapes = new ArrayList<>();
         blocks(world, context, box, shapes, null);
-        return shapes.isEmpty();
+        if (!shapes.isEmpty()) {
+            return false;
+        }
+        Voxels border = context == null ? null : context.border(box);
+        return border == null || !VoxelCollisions.overlaps(border, VoxelCollisions.create(box));
     }
 
     /**

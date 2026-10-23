@@ -116,6 +116,9 @@ public final class ClientEntities {
     private final ArrayDeque<long[]> pings = new ArrayDeque<>();
     /** The sequence of the last answered ping: the client processed it and everything before it. */
     private long certain = Long.MIN_VALUE;
+    /** The prefixes the client's last tick could fall in ({@link #lastTickRanNormally}). */
+    private long lastTickLower = Long.MIN_VALUE;
+    private long lastTickUpper = Long.MAX_VALUE;
     private final Map<Integer, Track> tracks = new HashMap<>();
     private final Set<Track> pendingTracks = new LinkedHashSet<>();
 
@@ -797,6 +800,8 @@ public final class ClientEntities {
     private void onTick() {
         ticks++;
         long end = windowEnd();
+        lastTickLower = certain;
+        lastTickUpper = end;
         List<State> scratch = new ArrayList<>(2);
         for (Track track : tracks.values()) {
             int applicable = applicable(track, end);
@@ -1380,6 +1385,18 @@ public final class ClientEntities {
     }
 
     // --- global facts at the client's prefix ------------------------------------------------------------------------
+
+    /**
+     * Whether the client's level ran its last tick normally ({@code tickRateManager().runsNormally()}: not frozen, or
+     * stepping), whatever it had processed by then: the world border and the time advance only then. Null when not known.
+     */
+    public Boolean lastTickRanNormally() {
+        return switch (frozen.range(lastTickLower, lastTickUpper)) {
+            case FROZEN_NO -> Boolean.TRUE;
+            case FROZEN_YES -> Boolean.FALSE;
+            default -> null; // stepping may or may not have been left, or the state changed within the window
+        };
+    }
 
     /** Whether the client's TickRateManager lets non-player entities tick for every prefix X in (lower, upper]. */
     private Tri notFrozen(long lower, long upper) {

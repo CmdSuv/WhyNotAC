@@ -96,6 +96,19 @@ def verify_sequence(events, check):
           f"({after}), every other action 0 ({len(unpredicted)} not)")
 
 
+def verify_border(events, check):
+    """The border leg: the server set a static border 20 wide around x 50, z 65.5, lerped it to 30 over 80 ticks and back
+    to 20 over 60, then set the default again."""
+    def f(v):
+        return float(v["f64"]) if isinstance(v, dict) else float(v)
+    out = [e["packet"] for e in events if e["type"] == "Outbound" and (e.get("packet") or {}).get("type", "").startswith("SetBorder")]
+    centers = [(f(p["centerX"]), f(p["centerZ"])) for p in out if p["type"] == "SetBorderCenter"]
+    sizes = [f(p["size"]) for p in out if p["type"] == "SetBorderSize"]
+    lerps = [(f(p["oldSize"]), f(p["newSize"]), int(p["lerpTime"])) for p in out if p["type"] == "SetBorderLerpSize"]
+    check(centers == [(50.0, 65.5), (0.0, 0.0)] and sizes == [20.0, 59999968.0] and lerps == [(20.0, 30.0, 80), (30.0, 20.0, 60)],
+          f"the border leg: a static border, two lerps and the default again ({centers}, {sizes}, {lerps})")
+
+
 def verify_glide(events, check):
     """The elytra legs: a START_FALL_FLYING for each glide the client started, the server's shared flags echoing it
     (bit 7) and then ending it on the ground."""
@@ -263,6 +276,7 @@ def main():
     verify_break(work, check)
     verify_sequence(events, check)
     verify_glide(events, check)
+    verify_border(events, check)
     m = re.search(r"WhyNotAC self RealProbe: (.*)", re.sub(r"\x1b\[[0-9;]*m", "", log))
     fields = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv) if m else {}
     check(m is not None and fields.get("matches") == "true" and fields.get("eye") == "known" and fields.get("positionEqual") == "true"

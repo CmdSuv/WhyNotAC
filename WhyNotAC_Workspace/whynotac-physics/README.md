@@ -235,9 +235,9 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     - **Son oturum (göğüste elytra; 30 blok yukarıdan 20° aşağı bakarak düşüp havada zıplamayla süzülme ve yere
       iniş; yerden zıplayıp tepesinde ikinci basışla kısa bir süzülme; W basılıyken 20 bloktan süzülme; x86_64'ün
       kosinüsünün fdlibm'inkinden ayrıldığı 34.2°'lik dalış, süzülürken koşma tuşlarıyla; 15° yukarı bakarak süzülme;
-      10° aşağı bakarak süzülürken bir roket):** altı süzülmenin 252 tikinin hepsi bit bit eşit (roketin ittiği tikler
-      dahil: itme bir sonraki tikin başlangıç durumundadır). Tüm oturum: 11 506 tikin 11 359'u eşit, 0 fark. Negatif
-      kontroller (beş süzülmelik bir önceki oturumda, hepsi yakalandı): sürüklenme 0.99 → 0.98 (162 fark), kaldırma 0.75 → 0.76 (162), alçalma 0.1 → 0.11 (162), bakışa
+      10° aşağı bakarak süzülürken bir roket):** altı süzülmenin 272 tikinin hepsi bit bit eşit (roketin ittiği tikler
+      dahil: itme bir sonraki tikin başlangıç durumundadır). Tüm oturum: 12 094 tikin 11 916'sı eşit, 0 fark. Negatif
+      kontroller (beş süzülmelik bir oturumda, hepsi yakalandı): sürüklenme 0.99 → 0.98 (162 fark), kaldırma 0.75 → 0.76 (162), alçalma 0.1 → 0.11 (162), bakışa
       dönüş 0.1 → 0.11 (162), tırmanma 3.2 → 3.3 (13), düşüşü 1'e indirmemek (96), basılı tutulan zıplamayla ya da yerde
       başlamak (1'er), süzülme duruşunu almamak (162), süzülürken koşmaya başlayabilmek (18), x86_64 yerine fdlibm'in
       kosinüsü (17). Süzülürken blok hız çarpanı bu veride ayırt edilmez (yer çimen); `GlideTest` ruh kumunda ister.
@@ -250,6 +250,19 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     - bilinmeyen düşüş mesafesinin (NaN) okunduğu her yer.
 
     Varsayılan öznitelikler (hız dışında) varsayılır; adımın okuduğu efektler (`OnFoot.Effects`: zıplama gücü,
-    havada süzülme, yavaş düşüş, körlük, yunus lütfu, dokuma) dışarıdan verilir. Katı varlıklar ve dünya sınırı çağıranın
+    havada süzülme, yavaş düşüş, körlük, yunus lütfu, dokuma) dışarıdan verilir. Katı varlıklar çağıranın
     sorumluluğundadır.
+  - **Dünya sınırı (`Border`, `Conditions.border`):** `Entity.collectColliders` sınırın şeklini, oyuncu ona yakınken
+    (`isInsideCloseToBorder`: kutunun büyük yatay boyunun iki katından yakın, en az 1, ve o kadar içeride) varlıklardan
+    sonra, bloklardan önce ekler; `noCollision` da onu sayar (kenardan geri çekilme, duruşa sığma, sudan çıkış), destek
+    bloğu ve boğulma saymaz. Şekil `Shapes.join(INFINITY, box(floor(minX), -∞, floor(minZ), ceil(maxX), ∞,
+    ceil(maxZ)), ONLY_FIRST)`'tür: sınırın kutusu tam bloğa yuvarlanır, dışarısı dolu; kutusu inceyse her yer. Sınırlar
+    `getMinX()` ve diğerleridir (kısmi tik 0, hareket eden sınırda bir önceki boyut, mutlak en büyüğe kırpılmış).
+    `WorldBorderConformanceTest` (whynotac-paper) sınırları, şekli hücre hücre, uzaklığı, içerde olmayı ve bir varlığın
+    yakın olmasını (`isInsideCloseToBorder`), oyuncu
+    kutularının şekille `collide`'ını ve `joinIsNotEmpty`'sini oyunun kendi `WorldBorder`'ına karşı, lerp'in her
+    adımında bit bit sınar. Gerçek client (truth ajanı client'ın sınırını hareketin gördüğü haliyle kaydeder): 20
+    genişliğinde sabit sınıra yürüme, zıplama, kenarı boyunca ve köşesine koşma, sonra ona yaslıyken 80 tikte büyüyen
+    ve geri çekilirken 60 tikte küçülen sınır: sınırın yanındaki 321 tikin hepsi bit bit eşit, 196'sı sınıra çarpan.
+    Sınır verilmeyen motor tam o 196 tikte ayrılır.
 - **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.

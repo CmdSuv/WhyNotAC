@@ -3,6 +3,7 @@ package dev.whynotac.analysis.movement;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
@@ -102,7 +103,7 @@ public final class MovementTracker {
     static final int MOVER_MARGIN = 1;
     /** Entities pushing or blocking the player: their boxes searched this much beyond where the player may be. */
     static final double ENTITY_MARGIN = 1.5;
-    /** The world border collides within a few blocks ({@code WorldBorder.isInsideCloseToBorder}); this much is kept free. */
+    /** A world border not known exactly ({@link ClientBorder#known}) collides within a few blocks: this much is kept free of it. */
     static final double BORDER_MARGIN = 16.0;
     /** {@code sendPosition}'s threshold, squared as {@code Mth.square(2.0E-4)}. */
     static final double SEND_THRESHOLD_SQR = VanillaMath.square(2.0E-4);
@@ -543,8 +544,20 @@ public final class MovementTracker {
             result = untracked(number, end, in, w, world, entities);
         }
         settleBookkeeping(number, end, in);
+        base = base.withBorder(base.border().ticked(entities.lastTickRanNormally()));
         prune();
         return result;
+    }
+
+    /** {@code ClientLevel.tick}, after the entities: the world border's step, when the level ran normally. */
+    private static List<Hypothesis> borderTicked(List<Hypothesis> states, Boolean ranNormally) {
+        List<Hypothesis> out = new ArrayList<>(states.size());
+        for (Hypothesis h : states) {
+            ClientBorder border = h.self().border();
+            ClientBorder ticked = border.ticked(ranNormally);
+            out.add(ticked == border ? h : h.withSelf(h.self().withBorder(ticked)));
+        }
+        return out;
     }
 
     private Tick tracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
@@ -590,7 +603,7 @@ public final class MovementTracker {
         sent = merged(next);
         try {
             // the entities that tick after the player, in this same client tick
-            hypotheses = merged(new LinkedHashSet<>(pushed(sent, false, view)));
+            hypotheses = merged(new LinkedHashSet<>(borderTicked(pushed(sent, false, view), entities.lastTickRanNormally())));
             if (hypotheses.size() > MAX_HYPOTHESES) {
                 throw new Lose("more than " + MAX_HYPOTHESES + " hypotheses");
             }
@@ -802,7 +815,7 @@ public final class MovementTracker {
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
     private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, OnFoot.Effects effects,
-            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine) {}
+            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine, Border border) {}
 
     private void lose(String reason) {
         hypotheses = null; // the base goes on from what the server knows for certain
@@ -825,7 +838,7 @@ public final class MovementTracker {
         SelfState s = h.self();
         PlayerState p = h.player();
         return switch (packet) {
-            case ClientboundPacket.Login login -> freshPlayer(h, SelfState.INITIAL, login.gameMode(), false, false);
+            case ClientboundPacket.Login login -> freshPlayer(h, loggedIn(login), login.gameMode(), false, false);
             case ClientboundPacket.Respawn respawn -> respawned(h, respawn);
             case ClientboundPacket.PlayerPosition teleport -> {
                 if (s.vehicle() != -1) {
@@ -877,14 +890,10 @@ public final class MovementTracker {
                 yield h;
             }
             case ClientboundPacket.SetCamera camera -> h.withSelf(s.withCamera(camera.entityId() == selfId));
-            case ClientboundPacket.InitializeBorder b -> h.withSelf(s.withBorder(new SelfState.Border(b.centerX(), b.centerZ(),
-                    b.lerpTime() > 0 ? Math.min(b.oldSize(), b.newSize()) : b.newSize(), b.lerpTime() > 0 ? Math.max(b.oldSize(), b.newSize()) : b.newSize())));
-            case ClientboundPacket.SetBorderCenter b -> h.withSelf(s.withBorder(new SelfState.Border(b.centerX(), b.centerZ(), s.border().minSize(),
-                    s.border().maxSize())));
-            case ClientboundPacket.SetBorderLerpSize b -> h.withSelf(s.withBorder(new SelfState.Border(s.border().centerX(), s.border().centerZ(),
-                    Math.min(b.oldSize(), b.newSize()), Math.max(b.oldSize(), b.newSize()))));
-            case ClientboundPacket.SetBorderSize b -> h.withSelf(s.withBorder(new SelfState.Border(s.border().centerX(), s.border().centerZ(), b.size(),
-                    b.size())));
+            case ClientboundPacket.InitializeBorder b -> h.withSelf(s.withBorder(s.border().initialized(b)));
+            case ClientboundPacket.SetBorderCenter b -> h.withSelf(s.withBorder(s.border().withCenter(b.centerX(), b.centerZ())));
+            case ClientboundPacket.SetBorderLerpSize b -> h.withSelf(s.withBorder(s.border().lerp(b.oldSize(), b.newSize(), b.lerpTime())));
+            case ClientboundPacket.SetBorderSize b -> h.withSelf(s.withBorder(s.border().withSize(b.size())));
             case ClientboundPacket.EntityEvent event -> {
                 int e = event.event();
                 if (e == ClientboundPacket.EntityEvent.FINISH_USING_ITEM) {
@@ -1002,7 +1011,17 @@ public final class MovementTracker {
         }
         boolean keepAttributes = (keep & ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS) != 0;
         boolean keepData = (keep & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) != 0;
-        return freshPlayer(h, h.self(), respawn.gameMode(), keepAttributes, keepData);
+        return freshPlayer(h, respawnedInto(h.self(), respawn), respawn.gameMode(), keepAttributes, keepData);
+    }
+
+    /** A login's state before the player: a new level, its new border. */
+    private static SelfState loggedIn(ClientboundPacket.Login login) {
+        return SelfState.INITIAL.withBorder(ClientBorder.fresh(login.dimension() == null ? null : login.dimension().key()));
+    }
+
+    /** {@code handleRespawn}: a new level (and border) only into another dimension. */
+    private static SelfState respawnedInto(SelfState s, ClientboundPacket.Respawn respawn) {
+        return s.withBorder(s.border().respawned(respawn.dimension() == null ? null : respawn.dimension().key()));
     }
 
     /** {@code setValuesFromPositionPacket} ({@code PositionMoveRotation.calculateAbsolute}): position and motion. */
@@ -1132,8 +1151,9 @@ public final class MovementTracker {
             PlatformCos cosine, Map<StepKey, OnFoot.Step> steps) throws Lose {
         PlayerState start = begin.player();
         OnFoot.ItemUse use = begin.using() == null ? null : begin.using().effects();
+        Border border = self.border().collision(); // as it is at the move: the level ticks it after the entities
         StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), use, window,
-                glider, cosine);
+                glider, cosine, border);
         OnFoot.Step step = steps.get(key);
         if (step != null && !step.readSprintTrigger()) {
             // the same step: only this state's own counter counted down (or was cleared by shift or backward)
@@ -1144,7 +1164,7 @@ public final class MovementTracker {
         }
         try {
             step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects(),
-                    use, glider, cosine));
+                    use, glider, cosine, border));
         } catch (Colliders.Unknown e) {
             throw new Lose(e.getMessage());
         }
@@ -1387,7 +1407,7 @@ public final class MovementTracker {
                 anchored.add(u);
                 anchored.add(u.withPlayer(withSprintModifier(u.player(), !present)).withSelf(u.self().withSpeed(other)));
             }
-            hypotheses = List.copyOf(anchored);
+            hypotheses = List.copyOf(borderTicked(anchored, entities.lastTickRanNormally())); // the anchor is the state after this tick
             lastHands = hands();
             since = end.sequence();
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: standing still", hypotheses.size(), since, null, null);
@@ -1486,15 +1506,18 @@ public final class MovementTracker {
     /** The base's view of a packet: as {@link #apply}, without a physics state (only what does not depend on it). */
     private Hypothesis applyBase(Hypothesis b, ClientboundPacket packet) throws Lose {
         return switch (packet) {
-            case ClientboundPacket.Login login -> freshPlayer(b, SelfState.INITIAL, login.gameMode(), false, false);
+            case ClientboundPacket.Login login -> freshPlayer(b, loggedIn(login), login.gameMode(), false, false);
             case ClientboundPacket.Respawn respawn -> {
                 int keep = respawn.dataToKeep();
+                SelfState into = respawnedInto(b.self(), respawn);
                 if (keep >= 0 && (keep & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) == 0) {
-                    yield freshPlayer(b, b.self(), respawn.gameMode(), (keep & ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS) != 0, false);
+                    yield freshPlayer(b, into, respawn.gameMode(), (keep & ClientboundPacket.Respawn.KEEP_ATTRIBUTE_MODIFIERS) != 0, false);
                 }
                 quietSincePosition = false;
-                yield b.withSelf(b.self().withTicking(false));
+                yield b.withSelf(into.withTicking(false));
             }
+            case ClientboundPacket.InitializeBorder ignored -> processedBefore(apply(b, packet));
+            case ClientboundPacket.SetBorderLerpSize ignored -> processedBefore(apply(b, packet));
             case ClientboundPacket.PlayerPosition ignored -> {
                 quietSincePosition = false;
                 yield b.withSelf(b.self().withPositionKnown());
@@ -1537,6 +1560,11 @@ public final class MovementTracker {
         return b;
     }
 
+    /** The base processes a packet once the client certainly has: a lerp it started at a tick not known ({@link ClientBorder#processedBefore}). */
+    private static Hypothesis processedBefore(Hypothesis b) {
+        return b.withSelf(b.self().withBorder(b.self().border().processedBefore()));
+    }
+
     /** The settle anchor (see the class comment) for the tick just sent, or null. */
     private Hypothesis settleAnchor(long number, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         ServerboundPacket.MovePlayer move = in.move;
@@ -1573,11 +1601,12 @@ public final class MovementTracker {
                 false, Vec3d.ZERO, false, false); // the step finds the eye; standing still, it does not swim
         try {
             Box box = guess.box();
-            if (!base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
+            if (!base.border().known() && !base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
                 return null;
             }
             view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
-            OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects());
+            OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects(),
+                    null, false, PlatformCos.X86_64, base.border().collision());
             PlayerState first = OnFoot.tick(guess, PlayerState.Keys.NONE, view, conditions);
             PlayerState again = OnFoot.tick(first, PlayerState.Keys.NONE, view, conditions);
             if (!first.equals(again) || first.x() != x || first.y() != y || first.z() != z || !first.onGround() || first.horizontalCollision()
@@ -1688,8 +1717,9 @@ public final class MovementTracker {
                 Vec3d d = p.deltaMovement();
                 double reach = Math.abs(d.x()) + Math.abs(d.y()) + Math.abs(d.z());
                 Box box = p.box();
-                if (!h.self().border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN + reach)) {
-                    throw new Lose("near the world border");
+                ClientBorder border = h.self().border();
+                if (!border.known() && !border.farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN + reach)) {
+                    throw new Lose("near a world border not known exactly");
                 }
                 minX = Math.min(minX, box.minX() - reach);
                 minY = Math.min(minY, box.minY() - reach);

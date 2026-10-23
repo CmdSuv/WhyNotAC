@@ -15,7 +15,7 @@ import java.util.List;
  * <p>The scope is a survival player on foot, in water or lava or crawling, or gliding with an elytra in the air
  * ({@code travelFallFlying}), with default attributes but the speed ({@link Speed}) and the effects the step reads
  * ({@link Effects}), using an item or not ({@link ItemUse}), not riding or flying, not gliding in a fluid, away from
- * powder snow, solid entities and the world border; the fluids' currents and
+ * powder snow and solid entities, against the world border or not ({@link Border}); the fluids' currents and
  * the blocks that move the player from inside (cobwebs, berry bushes, honey slides, bubble columns) are followed.
  * Outside it, or where the client's world is not known, {@link Colliders.Unknown} is thrown: no claim can rest on that
  * tick. Sources: the decompiled client, {@code LocalPlayer},
@@ -66,9 +66,10 @@ public final class OnFoot {
      *                         component, not about to break): a new jump press in the air then starts gliding
      * @param cosine           the client's {@code Math.cos} ({@link PlatformCos}): a glide reads it
      *                         ({@code updateFallFlyingMovement}), and it is an intrinsic of the client's CPU
+     * @param border           the client's world border at the move ({@link Border}); null when it is far
      */
     public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
-            boolean glider, PlatformCos cosine) {
+            boolean glider, PlatformCos cosine, Border border) {
         public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE, null);
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
@@ -90,6 +91,11 @@ public final class OnFoot {
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
                 boolean glider) {
             this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, PlatformCos.X86_64);
+        }
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
+                boolean glider, PlatformCos cosine) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, null);
         }
     }
 
@@ -1031,10 +1037,10 @@ public final class OnFoot {
 
     /**
      * {@code CollisionContext.of(player)} made now: the feet's height and the shift key as they are at this point of the
-     * tick (before the input is polled, the last tick's keys).
+     * tick (before the input is polled, the last tick's keys); where the player is, for the world border.
      */
     private Colliders.Context context() {
-        return new Colliders.Context(y, keys.shift());
+        return new Colliders.Context(y, keys.shift(), x, z, conditions.border());
     }
 
     /** The most cells a move's ray is followed through ({@link #mayResetTheFall}); beyond, it is not followed. */

@@ -394,6 +394,23 @@ echo "item replace entity $NAME weapon.mainhand with minecraft:firework_rocket 1
 glide 40.5 -30 10 -/0.4 space/0.2 -/0.3 Button3/0.1 -/12.0
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 echo "item replace entity $NAME armor.chest with minecraft:air" > "$FIFO"; sleep 0.5
+# The world border (its shape, rounded out to whole blocks, collides within a few blocks: isInsideCloseToBorder): 20
+# wide around x 50, z 65.5 (its east side at x 60, its south side at z 75.5), walked into, jumped at, walked along, and
+# sprinted into diagonally up to its corner; then growing to 30 over 80 ticks with the player pressed against it, and
+# shrinking back to 20 over 60 ticks as it walks away backwards. The default border after. The player is put inside
+# first: far outside a border it takes damage by the block beyond (it would die where the rocket left it). The centres
+# are written with a fraction, which the command takes as it is (a whole number is a block's centre).
+border() { echo "tp $NAME $1 -60 $2 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+echo "tp $NAME 55.5 -60 65.5 -90 0" > "$FIFO"; sleep 1.5
+echo "worldborder center 50.0 65.5" > "$FIFO"; echo "worldborder set 20" > "$FIFO"; sleep 1.0
+border 55.5 65.5 -90 w/2.5 w,space/1.0 w,a/1.5 -/0.5
+border 55.5 70.5 -60 w/1.5 w,Control_L/1.5 -/0.5
+border 56.5 65.5 -90 w/1.0
+echo "worldborder set 30 80" > "$FIFO"
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/5.0 -/0.5
+echo "worldborder set 20 60" > "$FIFO"
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" s/3.5 -/0.5
+echo "worldborder set 59999968" > "$FIFO"; echo "worldborder center 0.0 0.0" > "$FIFO"; sleep 1.0
 # Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
 # y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at
 # x 13 floods eight blocks east, walked into from the east against the current, stood in and jumped in. The session ends

@@ -84,8 +84,15 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > olarak izler. Havai fişek roketinin itmesi de izlenir: client'ta oyuncuya bağlı roket oyuncudan sonra tick'ler ve
 > süzülen oyuncuyu bakışına doğru iter; takipçi bağlı roketleri sayar ve itmeyi client'ın aritmetiğiyle uygular, bağlı
 > olup olmadığı ya da tick'leyip tick'lemediği kesin olmayan bir rokette iddiadan çekilir. Gerçek client'ın altı
-> süzülmesi (252 tik, biri x86_64'ün kosinüsünün ayrıldığı eğimde, biri roketle: 46 itme izlendi) bit bit eşit;
+> süzülmesi (272 tik, biri x86_64'ün kosinüsünün ayrıldığı eğimde, biri roketle: 50 itme izlendi) bit bit eşit;
 > sentetik testte daha uzağa süzülme, başlatılamayacak yerde başlatma, paketsiz süzülme ve roket yokken roket hızı kanıt oldu.
+>
+> **Dünya sınırı (`movement`):** sınırın çarpışması da client'ın kendi kopyasıyla izlenir (`ClientBorder`): sabit ya da
+> lerp'li, client'ın tikleriyle adım adım (dünya donmuşken adım atmaz, çarpışan bir önceki boyuttur, şekli tam bloğa
+> yuvarlanır). Sınırlar, şekil ve oyuncu kutularıyla çarpışma oyunun kendi `WorldBorder`'ına karşı lerp'in her adımında bit
+> bit sınanır. Sınıra yaslanan, küçülen sınırın içinden geçtiği ve büyüyen sınırla ilerleyen oyuncu izlenir; sınırı yok
+> sayan ya da lerp'te bir adım önden giden client kanıttır. Gerçek client'ın sabit, büyüyen ve küçülen sınırın
+> yanındaki 321 tiki (196'sı sınıra çarpan) bit bit eşit; takipçi hiçbirini açıklanamaz ya da iddiasız bırakmadı.
 >
 > **Sunucunun etiketleri (`update_tags`):** client neye tırmandığını, neyin üstünde durduğunu, nerede yüzdüğünü ve aletinin
 > hangi bloğu kazdığını sunucunun gönderdiği etiketlerden bilir; veri paketi bunları değiştirebilir. WhyNotAC paketi
@@ -122,7 +129,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 603 test
+./gradlew build                       # tüm modüller + 617 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

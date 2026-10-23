@@ -16,6 +16,7 @@ dependencies {
     implementation(project(":whynotac-recording"))
     implementation(project(":whynotac-world"))
     implementation(project(":whynotac-analysis"))
+    testImplementation(project(":whynotac-physics")) // conformance of the movement engine's shapes against the game's
 }
 
 tasks.processResources {

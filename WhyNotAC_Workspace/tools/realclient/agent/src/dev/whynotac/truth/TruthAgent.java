@@ -29,7 +29,7 @@ public final class TruthAgent {
             "net.minecraft.client.player.ClientInput", "net.minecraft.world.entity.player.Input", "net.minecraft.world.phys.Vec3",
             "net.minecraft.client.multiplayer.ClientPacketListener", "net.minecraft.core.Vec3i", "net.minecraft.world.phys.Vec2",
             "net.minecraft.world.effect.MobEffectInstance", "net.minecraft.world.entity.player.Player", "net.minecraft.world.entity.EquipmentSlot",
-            "net.minecraft.world.item.ItemStack");
+            "net.minecraft.world.item.ItemStack", "net.minecraft.client.multiplayer.ClientLevel", "net.minecraft.world.level.border.WorldBorder");
 
     private TruthAgent() {}
 

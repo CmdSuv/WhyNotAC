@@ -271,6 +271,18 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   sırayla. Durma çapası, client hâlâ süzülüyor olabildikçe
   (tabanın son işlenen bayrakları süzülme diyorsa ya da client'ın başlattığı süzülmeden sonra bayrak işlenmediyse)
   kurulmaz: süzülen ama duran oyuncu (dik aşağı bakan) yürüyen sanılmaz.
+- **Dünya sınırı (`ClientBorder`):** client'ın `ClientLevel`'inin `WorldBorder`'ı, işlediği sırayla: her yeni dünya
+  (her giriş, başka boyuta doğuş: `handleRespawn` anahtarları karşılaştırır) yeni, varsayılan bir sınırdır;
+  `InitializeBorder` hepsini kurar (merkez, boyut ya da lerp, mutlak en büyük), diğer üç paket birer parçasını. Lerp
+  (`MovingBorderExtent`) dünyanın normal koşan her tikinde, varlıklardan sonra bir adım atar
+  (`ClientLevel.tick`: `tickRateManager().runsNormally()`, `ClientEntities.lastTickRanNormally`); adımları bitince
+  hedefinde sabittir. Adım hareketten önceki sınırla koşar ve çarpışma bir önceki boyutu okur. Kesin değilse
+  (`Uncertain`: tik hızı donmuş olabilirken bir lerp, ya da tabanın hangi tikte işlendiğini bilmediği bir lerp) boyut
+  iki ucu arasındadır ve adımları kesin koştuktan sonra hedefinde kesinleşir; kesin olmayan sınır yakınsa iddia yoktur.
+  Boyut anahtarı bilinmeyen bir yeniden doğuşta sınır `InitializeBorder`'a kadar bilinmez. `MovementCheckTest`: sabit sınıra yürüyüp
+  duran, küçülen sınırın içinden geçtiği, büyüyen sınıra yaslanıp onunla ilerleyen, içinden geçen sınır ayağa kalkacak
+  yeri aldığı için shift'i bırakınca da çömelik kalan oyuncu izlenir; sınırı yok sayan ya
+  da lerp'te bir adım önden giden client kanıttır; dünya donmuş olabilirken lerp'li sınır yakınında iddia yoktur.
 - **Havai fişek roketi (`ClientEntities.rocketsBoosting`):** süzülürken kullanılan roketi yalnızca sunucu doğurur;
   client'a eşleme paketinde bağlı olduğu varlıkla gelir (`DATA_ATTACHED_TO_TARGET`, veri 9, yalnızca yapılırken
   atanır). Oyuncudan sonra eklendiği için oyuncudan sonra tick'ler (`FireworkRocketEntity.tick`): oyuncu süzülüyorsa
@@ -322,7 +334,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   böyle), oyuncuya bağlı olup olmadığı ya da tick'leyip tick'lemediği kesin olmayan bir havai fişek roketi, aynı tikte
   roket ve canlı itmesi, itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
   her durum adım için aynıysa, ör. çimenin yayıldığı toprak, blok bilinir: `ClientWorld.possibleStates`,
-  `OnFoot.sameForMovement`), piston, dünya sınırı yakın,
+  `OnFoot.sameForMovement`), piston, kesin bilinmeyen bir dünya sınırı yakın,
   hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
   duran oyuncu: 12 tik tuşsuz, en az 3 tik arayla bit bit aynı iki konum paketi, arada gönderim yok, sonda yerde.
@@ -335,8 +347,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
   ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme; ağlar, çalılar, bal ve kabarcık sütunları;
   Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü; elytra ile altı süzülme, biri roketle,
-  ve inişleri): 11 542 tikin 11 033'ü iddia edildi, 0 açıklanamayan, 5925/5925 tick'te client'ın durumu kümede, 25
-  canlı itmesi ve 46 roket itmesi izlendi. Kalanlar çoğunlukla uzak ışınlamalardan ve Nether'e geçişten sonra client'ın
+  ve inişleri; sabit, büyüyen ve küçülen dünya sınırına yürüme): 12 134 tikin 11 601'i iddia edildi, 0 açıklanamayan,
+  6217/6217 tick'te client'ın durumu kümede, 42 canlı itmesi ve 50 roket itmesi izlendi; sınır hiçbir tiki iddiasız
+  bırakmadı. Kalanlar çoğunlukla uzak ışınlamalardan ve Nether'e geçişten sonra client'ın
   henüz işlemediği chunk'lar ve bloğa eşya kullanımıdır (bir önceki oturumda
   32 tik de konumu kesin bilinmeyen, dünyayla doğmuş bir koyunun yakınlığıydı). İlk elytra oturumunda süzülmenin 34
   tiki de iddiasız kaldı: yay şeridinin bir oku izlenemez olmuştu ve varlık replikası türünü unutup onu "roket

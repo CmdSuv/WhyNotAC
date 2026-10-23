@@ -12,6 +12,7 @@ import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
@@ -128,6 +129,15 @@ class MovementCheckTest {
     private final List<double[]> villagers = new ArrayList<>();
     /** Firework rockets attached to the player, as the client holds them (added after it: they tick after it). */
     private int rockets;
+    /**
+     * The synthetic client's world border at its move (null: far), and a lerp it follows ({centre x, centre z, from, to,
+     * ticks}) with the steps its level took since.
+     */
+    private Border border;
+    private double[] borderLerp;
+    private int borderSteps;
+    /** The client collides with the size after its level's last step, not before it. */
+    private boolean borderAhead;
     /** Whether their pushes reach the player (teams); {@code ignorePushes}: the client drops them. */
     private boolean pushedByVillagers = true;
     private boolean ignorePushes;
@@ -258,7 +268,7 @@ class MovementCheckTest {
         keybinds.clear();
         PlayerState pre = rotate(player, yRot, xRot);
         OnFoot.Step step = OnFoot.step(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects, use,
-                elytra, platform));
+                elytra, platform, border));
         PlayerState post = step.state();
         firstTick = false;
         if (step.startedGliding() && sendsGlideStart) {
@@ -300,6 +310,7 @@ class MovementCheckTest {
         sentCollision = post.horizontalCollision();
         villagersPush();
         rocketsBoost();
+        borderStep();
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
         if (sprintSent && serverSendsSpeed) {
@@ -479,6 +490,43 @@ class MovementCheckTest {
             player = withDelta(player, new Vec3d(d.x() + (look.x() * 0.1 + (look.x() * 1.5 - d.x()) * 0.5),
                     d.y() + (look.y() * 0.1 + (look.y() * 1.5 - d.y()) * 0.5), d.z() + (look.z() * 0.1 + (look.z() * 1.5 - d.z()) * 0.5)));
         }
+    }
+
+    /** The server sets a static world border, which the client processes before its next tick. */
+    private void staticBorder(double centerX, double centerZ, double size) {
+        out(new ClientboundPacket.InitializeBorder(centerX, centerZ, size, size, 0L, 29999984));
+        sync();
+        border = bounds(centerX, centerZ, size);
+        borderLerp = null;
+    }
+
+    /** The server sets a border moving from {@code from} to {@code to} over {@code time} ticks. */
+    private void lerpingBorder(double centerX, double centerZ, double from, double to, long time) {
+        out(new ClientboundPacket.InitializeBorder(centerX, centerZ, from, to, time, 29999984));
+        sync();
+        border = bounds(centerX, centerZ, from);
+        borderLerp = new double[] {centerX, centerZ, from, to, time};
+        borderSteps = 0;
+    }
+
+    private static Border bounds(double centerX, double centerZ, double size) {
+        return new Border(centerX - size / 2.0, centerZ - size / 2.0, centerX + size / 2.0, centerZ + size / 2.0);
+    }
+
+    /**
+     * {@code ClientLevel.tick}, after the entities: a lerp's step. The collision reads the size before the last step (the
+     * start's for the first), the target once all steps are taken; step {@code k}'s size is {@code from + k / ticks * (to - from)}.
+     */
+    private void borderStep() {
+        if (borderLerp == null) {
+            return;
+        }
+        borderSteps++;
+        double from = borderLerp[2];
+        double to = borderLerp[3];
+        double time = borderLerp[4];
+        int step = borderAhead ? borderSteps : borderSteps - 1;
+        border = bounds(borderLerp[0], borderLerp[1], borderSteps >= time ? to : from + step / time * (to - from));
     }
 
     /** The server adds a firework rocket at the player, attached to {@code target} (the server's pairing: entity and data). */
@@ -1277,6 +1325,84 @@ class MovementCheckTest {
         tick(NONE, 0.0F, 10.0F, Vec3d.ZERO);
         tick(NONE, 0.0F, 10.0F, Vec3d.ZERO);
         assertTrue(!evidence.isEmpty(), String.valueOf(ticks.subList(ticks.size() - 2, ticks.size())));
+    }
+
+    @Test
+    void walkingIntoTheWorldBorderStopsAtItAndIsFollowed() throws Exception {
+        staticBorder(-7.0, 0.5, 20.0); // its east side at x 3
+        ticks(5, NONE, -90.0F);
+        ticks(30, FORWARD, -90.0F);
+        assertTrue(player.horizontalCollision() && player.x() > 2.69 && player.x() < 2.7 + 1.0E-9, String.valueOf(player));
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void walkingThroughTheWorldBorderIsAFinding() throws Exception {
+        staticBorder(-7.0, 0.5, 20.0);
+        border = null; // the client ignores it
+        ticks(5, NONE, -90.0F);
+        ticks(30, FORWARD, -90.0F);
+        assertTrue(player.x() > 3.0, String.valueOf(player));
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void aShrinkingWorldBorderIsFollowedStepByStep() throws Exception {
+        lerpingBorder(-7.0, 0.5, 30.0, 4.0, 40L); // its east side from x 8 to -5 over two seconds, through the player
+        ticks(60, FORWARD, -90.0F); // walking into it as it comes, then out of it once it passed
+        assertTrue(player.x() > 3.0, String.valueOf(player));
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aGrowingWorldBorderTheClientStopsAtIsFollowed() throws Exception {
+        lerpingBorder(-7.0, 0.5, 18.0, 22.0, 100L); // its east side from x 2 to 4 over five seconds, ahead of the player
+        ticks(80, FORWARD, -90.0F); // pressed against it as it moves: its shape's side is the whole block beyond, 2, 3, then 4
+        assertTrue(player.horizontalCollision() && Math.abs(player.x() - 3.7) < 1.0E-6, String.valueOf(player)); // half of 0.6F short of x 4
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aBorderOneStepAheadOfTheClientsIsAFinding() throws Exception {
+        borderAhead = true; // its side passes x 2 after the first step, a tick before the client's does
+        lerpingBorder(-7.0, 0.5, 18.0, 22.0, 100L);
+        ticks(80, FORWARD, -90.0F);
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void aBorderPassingThroughThePlayerKeepsItCrouching() throws Exception {
+        PlayerState.Keys sneak = new PlayerState.Keys(false, false, false, false, false, true, false);
+        lerpingBorder(-7.0, 0.5, 30.0, 4.0, 400L); // its east side from x 8 to -5 over 20 seconds
+        ticks(252, sneak, 90.0F); // crouching until the side's whole block (0) is inside the box, the player still close
+        int from = ticks.size();
+        boolean keptCrouching = false;
+        for (int i = 0; i < 20; i++) {
+            tick(FORWARD, 90.0F, 0.0F, Vec3d.ZERO); // walking west without shift: standing needs room the border takes
+            keptCrouching |= player.pose() == PlayerState.Pose.CROUCHING;
+        }
+        assertTrue(keptCrouching, "the border kept the client crouching");
+        assertEquals(PlayerState.Pose.STANDING, player.pose());
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void aLerpingBorderWhileTheLevelMayBeFrozenEndsTheClaimNearIt() throws Exception {
+        out(new ClientboundPacket.TickingState(20.0F, true));
+        out(new ClientboundPacket.TickingStep(100)); // stepping: the level may or may not run normally in a tick
+        sync();
+        lerpingBorder(-7.0, 0.5, 30.0, 4.0, 40L);
+        ticks(10, NONE, -90.0F);
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.stream().anyMatch(t -> "near a world border not known exactly".equals(t.reason())), String.valueOf(ticks));
     }
 
     @Test

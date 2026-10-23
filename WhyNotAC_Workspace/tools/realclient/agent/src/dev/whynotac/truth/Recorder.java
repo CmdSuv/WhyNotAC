@@ -52,6 +52,7 @@ public final class Recorder {
     private static Method isSprinting, isShiftKeyDown, getPose, isPassenger, isSwimming;
     // gliding: the shared flag, and whether an equipped item can glide (the item part of LivingEntity.canGlide)
     private static Method isFallFlying, getItemBySlot, canGlideUsing;
+    private static Method level, getWorldBorder, borderMinX, borderMinZ, borderMaxX, borderMaxZ;
     private static Object[] equipmentSlots;
 
     private Recorder() {}
@@ -117,6 +118,14 @@ public final class Recorder {
             bool(line, "swimming", (Boolean) isSwimming.invoke(player));
             bool(line, "fallFlying", (Boolean) isFallFlying.invoke(player)); // the shared flag 7
             bool(line, "glider", glider(player));
+            // the level's world border as the collision reads it (it steps after the entities: at "pre", the move's)
+            Object worldBorder = getWorldBorder.invoke(level.invoke(player));
+            line.append(",\"border\":[");
+            Method[] bounds = {borderMinX, borderMinZ, borderMaxX, borderMaxZ};
+            for (int i = 0; i < bounds.length; i++) {
+                line.append(i == 0 ? "\"" : ",\"").append(Long.toHexString(Double.doubleToRawLongBits((Double) bounds[i].invoke(worldBorder)))).append('"');
+            }
+            line.append(']');
             // TagKey.toString: "TagKey[minecraft:fluid / minecraft:water]"
             bool(line, "eyeInWater", String.valueOf(fluidOnEyes.get(player)).contains(" / minecraft:water]"));
             bool(line, "wasUnderwater", wasUnderwater.getBoolean(player));
@@ -253,6 +262,13 @@ public final class Recorder {
         equipmentSlots = slot.getEnumConstants();
         getItemBySlot = method(loader, living, "getItemBySlot(net.minecraft.world.entity.EquipmentSlot)", slot);
         canGlideUsing = method(loader, living, "canGlideUsing(net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot)", stack, slot);
+        level = method(loader, entity, "level()");
+        getWorldBorder = method(loader, "net.minecraft.client.multiplayer.ClientLevel", "getWorldBorder()"); // declared there, not in Level
+        String border = "net.minecraft.world.level.border.WorldBorder";
+        borderMinX = method(loader, border, "getMinX()");
+        borderMinZ = method(loader, border, "getMinZ()");
+        borderMaxX = method(loader, border, "getMaxX()");
+        borderMaxZ = method(loader, border, "getMaxZ()");
         fluidOnEyes = field(loader, entity, "fluidOnEyes");
         fluidHeight = field(loader, entity, "fluidHeight");
         wasUnderwater = field(loader, "net.minecraft.world.entity.player.Player", "wasUnderwater");

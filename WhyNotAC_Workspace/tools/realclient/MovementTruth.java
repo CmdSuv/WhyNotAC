@@ -3,6 +3,7 @@ import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.BlockPos;
+import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
@@ -30,7 +31,9 @@ import java.util.TreeMap;
  * with the keys the client polled, in the world WhyNotAC's replica holds from the server's recording.
  * Every tick the engine models must come out equal to the state after, bit for bit: position, velocity,
  * collision flags, fall distance, sprint, crouch, pose, the jump and sprint counters and the supporting
- * block. Ticks outside its scope are counted by reason.
+ * block. The client's world border at the move is the one the agent recorded; the ticks next to it
+ * ({@code nearBorder}: the session walks into a static border and one that moves) must be more than none. Ticks
+ * outside its scope are counted by reason.
  *
  * <p>Each tick is evaluated in the world the replica holds when the client's movement packet of that tick (or of
  * the next tick that sent one) arrives in the replay: the k-th packet the client sent, rebuilt from its own
@@ -94,7 +97,7 @@ public class MovementTruth {
         result.put("tracker", tracker);
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
-                && ((Number) result.get("gliding")).longValue() > 0
+                && ((Number) result.get("gliding")).longValue() > 0 && ((Number) result.get("nearBorder")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0;
@@ -330,6 +333,7 @@ public class MovementTruth {
         long effectTicks;
         long useTicks;
         long glideTicks;
+        long borderTicks;
         final Map<String, Long> unknown = new TreeMap<>();
         final Map<String, Long> differingFields = new TreeMap<>();
         final List<String> examples = new ArrayList<>();
@@ -411,8 +415,13 @@ public class MovementTruth {
                 }
                 // an equipped item that can glide (older truth files: none)
                 boolean glider = Boolean.TRUE.equals(pre.get("glider"));
+                Border border = border(pre);
+                if (border != null && border.distance(before.x(), before.z()) < 2.0) {
+                    borderTicks++; // close enough for its shape to collide (isInsideCloseToBorder)
+                }
                 PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use, glider, CLIENT_COSINE));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use, glider, CLIENT_COSINE,
+                                border));
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
                     matched++;
@@ -439,6 +448,7 @@ public class MovementTruth {
             out.put("withEffects", effectTicks);
             out.put("usingItem", useTicks);
             out.put("gliding", glideTicks);
+            out.put("nearBorder", borderTicks);
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
             out.put("examples", examples);
@@ -552,6 +562,13 @@ public class MovementTruth {
     private static PlayerState.Keys keys(String k) {
         return new PlayerState.Keys(k.charAt(0) == 'W', k.charAt(1) == 'S', k.charAt(2) == 'A', k.charAt(3) == 'D', k.charAt(4) == 'J', k.charAt(5) == 'H',
                 k.charAt(6) == 'R');
+    }
+
+    /** The client's world border at the move (older truth files: none recorded, taken as far). */
+    @SuppressWarnings("unchecked")
+    private static Border border(Map<String, Object> pre) {
+        List<Object> b = (List<Object>) pre.get("border");
+        return b == null ? null : new Border(f64(b.get(0)), f64(b.get(1)), f64(b.get(2)), f64(b.get(3)));
     }
 
     @SuppressWarnings("unchecked")
