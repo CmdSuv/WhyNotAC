@@ -409,6 +409,20 @@ public sealed interface ClientboundPacket {
     /** {@code ClientboundSetPlayerInventoryPacket}: one slot of the player's inventory, by inventory index (0-8 hotbar, 40 off hand). */
     record SetPlayerInventory(int slot, Stack item) implements ClientboundPacket {}
 
+    /**
+     * {@code ClientboundSetEquipmentPacket}: an entity's equipment, slot by slot ({@code EquipmentSlot}'s serialized name:
+     * {@code mainhand}, {@code offhand}, {@code feet}, ...). The client sets each with {@code setItemSlot}; for its own
+     * player that is its inventory ({@code PlayerEquipment}: the main hand is the selected hotbar slot). A vanilla
+     * server sends it only to the players tracking the entity, never to the entity itself.
+     */
+    record SetEquipment(int entityId, List<Slot> slots) implements ClientboundPacket {
+        public SetEquipment {
+            slots = List.copyOf(slots);
+        }
+
+        public record Slot(String slot, Stack item) {}
+    }
+
     /** {@code ClientboundSetHeldSlotPacket}: the selected hotbar slot. */
     record SetHeldSlot(int slot) implements ClientboundPacket {}
 

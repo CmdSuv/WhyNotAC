@@ -179,6 +179,38 @@ final class InsideBlocks {
         return out;
     }
 
+    /**
+     * {@code AABB.collidedAlongVector(vector, boxes)} for {@code box}: its centre's path along the vector meets one of the
+     * boxes grown by half the box's size (less {@code 1.0E-7}): it starts or ends inside one, or crosses one.
+     */
+    static boolean collidedAlongVector(Box box, Vec3d vector, java.util.List<Box> boxes) {
+        Vec3d center = new Vec3d(lerpHalf(box.minX(), box.maxX()), lerpHalf(box.minY(), box.maxY()), lerpHalf(box.minZ(), box.maxZ()));
+        Vec3d end = center.add(vector);
+        for (Box b : boxes) {
+            double gx = (box.maxX() - box.minX()) * 0.5 - 1.0E-7;
+            double gy = (box.maxY() - box.minY()) * 0.5 - 1.0E-7;
+            double gz = (box.maxZ() - box.minZ()) * 0.5 - 1.0E-7;
+            Box grown = b.inflate(gx, gy, gz);
+            if (contains(grown, end) || contains(grown, center)) {
+                return true;
+            }
+            if (clip(grown.minX(), grown.minY(), grown.minZ(), grown.maxX(), grown.maxY(), grown.maxZ(), center, end) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** {@code Mth.lerp(0.5, min, max)}: {@code AABB.getCenter}'s. */
+    private static double lerpHalf(double min, double max) {
+        return min + 0.5 * (max - min);
+    }
+
+    /** {@code AABB.contains(Vec3)}: lower bounds in, upper bounds out. */
+    private static boolean contains(Box b, Vec3d p) {
+        return p.x() >= b.minX() && p.x() < b.maxX() && p.y() >= b.minY() && p.y() < b.maxY() && p.z() >= b.minZ() && p.z() < b.maxZ();
+    }
+
     /** {@code AABB.clip(minX, minY, minZ, maxX, maxY, maxZ, from, to)}: the point the segment enters the box at, or null. */
     static double[] clip(double minX, double minY, double minZ, double maxX, double maxY, double maxZ, Vec3d from, Vec3d to) {
         double[] t = {1.0};

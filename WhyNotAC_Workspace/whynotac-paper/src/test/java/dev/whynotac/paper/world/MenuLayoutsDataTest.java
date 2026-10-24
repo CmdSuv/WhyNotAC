@@ -115,11 +115,12 @@ class MenuLayoutsDataTest {
         return new NautilusInventoryMenu(2, inventory, new SimpleContainer(AbstractMountInventoryMenu.getInventorySize(columns)), nautilus, columns);
     }
 
-    /** {@code key size hotbar(9 menu slots, -1 none) offhand}. */
+    /** {@code key size hotbar(9 menu slots, -1 none) offhand feet}. */
     private static String row(String key, AbstractContainerMenu menu) {
         int[] hotbar = new int[9];
         Arrays.fill(hotbar, -1);
         int offhand = -1;
+        int feet = -1;
         for (int i = 0; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
             if (slot.container == inventory) {
@@ -129,6 +130,9 @@ class MenuLayoutsDataTest {
                     hotbar[index] = i;
                 } else if (index == 40) {
                     offhand = i;
+                } else if (Inventory.EQUIPMENT_SLOT_MAPPING.get(index) == net.minecraft.world.entity.EquipmentSlot.FEET) {
+                    assertEquals(-1, feet, key + ": the feet twice");
+                    feet = i;
                 }
             }
         }
@@ -136,7 +140,7 @@ class MenuLayoutsDataTest {
         for (int k = 0; k < 9; k++) {
             b.append(k == 0 ? "" : ",").append(hotbar[k]);
         }
-        return b.append('\t').append(offhand).toString();
+        return b.append('\t').append(offhand).append('\t').append(feet).toString();
     }
 
     private static String line(MenuLayouts.Layout layout) {
@@ -144,6 +148,6 @@ class MenuLayoutsDataTest {
         for (int k = 0; k < 9; k++) {
             b.append(k == 0 ? "" : ",").append(layout.hotbar().get(k));
         }
-        return b.append('\t').append(layout.offhand()).toString();
+        return b.append('\t').append(layout.offhand()).append('\t').append(layout.feet()).toString();
     }
 }

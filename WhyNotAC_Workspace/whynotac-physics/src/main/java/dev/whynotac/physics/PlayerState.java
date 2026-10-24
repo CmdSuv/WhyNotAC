@@ -20,12 +20,24 @@ import dev.whynotac.math.vector.Vec3d;
  *                          ({@code updateFluidOnEyes}); the next tick's {@code isUnderWater} reads it
  * @param fallFlying        the shared gliding flag ({@code isFallFlying}): set by the client when it starts gliding, cleared
  *                          only by the server's own (echoed back) or a climbable block in the glide
+ * @param inPowderSnow      {@code isInPowderSnow}: the tick's move went through powder snow ({@code InsideBlockEffectType.FREEZE});
+ *                          the next tick's {@code wasInPowderSnow}
  */
 public record PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround,
         boolean horizontalCollision, boolean minorHorizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow,
         double fallDistance, boolean sprinting, boolean sprintModifier, boolean crouching, Pose pose, Keys keys, int noJumpDelay, int sprintTriggerTime,
         int autoJumpTime, BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, boolean swimming, boolean eyeInWater,
-        boolean fallFlying) {
+        boolean fallFlying, boolean inPowderSnow) {
+
+    /** A state not in powder snow. */
+    public PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround, boolean horizontalCollision,
+            boolean minorHorizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow, double fallDistance, boolean sprinting,
+            boolean sprintModifier, boolean crouching, Pose pose, Keys keys, int noJumpDelay, int sprintTriggerTime, int autoJumpTime, BlockPos support,
+            boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, boolean swimming, boolean eyeInWater, boolean fallFlying) {
+        this(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision, verticalCollisionBelow,
+                fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support, onGroundNoBlocks,
+                stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, false);
+    }
 
     /** A state not gliding. */
     public PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround, boolean horizontalCollision,
@@ -34,21 +46,28 @@ public record PlayerState(double x, double y, double z, Vec3d deltaMovement, flo
             boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, boolean swimming, boolean eyeInWater) {
         this(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision, verticalCollisionBelow,
                 fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support, onGroundNoBlocks,
-                stuckSpeedMultiplier, swimming, eyeInWater, false);
+                stuckSpeedMultiplier, swimming, eyeInWater, false, false);
     }
 
     /** This state with the water flags. */
     public PlayerState withWater(boolean swimming, boolean eyeInWater) {
         return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying);
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow);
     }
 
     /** This state with the gliding flag. */
     public PlayerState withFallFlying(boolean fallFlying) {
         return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying);
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow);
+    }
+
+    /** This state with the powder snow flag. */
+    public PlayerState withInPowderSnow(boolean inPowderSnow) {
+        return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
+                verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow);
     }
 
     /** The poses the step handles ({@code Player.POSES}; SWIMMING is crawling too). */

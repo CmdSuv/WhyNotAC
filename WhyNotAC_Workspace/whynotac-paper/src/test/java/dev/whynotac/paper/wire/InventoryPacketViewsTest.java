@@ -23,9 +23,11 @@ import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundSetCursorItemPacket;
 import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -35,8 +37,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * The inventory packets translate to the same records from the game's objects and from the bytes the
- * client receives: item, count, the component patch (types sorted) and a patched attack range; a click's
+ * The inventory packets (and an entity's equipment) translate to the same records from the game's objects and from
+ * the bytes the client receives: item, count, the component patch (types sorted) and a patched attack range; a click's
  * hashed stacks keep the item, count and patch types, never values.
  */
 class InventoryPacketViewsTest {
@@ -159,6 +161,25 @@ class InventoryPacketViewsTest {
         assertEquals(new ClientboundPacket.SetCursorItem(dirt), cursor(new ItemStack(Items.DIRT, 12)));
         assertEquals(new ClientboundPacket.SetPlayerInventory(40, reachStickModel()), playerInventory(40, reachStick()));
         assertEquals(new ClientboundPacket.SetHeldSlot(4), translator.outbound(new ClientboundSetHeldSlotPacket(4), true));
+    }
+
+    /** {@code ClientboundSetEquipmentPacket}: the entity, then each slot's ordinal (the high bit: more follow) and its stack. */
+    @Test
+    void equipmentKeepsTheEntityTheSlotsAndTheirStacks() {
+        List<com.mojang.datafixers.util.Pair<EquipmentSlot, ItemStack>> slots = List.of(
+                com.mojang.datafixers.util.Pair.of(EquipmentSlot.FEET, new ItemStack(Items.LEATHER_BOOTS)),
+                com.mojang.datafixers.util.Pair.of(EquipmentSlot.MAINHAND, reachStick()), com.mojang.datafixers.util.Pair.of(EquipmentSlot.HEAD, ItemStack.EMPTY));
+        RegistryFriendlyByteBuf buf = bytes();
+        buf.writeVarInt(42);
+        for (int i = 0; i < slots.size(); i++) {
+            int ordinal = slots.get(i).getFirst().ordinal();
+            buf.writeByte(i != slots.size() - 1 ? ordinal | -128 : ordinal);
+            writeStack(buf, slots.get(i).getSecond());
+        }
+        ClientboundPacket wire = bothViews(new ClientboundSetEquipmentPacket(42, slots), decoded(buf, ClientboundSetEquipmentPacket.STREAM_CODEC));
+        assertEquals(new ClientboundPacket.SetEquipment(42, List.of(
+                new ClientboundPacket.SetEquipment.Slot("feet", new Stack("minecraft:leather_boots", 1, List.of(), List.of(), null, false)),
+                new ClientboundPacket.SetEquipment.Slot("mainhand", reachStickModel()), new ClientboundPacket.SetEquipment.Slot("head", Stack.EMPTY))), wire);
     }
 
     @Test

@@ -69,10 +69,10 @@ class ProtocolSurfaceTest {
 
     /**
      * Changes what the client simulates or collides with, or its combat state, but is not modelled yet.
-     * This is the Phase 2b backlog (leashes, new minecarts, equipment, cooldowns, combat state).
+     * This is the Phase 2b backlog (leashes, new minecarts, cooldowns, combat state).
      */
     private static final Set<String> CLIENTBOUND_PHYSICS_PENDING = Set.of(
-            "set_entity_link", "move_minecart_along_track", "projectile_power", "block_event", "cooldown", "set_equipment", "player_combat_kill",
+            "set_entity_link", "move_minecart_along_track", "projectile_power", "block_event", "cooldown", "player_combat_kill",
             "player_look_at",
             "damage_event", "hurt_animation", "start_configuration");
 

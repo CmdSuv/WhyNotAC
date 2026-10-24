@@ -626,6 +626,15 @@ public final class EventCodec {
                     body.writeZigZag(c.slot());
                     stack(c.item());
                 }
+                case ClientboundPacket.SetEquipment e -> {
+                    body.writeVarInt(CB_SET_EQUIPMENT);
+                    body.writeZigZag(e.entityId());
+                    body.writeVarInt(e.slots().size());
+                    for (ClientboundPacket.SetEquipment.Slot slot : e.slots()) {
+                        string(slot.slot());
+                        stack(slot.item());
+                    }
+                }
                 case ClientboundPacket.EntityEvent e -> {
                     body.writeVarInt(CB_ENTITY_EVENT);
                     body.writeZigZag(e.entityId());
@@ -1237,6 +1246,15 @@ public final class EventCodec {
                 case CB_SET_PLAYER_INVENTORY -> new ClientboundPacket.SetPlayerInventory(zint(in), readStack(in));
                 case CB_SET_HELD_SLOT -> new ClientboundPacket.SetHeldSlot(zint(in));
                 case CB_ENTITY_EVENT -> new ClientboundPacket.EntityEvent(zint(in), zint(in));
+                case CB_SET_EQUIPMENT -> {
+                    int entityId = zint(in);
+                    int count = boundedCount(in);
+                    List<ClientboundPacket.SetEquipment.Slot> slots = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) {
+                        slots.add(new ClientboundPacket.SetEquipment.Slot(string(in), readStack(in)));
+                    }
+                    yield new ClientboundPacket.SetEquipment(entityId, slots);
+                }
                 case CB_SET_CAMERA -> new ClientboundPacket.SetCamera(zint(in));
                 case CB_SET_HEALTH -> new ClientboundPacket.SetHealth(in.readFloat(), zint(in), in.readFloat());
                 case CB_SET_PLAYER_TEAM -> {

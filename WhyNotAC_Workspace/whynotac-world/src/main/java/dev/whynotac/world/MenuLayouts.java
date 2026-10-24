@@ -11,8 +11,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Where the player's hotbar and off hand sit in each 1.21.11 menu the client can have open: for every menu
- * type, its slot count and the menu slot of each hotbar slot and of the off hand (-1: the menu has none).
+ * Where the player's hotbar, off hand and feet sit in each 1.21.11 menu the client can have open: for every
+ * menu type, its slot count and the menu slot of each hotbar slot, of the off hand and of the feet armor
+ * (-1: the menu has none).
  * The table is the game's own: {@code MenuLayoutsDataTest} builds every menu type's client menu and reads
  * which of its slots are the player's inventory.
  */
@@ -24,16 +25,24 @@ public final class MenuLayouts {
     public static final String HORSE = "#horse";
     public static final String NAUTILUS = "#nautilus";
 
-    /** One menu: its slot count, the menu slot of hotbar slots 0..8 (-1: none) and of the off hand (-1: none). */
-    public record Layout(String key, int size, List<Integer> hotbar, int offhand) {
+    /** One menu: its slot count, the menu slot of hotbar slots 0..8 (-1: none), of the off hand and of the feet (-1: none). */
+    public record Layout(String key, int size, List<Integer> hotbar, int offhand, int feet) {
+        /** The off hand's {@link #playerSlot}. */
+        public static final int OFFHAND = -2;
+        /** The feet's {@link #playerSlot}. */
+        public static final int FEET = -3;
+
         public Layout {
             hotbar = Collections.unmodifiableList(new ArrayList<>(hotbar));
         }
 
-        /** The hotbar slot (0..8) at menu slot {@code slot}, -2 for the off hand, -1 for neither. */
+        /** The hotbar slot (0..8) at menu slot {@code slot}, {@link #OFFHAND}, {@link #FEET}, or -1 for none of them. */
         public int playerSlot(int slot) {
             if (slot == offhand && offhand >= 0) {
-                return -2;
+                return OFFHAND;
+            }
+            if (slot == feet && feet >= 0) {
+                return FEET;
             }
             return hotbar.indexOf(slot);
         }
@@ -59,7 +68,8 @@ public final class MenuLayouts {
                     for (String s : cells[2].split(",")) {
                         hotbar.add(Integer.parseInt(s));
                     }
-                    layouts.put(cells[0], new Layout(cells[0], Integer.parseInt(cells[1]), hotbar, Integer.parseInt(cells[3])));
+                    layouts.put(cells[0], new Layout(cells[0], Integer.parseInt(cells[1]), hotbar, Integer.parseInt(cells[3]),
+                            Integer.parseInt(cells[4])));
                 }
             }
             vanilla = table = new MenuLayouts(Map.copyOf(layouts));
@@ -91,7 +101,8 @@ public final class MenuLayouts {
         for (int slot : zero.hotbar()) {
             hotbar.add(slot < 0 ? slot : slot + shift);
         }
-        return new Layout(HORSE + ":" + columns, zero.size() + shift, hotbar, zero.offhand() < 0 ? -1 : zero.offhand() + shift);
+        return new Layout(HORSE + ":" + columns, zero.size() + shift, hotbar, zero.offhand() < 0 ? -1 : zero.offhand() + shift,
+                zero.feet() < 0 ? -1 : zero.feet() + shift);
     }
 
     /** A nautilus's inventory menu: the saddle and the body armor, then the player's; it has no chest slots whatever the columns. */

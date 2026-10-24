@@ -42,7 +42,10 @@ import org.junit.jupiter.api.Test;
  * sprinted in, and a channel's slow current walked against and stood in; {@code truth-nether.jsonl.gz} the same in the
  * nether, where lava is fast. {@code truth-scaffolding.jsonl.gz} holds a scaffolding tower climbed from the ground and
  * jumped in, its top stood on and gone down through with shift, and a bridge hanging off it walked onto, stood on with
- * shift and left to the side. Each tick, run from its start in the same world (rebuilt here from the commands that built
+ * shift and left to the side. {@code truth-powdersnow.jsonl.gz} holds powder snow one deep and two deep: sunk into without
+ * boots and jumped in against its wall, fallen onto from five blocks (the falling shape, then in), walked and sprinted
+ * across on top in leather boots, sunk into with shift and climbed out of at a wall in them, and the server's frost on
+ * the speed while in it (the attribute the recorded speed shows: {@code RecordedSpeed}). Each tick, run from its start in the same world (rebuilt here from the commands that built
  * the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -134,6 +137,9 @@ class OnFootTruthTest {
         {133, -56, 26, 133, -56, 26, scaffolding("bottom=true", "distance=1")},
         {134, -56, 26, 134, -56, 26, scaffolding("bottom=true", "distance=2")},
         {135, -56, 26, 135, -56, 26, scaffolding("bottom=true", "distance=3")},
+        // powder snow in the ground: a strip one deep, a pit two deep
+        {60, -61, 29, 65, -61, 31, blockState("minecraft:powder_snow")},
+        {68, -62, 29, 70, -61, 31, blockState("minecraft:powder_snow")},
     };
 
     private static int scaffolding(String bottom, String distance) {
@@ -346,6 +352,14 @@ class OnFootTruthTest {
     }
 
     @Test
+    void powderSnowIsTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-powdersnow.jsonl.gz", COURSE_WORLD);
+        // ticks in powder snow, held by it, on top of it in boots, climbing out of it in boots, landed on its falling shape, frozen
+        assertTrue(counts[0] > 650 && counts[42] > 450 && counts[43] > 450 && counts[44] > 80 && counts[45] > 10 && counts[46] > 1
+                && counts[47] > 250, java.util.Arrays.toString(counts));
+    }
+
+    @Test
     void itemUseIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-use.jsonl.gz", COURSE_WORLD);
         assertTrue(counts[0] > 180 && counts[11] > 180 && counts[12] > 20 && counts[3] > 10, java.util.Arrays.toString(counts));
@@ -360,7 +374,9 @@ class OnFootTruthTest {
      * the waterfall, and crawling, then ticks held back by a cobweb, by one under weaving and by a berry bush, honey slides,
      * ticks in the rising bubble column, above it, in the dragging one, and among the pool's columns, then ticks touching
      * lava, in a lava channel's current, and jumping out of lava at a wall, then ticks in scaffolding, standing on its top,
-     * standing on a hanging block's floor, climbing it, and going down it with shift}.
+     * standing on a hanging block's floor, climbing it, and going down it with shift, then ticks ending in powder snow, held
+     * by it, standing on it in leather boots, climbing out of it in them, landings on its falling shape, and ticks under
+     * its frost}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -370,12 +386,17 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[42];
+        int[] counts = new int[48];
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
-            PlayerState before = state(pre);
-            PlayerState expected = state(post);
+            RecordedSpeed speedBefore = RecordedSpeed.of(f32(text(pre, "speed")), bool(pre, "sprinting"));
+            RecordedSpeed speedAfter = RecordedSpeed.of(f32(text(post, "speed")), bool(post, "sprinting"));
+            if (speedBefore == null || speedAfter == null) {
+                continue; // the float is no attribute of the base, frost and sprinting, or two that move the player differently
+            }
+            PlayerState before = state(pre, speedBefore.sprintModifier());
+            PlayerState expected = state(post, speedAfter.sprintModifier());
             String where = "tick " + number(pre, "tickCount") + " keys " + text(post, "keys");
             PlayerState predicted;
             try {
@@ -383,8 +404,12 @@ class OnFootTruthTest {
                 boolean autoJump = pre.contains("\"autoJumpEnabled\":true");
                 OnFoot.Effects effects = effects(pre);
                 OnFoot.ItemUse use = use(pre);
+                // canEntityWalkOnPowderSnow: the leather boots (recorded in newer files; the older ones never met powder snow)
+                Boolean boots = pre.contains("\"leatherBoots\":true") ? Boolean.TRUE : pre.contains("\"leatherBoots\":false") ? Boolean.FALSE : null;
                 predicted = OnFoot.tick(before, keys(text(post, "keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, speedAfter, effects, use, false,
+                                dev.whynotac.math.vanilla.PlatformCos.X86_64, null, boots));
+                counts[47] += speedAfter.frost() != 0.0 ? 1 : 0;
                 counts[11] += use != null ? 1 : 0;
                 counts[12] += use != null && predicted.sprinting() ? 1 : 0;
                 // on a climbable block at the end (the ladder, vine and trapdoor columns), and pushed out of a block
@@ -447,6 +472,13 @@ class OnFootTruthTest {
             counts[39] += onScaffolding && expected.y() == on.y() + 0.125 ? 1 : 0;
             counts[40] += inScaffolding && expected.deltaMovement().y() > 0.0 ? 1 : 0;
             counts[41] += inScaffolding && expected.keys().shift() && expected.deltaMovement().y() < 0.0 && !expected.onGround() ? 1 : 0;
+            boolean onSnow = expected.onGround() && on != null && STATES.block(world.blockState(on.x(), on.y(), on.z())).equals("minecraft:powder_snow");
+            counts[42] += expected.inPowderSnow() ? 1 : 0;
+            counts[43] += held.equals(new Vec3d(0.9F, 1.5, 0.9F)) ? 1 : 0;
+            counts[44] += onSnow && expected.y() == on.y() + 1.0 ? 1 : 0;
+            counts[45] += before.inPowderSnow() && pre.contains("\"leatherBoots\":true") && expected.horizontalCollision()
+                    && expected.deltaMovement().y() > 0.0 && !expected.onGround() ? 1 : 0;
+            counts[46] += onSnow && expected.y() == on.y() + (double) 0.9F ? 1 : 0;
         }
         return counts;
     }
@@ -476,7 +508,7 @@ class OnFootTruthTest {
         return false;
     }
 
-    private static PlayerState state(String line) {
+    private static PlayerState state(String line, boolean sprintModifier) {
         List<String> pos = list(line, "pos");
         String support = raw(line, "support");
         BlockPos supportPos = null;
@@ -487,9 +519,10 @@ class OnFootTruthTest {
         return new PlayerState(f64(pos.get(0)), f64(pos.get(1)), f64(pos.get(2)), vec(list(line, "deltaMovement")), f32(text(line, "yRot")),
                 f32(text(line, "xRot")), bool(line, "onGround"), bool(line, "horizontalCollision"), bool(line, "minorHorizontalCollision"),
                 bool(line, "verticalCollision"), bool(line, "verticalCollisionBelow"), f64(text(line, "fallDistance")), bool(line, "sprinting"),
-                sprintModifier(line), bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
+                sprintModifier, bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
                 number(line, "sprintTriggerTime"), number(line, "autoJumpTime"), supportPos, bool(line, "onGroundNoBlocks"),
-                vec(list(line, "stuckSpeedMultiplier")), line.contains("\"swimming\":true"), line.contains("\"eyeInWater\":true"));
+                vec(list(line, "stuckSpeedMultiplier")), line.contains("\"swimming\":true"), line.contains("\"eyeInWater\":true"),
+                line.contains("\"fallFlying\":true"), line.contains("\"inPowderSnow\":true"));
     }
 
     /** The recorded active effects ({@code "effects":{"minecraft:jump_boost":1,...}}, newer files only), by amplifier. */
@@ -530,13 +563,42 @@ class OnFootTruthTest {
         return new OnFoot.ItemUse(p.useCanSprint(), p.useSpeed());
     }
 
-    /** {@code LivingEntity.speed} (the attribute as a float, set in the last tick's aiStep) holds the sprinting modifier or not. */
-    private static boolean sprintModifier(String line) {
-        float speed = f32(text(line, "speed"));
-        if (speed != (float) OnFoot.Speed.VANILLA.value(true) && speed != (float) OnFoot.Speed.VANILLA.value(false)) {
-            throw new AssertionError("speed " + speed + " in " + line);
+    /**
+     * The movement speed attribute a recorded {@code LivingEntity.speed} shows (the attribute as a float, set in
+     * {@code Player.aiStep} after the tick's sprint changes): the base {@code 0.1F}, powder snow's frost added (the server's
+     * {@code tryAddFrost}: {@code -0.05F} times the part frozen, {@code ticksFrozen / 140}, an attribute it sends), and
+     * the sprinting modifier or not. {@link #of} is null where none gives the float, or two that move the player differently
+     * do; where frost and sprinting both give it (72 ticks frozen walking, 120 sprinting) the sprinting flag decides.
+     */
+    private record RecordedSpeed(double frost, boolean sprintModifier) implements OnFoot.Speed {
+        @Override
+        public double value(boolean sprint) {
+            double base = 0.1F + frost; // calculateValue: the base, plus the added
+            return sprint ? base * (1.0 + 0.3F) : base;
         }
-        return speed == (float) OnFoot.Speed.VANILLA.value(true);
+
+        static RecordedSpeed of(float recorded, boolean sprinting) {
+            List<RecordedSpeed> matches = new ArrayList<>();
+            for (int ticks = 0; ticks <= 140; ticks++) {
+                double frost = -0.05F * ((float) ticks / 140);
+                for (boolean sprint : new boolean[] {false, true}) {
+                    RecordedSpeed s = new RecordedSpeed(frost, sprint);
+                    if ((float) s.value(sprint) == recorded) {
+                        matches.add(s);
+                    }
+                }
+            }
+            if (matches.stream().anyMatch(m -> m.sprintModifier() == sprinting)) {
+                matches.removeIf(m -> m.sprintModifier() != sprinting);
+            }
+            if (matches.isEmpty() || matches.stream().map(RecordedSpeed::sprintModifier).distinct().count() > 1) {
+                return null;
+            }
+            RecordedSpeed first = matches.getFirst();
+            boolean other = !first.sprintModifier();
+            // the tick may toggle the modifier: every match must give the same float there too
+            return matches.stream().allMatch(m -> (float) m.value(other) == (float) first.value(other)) ? first : null;
+        }
     }
 
     private static PlayerState.Keys keys(String k) {

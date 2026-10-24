@@ -53,6 +53,8 @@ public final class Recorder {
     // gliding: the shared flag, and whether an equipped item can glide (the item part of LivingEntity.canGlide)
     private static Method isFallFlying, getItemBySlot, canGlideUsing;
     private static Method level, getWorldBorder, borderMinX, borderMinZ, borderMaxX, borderMaxZ;
+    private static Field isInPowderSnow;
+    private static Object feetSlot;
     private static Object[] equipmentSlots;
 
     private Recorder() {}
@@ -118,6 +120,9 @@ public final class Recorder {
             bool(line, "swimming", (Boolean) isSwimming.invoke(player));
             bool(line, "fallFlying", (Boolean) isFallFlying.invoke(player)); // the shared flag 7
             bool(line, "glider", glider(player));
+            bool(line, "inPowderSnow", isInPowderSnow.getBoolean(player));
+            // canEntityWalkOnPowderSnow: ItemStack.toString is "count item", Item.toString its registered name
+            bool(line, "leatherBoots", String.valueOf(getItemBySlot.invoke(player, feetSlot)).endsWith(" minecraft:leather_boots"));
             // the level's world border as the collision reads it (it steps after the entities: at "pre", the move's)
             Object worldBorder = getWorldBorder.invoke(level.invoke(player));
             line.append(",\"border\":[");
@@ -262,6 +267,10 @@ public final class Recorder {
         equipmentSlots = slot.getEnumConstants();
         getItemBySlot = method(loader, living, "getItemBySlot(net.minecraft.world.entity.EquipmentSlot)", slot);
         canGlideUsing = method(loader, living, "canGlideUsing(net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot)", stack, slot);
+        isInPowderSnow = field(loader, entity, "isInPowderSnow");
+        Field feet = slot.getDeclaredField(mappings.field("net.minecraft.world.entity.EquipmentSlot", "FEET"));
+        feet.setAccessible(true);
+        feetSlot = feet.get(null);
         level = method(loader, entity, "level()");
         getWorldBorder = method(loader, "net.minecraft.client.multiplayer.ClientLevel", "getWorldBorder()"); // declared there, not in Level
         String border = "net.minecraft.world.level.border.WorldBorder";

@@ -24,6 +24,8 @@ class ClientInventoryTest {
     private static final Stack SPEAR = plain("minecraft:iron_spear");
     private static final Stack SHIELD = plain("minecraft:shield");
     private static final Stack APPLE = plain("minecraft:golden_apple");
+    private static final Stack LEATHER_BOOTS = plain("minecraft:leather_boots");
+    private static final Stack IRON_BOOTS = plain("minecraft:iron_boots");
     private static final Stack.AttackRange LONG = new Stack.AttackRange(0F, 4.5F, 0F, 6.5F, 0.25F, 1F);
     private static final int LONG_HASH = 0x5eed1234;
     private static final Stack LONG_STICK = new Stack("minecraft:stick", 1, List.of(Stack.ATTACK_RANGE), List.of(), LONG, false, LONG_HASH);
@@ -417,12 +419,83 @@ class ClientInventoryTest {
     }
 
     @Test
+    void theFeetAreTheInventoryMenusArmorSlotAndInventoryIndex36() {
+        assertEquals(Boolean.FALSE, inventory.wearsOnFeet(LEATHER_BOOTS.item()), "the login's content: no boots");
+        List<Stack> items = inventoryMenu(SHIELD, SWORD);
+        items.set(8, LEATHER_BOOTS);
+        out(content(0, items, Stack.EMPTY));
+        sync();
+        assertEquals(Boolean.TRUE, inventory.wearsOnFeet(LEATHER_BOOTS.item()));
+        assertEquals(LEATHER_BOOTS, only().feet());
+        out(new ClientboundPacket.ContainerSetSlot(0, 2, 8, IRON_BOOTS));
+        sync();
+        assertEquals(Boolean.FALSE, inventory.wearsOnFeet(LEATHER_BOOTS.item()));
+        out(new ClientboundPacket.SetPlayerInventory(36, LEATHER_BOOTS));
+        sync();
+        assertEquals(Boolean.TRUE, inventory.wearsOnFeet(LEATHER_BOOTS.item()));
+        out(new ClientboundPacket.OpenScreen(4, "minecraft:generic_9x1"));
+        out(content(4, Collections.nCopies(45, Stack.EMPTY), Stack.EMPTY));
+        sync();
+        assertEquals(Boolean.TRUE, inventory.wearsOnFeet(LEATHER_BOOTS.item()), "a chest has no armor slots");
+        in(new ServerboundPacket.ContainerClose(4));
+        click(0, 8, "PICKUP", changed(8, Stack.EMPTY));
+        assertEquals(Boolean.FALSE, inventory.wearsOnFeet(LEATHER_BOOTS.item()), "taken off in the inventory screen");
+        out(new ClientboundPacket.SetPlayerInventory(36, LEATHER_BOOTS));
+        assertNull(inventory.wearsOnFeet(LEATHER_BOOTS.item()), "maybe processed, maybe not");
+        sync();
+        out(new ClientboundPacket.Respawn(OVERWORLD, 0));
+        sync();
+        assertEquals(Stack.EMPTY, only().feet(), "a new player");
+    }
+
+    @Test
+    void thePlayersOwnEquipmentPacketSetsItsInventory() {
+        out(new ClientboundPacket.SetEquipment(7, List.of(new ClientboundPacket.SetEquipment.Slot("feet", LEATHER_BOOTS))));
+        sync();
+        assertEquals(Stack.EMPTY, only().feet(), "another entity's");
+        out(new ClientboundPacket.SetEquipment(1, List.of(new ClientboundPacket.SetEquipment.Slot("feet", LEATHER_BOOTS),
+                new ClientboundPacket.SetEquipment.Slot("mainhand", SHIELD), new ClientboundPacket.SetEquipment.Slot("offhand", SPEAR),
+                new ClientboundPacket.SetEquipment.Slot("head", IRON_BOOTS))));
+        sync();
+        ClientInventory.View view = only();
+        assertEquals(LEATHER_BOOTS, view.feet());
+        assertEquals(SHIELD, view.hotbar().get(2), "the main hand is the selected slot");
+        assertEquals(SWORD, view.hotbar().get(0));
+        assertEquals(SPEAR, view.offhand());
+        out(new ClientboundPacket.Untranslatable("minecraft:set_equipment"));
+        sync();
+        assertNull(only().feet());
+    }
+
+    @Test
+    void aUseThatMaySwapTheArmorMakesTheFeetUnknown() {
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0F, 0F));
+        assertEquals(Stack.EMPTY, only().feet(), "a use that keeps the stack");
+        outcome = ClientInventory.Outcome.KEEP_OR_NONE_ADD;
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 2, 0F, 0F));
+        assertNull(only().feet(), "a stacked equippable");
+        out(content(0, inventoryMenu(SHIELD, SWORD, SPEAR, APPLE), Stack.EMPTY));
+        sync();
+        outcome = ClientInventory.Outcome.UNKNOWN;
+        in(new ServerboundPacket.UseItem(Hand.OFF_HAND, 3, 0F, 0F));
+        assertNull(only().feet(), "a single one");
+        outcome = ClientInventory.Outcome.KEEP;
+        out(new ClientboundPacket.SetPlayerInventory(36, Stack.EMPTY));
+        sync();
+        assertEquals(Stack.EMPTY, only().feet());
+        assertNull(only().offhand());
+        in(new ServerboundPacket.UseItem(Hand.OFF_HAND, 4, 0F, 0F));
+        assertNull(only().feet(), "a stack not known may be one");
+    }
+
+    @Test
     void aGapForgetsEverything() {
         inventory.onEvent(new TimelineEvent.Gap(sequence++, sequence, 3));
         ClientInventory.View view = only();
         assertNull(view.hotbar().get(0));
         assertEquals(-1, view.selected());
         assertEquals(Set.of(ClientInventory.Reach.UNKNOWN), inventory.mainHandReach());
+        assertNull(view.feet());
     }
 
     @Test

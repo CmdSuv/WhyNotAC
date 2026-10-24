@@ -283,6 +283,16 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   duran, küçülen sınırın içinden geçtiği, büyüyen sınıra yaslanıp onunla ilerleyen, içinden geçen sınır ayağa kalkacak
   yeri aldığı için shift'i bırakınca da çömelik kalan oyuncu izlenir; sınırı yok sayan ya
   da lerp'te bir adım önden giden client kanıttır; dünya donmuş olabilirken lerp'li sınır yakınında iddia yoktur.
+- **Toz kar ve botlar (`ClientInventory.wearsOnFeet`):** adım toz karın şeklini ve tutuşunu motorda hesaplar
+  (whynotac-physics); ayağındaki deri botu envanter replikası verir: envanter menüsünün 8. slotu, envanterin 36.
+  indisi, oyuncunun kendi ekipman paketi (`SetEquipment`; vanilla sunucu kendine göndermez, bir eklenti gönderebilir)
+  ve giyilebilir bir eşyanın kullanımla zırhla yer değiştirmesi (bilinmez sayılır, sunucu yeniden gönderene dek).
+  Client'ın tutabileceği her durumda bot aynıysa bilinir; değilse yalnızca botların karar verdiği toz kar tikleri
+  iddiasız kalır. Donma (`DATA_TICKS_FROZEN`) client'ın hareketini değiştirmez: yavaşlaması sunucunun hız
+  özniteliğidir, takipçi onu izler; donan oyuncu artık kapsam dışı değildir. `MovementCheckTest`: botsuz batan, duvara
+  karşı zıplayıp çıkamayan, 2.5'ten fazla düşüp levhaya inip batan, botla üstünde yürüyen, shift ile batıp duvarda
+  tırmanan ve donarken yürüyen oyuncu izlenir; botsuz üstünde yürüyen ya da içinde tutulmadan hızlı yürüyen client
+  kanıttır; bot bilinmiyorsa yalnızca toz karın üstünde iddia yoktur.
 - **Havai fişek roketi (`ClientEntities.rocketsBoosting`):** süzülürken kullanılan roketi yalnızca sunucu doğurur;
   client'a eşleme paketinde bağlı olduğu varlıkla gelir (`DATA_ATTACHED_TO_TARGET`, veri 9, yalnızca yapılırken
   atanır). Oyuncudan sonra eklendiği için oyuncudan sonra tick'ler (`FireworkRocketEntity.tick`): oyuncu süzülüyorsa
@@ -328,7 +338,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   `pushableBy`'ın kurallarıyla verilir ve client'ın o tick tutabileceği her takım durumunda aynı olmalıdır. Bir
   oyuncunun ya da evcil bir hayvanın takımı adından bilinmez: her takım denenir. Birden çok iticinin sırası
   izlenmez, her sıra bir hipotezdir (en çok 3 itici).
-- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (toz kar, lav hızı bilinmeyen boyutta lav akıntısı...), çarpışan ya da kendi yoluyla iten bir
+- **İddia yok (küme düşer):** OnFoot'un kapsamı dışı (botu bilinmeyen oyuncunun altındaki toz kar, lav hızı bilinmeyen boyutta lav
+  akıntısı...), çarpışan ya da kendi yoluyla iten bir
   varlık yakında (tekneler, vagonlar, shulker, mutlu ghast), oyuncunun kutusuna değebilecek bir canlının konumu,
   boyutu, tick'i ya da tick sırası kesin değil (yeniden doğuştan önce eklenmiş, oyuncu olmayan bir canlı da
   böyle), oyuncuya bağlı olup olmadığı ya da tick'leyip tick'lemediği kesin olmayan bir havai fişek roketi, aynı tikte
@@ -347,9 +358,10 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
   ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme; ağlar, çalılar, bal ve kabarcık sütunları;
   Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü; elytra ile altı süzülme, biri roketle,
-  ve inişleri; sabit, büyüyen ve küçülen dünya sınırına yürüme): 12 134 tikin 11 601'i iddia edildi, 0 açıklanamayan,
-  6217/6217 tick'te client'ın durumu kümede, 42 canlı itmesi ve 50 roket itmesi izlendi; sınır hiçbir tiki iddiasız
-  bırakmadı. Kalanlar çoğunlukla uzak ışınlamalardan ve Nether'e geçişten sonra client'ın
+  ve inişleri; sabit, büyüyen ve küçülen dünya sınırına yürüme; toz kar şeridi ve çukuru: botsuz batma, beş bloktan
+  düşüş, deri botla üstünde yürüme ve koşma, shift ile batıp duvarda tırmanma, donarken yürüme): 12 869 tikin
+  12 363'ü iddia edildi, 0 açıklanamayan, 6648/6648 tick'te client'ın durumu kümede, 30 canlı itmesi ve 50 roket itmesi
+  izlendi; ne sınır ne toz kar (donmuş tikleri de) hiçbir tiki iddiasız bırakmadı. Kalanlar çoğunlukla uzak ışınlamalardan ve Nether'e geçişten sonra client'ın
   henüz işlemediği chunk'lar ve bloğa eşya kullanımıdır (bir önceki oturumda
   32 tik de konumu kesin bilinmeyen, dünyayla doğmuş bir koyunun yakınlığıydı). İlk elytra oturumunda süzülmenin 34
   tiki de iddiasız kaldı: yay şeridinin bir oku izlenemez olmuştu ve varlık replikası türünü unutup onu "roket

@@ -138,6 +138,8 @@ class MovementCheckTest {
     private int borderSteps;
     /** The client collides with the size after its level's last step, not before it. */
     private boolean borderAhead;
+    /** The synthetic client wears leather boots (its feet slot, as the server set it unless the client lies). */
+    private boolean leatherBoots;
     /** Whether their pushes reach the player (teams); {@code ignorePushes}: the client drops them. */
     private boolean pushedByVillagers = true;
     private boolean ignorePushes;
@@ -161,11 +163,12 @@ class MovementCheckTest {
     }
 
     /**
-     * The client's movement speed attribute: base {@code 0.1F}, the modifiers multiplying the total in fastutil's
-     * own table ({@code AttributeInstance}), summed in its iteration order.
+     * The client's movement speed attribute: base {@code 0.1F}, the modifiers adding to it and those multiplying the
+     * total each in fastutil's own table ({@code AttributeInstance}), summed in its iteration order.
      */
     private static final class ClientSpeed implements OnFoot.Speed {
         private static final String SPRINTING = "minecraft:sprinting";
+        private final Object2ObjectOpenHashMap<Key, Double> added = new Object2ObjectOpenHashMap<>();
         private final Object2ObjectOpenHashMap<Key, Double> total = new Object2ObjectOpenHashMap<>();
 
         boolean holdsSprinting() {
@@ -176,6 +179,9 @@ class MovementCheckTest {
         public double value(boolean sprintModifier) {
             assertEquals(holdsSprinting(), sprintModifier, "the synthetic client's state follows its own attribute");
             double value = 0.1F;
+            for (double amount : added.values()) {
+                value += amount;
+            }
             for (double amount : total.values()) {
                 value *= 1.0 + amount;
             }
@@ -193,10 +199,14 @@ class MovementCheckTest {
 
         /** {@code handleUpdateAttributes}: every modifier removed, then the update's added in its order. */
         void replace(List<ClientboundPacket.UpdateAttributes.Modifier> modifiers) {
+            added.clear();
             total.clear();
             for (ClientboundPacket.UpdateAttributes.Modifier m : modifiers) {
-                assertEquals(ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL, m.operation());
-                total.put(Key.of(m.id()), m.amount());
+                switch (m.operation()) {
+                    case ADD_VALUE -> added.put(Key.of(m.id()), m.amount());
+                    case ADD_MULTIPLIED_TOTAL -> total.put(Key.of(m.id()), m.amount());
+                    default -> throw new AssertionError(m);
+                }
             }
         }
     }
@@ -257,7 +267,8 @@ class MovementCheckTest {
         player = new PlayerState(x, y, z, Vec3d.ZERO, yaw, pitch, player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
                 player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(), player.sprintModifier(),
                 player.crouching(), player.pose(), player.keys(), player.noJumpDelay(), player.sprintTriggerTime(), player.autoJumpTime(), player.support(),
-                player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(), player.fallFlying());
+                player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(), player.fallFlying(),
+                player.inPowderSnow());
         in(new ServerboundPacket.AcceptTeleportation(id));
         in(new ServerboundPacket.MovePlayer(x, y, z, yaw, pitch, true, true, false, false));
     }
@@ -268,7 +279,7 @@ class MovementCheckTest {
         keybinds.clear();
         PlayerState pre = rotate(player, yRot, xRot);
         OnFoot.Step step = OnFoot.step(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects, use,
-                elytra, platform, border));
+                elytra, platform, border, leatherBoots));
         PlayerState post = step.state();
         firstTick = false;
         if (step.startedGliding() && sendsGlideStart) {
@@ -370,6 +381,13 @@ class MovementCheckTest {
         }
         out(new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY));
         sync();
+    }
+
+    /** The server sets the feet armor slot (the InventoryMenu's slot 8), which the client handles before its next tick. */
+    private void wear(String feet) {
+        out(new ClientboundPacket.ContainerSetSlot(0, 1, 8, feet == null ? Stack.EMPTY : new Stack(feet, 1, List.of(), List.of(), null, false)));
+        sync();
+        leatherBoots = "minecraft:leather_boots".equals(feet);
     }
 
     /** The server's living-entity flags (1: using, 2: the off hand), handled before the client's next tick. */
@@ -547,28 +565,28 @@ class MovementCheckTest {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater(), p.fallFlying());
+                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
     }
 
     private static PlayerState move(PlayerState p, Vec3d by) {
         return new PlayerState(p.x() + by.x(), p.y() + by.y(), p.z() + by.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(),
                 p.horizontalCollision(), p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(),
                 p.sprintModifier(), p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(),
-                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying());
+                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
     }
 
     private static PlayerState withDelta(PlayerState p, Vec3d delta) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater(), p.fallFlying());
+                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
     }
 
     private static PlayerState withSprintModifier(PlayerState p, boolean sprintModifier) {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), sprintModifier, p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater(), p.fallFlying());
+                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
     }
 
     /** The server sets a block; the client handles it before its next tick. */
@@ -1325,6 +1343,147 @@ class MovementCheckTest {
         tick(NONE, 0.0F, 10.0F, Vec3d.ZERO);
         tick(NONE, 0.0F, 10.0F, Vec3d.ZERO);
         assertTrue(!evidence.isEmpty(), String.valueOf(ticks.subList(ticks.size() - 2, ticks.size())));
+    }
+
+    /** A strip of powder snow in the ground's top layer (y 63), x 2 to 5, z -1 to 1: stone below, stone east of it. */
+    private void powderSnowStrip() {
+        int snow = STATES.firstStateOf("minecraft:powder_snow");
+        for (int x = 2; x <= 5; x++) {
+            for (int z = -1; z <= 1; z++) {
+                place(x, 63, z, snow);
+            }
+        }
+    }
+
+    @Test
+    void withoutBootsThePlayerSinksIntoPowderSnowAndStaysIn() throws Exception {
+        powderSnowStrip();
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        boolean in = false;
+        double lowest = Double.MAX_VALUE;
+        for (int i = 0; i < 70; i++) { // walks east into it, held back, against the stone at x 6
+            tick(FORWARD, -90.0F, 0.0F, Vec3d.ZERO);
+            in |= player.inPowderSnow();
+            lowest = Math.min(lowest, player.y());
+        }
+        assertTrue(in && lowest < 63.5 && player.horizontalCollision(), String.valueOf(player));
+        double highest = 0.0;
+        for (int i = 0; i < 30; i++) { // jumping against the stone: held, no step up the whole block, no climbing without boots
+            tick(SPRINT_JUMP, -90.0F, 0.0F, Vec3d.ZERO);
+            highest = Math.max(highest, player.y());
+        }
+        assertTrue(player.x() < 6.0 && highest > 63.5 && highest < 64.0, player + " " + highest);
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void leatherBootsWalkOnPowderSnowSinkWhenDescendingAndClimbOut() throws Exception {
+        powderSnowStrip();
+        wear("minecraft:leather_boots");
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        for (int i = 0; i < 15; i++) { // on top of it: the full block holds the player up
+            tick(FORWARD, -90.0F, 0.0F, Vec3d.ZERO);
+            assertEquals(64.0, player.y(), String.valueOf(player));
+        }
+        assertTrue(player.x() > 3.0 && player.x() < 4.5 && !player.inPowderSnow(), String.valueOf(player));
+        PlayerState.Keys sneak = new PlayerState.Keys(false, false, false, false, false, true, false);
+        ticks(20, sneak, -90.0F); // descending: no shape, in it
+        assertTrue(player.y() < 63.5 && player.inPowderSnow(), String.valueOf(player));
+        boolean climbed = false;
+        for (int i = 0; i < 60 && player.y() < 64.0; i++) { // against the stone at x 6: climbing out, 0.2 a tick
+            tick(FORWARD, -90.0F, 0.0F, Vec3d.ZERO);
+            climbed |= player.deltaMovement().y() > 0.0 && !player.onGround();
+        }
+        ticks(10, FORWARD, -90.0F);
+        assertTrue(climbed && player.x() > 6.0 && player.y() == 64.0, String.valueOf(player));
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void aFallOfMoreThan2Point5LandsOnPowderSnowsSlabThenSinks() throws Exception {
+        powderSnowStrip();
+        teleport(3.5, 70.0, 0.5, -90.0F, 0.0F);
+        int from = ticks.size();
+        boolean slab = false;
+        for (int i = 0; i < 40; i++) {
+            tick(NONE, -90.0F, 0.0F, Vec3d.ZERO);
+            slab |= player.onGround() && player.y() == 63.0 + (double) 0.9F;
+        }
+        assertTrue(slab, "it landed on the falling shape");
+        assertTrue(player.y() < 63.5 && player.inPowderSnow(), String.valueOf(player));
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void freezingInPowderSnowIsFollowedThroughItsSpeed() throws Exception {
+        powderSnowStrip();
+        teleport(2.5, 63.0, 0.5, -90.0F, 0.0F);
+        ticks(5, NONE, -90.0F);
+        int from = ticks.size();
+        for (int frozen = 1; frozen <= 60; frozen++) {
+            // the server's tick: FREEZE counts the ticks frozen (synched data), then tryAddFrost's modifier, -0.05F of the part frozen
+            out(new ClientboundPacket.SetEntityData(SELF, List.of(new ClientboundPacket.SetEntityData.DataEntry(7,
+                    ClientboundPacket.SetEntityData.Kind.INT, frozen)), 0));
+            serverModifiers.removeIf(m -> m.id().equals("minecraft:powder_snow"));
+            serverModifiers.add(new ClientboundPacket.UpdateAttributes.Modifier("minecraft:powder_snow", -0.05F * ((float) frozen / 140.0F),
+                    ClientboundPacket.UpdateAttributes.Operation.ADD_VALUE));
+            sendSpeed(true);
+            tick(frozen < 30 ? NONE : FORWARD, -90.0F, 0.0F, Vec3d.ZERO);
+        }
+        assertTrue(player.inPowderSnow() && player.x() > 2.6, String.valueOf(player));
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void walkingOnPowderSnowWithoutBootsIsAFinding() throws Exception {
+        powderSnowStrip();
+        leatherBoots = true; // the client walks on it as if it wore boots: it wears none
+        ticks(5, NONE, -90.0F);
+        ticks(12, FORWARD, -90.0F);
+        assertEquals(64.0, player.y(), String.valueOf(player));
+        assertTrue(!evidence.isEmpty(), String.valueOf(ticks));
+    }
+
+    @Test
+    void movingThroughPowderSnowAtFullSpeedIsAFinding() throws Exception {
+        powderSnowStrip();
+        teleport(2.5, 63.0, 0.5, -90.0F, 0.0F); // in it
+        ticks(5, NONE, -90.0F);
+        assertTrue(player.inPowderSnow(), String.valueOf(player));
+        ticks(3, FORWARD, -90.0F);
+        assertEquals(List.of(), evidence);
+        tick(FORWARD, -90.0F, 0.0F, new Vec3d(0.03, 0.0, 0.0)); // not held back
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void bootsNotKnownEndTheClaimOnlyOnPowderSnow() throws Exception {
+        powderSnowStrip();
+        hold("minecraft:leather_boots", null);
+        ticks(5, NONE, -90.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND)); // Equippable.swapWithEquipmentSlot: on, but the replica does not follow the swap
+        leatherBoots = true;
+        tick(NONE, -90.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.ContainerSetSlot(0, 2, 36, Stack.EMPTY)); // the server resends the hand, not the feet
+        sync();
+        ticks(45, NONE, 90.0F); // anchored again where it stands (at a position reminder like the last)
+        ticks(5, FORWARD, 90.0F); // west, away from the snow: claimed
+        assertTrue(ticks.subList(ticks.size() - 4, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks));
+        teleport(3.5, 64.0, 0.5, -90.0F, 0.0F); // standing over it: the boots decide
+        ticks(5, NONE, -90.0F);
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.stream().anyMatch(t -> t.reason() != null && t.reason().contains("boots")), String.valueOf(ticks));
     }
 
     @Test

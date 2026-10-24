@@ -39,8 +39,8 @@ public final class OnFoot {
      */
     static final java.util.Set<String> MOVING_INSIDE = java.util.Set.of("minecraft:bubble_column", "minecraft:honey_block", "minecraft:cobweb",
             "minecraft:sweet_berry_bush", "minecraft:powder_snow");
-    /** Its collision and its hold depend on the player's boots and fall ({@code PowderSnowBlock}): not followed. */
-    static final String POWDER_SNOW = "minecraft:powder_snow";
+    /** Its collision depends on the player's fall and boots ({@link Colliders#powderSnow}), its hold on the feet's block. */
+    static final String POWDER_SNOW = Colliders.POWDER_SNOW;
     /** {@code BlockTags.CLIMBABLE}; trapdoors can be ladders too ({@code trapdoorUsableAsLadder}). */
     public static final java.util.Set<String> CLIMBABLE = java.util.Set.of("minecraft:ladder", "minecraft:vine", "minecraft:scaffolding",
             "minecraft:weeping_vines", "minecraft:weeping_vines_plant", "minecraft:twisting_vines", "minecraft:twisting_vines_plant",
@@ -67,9 +67,11 @@ public final class OnFoot {
      * @param cosine           the client's {@code Math.cos} ({@link PlatformCos}): a glide reads it
      *                         ({@code updateFallFlyingMovement}), and it is an intrinsic of the client's CPU
      * @param border           the client's world border at the move ({@link Border}); null when it is far
+     * @param leatherBoots     the player wears leather boots ({@code canEntityWalkOnPowderSnow}: it walks on powder snow and
+     *                         climbs out of it); null when not known: a tick that reads it is {@link Colliders.Unknown}
      */
     public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
-            boolean glider, PlatformCos cosine, Border border) {
+            boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots) {
         public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE, null);
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
@@ -95,7 +97,12 @@ public final class OnFoot {
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
                 boolean glider, PlatformCos cosine) {
-            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, null);
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, null, null);
+        }
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
+                boolean glider, PlatformCos cosine, Border border) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, border, null);
         }
     }
 
@@ -209,6 +216,9 @@ public final class OnFoot {
     private Vec3d stuck;
     private boolean swimming;
     private boolean fallFlying;
+    /** {@code isInPowderSnow}, set by this tick's moves ({@code FREEZE}); {@code wasInPowderSnow}: the last tick's. */
+    private boolean inPowderSnow;
+    private final boolean wasInPowderSnow;
     private boolean startedGliding;
     private boolean readCosine;
     /** {@code fluidOnEyes} holds water: set by this tick's {@code updateFluidOnEyes}, read as the last tick's before it. */
@@ -264,6 +274,7 @@ public final class OnFoot {
         swimming = pre.swimming();
         eyeInWater = pre.eyeInWater();
         fallFlying = pre.fallFlying();
+        wasInPowderSnow = pre.inPowderSnow(); // Entity.baseTick: wasInPowderSnow = isInPowderSnow, isInPowderSnow = false
         oldPosition = new Vec3d(x, y, z);
     }
 
@@ -327,13 +338,13 @@ public final class OnFoot {
     private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuck, swimming, eyeInWater, fallFlying);
+                onGroundNoBlocks, stuck, swimming, eyeInWater, fallFlying, inPowderSnow);
     }
 
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
         // --- Player.tick: updateIsUnderwater, from the last tick's eye ---
         wasUnderwater = eyeInWater;
-        // --- Entity.baseTick: water and lava (no other fluid, no powder snow), the eye, swimming, a fall in lava halved ---
+        // --- Entity.baseTick: water and lava (no other fluid), the eye, swimming, a fall in lava halved ---
         Box start = pose.box(x, y, z);
         requireInScope(start.inflate(-0.001, -0.001, -0.001), start, "at the start of the tick");
         updateInWaterStateAndDoFluidPushing();
@@ -568,8 +579,8 @@ public final class OnFoot {
         move(delta);
         requireInScope(before.inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), pose.box(x, y, z).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F), "along the move");
         Vec3d moved = delta;
-        if ((horizontalCollision || jumping) && onClimbable()) { // asked again after the move, at the new feet block
-            moved = new Vec3d(moved.x(), 0.2, moved.z());
+        if ((horizontalCollision || jumping) && (onClimbable() || wasInPowderSnow && leatherBoots())) { // asked again after the move
+            moved = new Vec3d(moved.x(), 0.2, moved.z()); // a climbable at the new feet block, or out of powder snow with boots
         }
         double vy = moved.y();
         int levitation = conditions.effects().levitation();
@@ -1040,7 +1051,15 @@ public final class OnFoot {
      * tick (before the input is polled, the last tick's keys); where the player is, for the world border.
      */
     private Colliders.Context context() {
-        return new Colliders.Context(y, keys.shift(), x, z, conditions.border());
+        return new Colliders.Context(y, keys.shift(), x, z, conditions.border(), fallDistance, conditions.leatherBoots());
+    }
+
+    /** {@code PowderSnowBlock.canEntityWalkOnPowderSnow}: leather boots on the feet (the player is no powder-snow-walkable mob). */
+    private boolean leatherBoots() throws Colliders.Unknown {
+        if (conditions.leatherBoots() == null) {
+            throw new Colliders.Unknown("whether the player wears leather boots is not known (out of powder snow)");
+        }
+        return conditions.leatherBoots();
     }
 
     /** The most cells a move's ray is followed through ({@link #mayResetTheFall}); beyond, it is not followed. */
@@ -1342,12 +1361,19 @@ public final class OnFoot {
             last[0] = step;
             BlockPos pos = new BlockPos(bx, by, bz);
             int s = state(pos);
-            if (!states.has(s, BlockStates.AIR) && MOVING_INSIDE.contains(states.block(s)) && visited.add(pos)) {
+            // getEntityInsideCollisionShape: the full block, but powder snow's own shape for the player where it has one
+            if (!states.has(s, BlockStates.AIR) && MOVING_INSIDE.contains(states.block(s)) && (!states.block(s).equals(POWDER_SNOW)
+                    || enteredPowderSnow(pos, from, to)) && visited.add(pos)) {
                 entityInside(s, pos, far || box.intersects(bx, by, bz, bx + 1, by + 1, bz + 1));
             }
             return true;
         });
         return last[0] + 1;
+    }
+
+    /** Whether the move from {@code from} to {@code to} met powder snow at {@code pos} ({@link Colliders#powderSnowEntered}). */
+    private boolean enteredPowderSnow(BlockPos pos, Vec3d from, Vec3d to) throws Colliders.Unknown {
+        return Colliders.powderSnowEntered(context(), pose.box(from.x(), from.y(), from.z()), to.subtract(from), pos.x(), pos.y(), pos.z());
     }
 
     /**
@@ -1365,6 +1391,14 @@ public final class OnFoot {
             case "minecraft:sweet_berry_bush" -> {
                 fallDistance = 0.0;
                 stuck = new Vec3d(0.8F, 0.75, 0.8F);
+            }
+            case POWDER_SNOW -> {
+                // PowderSnowBlock.entityInside: a living entity is held only with its feet in it (getInBlockState); FREEZE
+                if (states.block(state(new BlockPos(Colliders.floor(x), Colliders.floor(y), Colliders.floor(z)))).equals(POWDER_SNOW)) {
+                    fallDistance = 0.0;
+                    stuck = new Vec3d(0.9F, 1.5, 0.9F);
+                }
+                inPowderSnow = true;
             }
             case "minecraft:honey_block" -> {
                 if (isSlidingDown(pos)) {
@@ -1491,7 +1525,7 @@ public final class OnFoot {
         return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
     }
 
-    /** No block in the cells the two boxes span holds a fluid but water and lava, nor is powder snow. */
+    /** No block in the cells the two boxes span holds a fluid but water and lava. */
     private void requireInScope(Box a, Box b, String when) throws Colliders.Unknown {
         int x0 = Colliders.floor(Math.min(a.minX(), b.minX()));
         int x1 = Colliders.floor(Math.max(a.maxX(), b.maxX()));
@@ -1504,7 +1538,7 @@ public final class OnFoot {
                 for (int bz = z0; bz <= z1; bz++) {
                     int s = state(new BlockPos(bx, by, bz));
                     byte fluid = states.fluidKind(s);
-                    if (fluid == BlockStates.FLUID_OTHER || states.block(s).equals(POWDER_SNOW)) {
+                    if (fluid == BlockStates.FLUID_OTHER) {
                         throw new Colliders.Unknown(states.block(s) + " inside the box " + when + " (not modelled)");
                     }
                 }

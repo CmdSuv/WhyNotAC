@@ -152,6 +152,8 @@ public final class RecordingFormat {
     public static final int CB_RESPAWN_LAVA = 60;
     /** Every registry sent, each with its tags and their ids. */
     public static final int CB_UPDATE_TAGS = 61;
+    /** An entity's equipment: the entity, then each slot's name and stack. */
+    public static final int CB_SET_EQUIPMENT = 62;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

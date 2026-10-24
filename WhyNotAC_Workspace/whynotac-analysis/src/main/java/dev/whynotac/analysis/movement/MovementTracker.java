@@ -144,6 +144,9 @@ public final class MovementTracker {
     private Map<Hand, List<HandItem>> lastHands;
     /** This tick's {@link #handItems}, by hand. */
     private final Map<Hand, List<HandItem>> handsNow = new java.util.EnumMap<>(Hand.class);
+    static final String LEATHER_BOOTS = "minecraft:leather_boots";
+    /** This tick's feet: leather boots in every state the inventory replica holds, in none, or null (not known). */
+    private Boolean leatherBoots;
 
     // --- tracking ---------------------------------------------------------------------------------------------------
     private List<Hypothesis> hypotheses;
@@ -528,6 +531,7 @@ public final class MovementTracker {
         long number = ticks++;
         sent = List.of();
         handsNow.clear();
+        leatherBoots = inventory == null ? null : inventory.wearsOnFeet(LEATHER_BOOTS);
         TickInput in = sortOut();
         inbound.clear();
         long[] w = window();
@@ -815,7 +819,7 @@ public final class MovementTracker {
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
     private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, OnFoot.Effects effects,
-            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine, Border border) {}
+            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots) {}
 
     private void lose(String reason) {
         hypotheses = null; // the base goes on from what the server knows for certain
@@ -946,7 +950,6 @@ public final class MovementTracker {
         SelfState s = h.self();
         boolean noGravity = s.noGravity();
         Using using = s.using();
-        boolean frozen = s.frozen();
         for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
             switch (e.index()) {
                 case 0 -> { // Entity.DATA_SHARED_FLAGS_ID
@@ -967,7 +970,7 @@ public final class MovementTracker {
                         default -> throw new Lose("pose " + pose + " set by the server");
                     };
                 }
-                case 7 -> frozen = e.value() != 0; // DATA_TICKS_FROZEN
+                // DATA_TICKS_FROZEN (7): what freezing changes on the client's move is the speed, an attribute the server sends
                 case 8 -> { // LivingEntity.DATA_LIVING_ENTITY_FLAGS: LocalPlayer.onSyncedDataUpdated starts or stops its own use to match
                     boolean flag = (e.value() & 1) != 0;
                     if (flag && using == null) {
@@ -979,7 +982,7 @@ public final class MovementTracker {
                 default -> { }
             }
         }
-        return h.withPlayer(p).withSelf(s.withFlags(noGravity, frozen).withUsing(using));
+        return h.withPlayer(p).withSelf(s.withNoGravity(noGravity).withUsing(using));
     }
 
     /** A new {@code LocalPlayer} (login or respawn): the client's defaults, its rotation {@code -180, 0}, not ticking until loaded. */
@@ -1043,7 +1046,7 @@ public final class MovementTracker {
         PlayerState moved = new PlayerState(x, y, z, delta.isFinite() ? delta : d, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(),
                 p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(),
                 p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(),
-                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying());
+                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
         return moved;
     }
 
@@ -1153,7 +1156,7 @@ public final class MovementTracker {
         OnFoot.ItemUse use = begin.using() == null ? null : begin.using().effects();
         Border border = self.border().collision(); // as it is at the move: the level ticks it after the entities
         StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), use, window,
-                glider, cosine, border);
+                glider, cosine, border, leatherBoots);
         OnFoot.Step step = steps.get(key);
         if (step != null && !step.readSprintTrigger()) {
             // the same step: only this state's own counter counted down (or was cleared by shift or backward)
@@ -1164,7 +1167,7 @@ public final class MovementTracker {
         }
         try {
             step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects(),
-                    use, glider, cosine, border));
+                    use, glider, cosine, border, leatherBoots));
         } catch (Colliders.Unknown e) {
             throw new Lose(e.getMessage());
         }
@@ -1529,15 +1532,13 @@ public final class MovementTracker {
             case ClientboundPacket.SetEntityData data -> {
                 quietSincePosition = false;
                 boolean noGravity = b.self().noGravity();
-                boolean frozen = b.self().frozen();
                 for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
                     switch (e.index()) {
                         case 5 -> noGravity = e.value() != 0;
-                        case 7 -> frozen = e.value() != 0;
                         default -> { } // the living flags: an anchor tries every use the hands allow
                     }
                 }
-                yield b.withSelf(b.self().withFlags(noGravity, frozen));
+                yield b.withSelf(b.self().withNoGravity(noGravity));
             }
             case ClientboundPacket.GameEvent event -> {
                 if (event.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE) {
@@ -1606,7 +1607,7 @@ public final class MovementTracker {
             }
             view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
             OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects(),
-                    null, false, PlatformCos.X86_64, base.border().collision());
+                    null, false, PlatformCos.X86_64, base.border().collision(), leatherBoots);
             PlayerState first = OnFoot.tick(guess, PlayerState.Keys.NONE, view, conditions);
             PlayerState again = OnFoot.tick(first, PlayerState.Keys.NONE, view, conditions);
             if (!first.equals(again) || first.x() != x || first.y() != y || first.z() != z || !first.onGround() || first.horizontalCollision()
@@ -1760,7 +1761,7 @@ public final class MovementTracker {
         return new PlayerState(p.x(), p.y(), p.z(), delta, yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), sprinting, sprintModifier, p.crouching(), pose, p.keys(),
                 p.noJumpDelay(), sprintTrigger, autoJump, p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(),
-                p.fallFlying());
+                p.fallFlying(), p.inPowderSnow());
     }
 
     private static PlayerState rotated(PlayerState p, float yRot, float xRot) {

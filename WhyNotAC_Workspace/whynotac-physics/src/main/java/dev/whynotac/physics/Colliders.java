@@ -1,5 +1,6 @@
 package dev.whynotac.physics;
 
+import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.Shape;
@@ -36,11 +37,13 @@ public final class Colliders {
      * {@code EntityCollisionContext} for the player, as far as block shapes read it: the feet's height when the context
      * was made ({@code getY()}) and whether the player descends ({@code isDescending}: the shift key). Null: not known.
      * For the world border ({@code isInsideCloseToBorder(entity, box)}): where the player is ({@code getX()},
-     * {@code getZ()}) and the client's border; a null border is far.
+     * {@code getZ()}) and the client's border; a null border is far. For powder snow ({@code PowderSnowBlock}, which reads
+     * the entity itself): its fall distance (NaN: not known) and whether it wears leather boots (null: not known).
      */
-    public record Context(double entityBottom, boolean descending, double entityX, double entityZ, Border border) {
+    public record Context(double entityBottom, boolean descending, double entityX, double entityZ, Border border, double fallDistance,
+            Boolean leatherBoots) {
         public Context(double entityBottom, boolean descending) {
-            this(entityBottom, descending, 0.0, 0.0, null);
+            this(entityBottom, descending, 0.0, 0.0, null, Double.NaN, null);
         }
 
         /** {@code borderCollision(player, box)}: the border's shape when the player is close to it, else null. */
@@ -151,6 +154,9 @@ public final class Colliders {
                     }
                     Shape shape = states.collisionShape(state);
                     boolean dynamic = states.has(state, BlockStates.DYNAMIC_SHAPE);
+                    if (onlySuffocating && states.block(state).equals(POWDER_SNOW)) {
+                        continue; // isSuffocating: its empty-context shape is empty
+                    }
                     if (onlySuffocating) {
                         if (dynamic && !states.block(state).equals(SCAFFOLDING)) { // scaffolding's empty-context shape never is a full block
                             throw new Unknown(states.block(state) + " (whether it suffocates depends on the world) at " + x + " " + y + " " + z);
@@ -166,13 +172,17 @@ public final class Colliders {
                     if (type == 2 && !states.block(state).equals("minecraft:moving_piston")) {
                         continue;
                     }
+                    if (states.block(state).equals(POWDER_SNOW) && !box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0)) {
+                        continue; // each shape it may have (the full block, the falling slab, none) is within its cell: whatever decides it
+                    }
                     shape = playerShape(states, state, shape, context, x, y, z);
                     if (shape.isEmpty()) {
                         continue;
                     }
                     boolean collides;
                     Voxels moved = Voxels.moved(shape, x, y, z);
-                    if (states.has(state, BlockStates.FULL_BLOCK)) {
+                    // BlockCollisions: Shapes.block() itself (a full block's table shape, powder snow's own) meets the box as a box
+                    if (states.has(state, BlockStates.FULL_BLOCK) || shape == FULL_BLOCK) {
                         collides = box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0);
                     } else {
                         if (entityShape == null) {
@@ -192,7 +202,7 @@ public final class Colliders {
     }
 
     /** {@code state.getCollisionShape(level, pos, CollisionContext.of(player))}: the table's shape where it is the client's. */
-    static Shape playerShape(BlockStates states, int state, Context context, int x, int y, int z) throws Unknown {
+    public static Shape playerShape(BlockStates states, int state, Context context, int x, int y, int z) throws Unknown {
         return playerShape(states, state, states.collisionShape(state), context, x, y, z);
     }
 
@@ -202,6 +212,9 @@ public final class Colliders {
     private static Shape playerShape(BlockStates states, int state, Shape shape, Context context, int x, int y, int z) throws Unknown {
         if (states.block(state).equals(SCAFFOLDING)) {
             return scaffolding(states, state, shape, context, x, y, z);
+        }
+        if (states.block(state).equals(POWDER_SNOW)) {
+            return powderSnow(context, x, y, z);
         }
         if (states.has(state, BlockStates.DYNAMIC_SHAPE)) {
             throw new Unknown(states.block(state) + " (shape depends on the world) at " + x + " " + y + " " + z);
@@ -237,6 +250,46 @@ public final class Colliders {
             return unstableBottom(states);
         }
         return Shape.EMPTY;
+    }
+
+    static final String POWDER_SNOW = "minecraft:powder_snow";
+    /** {@code PowderSnowBlock.FALLING_COLLISION_SHAPE}: {@code Shapes.box(0, 0, 0, 1, 0.9F, 1)}. */
+    static final Shape POWDER_SNOW_FALLING = VoxelCollisions.create(new Box(0.0, 0.0, 0.0, 1.0, 0.9F, 1.0)).shape();
+    /**
+     * Whether {@code checkInsideBlocks} meets the powder snow at (x, y, z) for a move of the box {@code from} by
+     * {@code move}: its inside shape ({@code getEntityInsideCollisionShape}: its shape for the entity, {@code Shapes.block()}
+     * where that is empty) is {@code Shapes.block()} itself, or the move meets the falling slab
+     * ({@code collidedWithShapeMovingFrom} with {@code FALLING_COLLISION_SHAPE.move(pos).toAabbs()}).
+     */
+    public static boolean powderSnowEntered(Context context, Box from, Vec3d move, int x, int y, int z) throws Unknown {
+        if (powderSnow(context, x, y, z) != POWDER_SNOW_FALLING) {
+            return true;
+        }
+        return InsideBlocks.collidedAlongVector(from, move, List.of(Voxels.moved(POWDER_SNOW_FALLING, x, y, z).box(0)));
+    }
+
+    /** {@code Shapes.block()}: what the block's own shape is. */
+    static final Shape FULL_BLOCK = VoxelCollisions.create(new Box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)).shape();
+
+    /**
+     * {@code PowderSnowBlock.getCollisionShape} for the player: falling more than 2.5, a slab 0.9 high; else, wearing
+     * leather boots ({@code canEntityWalkOnPowderSnow}: the player is no {@code powder_snow_walkable_mobs}) above its top
+     * ({@code isAbove(Shapes.block(), pos, false)}) and not descending, the full block; else nothing.
+     */
+    static Shape powderSnow(Context context, int x, int y, int z) throws Unknown {
+        if (context == null || Double.isNaN(context.fallDistance())) {
+            throw new Unknown("powder snow (its shape depends on the player's fall) at " + x + " " + y + " " + z);
+        }
+        if (context.fallDistance() > 2.5) {
+            return POWDER_SNOW_FALLING;
+        }
+        if (context.descending() || !(context.entityBottom() > y + 1.0 - 1.0E-5F)) {
+            return Shape.EMPTY;
+        }
+        if (context.leatherBoots() == null) {
+            throw new Unknown("powder snow under a player whose boots are not known at " + x + " " + y + " " + z);
+        }
+        return context.leatherBoots() ? FULL_BLOCK : Shape.EMPTY;
     }
 
     /** {@code ScaffoldingBlock.SHAPE_UNSTABLE_BOTTOM}: {@code SnowLayerBlock.SHAPES[1]} is the very same call. */

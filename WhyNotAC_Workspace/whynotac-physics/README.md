@@ -38,7 +38,8 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
   vakalarda bit bit karşılaştırır. Yerelde 200.000 denemede 3,4 milyon karşılaştırma yapıldı, 0 fark çıktı.
   Toleransa iki bilinçli hata eklendiğinde test 409 ve 234 fark buldu.
 - **Bilinmeyen şekiller iddia üretmez:** dünyaya bağlı şekiller (hareketli piston, shulker kutusu),
-  oyuncuya bağlı şekiller (toz kar; iskele yalnızca oyuncunun bağlamı verilmezse), kaydırılmış şekiller ve
+  oyuncuya bağlı şekiller (toz kar ve iskele yalnızca oyuncunun bağlamı verilmezse; toz kar botlar bilinmeden üstündeyken),
+  kaydırılmış şekiller ve
   bilinmeyen bloklar `Colliders.Unknown` fırlatır. Sıvılar oyuncu için boş şekildir.
 - **Yaya hareket adımı (`OnFoot`, tamam):** bir `LocalPlayer.tick()` bit bit. Girdi vektörü ve kare düzeltmesi,
   eğilme (önceki tikin shift'i) ve kenardan geri çekilme (bu tikin shift'i), koşma başlatma ve durdurma, zıplama
@@ -242,7 +243,7 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
       başlamak (1'er), süzülme duruşunu almamak (162), süzülürken koşmaya başlayabilmek (18), x86_64 yerine fdlibm'in
       kosinüsü (17). Süzülürken blok hız çarpanı bu veride ayırt edilmez (yer çimen); `GlideTest` ruh kumunda ister.
   - **Kapsam dışında `Colliders.Unknown`:**
-    - su ve lav dışındaki sıvılar, toz kar (çarpışması ve tutuşu oyuncunun botlarına ve düşüşüne bağlı), düşen
+    - su ve lav dışındaki sıvılar, ayağında deri bot olup olmadığı bilinmeyen oyuncunun üstündeki toz kar, düşen
       bir sıvının ya da bir kabarcık sütununun yanında/üstünde şekli dünyaya bağlı bir blok, hızı bilinmeyen bir boyutta
       lav akıntısı;
     - yüklenmemiş chunk (suyun yakınında, client'ın tutup tutmadığı kesin olmayan chunk da), su hareket verimliliği
@@ -265,4 +266,27 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     genişliğinde sabit sınıra yürüme, zıplama, kenarı boyunca ve köşesine koşma, sonra ona yaslıyken 80 tikte büyüyen
     ve geri çekilirken 60 tikte küçülen sınır: sınırın yanındaki 321 tikin hepsi bit bit eşit, 196'sı sınıra çarpan.
     Sınır verilmeyen motor tam o 196 tikte ayrılır.
+  - **Toz kar (`Colliders.powderSnow`, `Conditions.leatherBoots`):** `PowderSnowBlock.getCollisionShape` oyuncuya göre:
+    2.5'ten fazla düşmüşse 0.9 yüksekliğinde düşme levhası; değilse ayağında deri bot (`canEntityWalkOnPowderSnow`:
+    oyuncu `powder_snow_walkable_mobs` değildir) varken, bloğun üstündeyse (`entityBottom > y + 1 - 1.0E-5F`) ve
+    inmiyorsa tam blok (`Shapes.block()`'un kendisi: `BlockCollisions` onu kutu olarak sınar); yoksa hiçbir şey. Boğmaz.
+    `checkInsideBlocks` onun içine şekli boşken ya da tam blokken hemen, düşme levhasındayken yalnızca hareket o levhaya
+    değerse girer (`collidedWithShapeMovingFrom`); girişte `FREEZE` `isInPowderSnow`'u açar, ayakların bloğu toz karsa
+    (`getInBlockState`) oyuncuyu tutar (`makeStuckInBlock(0.9F, 1.5, 0.9F)`, düşüş sıfırlanır). Bir sonraki tik
+    `wasInPowderSnow` olur: botluysa ve çarpışıyor ya da zıplıyorsa hız 0.2 ile tırmanır. Donma ve yavaşlaması sunucunun
+    (`tryAddFrost`): hıza özniteliğiyle gelir. Bot bilinmiyorsa yalnızca kutunun değdiği, sonucu botlara bağlı bir toz
+    kar `Unknown`'dır. `PowderSnowConformanceTest` (whynotac-paper) şekli düşüş, ayak yüksekliği, shift ve botlara göre
+    hücre hücre ve kutu kutu, `Shapes.block()` olup olmadığını ve bir hareketin içine girip girmediğini oyunun kendi
+    bloğuyla ve oyuncu sınıfıyla, dünyanın uzak köşelerinde bit bit sınar (Paper'ın `Shapes.block()`'u bir
+    `ArrayVoxelShape`'tir, client'ınki `CubeVoxelShape`: hücreleri, koordinatları ve kutusu aynı). Gerçek client (truth
+    ajanı `isInPowderSnow`'u ve ayaktaki deri botu da kaydeder; donmanın hızı kaydedilen hızdan çözülür:
+    `RecordedSpeed`, 0.1F + donma, koşma değiştiricisiyle ya da değil): bir derin şerit ve iki derin çukurda botsuz
+    batma ve duvara karşı zıplama, beş bloktan düşüş, deri botla üstünde yürüme ve koşma, shift ile batıp duvarda
+    tırmanma: toz kardaki 511 tikin hepsi bit bit eşit, 282'si donmuşken. `truth-powdersnow.jsonl.gz`
+    (`OnFootTruthTest`) bu oturumun 712 tikidir: 507'si toz karda, 505'i tutulmuş, 99'u botla üstünde, 14'ü botla
+    tırmanan, 2'si düşme levhasına iniş, 282'si donmuş. Negatif kontroller (15'i de yakalandı): levha 2.5'te başlasın,
+    üst sınır dahil olsun, inmek ya da botlar yok sayılsın, kutunun değmediği hücre de atlansın, her zaman girilsin,
+    ayaklar içinde değilken tutsun, `isInPowderSnow` açılmasın, bu tikin bayrağıyla ya da botsuz tırmansın; envanter
+    zırh slotunu yazmasın, yer değiştirmede ayağı korusun, kendi ekipman paketini yok saysın; takipçi botları vermesin ya
+    da hep var saysın.
 - **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.

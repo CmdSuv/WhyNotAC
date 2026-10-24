@@ -32,7 +32,8 @@ import java.util.TreeMap;
  * Every tick the engine models must come out equal to the state after, bit for bit: position, velocity,
  * collision flags, fall distance, sprint, crouch, pose, the jump and sprint counters and the supporting
  * block. The client's world border at the move is the one the agent recorded; the ticks next to it
- * ({@code nearBorder}: the session walks into a static border and one that moves) must be more than none. Ticks
+ * ({@code nearBorder}: the session walks into a static border and one that moves) must be more than none, and so must the
+ * ticks in powder snow ({@code inPowderSnow}: with and without leather boots, which the agent records too). Ticks
  * outside its scope are counted by reason.
  *
  * <p>Each tick is evaluated in the world the replica holds when the client's movement packet of that tick (or of
@@ -98,6 +99,7 @@ public class MovementTruth {
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
                 && ((Number) result.get("gliding")).longValue() > 0 && ((Number) result.get("nearBorder")).longValue() > 0
+                && ((Number) result.get("inPowderSnow")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0;
@@ -334,6 +336,8 @@ public class MovementTruth {
         long useTicks;
         long glideTicks;
         long borderTicks;
+        long powderSnowTicks;
+        long frostTicks;
         final Map<String, Long> unknown = new TreeMap<>();
         final Map<String, Long> differingFields = new TreeMap<>();
         final List<String> examples = new ArrayList<>();
@@ -364,7 +368,9 @@ public class MovementTruth {
             List<PlayerState> out = new ArrayList<>();
             for (int i = 0; i < ticks.size(); i++) {
                 if (sent.get(i)) {
-                    out.add(state(ticks.get(i)[1]));
+                    float speed = f32(ticks.get(i)[1].get("speed"));
+                    RecordedSpeed s = RecordedSpeed.of(speed, (Boolean) ticks.get(i)[1].get("sprinting"));
+                    out.add(state(ticks.get(i)[1], s != null ? s.sprintModifier() : speed == (float) OnFoot.Speed.VANILLA.value(true)));
                 }
             }
             return out;
@@ -390,12 +396,16 @@ public class MovementTruth {
             // LocalPlayer.autoJumpEnabled: true until a new player's first sendPosition, then the option (older truth files: off)
             boolean autoJump = firstLoaded || Boolean.TRUE.equals(pre.get("autoJumpEnabled"));
             firstLoaded = false;
-            PlayerState before = state(pre);
-            PlayerState expected = state(post);
-            float speed = f32(pre.get("speed"));
-            if (speed != (float) OnFoot.Speed.VANILLA.value(true) && speed != (float) OnFoot.Speed.VANILLA.value(false)) {
-                unknown.merge("a speed attribute other than the vanilla walk or sprint", 1L, Long::sum);
+            RecordedSpeed speedBefore = RecordedSpeed.of(f32(pre.get("speed")), (Boolean) pre.get("sprinting"));
+            RecordedSpeed speedAfter = RecordedSpeed.of(f32(post.get("speed")), (Boolean) post.get("sprinting"));
+            if (speedBefore == null || speedAfter == null) {
+                unknown.merge("a speed attribute other than the base's, frost's and sprinting's", 1L, Long::sum);
                 return;
+            }
+            PlayerState before = state(pre, speedBefore.sprintModifier());
+            PlayerState expected = state(post, speedAfter.sprintModifier());
+            if (speedAfter.frost() != 0.0) {
+                frostTicks++;
             }
             OnFoot.Effects effects = effects(pre);
             if (effects == null) {
@@ -419,9 +429,13 @@ public class MovementTruth {
                 if (border != null && border.distance(before.x(), before.z()) < 2.0) {
                     borderTicks++; // close enough for its shape to collide (isInsideCloseToBorder)
                 }
+                if (before.inPowderSnow() || expected.inPowderSnow()) {
+                    powderSnowTicks++;
+                }
+                Boolean boots = (Boolean) pre.get("leatherBoots"); // older truth files: not recorded, not known
                 PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, OnFoot.Speed.VANILLA, effects, use, glider, CLIENT_COSINE,
-                                border));
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, speedAfter, effects, use, glider, CLIENT_COSINE,
+                                border, boots));
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
                     matched++;
@@ -449,6 +463,8 @@ public class MovementTruth {
             out.put("usingItem", useTicks);
             out.put("gliding", glideTicks);
             out.put("nearBorder", borderTicks);
+            out.put("inPowderSnow", powderSnowTicks);
+            out.put("frozen", frostTicks);
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
             out.put("examples", examples);
@@ -482,6 +498,7 @@ public class MovementTruth {
         same(d, "swimming", p.swimming(), e.swimming());
         same(d, "eyeInWater", p.eyeInWater(), e.eyeInWater());
         same(d, "fallFlying", p.fallFlying(), e.fallFlying());
+        same(d, "inPowderSnow", p.inPowderSnow(), e.inPowderSnow());
         return d;
     }
 
@@ -497,19 +514,57 @@ public class MovementTruth {
         }
     }
 
+    /**
+     * The movement speed attribute a recorded {@code LivingEntity.speed} shows (the attribute as a float, set in
+     * {@code Player.aiStep} after the tick's sprint changes): the base {@code 0.1F}, powder snow's frost added (the
+     * server's {@code tryAddFrost}: {@code -0.05F} times the part frozen, {@code ticksFrozen / 140}), and the sprinting
+     * modifier or not. {@link #of} is null where none gives the float, or two that move the player differently do.
+     */
+    record RecordedSpeed(double frost, boolean sprintModifier) implements OnFoot.Speed {
+        @Override
+        public double value(boolean sprint) {
+            double base = 0.1F + frost; // calculateValue: the base, plus the added
+            return sprint ? base * (1.0 + 0.3F) : base;
+        }
+
+        /** Where frost and sprinting both give the float (72 ticks frozen walking, 120 sprinting), the sprinting flag decides. */
+        static RecordedSpeed of(float recorded, boolean sprinting) {
+            List<RecordedSpeed> matches = new ArrayList<>();
+            for (int ticks = 0; ticks <= 140; ticks++) {
+                double frost = -0.05F * ((float) ticks / 140);
+                for (boolean sprint : new boolean[] {false, true}) {
+                    RecordedSpeed s = new RecordedSpeed(frost, sprint);
+                    if ((float) s.value(sprint) == recorded) {
+                        matches.add(s);
+                    }
+                }
+            }
+            if (matches.stream().anyMatch(m -> m.sprintModifier() == sprinting)) {
+                matches.removeIf(m -> m.sprintModifier() != sprinting);
+            }
+            if (matches.isEmpty() || matches.stream().map(m -> m.sprintModifier()).distinct().count() > 1) {
+                return null;
+            }
+            RecordedSpeed first = matches.getFirst();
+            boolean other = !first.sprintModifier();
+            // the tick may toggle the modifier: every match must give the same float there too
+            return matches.stream().allMatch(m -> (float) m.value(other) == (float) first.value(other)) ? first : null;
+        }
+    }
+
     @SuppressWarnings("unchecked")
-    private static PlayerState state(Map<String, Object> r) {
+    private static PlayerState state(Map<String, Object> r, boolean sprintModifier) {
         List<Object> pos = (List<Object>) r.get("pos");
         List<Object> support = (List<Object>) r.get("support");
         return new PlayerState(f64(pos.get(0)), f64(pos.get(1)), f64(pos.get(2)), vec(r.get("deltaMovement")), f32(r.get("yRot")), f32(r.get("xRot")),
                 (Boolean) r.get("onGround"), (Boolean) r.get("horizontalCollision"), (Boolean) r.get("minorHorizontalCollision"),
                 (Boolean) r.get("verticalCollision"), (Boolean) r.get("verticalCollisionBelow"), f64(r.get("fallDistance")), (Boolean) r.get("sprinting"),
-                f32(r.get("speed")) == (float) OnFoot.Speed.VANILLA.value(true), (Boolean) r.get("crouching"), PlayerState.Pose.valueOf((String) r.get("pose")), keys((String) r.get("keys")),
+                sprintModifier, (Boolean) r.get("crouching"), PlayerState.Pose.valueOf((String) r.get("pose")), keys((String) r.get("keys")),
                 ((Number) r.get("noJumpDelay")).intValue(), ((Number) r.get("sprintTriggerTime")).intValue(), ((Number) r.get("autoJumpTime")).intValue(),
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), Boolean.TRUE.equals(r.get("swimming")),
-                Boolean.TRUE.equals(r.get("eyeInWater")), Boolean.TRUE.equals(r.get("fallFlying")));
+                Boolean.TRUE.equals(r.get("eyeInWater")), Boolean.TRUE.equals(r.get("fallFlying")), Boolean.TRUE.equals(r.get("inPowderSnow")));
     }
 
     /** The recorded effects the on-foot step reads (older truth files: none); null if one was not recorded by name. */

@@ -257,6 +257,13 @@ public final class Generators {
             case "SetPlayerInventory" -> new ClientboundPacket.SetPlayerInventory(anyInt(), stack(false));
             case "SetHeldSlot" -> new ClientboundPacket.SetHeldSlot(anyInt());
             case "EntityEvent" -> new ClientboundPacket.EntityEvent(anyInt(), random.nextInt(256) - 128);
+            case "SetEquipment" -> {
+                List<ClientboundPacket.SetEquipment.Slot> slots = new ArrayList<>();
+                for (int i = random.nextInt(4); i > 0; i--) {
+                    slots.add(new ClientboundPacket.SetEquipment.Slot(anyString(), stack(false)));
+                }
+                yield new ClientboundPacket.SetEquipment(anyInt(), slots);
+            }
             case "SetCamera" -> new ClientboundPacket.SetCamera(anyInt());
             case "SetHealth" -> new ClientboundPacket.SetHealth(anyFloat(), anyInt(), anyFloat());
             case "SetPlayerTeam" -> new ClientboundPacket.SetPlayerTeam(anyString(), random.nextInt(5), random.nextBoolean() ? null : anyString(),

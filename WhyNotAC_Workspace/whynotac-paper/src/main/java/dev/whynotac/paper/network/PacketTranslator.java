@@ -81,6 +81,7 @@ import net.minecraft.network.protocol.game.ClientboundSetBorderCenterPacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderLerpSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetHealthPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
@@ -241,15 +242,17 @@ public final class PacketTranslator {
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
             "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
             "mount_screen_open", "container_close", "entity_event", "set_camera", "set_health", "initialize_border", "set_border_center",
-            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags");
+            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags", "set_equipment");
 
     /**
-     * Packets about other entities that come by the hundred per tick: the edge decodes them (the client's
-     * view is what the replicas read), while the game's view only notes their type, and the two views are
-     * reconciled by type and order. None of them ever needs a physics bracket ({@code TransactionPolicy}).
+     * Packets about other entities that come by the hundred per tick, or whose stacks Paper may rewrite on the
+     * way out (its item obfuscation sanitizes equipment): the edge decodes them (the client's view is what the
+     * replicas read), while the game's view only notes their type, and the two views are reconciled by type and
+     * order. None of them ever needs a physics bracket ({@code TransactionPolicy}).
      */
     public static final Set<String> RECONCILED_BY_TYPE = Set.of("minecraft:move_entity_pos", "minecraft:move_entity_pos_rot",
-            "minecraft:move_entity_rot", "minecraft:rotate_head", "minecraft:set_entity_data", "minecraft:entity_position_sync");
+            "minecraft:move_entity_rot", "minecraft:rotate_head", "minecraft:set_entity_data", "minecraft:entity_position_sync",
+            "minecraft:set_equipment");
 
     private static final Map<String, ClientboundPacket.Unmodeled> TYPE_MARKERS = new ConcurrentHashMap<>();
 
@@ -272,7 +275,7 @@ public final class PacketTranslator {
             ClientboundTickingStatePacket.class, ClientboundTickingStepPacket.class, ClientboundPlayerInfoUpdatePacket.class,
             ClientboundPlayerInfoRemovePacket.class, ClientboundContainerSetContentPacket.class,
             ClientboundContainerSetSlotPacket.class, ClientboundSetCursorItemPacket.class,
-            ClientboundSetPlayerInventoryPacket.class, ClientboundSetHeldSlotPacket.class,
+            ClientboundSetPlayerInventoryPacket.class, ClientboundSetHeldSlotPacket.class, ClientboundSetEquipmentPacket.class,
             ClientboundOpenScreenPacket.class, ClientboundMountScreenOpenPacket.class,
             ClientboundUpdateTagsPacket.class,
             ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class, ClientboundSetCameraPacket.class,
@@ -609,6 +612,14 @@ public final class PacketTranslator {
             case ClientboundSetPlayerInventoryPacket inventory -> new ClientboundPacket.SetPlayerInventory(
                     inventory.slot(), stack(inventory.contents()));
             case ClientboundSetHeldSlotPacket held -> new ClientboundPacket.SetHeldSlot(held.slot());
+            case ClientboundSetEquipmentPacket equipment -> {
+                List<ClientboundPacket.SetEquipment.Slot> slots = new ArrayList<>(equipment.getSlots().size());
+                for (com.mojang.datafixers.util.Pair<net.minecraft.world.entity.EquipmentSlot, net.minecraft.world.item.ItemStack> slot
+                        : equipment.getSlots()) {
+                    slots.add(new ClientboundPacket.SetEquipment.Slot(slot.getFirst().getSerializedName(), stack(slot.getSecond())));
+                }
+                yield new ClientboundPacket.SetEquipment(equipment.getEntity(), slots);
+            }
             case ClientboundEntityEventPacket event -> new ClientboundPacket.EntityEvent((int) ENTITY_EVENT_ID.get(event), event.getEventId());
             case ClientboundSetCameraPacket camera -> new ClientboundPacket.SetCamera((int) SET_CAMERA_ID.get(camera));
             case ClientboundSetHealthPacket health -> new ClientboundPacket.SetHealth(health.getHealth(), health.getFood(), health.getSaturation());

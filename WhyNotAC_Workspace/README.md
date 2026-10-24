@@ -94,6 +94,15 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 > sayan ya da lerp'te bir adım önden giden client kanıttır. Gerçek client'ın sabit, büyüyen ve küçülen sınırın
 > yanındaki 321 tiki (196'sı sınıra çarpan) bit bit eşit; takipçi hiçbirini açıklanamaz ya da iddiasız bırakmadı.
 >
+> **Toz kar (`movement`):** şekli oyuncuya bağlıdır: 2.5'ten fazla düşene levha, ayağında deri botla üstünde duran ve
+> inmeyene tam blok, kalanlara hiçbir şey; içine giren tutulur, bir sonraki tik botluysa duvarda tırmanır. Botlar
+> client'ın envanter replikasından gelir (zırh slotu, envanter indisi, oyuncunun kendi `set_equipment` paketi; yeni
+> modellenen bu paket kaydedilir ve kenarda türüne göre uzlaştırılır, Paper eşyalarını gizleyebildiği için). Donma
+> client'ın hareketini değiştirmez, yavaşlaması sunucunun hız özniteliğiyle izlenir. Şekil ve içine giriş oyunun
+> kendi `PowderSnowBlock`'una karşı bit bit sınanır; botsuz üstünde yürüyen ya da içinde tutulmayan client kanıttır.
+> Gerçek client'ın botsuz ve deri botlu toz kar parkurunda (batma, düşüş, üstünde yürüme, tırmanma, donma) 511 tiki
+> bit bit eşit; takipçi hiçbirini açıklanamaz ya da iddiasız bırakmadı.
+>
 > **Sunucunun etiketleri (`update_tags`):** client neye tırmandığını, neyin üstünde durduğunu, nerede yüzdüğünü ve aletinin
 > hangi bloğu kazdığını sunucunun gönderdiği etiketlerden bilir; veri paketi bunları değiştirebilir. WhyNotAC paketi
 > yapılandırma evresinde de kenardan çözer, kaydeder ve client'ın etiketlerini işlediği sırayla izler (`ClientTags`).
@@ -129,7 +138,7 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar (birkaç dakika).
 
 ```bash
-./gradlew build                       # tüm modüller + 617 test
+./gradlew build                       # tüm modüller + 631 test
 ./gradlew :whynotac-paper:jar         # eklenti: whynotac-paper/build/libs/
 tools/e2e/run_e2e.sh /tmp/wnac-e2e    # gerçek Paper 1.21.11 sunucusuyla canlı uçtan uca test (111 kontrol)
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \

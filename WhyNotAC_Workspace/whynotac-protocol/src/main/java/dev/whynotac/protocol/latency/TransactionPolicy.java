@@ -65,6 +65,9 @@ public final class TransactionPolicy {
             case ClientboundPacket.OpenScreen ignored -> false;
             case ClientboundPacket.MountScreenOpen ignored -> false;
             case ClientboundPacket.ContainerClose ignored -> false;
+            // Another entity's equipment does not touch the player; its own (never from a vanilla server) is its inventory,
+            // placed by the flush brackets like the inventory packets.
+            case ClientboundPacket.SetEquipment ignored -> false;
             // The player's own: finishing an item use stops using it (the slowdown ends).
             case ClientboundPacket.EntityEvent event -> targetsSelf(event.entityId(), selfEntityId);
             // Another entity's camera stops the player's own movement input (LocalPlayer.isControlledCamera).

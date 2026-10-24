@@ -15,7 +15,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * The player's own hotbar, off hand, selected slot and open menu as the client holds them, in client
+ * The player's own hotbar, off hand, feet armor, selected slot and open menu as the client holds them, in client
  * order. A server packet takes effect when the client processes it, which the flush brackets place
  * (ops before the last answered ping are processed, ops from the first unanswered one on are not, and the
  * ones between are processed as a prefix); the client's own clicks, selections, creative edits and item
@@ -32,7 +32,10 @@ import java.util.Set;
  * longer creative (they are not sent).
  *
  * <p>What it follows is what the client's attack reach depends on: the stacks in its hands and their
- * {@code minecraft:attack_range}. An item use changes the hand in ways the packets do not show (a stack
+ * {@code minecraft:attack_range}; and what its movement depends on: the boots it wears (leather boots walk on
+ * powder snow). The feet change with the inventory menu's slot, the inventory's index 36, the player's own
+ * equipment packet (never sent by a vanilla server) and an equippable's swap on use, which is followed as
+ * unknown. An item use changes the hand in ways the packets do not show (a stack
  * used up, a bucket filled, a remainder); {@link UseEffects} says which of them the replica keeps
  * (its reach is not affected) and which make the hand unknown.
  *
@@ -43,6 +46,8 @@ public final class ClientInventory {
     public static final int HOTBAR = 9;
     /** {@code Inventory}: the off hand at 40. */
     static final int INVENTORY_OFFHAND = 40;
+    /** {@code Inventory.EQUIPMENT_SLOT_MAPPING}: the feet at 36. */
+    static final int INVENTORY_FEET = 36;
     /** {@code ServerboundContainerClickPacket} SWAP with this button swaps the slot with the off hand. */
     static final int SWAP_OFFHAND_BUTTON = 40;
     /** Beyond this many candidates the replica gives up and knows nothing until the server resends. */
@@ -146,6 +151,8 @@ public final class ClientInventory {
             case ClientboundPacket.ContainerSetSlot slot -> new Op.Slot(slot.containerId(), slot.slot(), slot.item());
             case ClientboundPacket.SetPlayerInventory inventory -> new Op.InventorySlot(inventory.slot(), inventory.item());
             case ClientboundPacket.SetHeldSlot held -> new Op.Held(held.slot());
+            // handleSetEquipment: setItemSlot on the entity, for the player's own its inventory (another's changes nothing here)
+            case ClientboundPacket.SetEquipment equipment when selfId < 0 || equipment.entityId() == selfId -> new Op.Equipment(equipment.slots());
             case ClientboundPacket.OpenScreen open -> new Op.Open(open.containerId(), open.menuType() == null ? null : layouts.get(open.menuType()));
             case ClientboundPacket.MountScreenOpen mount -> new Op.Mount(mount.containerId(), mount.inventoryColumns());
             case ClientboundPacket.ContainerClose ignored -> Op.CLOSE;
@@ -181,7 +188,7 @@ public final class ClientInventory {
                 case "minecraft:entity_event" -> Op.FINISH_USE; // maybe the player's own event 9
                 case "minecraft:container_set_content", "minecraft:container_set_slot", "minecraft:set_player_inventory",
                         "minecraft:set_held_slot", "minecraft:open_screen", "minecraft:mount_screen_open", "minecraft:container_close",
-                        "minecraft:login", "minecraft:respawn" -> Op.FORGET;
+                        "minecraft:login", "minecraft:respawn", "minecraft:set_equipment" -> Op.FORGET;
                 case "minecraft:player_abilities", "minecraft:game_event" -> new Op.Creative(MAYBE);
                 default -> null;
             };
@@ -193,6 +200,7 @@ public final class ClientInventory {
                 case Op.Content content -> content.items().forEach(this::learn);
                 case Op.Slot slot -> learn(slot.item());
                 case Op.InventorySlot slot -> learn(slot.item());
+                case Op.Equipment equipment -> equipment.slots().forEach(slot -> learn(slot.item()));
                 default -> { }
             }
         }
@@ -355,10 +363,10 @@ public final class ClientInventory {
                     // inventoryMenu.initializeContents, whatever menu is open; slots past the list keep their stack
                     write(n, layouts.inventory(), content.items());
                 } else if (n.menuId == UNKNOWN) {
-                    n.forgetHands(); // it may be the open menu's, laid out any way
+                    n.forgetSlots(); // it may be the open menu's, laid out any way
                 } else if (content.containerId() == n.menuId) {
                     if (n.layout == null) {
-                        n.forgetHands();
+                        n.forgetSlots();
                     } else {
                         write(n, n.layout, content.items());
                     }
@@ -368,10 +376,10 @@ public final class ClientInventory {
                 if (slot.containerId() == 0) {
                     write(n, layouts.inventory(), slot.slot(), slot.item());
                 } else if (n.menuId == UNKNOWN) {
-                    n.forgetHands();
+                    n.forgetSlots();
                 } else if (slot.containerId() == n.menuId) {
                     if (n.layout == null) {
-                        n.forgetHands();
+                        n.forgetSlots();
                     } else {
                         write(n, n.layout, slot.slot(), slot.item());
                     }
@@ -382,6 +390,27 @@ public final class ClientInventory {
                     n.set(slot.slot(), slot.item());
                 } else if (slot.slot() == INVENTORY_OFFHAND) {
                     n.set(OFFHAND, slot.item());
+                } else if (slot.slot() == INVENTORY_FEET) {
+                    n.feet = slot.item();
+                }
+            }
+            case Op.Equipment equipment -> {
+                // PlayerEquipment.set: the main hand is the selected hotbar slot
+                for (ClientboundPacket.SetEquipment.Slot slot : equipment.slots()) {
+                    switch (slot.slot()) {
+                        case "mainhand" -> {
+                            for (int k = 0; k < HOTBAR; k++) {
+                                if (n.selected == k) {
+                                    n.set(k, slot.item());
+                                } else if (n.selected == UNKNOWN) {
+                                    n.set(k, null);
+                                }
+                            }
+                        }
+                        case "offhand" -> n.set(OFFHAND, slot.item());
+                        case "feet" -> n.feet = slot.item();
+                        default -> { }
+                    }
                 }
             }
             case Op.Held held -> {
@@ -433,7 +462,7 @@ public final class ClientInventory {
                 ServerboundPacket.ContainerClick c = click.click();
                 if (n.menuId == UNKNOWN) {
                     // the click names the open menu, not its layout
-                    n.forgetHands();
+                    n.forgetSlots();
                     n.menuId = c.containerId();
                     n.layout = c.containerId() == 0 ? layouts.inventory() : null;
                     n.picker = c.containerId() == 0;
@@ -445,11 +474,11 @@ public final class ClientInventory {
                 if (n.menuId == 0 && n.mayBePicker()) {
                     // The creative screen's menu (id 0 too) never sends clicks, but after a switch out of creative
                     // with it open the inventory screen's clicks act on it, slot numbers and all.
-                    n.forgetHands();
+                    n.forgetSlots();
                     return n;
                 }
                 if (n.layout == null) {
-                    n.forgetHands();
+                    n.forgetSlots();
                     return n;
                 }
                 for (ServerboundPacket.ContainerClick.ChangedSlot changed : c.changed()) {
@@ -484,7 +513,7 @@ public final class ClientInventory {
             case Event.Simple simple -> {
                 switch (simple.kind()) {
                     case Event.KIND_CLOSE -> n.open(0, layouts.inventory());
-                    case Event.KIND_FORGET -> n.forgetHands();
+                    case Event.KIND_FORGET -> n.forgetSlots();
                     case Event.KIND_TICK_END -> n.tickSelected = n.selected == UNKNOWN ? ALL_SLOTS : 1 << n.selected;
                     case Event.KIND_RELEASE -> usedHandsAfter(n, Use.ITEM);
                     case Event.KIND_TRADE -> {
@@ -520,10 +549,14 @@ public final class ClientInventory {
         }
     }
 
-    /** The hand slot after a use of its stack. */
+    /** The hand slot after a use of its stack; the feet too where the use may be an equippable's swap with the armor. */
     private void afterUse(State n, int slot, Use use) {
         Stack stack = n.get(slot);
-        if (stack == null || stack.isEmpty()) {
+        if (stack == null) {
+            n.feet = null;
+            return;
+        }
+        if (stack.isEmpty()) {
             return;
         }
         switch (uses.outcome(stack, use)) {
@@ -532,8 +565,12 @@ public final class ClientInventory {
             case KEEP_OR_NONE_ADD -> {
                 n.mayBeNone[slot] = true;
                 n.emptySlotsUnknown();
+                n.feet = null;
             }
-            case UNKNOWN -> n.set(slot, null);
+            case UNKNOWN -> {
+                n.set(slot, null);
+                n.feet = null;
+            }
         }
     }
 
@@ -547,12 +584,17 @@ public final class ClientInventory {
         if (layout.offhand() >= 0 && layout.offhand() < items.size()) {
             n.set(OFFHAND, items.get(layout.offhand()));
         }
+        if (layout.feet() >= 0 && layout.feet() < items.size()) {
+            n.feet = items.get(layout.feet());
+        }
     }
 
     private static void write(State n, MenuLayouts.Layout layout, int slot, Stack item) {
         int player = layout.playerSlot(slot);
-        if (player == -2) {
+        if (player == MenuLayouts.Layout.OFFHAND) {
             n.set(OFFHAND, item);
+        } else if (player == MenuLayouts.Layout.FEET) {
+            n.feet = item;
         } else if (player >= 0) {
             n.set(player, item);
         }
@@ -658,6 +700,25 @@ public final class ClientInventory {
         return out;
     }
 
+    /**
+     * Whether the client's feet hold {@code item} (by its key) in every state it may be in now: TRUE in all of them,
+     * FALSE in none, null if the states differ or one does not know its feet.
+     */
+    public Boolean wearsOnFeet(String item) {
+        Boolean out = null;
+        for (State s : possible()) {
+            if (s.feet == null) {
+                return null;
+            }
+            boolean wears = item.equals(s.feet.item());
+            if (out != null && out != wears) {
+                return null;
+            }
+            out = wears;
+        }
+        return out;
+    }
+
     /** Every state the client may hold now. */
     public List<View> views() {
         List<View> out = new ArrayList<>();
@@ -665,7 +726,7 @@ public final class ClientInventory {
         for (State s : possible()) {
             State key = s.at(0);
             if (seen.add(key)) {
-                out.add(new View(Arrays.asList(s.hotbar.clone()), s.offhand, s.selected, s.menuId, s.mayBeNone.clone()));
+                out.add(new View(Arrays.asList(s.hotbar.clone()), s.offhand, s.selected, s.menuId, s.mayBeNone.clone(), s.feet));
             }
         }
         return out;
@@ -682,10 +743,10 @@ public final class ClientInventory {
 
     /**
      * One state: the hotbar (null: not known), the off hand, the selected slot (-1: not known), the open
-     * menu (-1: not known), and per hotbar slot (0..8) and the off hand (9) whether its stack may have been
-     * used up or turned into one without {@code attack_range}.
+     * menu (-1: not known), per hotbar slot (0..8) and the off hand (9) whether its stack may have been
+     * used up or turned into one without {@code attack_range}, and the feet armor (null: not known).
      */
-    public record View(List<Stack> hotbar, Stack offhand, int selected, int menuId, boolean[] mayBeNone) {
+    public record View(List<Stack> hotbar, Stack offhand, int selected, int menuId, boolean[] mayBeNone, Stack feet) {
         public View {
             hotbar = Collections.unmodifiableList(new ArrayList<>(hotbar));
             mayBeNone = mayBeNone.clone();
@@ -694,18 +755,18 @@ public final class ClientInventory {
         @Override
         public boolean equals(Object o) {
             return o instanceof View v && hotbar.equals(v.hotbar) && Objects.equals(offhand, v.offhand) && selected == v.selected
-                    && menuId == v.menuId && Arrays.equals(mayBeNone, v.mayBeNone);
+                    && menuId == v.menuId && Arrays.equals(mayBeNone, v.mayBeNone) && Objects.equals(feet, v.feet);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(hotbar, offhand, selected, menuId, Arrays.hashCode(mayBeNone));
+            return Objects.hash(hotbar, offhand, selected, menuId, Arrays.hashCode(mayBeNone), feet);
         }
 
         @Override
         public String toString() {
             return "View[hotbar=" + hotbar + ", offhand=" + offhand + ", selected=" + selected + ", menuId=" + menuId + ", mayBeNone="
-                    + Arrays.toString(mayBeNone) + "]";
+                    + Arrays.toString(mayBeNone) + ", feet=" + feet + "]";
         }
     }
 
@@ -739,6 +800,9 @@ public final class ClientInventory {
         record Slot(int containerId, int slot, Stack item) implements Op {}
 
         record InventorySlot(int slot, Stack item) implements Op {}
+
+        /** The player's own equipment, slot by slot. */
+        record Equipment(List<ClientboundPacket.SetEquipment.Slot> slots) implements Op {}
 
         record Held(int slot) implements Op {}
 
@@ -792,6 +856,8 @@ public final class ClientInventory {
     private static final class State {
         final Stack[] hotbar = new Stack[HOTBAR];
         Stack offhand;
+        /** The feet armor slot: what powder snow reads. */
+        Stack feet;
         /** Per hand slot (hotbar 0..8, the off hand): its stack may have been used up or turned into one without attack_range. */
         final boolean[] mayBeNone = new boolean[HOTBAR + 1];
         int selected = UNKNOWN;
@@ -815,6 +881,7 @@ public final class ClientInventory {
             State c = new State();
             System.arraycopy(hotbar, 0, c.hotbar, 0, HOTBAR);
             c.offhand = offhand;
+            c.feet = feet;
             System.arraycopy(mayBeNone, 0, c.mayBeNone, 0, HOTBAR + 1);
             c.selected = selected;
             c.tickSelected = tickSelected;
@@ -876,9 +943,10 @@ public final class ClientInventory {
             }
         }
 
-        void forgetHands() {
+        void forgetSlots() {
             Arrays.fill(hotbar, null);
             offhand = null;
+            feet = null;
             Arrays.fill(mayBeNone, false);
         }
 
@@ -896,7 +964,7 @@ public final class ClientInventory {
         void creative(byte value) {
             if (creative != NO && value != YES) {
                 // Leaving creative with the creative screen maybe open: its edits until the screen swaps are not sent.
-                forgetHands();
+                forgetSlots();
                 picker = true; // its menu stays the open one until a close
             }
             creative = value;
@@ -906,6 +974,7 @@ public final class ClientInventory {
         void newPlayer(int gameMode, MenuLayouts.Layout inventory) {
             Arrays.fill(hotbar, Stack.EMPTY);
             offhand = Stack.EMPTY;
+            feet = Stack.EMPTY;
             Arrays.fill(mayBeNone, false);
             selected = 0;
             tickSelected |= 1;
@@ -917,17 +986,17 @@ public final class ClientInventory {
         public boolean equals(Object o) {
             return o instanceof State s && applied == s.applied && selected == s.selected && tickSelected == s.tickSelected && menuId == s.menuId
                     && creative == s.creative && picker == s.picker && sameLayout(layout, s.layout) && Objects.equals(offhand, s.offhand)
-                    && Arrays.equals(hotbar, s.hotbar) && Arrays.equals(mayBeNone, s.mayBeNone);
+                    && Objects.equals(feet, s.feet) && Arrays.equals(hotbar, s.hotbar) && Arrays.equals(mayBeNone, s.mayBeNone);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(applied, selected, tickSelected, menuId, creative, picker, layout == null ? null : layout.hotbar(), offhand,
+            return Objects.hash(applied, selected, tickSelected, menuId, creative, picker, layout == null ? null : layout.hotbar(), offhand, feet,
                     Arrays.hashCode(hotbar), Arrays.hashCode(mayBeNone));
         }
 
         private static boolean sameLayout(MenuLayouts.Layout a, MenuLayouts.Layout b) {
-            return a == null ? b == null : b != null && a.size() == b.size() && a.offhand() == b.offhand() && a.hotbar().equals(b.hotbar());
+            return a == null ? b == null : b != null && a.size() == b.size() && a.offhand() == b.offhand() && a.feet() == b.feet() && a.hotbar().equals(b.hotbar());
         }
     }
 }

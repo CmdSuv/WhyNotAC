@@ -109,6 +109,7 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "setblock 76 -59 22 minecraft:dirt" \
   "setblock 133 -56 26 minecraft:scaffolding[distance=1,bottom=true]" "setblock 134 -56 26 minecraft:scaffolding[distance=2,bottom=true]" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
+  "fill 60 -61 29 65 -61 31 minecraft:powder_snow" "fill 68 -62 29 70 -61 31 minecraft:powder_snow" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
   "execute in minecraft:the_nether run fill -1 99 -1 21 108 21 minecraft:glass hollow" \
   "execute in minecraft:the_nether run fill 0 100 0 20 102 20 minecraft:glass" \
@@ -394,6 +395,21 @@ echo "item replace entity $NAME weapon.mainhand with minecraft:firework_rocket 1
 glide 40.5 -30 10 -/0.4 space/0.2 -/0.3 Button3/0.1 -/12.0
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 echo "item replace entity $NAME armor.chest with minecraft:air" > "$FIFO"; sleep 0.5
+# Powder snow, at z = 30.5: a strip one deep in the ground (x 60..65) and a pit two deep (x 68..70). Without boots the
+# player sinks into the strip (no shape), is held in it (makeStuckInBlock while its feet are in it), walks against its
+# east wall and jumps there (no step up a whole block); dropped onto it from five blocks it lands on the falling shape
+# (fallen more than 2.5) and sinks after. In leather boots it walks across the strip on top (the full block), sprints
+# across, sinks with shift (descending), climbs out at its east wall (wasInPowderSnow: 0.2 a tick against it), and
+# climbs out of the pit, two blocks up. Random ticks are off: the snow stays.
+snow() { echo "tp $NAME $1 $2 30.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+snow 58.5 -60 w/4.0 w,space/2.0 -/0.5
+snow 62.5 -55 -/2.5
+echo "item replace entity $NAME armor.feet with minecraft:leather_boots" > "$FIFO"; sleep 0.5
+snow 58.5 -60 w/1.2 -/0.5 Shift_L/1.0 -/0.3 w/2.5 -/0.5
+snow 58.5 -60 w,Control_L/1.5 -/0.5
+snow 62.5 -55 -/1.5 w/2.5 -/0.5
+snow 68.5 -61 Shift_L/1.0 -/0.3 w/3.0 -/0.5
+echo "item replace entity $NAME armor.feet with minecraft:air" > "$FIFO"; sleep 0.5
 # The world border (its shape, rounded out to whole blocks, collides within a few blocks: isInsideCloseToBorder): 20
 # wide around x 50, z 65.5 (its east side at x 60, its south side at z 75.5), walked into, jumped at, walked along, and
 # sprinted into diagonally up to its corner; then growing to 30 over 80 ticks with the player pressed against it, and
