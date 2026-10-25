@@ -85,7 +85,7 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   motorunun kapsamında bit bit). Elytra ile süzülme (bit bit, client'ın CPU'sunun `Math.cos`'u dahil) ve havai fişek
   roketinin itmesi motorda, dünya sınırı da (sabit ve lerp'li, client'ın tikleriyle), toz kar da (düşüşe, ayağın
   yüksekliğine, shift'e ve client'ın envanterinden izlenen deri botlara göre; botla tırmanma, donma hızın
-  özniteliğiyle). Kalan: motorun kapsamı dışındaki hareketler (binek).
+  özniteliğiyle). Tekne (`AbstractBoat.tick`, oyuncunun sürdüğü) motorda, gerçek client'ın 826 tikiyle bit bit. Kalan: motorun kapsamı dışındaki hareketler (at, domuz, deve ve öteki binekler, minecart, riptide, mızrak).
 
 ## Faz 4 — Doğrulama ve veri
 
