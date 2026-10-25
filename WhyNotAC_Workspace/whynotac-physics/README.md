@@ -242,6 +242,22 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
       dönüş 0.1 → 0.11 (162), tırmanma 3.2 → 3.3 (13), düşüşü 1'e indirmemek (96), basılı tutulan zıplamayla ya da yerde
       başlamak (1'er), süzülme duruşunu almamak (162), süzülürken koşmaya başlayabilmek (18), x86_64 yerine fdlibm'in
       kosinüsü (17). Süzülürken blok hız çarpanı bu veride ayırt edilmez (yer çimen); `GlideTest` ruh kumunda ister.
+  - **Tekne (`Boat`, `BoatState`, `AbstractBoat.tick`):** oyuncunun sürdüğü teknenin bir tick'i, client'ın sırasıyla
+    (tekne yolcusundan önce tick'ler): `getStatus` (suyun altında, suda, karada zeminin sürtünmesiyle, havada;
+    `waterLevel` ve `landFriction` o tikin), `floatBoat` (yerçekimi, kaldırma, sürtünme; havadan suya inişte tekne yüzeye
+    konur), `controlBoat` (A ve D döner, W kürek çeker, S geri gider) ve `Entity.move`. Akışkan, düşüş-ışını ve blok içi
+    kodu `OnFoot` ile ortaktır (`Terrain`). **Doğrulama:** truth ajanı teknenin her tick'inin başını ve sonunu kaydeder
+    (`boatPre`, `boatPost`); `MovementTruth` her teknenin tikini başındaki durumdan çalıştırıp sonuyla bit bit karşılaştırır,
+    `verify_truth.py` yolcunun `Rot`'unu ve teknenin `MoveVehicle` paketlerini hizalar. `BoatTruthTest` aynı tikleri
+    kodla yeniden kurulan parkurda (`truth-boat.jsonl.gz`) oynatır. **Son oturum (havuzda kürek, dönüş, geri gitme ve
+    kıyıya çarpma; çukurun dibine batma; yerçekimsiz asılıp suya düşme; buzda ve mavi buzda taş duvara düz ve açıyla
+    gitme; buza ve slime'a düşme; çimende sürüklenme):** teknenin 826 tikinin hepsi bit bit eşit: 277'si suda, 29'u
+    suyun altında, 324'ü karada, 196'sı havada, 1 havadan suya iniş; 834 `MoveVehicle` paketinin hepsi teknenin kendi
+    durumuna eşit. Tüm oturum: 14 304 tikin 13 256'sı eşit, 0 fark. Kapsam dışı: istemcinin teknenin konumuna doğru
+    yumuşattığı (`interpolating`, 8 tik) ve ilk tikler. Negatif kontroller (ikisi de yakalandı): ileri itiş
+    0.04 → 0.041, havada sürtünme 0.9 → 0.91. **Katı varlık:** inen oyuncu, istemcinin hâlâ tuttuğu teknenin tepesinde
+    durur (oyuncunun y'si teknenin tepesine bit bit eşit); motor katı varlıkları modellemez, bu tikler `MovementTruth`'ta
+    açıklanmamış fark değil, "indiği teknenin üstünde" bilinmeyenidir (11 tik).
   - **Kapsam dışında `Colliders.Unknown`:**
     - su ve lav dışındaki sıvılar, ayağında deri bot olup olmadığı bilinmeyen oyuncunun üstündeki toz kar, düşen
       bir sıvının ya da bir kabarcık sütununun yanında/üstünde şekli dünyaya bağlı bir blok, hızı bilinmeyen bir boyutta

@@ -6,6 +6,7 @@ import dev.whynotac.physics.BlockPos;
 import dev.whynotac.physics.Boat;
 import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Border;
+import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
@@ -421,6 +422,8 @@ public class MovementTruth {
                 }
                 if (riding.get(next - 1)) {
                     ridingTicks++;
+                } else if (onLastBoat(tick[0])) {
+                    unknown.merge("standing on the boat it just left, which the client still holds (a solid entity)", 1L, Long::sum);
                 } else {
                     compare(tick[0], tick[1], world);
                 }
@@ -491,8 +494,30 @@ public class MovementTruth {
             }
         }
 
+        /** The box of the last boat ticked, after its tick: the client holds it for some ticks after its passenger got off. */
+        private Box lastBoat;
+
+        /**
+         * The player's feet are on the top of the last boat ticked (inside its footprint, within a step of its top): the
+         * client's player collides with that entity, a solid one the on-foot engine does not model.
+         */
+        @SuppressWarnings("unchecked")
+        private boolean onLastBoat(Map<String, Object> pre) {
+            if (lastBoat == null) {
+                return false;
+            }
+            List<Object> pos = (List<Object>) pre.get("pos");
+            double x = f64(pos.get(0));
+            double y = f64(pos.get(1));
+            double z = f64(pos.get(2));
+            return x + 0.3 > lastBoat.minX() && x - 0.3 < lastBoat.maxX() && z + 0.3 > lastBoat.minZ() && z - 0.3 < lastBoat.maxZ()
+                    && y > lastBoat.maxY() - 1.0E-3 && y < lastBoat.maxY() + 0.5;
+        }
+
         /** The boat's tick from {@code pre} to {@code post}, in the client tick whose player record starts at {@code player}. */
         private void compareBoat(Map<String, Object> pre, Map<String, Object> post, Map<String, Object> player, Colliders.World world) {
+            BoatState last = boatState(post);
+            lastBoat = BoatState.box(last.x(), last.y(), last.z());
             if (Boolean.TRUE.equals(pre.get("interpolating"))) {
                 boatUnknown.merge("interpolating toward a position the server sent", 1L, Long::sum);
                 return;
