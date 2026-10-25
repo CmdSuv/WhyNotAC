@@ -6,9 +6,11 @@ with what WhyNotAC recorded on the server (dump.jsonl).
 From each tick's state before and after LocalPlayer.tick(), the movement packet the client's
 sendPosition() sent is reconstructed exactly (vanilla rules: nothing while the connection has not loaded
 the player, which tick() checks first; otherwise the position was sent iff positionReminder was reset to 0, the rotation iff yRotLast/xRotLast changed, a status-only packet iff onGround or
-horizontalCollision changed). That sequence must equal the server-side recording's MovePlayer packets,
-bit for bit, in order. This is the ground truth the physics engine is tested against: the client's exact
-position, velocity and collision flags for every tick, aligned with the packets.
+horizontalCollision changed). A passenger sends its rotation every tick instead (MovePlayer.Rot), and the vehicle
+it steers its move (MoveVehicle: the boat's state after its own tick, which runs first). Those sequences must equal
+the server-side recording's MovePlayer and MoveVehicle packets, bit for bit, in order. This is the ground truth the
+physics engine is tested against: the client's exact position, velocity and collision flags for every tick, aligned
+with the packets.
 
 usage: verify_truth.py <work-dir>     (prints PASS/FAIL lines; exit code 0 = aligned)
 """
@@ -27,14 +29,19 @@ def client_sent(records):
     sent = []
     pre = None
     for r in records:
+        if r["hook"] in ("boatPre", "boatPost"):
+            continue
         if r["hook"] == "pre":
             pre = r
             continue
         if pre is None or not pre["loaded"]:
             pre = None
             continue  # not loaded yet: LocalPlayer.tick() returned before super.tick() and sendPosition()
-        if pre["passenger"] or r["passenger"]:
-            raise SystemExit("FAIL the session rode a vehicle: the passenger path (Rot every tick) is not modelled here")
+        if r["passenger"]:  # a passenger when it sends: ServerboundMovePlayerPacket.Rot, every tick
+            sent.append({"tick": r["tickCount"], "hasPosition": False, "hasRotation": True, "pos": None,
+                         "rot": (bits(r["yRot"]), bits(r["xRot"])), "flags": (r["onGround"], r["horizontalCollision"])})
+            pre = None
+            continue
         pos_sent = r["positionReminder"] == 0
         rot_sent = r["yRotLast"] != pre["yRotLast"] or r["xRotLast"] != pre["xRotLast"]
         # sendPosition compares the flags at send time (= after the tick) with the last ones it sent (= before)
@@ -51,6 +58,35 @@ def client_sent(records):
             })
         pre = None
     return sent
+
+
+def client_vehicle_moves(records):
+    """The MoveVehicle packets the client sent: each steered boat's state after its tick, sent by its passenger's tick after it."""
+    moves = []
+    boat = None
+    for r in records:
+        if r["hook"] == "boatPost":
+            boat = r
+        elif r["hook"] == "post":
+            if boat is not None and r["passenger"]:
+                moves.append({"pos": tuple(bits(c) for c in boat["pos"]), "rot": (bits(boat["yRot"]), bits(boat["xRot"])), "onGround": boat["onGround"]})
+            boat = None
+    return moves
+
+
+def server_vehicle_moves(events):
+    """MoveVehicle packets on the server timeline, and how many vehicle moves the server sent back (its corrections)."""
+    moves = []
+    corrections = 0
+    for e in events:
+        if e["type"] == "Outbound" and e["packet"]["type"] == "MoveVehicle":
+            corrections += 1
+        if e["type"] != "Inbound" or e["packet"]["type"] != "MoveVehicle":
+            continue
+        p = e["packet"]
+        moves.append({"pos": tuple(bits(p["position"][a]["bits"]) for a in ("x", "y", "z")),
+                      "rot": (bits(p["yaw"]["bits"]), bits(p["pitch"]["bits"])), "onGround": p["onGround"]})
+    return moves, corrections
 
 
 def server_received(events):
@@ -98,6 +134,15 @@ def main():
               f"client {sent[mismatch] if mismatch is not None else '-'} server {received[mismatch] if mismatch is not None else '-'}")
     check(aligned and len(sent) > 50, "every movement packet the server recorded is exactly the client's own state when it sent it, "
                                       f"bit for bit, in order ({detail})")
+    vehicle_sent = client_vehicle_moves(records)
+    vehicle_received, corrections = server_vehicle_moves(events)
+    vmismatch = next((i for i, (a, b) in enumerate(zip(vehicle_sent, vehicle_received)) if a != b), None)
+    valigned = vmismatch is None and len(vehicle_sent) == len(vehicle_received) and corrections == 0
+    vdetail = (f"{len(vehicle_sent)} packets" if valigned else
+               f"client {len(vehicle_sent)} vs server {len(vehicle_received)}, {corrections} server corrections; first difference at {vmismatch}: "
+               f"client {vehicle_sent[vmismatch] if vmismatch is not None else '-'} server {vehicle_received[vmismatch] if vmismatch is not None else '-'}")
+    check(valigned and len(vehicle_sent) > 50, "every vehicle move the server recorded is exactly the steered boat's own state after its tick, "
+                                               f"bit for bit, in order ({vdetail})")
     moving = [r for r in records if r["hook"] == "post" and any(bits(c) & 0x7FFFFFFFFFFFFFFF for c in r["deltaMovement"])]
     check(len(moving) > 50, f"the ground truth includes the client's exact velocity on {len(moving)} ticks")
     print("TRUTH:", "OK" if not failures else f"{len(failures)} FAILURE(S)")

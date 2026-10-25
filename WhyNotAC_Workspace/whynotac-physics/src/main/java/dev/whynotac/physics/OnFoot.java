@@ -238,10 +238,7 @@ public final class OnFoot {
     /** {@code oldPosition()}: where the tick started. */
     private final Vec3d oldPosition;
     /** {@code movementThisTick}: the moves {@code Entity.move} made during the tick. */
-    private final java.util.ArrayList<Movement> movements = new java.util.ArrayList<>(2);
-
-    /** {@code Entity.Movement}: a move's start and end, and the movement asked for (null: none, a plain sweep). */
-    private record Movement(Vec3d from, Vec3d to, Vec3d original) {}
+    private final java.util.ArrayList<Terrain.Movement> movements = new java.util.ArrayList<>(2);
 
     private OnFoot(PlayerState pre, Colliders.World world, Conditions conditions) {
         this.world = world;
@@ -760,151 +757,16 @@ public final class OnFoot {
         }
     }
 
-    /**
-     * {@code Entity.updateFluidHeightAndDoFluidPushing(tag, scale)} for a player (pushed, the push not normalised): over the
-     * cells of the box deflated by 0.001, the fluid's height above the box's bottom and the mean of the flows of the cells
-     * it reaches (scaled by that height below 0.4), times {@code scale} (NaN: not known, which only a push needs). A chunk
-     * the client may not hold near the box is not known (the client then skips the fluid altogether).
-     */
+    /** {@code Entity.updateFluidHeightAndDoFluidPushing(tag, scale)} for a player ({@link Terrain#fluidPushing}: the push not normalised). */
     private boolean updateFluidHeightAndDoFluidPushing(byte kind, double scale) throws Colliders.Unknown {
-        Box full = pose.box(x, y, z);
-        Box near = full.inflate(1.0, 1.0, 1.0); // touchingUnloadedChunk
-        for (int cx = Colliders.floor(near.minX()) >> 4; cx <= VanillaMath.ceil(near.maxX()) >> 4; cx++) {
-            for (int cz = Colliders.floor(near.minZ()) >> 4; cz <= VanillaMath.ceil(near.maxZ()) >> 4; cz++) {
-                if (!world.isLoaded(cx, cz)) {
-                    throw new Colliders.Unknown("water next to a chunk the client may not hold");
-                }
-            }
-        }
-        Box box = full.inflate(-0.001, -0.001, -0.001);
-        double height = 0.0;
-        boolean touching = false;
-        Vec3d push = Vec3d.ZERO;
-        int count = 0;
-        for (int bx = Colliders.floor(box.minX()); bx < VanillaMath.ceil(box.maxX()); bx++) {
-            for (int by = Colliders.floor(box.minY()); by < VanillaMath.ceil(box.maxY()); by++) {
-                for (int bz = Colliders.floor(box.minZ()); bz < VanillaMath.ceil(box.maxZ()); bz++) {
-                    BlockPos p = new BlockPos(bx, by, bz);
-                    int s = state(p);
-                    if (states.fluidKind(s) != kind) {
-                        continue;
-                    }
-                    double top = by + fluidHeight(p, s, kind); // int + float, in float
-                    if (top >= box.minY()) {
-                        touching = true;
-                        height = Math.max(top - box.minY(), height);
-                        Vec3d flow = flow(p, s, kind);
-                        if (height < 0.4) {
-                            flow = flow.scale(height);
-                        }
-                        push = push.add(flow);
-                        count++;
-                    }
-                }
-            }
-        }
-        if (push.length() > 0.0) {
-            if (count > 0) {
-                push = push.scale(1.0 / count);
-            }
-            if (Double.isNaN(scale)) {
-                throw new Colliders.Unknown("lava's current in a level whose lava speed is not known");
-            }
-            push = push.scale(scale);
-            if (Math.abs(delta.x()) < 0.003 && Math.abs(delta.z()) < 0.003 && push.length() < 0.0045000000000000005) {
-                push = push.normalize().scale(0.0045000000000000005);
-            }
-            delta = delta.add(push);
-        }
+        Terrain.FluidPush push = Terrain.fluidPushing(world, pose.box(x, y, z), kind, scale, delta, true);
+        delta = push.delta();
         if (kind == BlockStates.FLUID_WATER) {
-            waterHeight = height;
+            waterHeight = push.height();
         } else {
-            lavaHeight = height;
+            lavaHeight = push.height();
         }
-        return touching;
-    }
-
-    /** {@code FlowingFluid.getHeight}: a full block under fluid of its own kind, else its own height. */
-    private float fluidHeight(BlockPos p, int s, byte kind) throws Colliders.Unknown {
-        return states.fluidKind(state(p.atY(p.y() + 1))) == kind ? 1.0F : ownHeight(s);
-    }
-
-    /** {@code FluidState.getOwnHeight}: {@code amount / 9}, 0 for no fluid. */
-    private float ownHeight(int s) {
-        return states.fluidAmount(s) / 9.0F;
-    }
-
-    /** {@code Direction.Plane.HORIZONTAL}: north, east, south, west, as x and z steps. */
-    private static final int[][] HORIZONTAL = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
-
-    /**
-     * {@code FlowingFluid.getFlow}: toward lower neighbours (through a passable neighbour to the fluid of its kind below
-     * it), and for a falling fluid next to a sturdy face (or one above it) mostly down.
-     */
-    private Vec3d flow(BlockPos pos, int s, byte kind) throws Colliders.Unknown {
-        float own = ownHeight(s);
-        double fx = 0.0;
-        double fz = 0.0;
-        for (int[] d : HORIZONTAL) {
-            BlockPos n = new BlockPos(pos.x() + d[0], pos.y(), pos.z() + d[1]);
-            int ns = state(n);
-            if (!affectsFlow(ns, kind)) {
-                continue;
-            }
-            float f = ownHeight(ns);
-            float g = 0.0F;
-            if (f == 0.0F) {
-                if (!states.has(ns, BlockStates.BLOCKS_MOTION)) {
-                    int below = state(n.atY(n.y() - 1));
-                    if (affectsFlow(below, kind)) {
-                        f = ownHeight(below);
-                        if (f > 0.0F) {
-                            g = own - (f - 0.8888889F);
-                        }
-                    }
-                }
-            } else if (f > 0.0F) {
-                g = own - f;
-            }
-            if (g != 0.0F) {
-                fx += d[0] * g;
-                fz += d[1] * g;
-            }
-        }
-        Vec3d flow = new Vec3d(fx, 0.0, fz);
-        if (states.fluidFalling(s)) {
-            for (int[] d : HORIZONTAL) {
-                BlockPos n = new BlockPos(pos.x() + d[0], pos.y(), pos.z() + d[1]);
-                if (solidFace(n, d, kind) || solidFace(n.atY(n.y() + 1), d, kind)) {
-                    flow = flow.normalize().add(0.0, -6.0, 0.0);
-                    break;
-                }
-            }
-        }
-        return flow.normalize();
-    }
-
-    /** {@code FlowingFluid.affectsFlow}: no fluid, or the same kind ({@code isSame}). */
-    private boolean affectsFlow(int s, byte kind) {
-        byte k = states.fluidKind(s);
-        return k == BlockStates.FLUID_NONE || k == kind;
-    }
-
-    /** {@code FlowingFluid.isSolidFace} for a horizontal side: not the same fluid, not ice, and the face sturdy. */
-    private boolean solidFace(BlockPos n, int[] d, byte kind) throws Colliders.Unknown {
-        int s = state(n);
-        if (states.fluidKind(s) == kind) {
-            return false;
-        }
-        String block = states.block(s);
-        if (block.equals("minecraft:ice") || block.equals("minecraft:frosted_ice")) { // IceBlock
-            return false;
-        }
-        if (states.has(s, BlockStates.DYNAMIC_SHAPE)) {
-            throw new Colliders.Unknown(block + " beside a falling fluid (its faces depend on the world)");
-        }
-        int flag = d[1] < 0 ? BlockStates.STURDY_NORTH : d[0] > 0 ? BlockStates.STURDY_EAST : d[1] > 0 ? BlockStates.STURDY_SOUTH : BlockStates.STURDY_WEST;
-        return states.has(s, flag);
+        return push.touching();
     }
 
     /** {@code Entity.updateFluidOnEyes}: the eye is in water when the water's top in its cell is above it. */
@@ -912,7 +774,7 @@ public final class OnFoot {
         double eyeY = y + pose.eyeHeight;
         BlockPos p = BlockPos.containing(x, eyeY, z);
         int s = state(p);
-        eyeInWater = states.fluidKind(s) == BlockStates.FLUID_WATER && p.y() + fluidHeight(p, s, BlockStates.FLUID_WATER) > eyeY;
+        eyeInWater = states.fluidKind(s) == BlockStates.FLUID_WATER && p.y() + Terrain.fluidHeight(world, p, s, BlockStates.FLUID_WATER) > eyeY;
     }
 
     /** {@code Entity.updateSwimming} for the local player ({@code isUnderWater}: {@code wasUnderwater}). */
@@ -1062,43 +924,6 @@ public final class OnFoot {
         return conditions.leatherBoots();
     }
 
-    /** The most cells a move's ray is followed through ({@link #mayResetTheFall}); beyond, it is not followed. */
-    private static final int MAX_RAY_CELLS = 512;
-
-    /**
-     * {@code Entity.move}: a move of a block or more while falling casts a ray from the feet along it, at most 8 long
-     * ({@code Level.clip} with {@code ClipContext.Block.FALLDAMAGE_RESETTING}, {@code ClipContext.Fluid.WATER}), and the
-     * fall resets where it meets a block of {@link #FALL_DAMAGE_RESETTING} (its shape a full block) or water. Where it
-     * meets them is not modelled: false only if no cell the move's ray can pass through ({@code traverseBlocks}: within
-     * the move's bounds) holds either.
-     */
-    private boolean mayResetTheFall(Vec3d move) throws Colliders.Unknown {
-        double margin = 1.0E-6; // traverseBlocks starts and ends 1.0E-7 beyond the segment's ends
-        int fromX = (int) Math.floor(Math.min(x, x + move.x()) - margin);
-        int fromY = (int) Math.floor(Math.min(y, y + move.y()) - margin);
-        int fromZ = (int) Math.floor(Math.min(z, z + move.z()) - margin);
-        int toX = (int) Math.floor(Math.max(x, x + move.x()) + margin);
-        int toY = (int) Math.floor(Math.max(y, y + move.y()) + margin);
-        int toZ = (int) Math.floor(Math.max(z, z + move.z()) + margin);
-        if ((long) (toX - fromX + 1) * (toY - fromY + 1) * (toZ - fromZ + 1) > MAX_RAY_CELLS) {
-            return true;
-        }
-        for (int bx = fromX; bx <= toX; bx++) {
-            for (int bz = fromZ; bz <= toZ; bz++) {
-                if (!world.isLoaded(bx >> 4, bz >> 4)) {
-                    return true; // the client's ray may meet what it holds there
-                }
-                for (int by = fromY; by <= toY; by++) {
-                    int s = state(new BlockPos(bx, by, bz));
-                    if (FALL_DAMAGE_RESETTING.contains(states.block(s)) || states.fluidKind(s) == BlockStates.FLUID_WATER) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
     /** {@code blockState.getCollisionShape(level, pos, CollisionContext.of(player))}, unmoved. */
     private Voxels collisionShape(BlockPos pos) throws Colliders.Unknown {
         return Voxels.of(Colliders.playerShape(states, state(pos), context(), pos.x(), pos.y(), pos.z()));
@@ -1116,14 +941,14 @@ public final class OnFoot {
         Vec3d collided = Collide.collide(world, context(), box, movement, onGround, STEP_HEIGHT, List.of());
         double length = collided.lengthSqr();
         if (length > 1.0E-7 || movement.lengthSqr() - length < 1.0E-7) {
-            if (fallDistance != 0.0 && length >= 1.0 && mayResetTheFall(collided)) {
+            if (fallDistance != 0.0 && length >= 1.0 && Terrain.mayResetTheFall(world, x, y, z, collided)) {
                 throw new Colliders.Unknown("a fall reset by a ray (not modelled)");
             }
             Vec3d from = new Vec3d(x, y, z);
             x += collided.x();
             y += collided.y();
             z += collided.z();
-            movements.add(new Movement(from, new Vec3d(x, y, z), movement)); // addMovementThisTick
+            movements.add(new Terrain.Movement(from, new Vec3d(x, y, z), movement)); // addMovementThisTick
         }
         boolean xHit = !VanillaMath.equal(movement.x(), collided.x());
         boolean zHit = !VanillaMath.equal(movement.z(), collided.z());
@@ -1275,13 +1100,7 @@ public final class OnFoot {
         if (fallFlying) {
             return 1.0F;
         }
-        int feet = state(BlockPos.containing(x, y, z));
-        float factor = states.speedFactor(feet);
-        String block = states.block(feet);
-        if (!block.equals("minecraft:water") && !block.equals("minecraft:bubble_column")) {
-            return factor == 1.0 ? states.speedFactor(state(onPos(0.500001F))) : factor;
-        }
-        return factor;
+        return Terrain.blockSpeedFactor(world, support, x, y, z);
     }
 
     /**
@@ -1291,14 +1110,8 @@ public final class OnFoot {
      * from where the tick started when it made none.
      */
     private void applyEffectsFromBlocks() throws Colliders.Unknown {
-        java.util.ArrayList<Movement> moves = new java.util.ArrayList<>(movements); // finalMovementsThisTick
+        List<Terrain.Movement> moves = Terrain.finalMovements(movements, oldPosition, new Vec3d(x, y, z));
         movements.clear();
-        Vec3d position = new Vec3d(x, y, z);
-        if (moves.isEmpty()) {
-            moves.add(new Movement(oldPosition, position, null));
-        } else if (moves.getLast().to().distanceToSqr(position) > 9.9999994E-11F) {
-            moves.add(new Movement(moves.getLast().to(), position, null));
-        }
         if (onGround) {
             String block = states.block(state(onPos(0.2F)));
             if (block.equals("minecraft:slime_block")) {
@@ -1309,66 +1122,19 @@ public final class OnFoot {
                 }
             }
         }
-        checkInsideBlocks(moves);
-    }
+        // checkInsideBlocks: every block that acts is met wherever its cell is (its inside shape is the full block), but powder snow
+        Terrain.checkInsideBlocks(world, moves, (px, py, pz) -> pose.box(px, py, pz), new Terrain.Inside() {
+            @Override
+            public boolean meets(int s, BlockPos pos, Vec3d from, Vec3d to) throws Colliders.Unknown {
+                // getEntityInsideCollisionShape: the full block, but powder snow's own shape for the player where it has one
+                return MOVING_INSIDE.contains(states.block(s)) && (!states.block(s).equals(POWDER_SNOW) || enteredPowderSnow(pos, from, to));
+            }
 
-    /**
-     * {@code Entity.checkInsideBlocks(List<Movement>)}: each move swept in at most 16 steps, a move asked for split per
-     * axis ({@code Direction.axisStepOrder}: y, then x and z, the larger last) and, the steps spent, its end once more;
-     * a block acts once a tick, in the order the sweeps meet it.
-     */
-    private void checkInsideBlocks(List<Movement> moves) throws Colliders.Unknown {
-        java.util.Set<BlockPos> visited = new java.util.HashSet<>();
-        for (Movement m : moves) {
-            Vec3d from = m.from();
-            Vec3d travel = m.to().subtract(m.from());
-            int budget = 16;
-            if (m.original() != null && travel.lengthSqr() > 0.0) {
-                boolean zBeforeX = Math.abs(m.original().x()) < Math.abs(m.original().z()); // YZX, else YXZ
-                Axis[] order = zBeforeX ? new Axis[] {Axis.Y, Axis.Z, Axis.X} : new Axis[] {Axis.Y, Axis.X, Axis.Z};
-                for (Axis axis : order) {
-                    double d = axis.choose(travel.x(), travel.y(), travel.z());
-                    if (d != 0.0) {
-                        // Vec3.relative(axis.getPositive(), d)
-                        Vec3d next = new Vec3d(from.x() + d * (axis == Axis.X ? 1 : 0), from.y() + d * (axis == Axis.Y ? 1 : 0),
-                                from.z() + d * (axis == Axis.Z ? 1 : 0));
-                        budget -= checkInsideBlocks(from, next, budget, visited);
-                        from = next;
-                    }
-                }
-            } else {
-                budget -= checkInsideBlocks(m.from(), m.to(), 16, visited);
+            @Override
+            public void inside(int s, BlockPos pos, boolean intersects) throws Colliders.Unknown {
+                entityInside(s, pos, intersects);
             }
-            if (budget <= 0) {
-                checkInsideBlocks(m.to(), m.to(), 1, visited);
-            }
-        }
-    }
-
-    /**
-     * One sweep of {@code checkInsideBlocks}: the box at {@code to}, deflated by {@code 1.0E-5F}, through the cells from
-     * {@code from} ({@link InsideBlocks}), stopping at the step budget; the steps it took. Every block that acts is
-     * met wherever its cell is (its inside shape is the full block).
-     */
-    private int checkInsideBlocks(Vec3d from, Vec3d to, int budget, java.util.Set<BlockPos> visited) throws Colliders.Unknown {
-        Box box = pose.box(to.x(), to.y(), to.z()).inflate(-1.0E-5F, -1.0E-5F, -1.0E-5F);
-        boolean far = from.distanceToSqr(to) > 0.9999900000002526 * 0.9999900000002526;
-        int[] last = {0};
-        InsideBlocks.forEachBlockIntersectedBetween(from, to, box, (bx, by, bz, step) -> {
-            if (step >= budget) {
-                return false;
-            }
-            last[0] = step;
-            BlockPos pos = new BlockPos(bx, by, bz);
-            int s = state(pos);
-            // getEntityInsideCollisionShape: the full block, but powder snow's own shape for the player where it has one
-            if (!states.has(s, BlockStates.AIR) && MOVING_INSIDE.contains(states.block(s)) && (!states.block(s).equals(POWDER_SNOW)
-                    || enteredPowderSnow(pos, from, to)) && visited.add(pos)) {
-                entityInside(s, pos, far || box.intersects(bx, by, bz, bx + 1, by + 1, bz + 1));
-            }
-            return true;
         });
-        return last[0] + 1;
     }
 
     /** Whether the move from {@code from} to {@code to} met powder snow at {@code pos} ({@link Colliders#powderSnowEntered}). */
@@ -1507,22 +1273,9 @@ public final class OnFoot {
         return Colliders.collidesWithSuffocatingBlock(world, column);
     }
 
-    /**
-     * {@code Entity.getOnPos(offset)}: the supporting block's column at the offset below the feet; the supporting block
-     * itself where it is a fence and the offset at most 0.5, a wall or a fence gate ({@code BlockTags.FENCES},
-     * {@code BlockTags.WALLS}, {@code FenceGateBlock}: in 1.21.11 exactly the blocks named so).
-     */
+    /** {@code Entity.getOnPos(offset)} ({@link Terrain#onPos}). */
     private BlockPos onPos(float offset) throws Colliders.Unknown {
-        if (support != null) {
-            if (!(offset > 1.0E-5F)) {
-                return support;
-            }
-            String block = states.block(state(support));
-            boolean fence = block.endsWith("_fence");
-            boolean wallOrGate = block.endsWith("_wall") || block.endsWith("_fence_gate");
-            return (!((double) offset <= 0.5) || !fence) && !wallOrGate ? support.atY(Colliders.floor(y - offset)) : support;
-        }
-        return new BlockPos(Colliders.floor(x), Colliders.floor(y - offset), Colliders.floor(z));
+        return Terrain.onPos(world, support, x, y, z, offset);
     }
 
     /** No block in the cells the two boxes span holds a fluid but water and lava. */
@@ -1586,21 +1339,11 @@ public final class OnFoot {
         return new Vec3d(cx, cy, cz);
     }
 
-    /** A block state's property value ({@code key=value,...}), or empty. */
     private String property(int state, String key) {
-        for (String kv : states.properties(state).split(",")) {
-            if (kv.startsWith(key + "=")) {
-                return kv.substring(key.length() + 1);
-            }
-        }
-        return "";
+        return Terrain.property(states, state, key);
     }
 
     private int state(BlockPos pos) throws Colliders.Unknown {
-        int s = world.blockState(pos.x(), pos.y(), pos.z());
-        if (s == dev.whynotac.world.ClientWorld.UNKNOWN) {
-            throw new Colliders.Unknown("unknown block at " + pos);
-        }
-        return s;
+        return Terrain.state(world, pos);
     }
 }

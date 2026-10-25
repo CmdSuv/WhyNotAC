@@ -110,6 +110,9 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "setblock 133 -56 26 minecraft:scaffolding[distance=1,bottom=true]" "setblock 134 -56 26 minecraft:scaffolding[distance=2,bottom=true]" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "fill 60 -61 29 65 -61 31 minecraft:powder_snow" "fill 68 -62 29 70 -61 31 minecraft:powder_snow" \
+  "forceload add 32 -48 127 -17" "fill 40 -62 -40 70 -61 -28 minecraft:water" "fill 60 -63 -37 66 -63 -31 minecraft:water" \
+  "fill 76 -61 -40 87 -61 -28 minecraft:ice" "fill 88 -61 -40 100 -61 -28 minecraft:blue_ice" "fill 101 -60 -40 101 -59 -28 minecraft:stone" \
+  "fill 76 -61 -26 84 -61 -24 minecraft:slime_block" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
   "execute in minecraft:the_nether run fill -1 99 -1 21 108 21 minecraft:glass hollow" \
   "execute in minecraft:the_nether run fill 0 100 0 20 102 20 minecraft:glass" \
@@ -410,6 +413,32 @@ snow 58.5 -60 w,Control_L/1.5 -/0.5
 snow 62.5 -55 -/1.5 w/2.5 -/0.5
 snow 68.5 -61 Shift_L/1.0 -/0.3 w/3.0 -/0.5
 echo "item replace entity $NAME armor.feet with minecraft:air" > "$FIFO"; sleep 0.5
+# Boats, north of everything (z -40..-24): a pool two deep (x 40..70) with a pit three deep in it (x 60..66), ice (x 76..87)
+# then blue ice (x 88..100) up to a stone wall (x 101), a slime strip (x 76..84, z -26..-24) and grass. Each leg summons an
+# oak boat, mounts the player in it (the ride command), steers it with the keys (A and D turn it, W paddles, S backs) and
+# dismounts: the boat paddled across the pool, turned, backed and driven into the pool's east bank; sunk to the pit's floor
+# (under water it sinks; the server ejects the player after 60 ticks there); hung in the air (no gravity) and let fall
+# onto the water (it lands on the surface: floatBoat's landing); driven over ice and blue ice into the wall at an angle,
+# turned there; dropped onto the ice, onto the slime (a bounce of 0.8) and dragged over grass. The truth agent records
+# the boat's tick (AbstractBoat.tick), which runs before its passenger's, and the movement engine's boat step is
+# compared with it.
+boat() { echo "kill @e[tag=wnb]" > "$FIFO"; echo "tp $NAME $1 -60 $2 -90 0" > "$FIFO"; sleep 1.0
+  echo "summon minecraft:oak_boat $3 $4 $5 {Tags:[\"wnb\"],Rotation:[$6f,0f]$7}" > "$FIFO"; sleep 1.5
+  echo "ride $NAME mount @e[tag=wnb,limit=1]" > "$FIFO"; sleep 1.0; }
+# The boat goes first: the player put down on its box would stand on a solid entity, which the on-foot engine does not model.
+unboat() { echo "kill @e[tag=wnb]" > "$FIFO"; sleep 1.0; }
+fall() { echo "data merge entity @e[tag=wnb,limit=1] {NoGravity:0b}" > "$FIFO"; }
+paddle() { python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; }
+echo "gamerule entity_drops false" > "$FIFO"
+boat 44.5 -26.5 45.5 -60.5 -34.5 -90 ""; paddle w/2.0 w,a/1.0 d/1.0 s/1.0 -/1.0 w,d/0.6 w/3.0 -/0.5; unboat
+boat 63.5 -26.5 63.5 -63 -34.5 -90 ""; paddle w/0.8 a/0.4 -/0.4; unboat
+boat 50.5 -26.5 50.5 -54 -34.5 -90 ",NoGravity:1b"; paddle -/0.5 d/0.3; fall; paddle -/2.0 w/1.0 -/0.5; unboat
+boat 74.5 -34.5 78.5 -60 -34.5 -90 ""; paddle w/2.5 -/0.5 a/0.6 w,a/0.8 -/0.5; unboat
+boat 74.5 -36.5 80.5 -60 -38.5 -60 ""; paddle w/2.0 w,d/1.0 -/0.5; unboat
+boat 74.5 -34.5 82.5 -55 -34.5 -90 ",NoGravity:1b"; paddle -/0.3; fall; paddle -/1.5 w/1.0 -/0.3; unboat
+boat 74.5 -22.5 80.5 -55 -25.0 -90 ",NoGravity:1b"; paddle -/0.3; fall; paddle -/2.5 w/0.8 -/0.3; unboat
+boat 44.5 -44.5 45.5 -60 -42.5 -90 ""; paddle w/1.5 a/0.5 -/0.5; unboat
+echo "gamerule entity_drops true" > "$FIFO"
 # The world border (its shape, rounded out to whole blocks, collides within a few blocks: isInsideCloseToBorder): 20
 # wide around x 50, z 65.5 (its east side at x 60, its south side at z 75.5), walked into, jumped at, walked along, and
 # sprinted into diagonally up to its corner; then growing to 30 over 80 ticks with the player pressed against it, and

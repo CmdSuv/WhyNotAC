@@ -11,7 +11,8 @@ import java.nio.file.Path;
 
 /**
  * Called by the instrumented {@code LocalPlayer.tick()} at its start ({@link #pre}) and before every
- * return ({@link #post}). Writes one JSON line per call with the player's exact state: doubles and
+ * return ({@link #post}), and by {@code AbstractBoat.tick()} likewise ({@link #boatPre}, {@link #boatPost}: only
+ * for a boat the local player steers). Writes one JSON line per call with the exact state: doubles and
  * floats as their raw bits (hex), so nothing is rounded on the way.
  *
  * <p>Runs on the client's main thread only. Never throws into the game: a failure disables recording
@@ -54,6 +55,12 @@ public final class Recorder {
     private static Method isFallFlying, getItemBySlot, canGlideUsing;
     private static Method level, getWorldBorder, borderMinX, borderMinZ, borderMaxX, borderMaxZ;
     private static Field isInPowderSnow;
+    // a boat the player steers: AbstractBoat's own state, the entity's id, whether it is interpolating
+    private static Field boatDeltaRotation, boatStatus, boatOldStatus, boatWaterLevel, boatLandFriction, boatLastYd, boatInputLeft, boatInputRight,
+            boatInputUp, boatInputDown, entityId, firstTick;
+    private static Method getControllingPassenger, isNoGravity, getInterpolation, hasActiveInterpolation, getType, getPassengers;
+    private static Class<?> localPlayerClass;
+    private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
     private static Object[] equipmentSlots;
 
@@ -85,6 +92,84 @@ public final class Recorder {
             write("post", ticking);
             inTick = false;
             LOCK.notifyAll();
+        }
+    }
+
+    /** At the start of {@code AbstractBoat.tick()}: recorded when the local player steers the boat (its controlling passenger). */
+    public static void boatPre(Object boat) {
+        synchronized (LOCK) {
+            tickingBoat = null;
+            if (closing || failed) {
+                return; // the player's tick would not run: no packet of this tick reaches the server
+            }
+            try {
+                if (out == null) {
+                    return; // the player has not ticked yet
+                }
+                if (localPlayerClass.isInstance(getControllingPassenger.invoke(boat))) {
+                    tickingBoat = boat;
+                    writeBoat("boatPre", boat);
+                }
+            } catch (Throwable e) {
+                failed = true;
+                System.err.println("[whynotac-truth] recording stopped: " + e);
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void boatPost() {
+        synchronized (LOCK) {
+            if (tickingBoat != null && !failed) {
+                writeBoat("boatPost", tickingBoat);
+            }
+            tickingBoat = null;
+        }
+    }
+
+    private static void writeBoat(String hook, Object boat) {
+        try {
+            StringBuilder line = new StringBuilder(512).append("{\"hook\":\"").append(hook).append("\",\"n\":").append(calls++)
+                    .append(",\"nanoTime\":").append(System.nanoTime())
+                    .append(",\"tickCount\":").append(tickCount.getInt(boat))
+                    .append(",\"id\":").append(entityId.getInt(boat));
+            line.append(",\"type\":\"").append(String.valueOf(getType.invoke(boat)).replaceAll("[^A-Za-z0-9_.:-]", "_")).append('"');
+            vec(line, "pos", position.get(boat));
+            vec(line, "deltaMovement", deltaMovement.get(boat));
+            vec(line, "stuckSpeedMultiplier", stuckSpeedMultiplier.get(boat));
+            f32(line, "yRot", yRot.getFloat(boat));
+            f32(line, "xRot", xRot.getFloat(boat));
+            f32(line, "deltaRotation", boatDeltaRotation.getFloat(boat));
+            // AbstractBoat.Status by its ordinal (its constants' names are obfuscated): IN_WATER, UNDER_WATER, UNDER_FLOWING_WATER, ON_LAND, IN_AIR
+            Object status = boatStatus.get(boat);
+            Object oldStatus = boatOldStatus.get(boat);
+            line.append(",\"status\":").append(status == null ? -1 : ((Enum<?>) status).ordinal());
+            line.append(",\"oldStatus\":").append(oldStatus == null ? -1 : ((Enum<?>) oldStatus).ordinal());
+            f64(line, "waterLevel", boatWaterLevel.getDouble(boat));
+            f32(line, "landFriction", boatLandFriction.getFloat(boat));
+            f64(line, "lastYd", boatLastYd.getDouble(boat));
+            f64(line, "fallDistance", fallDistance.getDouble(boat));
+            bool(line, "onGround", onGround.getBoolean(boat));
+            bool(line, "horizontalCollision", horizontalCollision.getBoolean(boat));
+            bool(line, "verticalCollision", verticalCollision.getBoolean(boat));
+            bool(line, "verticalCollisionBelow", verticalCollisionBelow.getBoolean(boat));
+            java.util.Optional<?> support = (java.util.Optional<?>) mainSupportingBlockPos.get(boat);
+            line.append(",\"support\":").append(support.isEmpty() ? "null" : "[" + posX.getInt(support.get()) + "," + posY.getInt(support.get()) + ","
+                    + posZ.getInt(support.get()) + "]");
+            bool(line, "onGroundNoBlocks", onGroundNoBlocks.getBoolean(boat));
+            line.append(",\"input\":\"").append(boatInputLeft.getBoolean(boat) ? 'L' : '-').append(boatInputRight.getBoolean(boat) ? 'R' : '-')
+                    .append(boatInputUp.getBoolean(boat) ? 'U' : '-').append(boatInputDown.getBoolean(boat) ? 'D' : '-').append('"');
+            bool(line, "noGravity", (Boolean) isNoGravity.invoke(boat));
+            bool(line, "interpolating", (Boolean) hasActiveInterpolation.invoke(getInterpolation.invoke(boat)));
+            bool(line, "firstTick", firstTick.getBoolean(boat));
+            bool(line, "wasTouchingWater", wasTouchingWater.getBoolean(boat));
+            bool(line, "inPowderSnow", isInPowderSnow.getBoolean(boat));
+            line.append(",\"passengers\":").append(((java.util.List<?>) getPassengers.invoke(boat)).size());
+            out.append(line).append("}\n");
+        } catch (Throwable e) { // never into the game
+            failed = true;
+            System.err.println("[whynotac-truth] recording stopped: " + e);
+            e.printStackTrace();
         }
     }
 
@@ -281,6 +366,26 @@ public final class Recorder {
         fluidOnEyes = field(loader, entity, "fluidOnEyes");
         fluidHeight = field(loader, entity, "fluidHeight");
         wasUnderwater = field(loader, "net.minecraft.world.entity.player.Player", "wasUnderwater");
+        String boat = TruthAgent.ABSTRACT_BOAT;
+        boatDeltaRotation = field(loader, boat, "deltaRotation");
+        boatStatus = field(loader, boat, "status");
+        boatOldStatus = field(loader, boat, "oldStatus");
+        boatWaterLevel = field(loader, boat, "waterLevel");
+        boatLandFriction = field(loader, boat, "landFriction");
+        boatLastYd = field(loader, boat, "lastYd");
+        boatInputLeft = field(loader, boat, "inputLeft");
+        boatInputRight = field(loader, boat, "inputRight");
+        boatInputUp = field(loader, boat, "inputUp");
+        boatInputDown = field(loader, boat, "inputDown");
+        entityId = field(loader, entity, "id");
+        firstTick = field(loader, entity, "firstTick");
+        getControllingPassenger = method(loader, boat, "getControllingPassenger()");
+        isNoGravity = method(loader, entity, "isNoGravity()");
+        getInterpolation = method(loader, boat, "getInterpolation()");
+        hasActiveInterpolation = method(loader, "net.minecraft.world.entity.InterpolationHandler", "hasActiveInterpolation()");
+        getType = method(loader, entity, "getType()");
+        getPassengers = method(loader, entity, "getPassengers()");
+        localPlayerClass = Class.forName(mappings.get(local).obf(), false, loader);
     }
 
     private static Field field(ClassLoader loader, String mojangClass, String name) throws ReflectiveOperationException {

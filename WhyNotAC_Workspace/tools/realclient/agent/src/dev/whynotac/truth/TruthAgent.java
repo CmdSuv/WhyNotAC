@@ -14,7 +14,8 @@ import jdk.internal.org.objectweb.asm.Opcodes;
 /**
  * Ground truth from inside the official, unmodified Minecraft client: a java agent that adds two calls
  * to {@code LocalPlayer.tick()} (at its start and before every return) which record the player's exact
- * physics state (position, velocity, rotation, collision flags, input) once per client tick.
+ * physics state (position, velocity, rotation, collision flags, input) once per client tick, and two to
+ * {@code AbstractBoat.tick()}, which record a boat the player steers (its tick runs before the player's).
  *
  * <p>Nothing else in the client changes, and the recorder only reads. Obfuscated names come from Mojang's
  * own mappings file for the same version. Uses the JDK's internal copy of ASM, so the agent has no
@@ -25,7 +26,8 @@ import jdk.internal.org.objectweb.asm.Opcodes;
 public final class TruthAgent {
 
     static final String LOCAL_PLAYER = "net.minecraft.client.player.LocalPlayer";
-    static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, "net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity",
+    static final String ABSTRACT_BOAT = "net.minecraft.world.entity.vehicle.boat.AbstractBoat";
+    static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, ABSTRACT_BOAT, "net.minecraft.world.entity.InterpolationHandler", "net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity",
             "net.minecraft.client.player.ClientInput", "net.minecraft.world.entity.player.Input", "net.minecraft.world.phys.Vec3",
             "net.minecraft.client.multiplayer.ClientPacketListener", "net.minecraft.core.Vec3i", "net.minecraft.world.phys.Vec2",
             "net.minecraft.world.effect.MobEffectInstance", "net.minecraft.world.entity.player.Player", "net.minecraft.world.entity.EquipmentSlot",
@@ -39,24 +41,30 @@ public final class TruthAgent {
         Recorder.configure(mappings, Path.of(parts[1]));
         String target = mappings.get(LOCAL_PLAYER).obf().replace('.', '/');
         String tick = mappings.method(LOCAL_PLAYER, "tick()");
+        String boat = mappings.get(ABSTRACT_BOAT).obf().replace('.', '/');
+        String boatTick = mappings.method(ABSTRACT_BOAT, "tick()");
         instrumentation.addTransformer(new ClassFileTransformer() {
             @Override
             public byte[] transform(ClassLoader loader, String className, Class<?> redefined, ProtectionDomain domain, byte[] bytes) {
-                if (!target.equals(className)) {
-                    return null;
-                }
                 try {
-                    return instrument(bytes, tick);
+                    if (target.equals(className)) {
+                        return instrument(bytes, tick, "pre", "post");
+                    }
+                    if (boat.equals(className)) {
+                        return instrument(bytes, boatTick, "boatPre", "boatPost");
+                    }
+                    return null;
                 } catch (RuntimeException e) {
                     System.err.println("[whynotac-truth] could not instrument " + className + ": " + e);
                     return null;
                 }
             }
         });
-        System.err.println("[whynotac-truth] recording " + LOCAL_PLAYER + " (" + target + ")." + tick + "() to " + parts[1]);
+        System.err.println("[whynotac-truth] recording " + LOCAL_PLAYER + " (" + target + ")." + tick + "() and " + ABSTRACT_BOAT + " (" + boat + ")."
+                + boatTick + "() to " + parts[1]);
     }
 
-    static byte[] instrument(byte[] bytes, String tickName) {
+    static byte[] instrument(byte[] bytes, String tickName, String pre, String post) {
         ClassReader reader = new ClassReader(bytes);
         ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
         int[] hooked = {0};
@@ -73,7 +81,7 @@ public final class TruthAgent {
                     public void visitCode() {
                         super.visitCode();
                         super.visitVarInsn(Opcodes.ALOAD, 0);
-                        super.visitMethodInsn(Opcodes.INVOKESTATIC, "dev/whynotac/truth/Recorder", "pre", "(Ljava/lang/Object;)V", false);
+                        super.visitMethodInsn(Opcodes.INVOKESTATIC, "dev/whynotac/truth/Recorder", pre, "(Ljava/lang/Object;)V", false);
                     }
 
                     @Override
@@ -81,7 +89,7 @@ public final class TruthAgent {
                         if (opcode == Opcodes.RETURN) {
                             // No aload_0 here: ProGuard's stack map frames mark local 0 as dead (Top) where the
                             // method no longer uses it, so reading it before a return fails verification.
-                            super.visitMethodInsn(Opcodes.INVOKESTATIC, "dev/whynotac/truth/Recorder", "post", "()V", false);
+                            super.visitMethodInsn(Opcodes.INVOKESTATIC, "dev/whynotac/truth/Recorder", post, "()V", false);
                         }
                         super.visitInsn(opcode);
                     }

@@ -3,6 +3,8 @@ import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.BlockPos;
+import dev.whynotac.physics.Boat;
+import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.OnFoot;
@@ -34,7 +36,10 @@ import java.util.TreeMap;
  * block. The client's world border at the move is the one the agent recorded; the ticks next to it
  * ({@code nearBorder}: the session walks into a static border and one that moves) must be more than none, and so must the
  * ticks in powder snow ({@code inPowderSnow}: with and without leather boots, which the agent records too). Ticks
- * outside its scope are counted by reason.
+ * outside its scope are counted by reason. While the player rides, its own tick is not compared ({@code riding}); the
+ * boat it steers is ({@code boat}): {@code Boat.tick} from the boat's state before its tick, steered by the keys the
+ * boat holds, must give its state after it, bit for bit (position, motion, rotation and turn, status, fall, collision
+ * flags, supporting block), in each status it can be in and on landing on water from the air.
  *
  * <p>Each tick is evaluated in the world the replica holds when the client's movement packet of that tick (or of
  * the next tick that sent one) arrives in the replay: the k-th packet the client sent, rebuilt from its own
@@ -99,7 +104,7 @@ public class MovementTruth {
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
                 && ((Number) result.get("gliding")).longValue() > 0 && ((Number) result.get("nearBorder")).longValue() > 0
-                && ((Number) result.get("inPowderSnow")).longValue() > 0
+                && ((Number) result.get("inPowderSnow")).longValue() > 0 && comparison.boatsClean()
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0;
@@ -328,6 +333,18 @@ public class MovementTruth {
     private static final class Comparison {
         private final List<Map<String, Object>[]> ticks = new ArrayList<>();
         private final List<Boolean> sent = new ArrayList<>();
+        /** Per player tick: it rode a vehicle (its own state is not compared), and the boat ticks it steered that client tick. */
+        private final List<Boolean> riding = new ArrayList<>();
+        private final List<List<Map<String, Object>[]>> boats = new ArrayList<>();
+        long ridingTicks;
+        long boatTicks;
+        long boatMatched;
+        long boatMismatched;
+        long boatLandings;
+        final Map<String, Long> boatStatuses = new TreeMap<>();
+        final Map<String, Long> boatUnknown = new TreeMap<>();
+        final Map<String, Long> boatDifferingFields = new TreeMap<>();
+        final List<String> boatExamples = new ArrayList<>();
         private int next;
         private boolean firstLoaded = true;
         long matched;
@@ -344,23 +361,36 @@ public class MovementTruth {
 
         @SuppressWarnings("unchecked")
         Comparison(List<Map<String, Object>> truth) {
+            List<Map<String, Object>[]> steered = new ArrayList<>(); // the boat's tick runs before its passenger's
             for (int i = 0; i + 1 < truth.size(); i++) {
                 Map<String, Object> pre = truth.get(i);
                 Map<String, Object> post = truth.get(i + 1);
+                if ("boatPre".equals(pre.get("hook")) && "boatPost".equals(post.get("hook")) && pre.get("tickCount").equals(post.get("tickCount"))
+                        && pre.get("id").equals(post.get("id"))) {
+                    steered.add(new Map[] {pre, post});
+                }
                 if ("pre".equals(pre.get("hook")) && "post".equals(post.get("hook")) && pre.get("tickCount").equals(post.get("tickCount"))
                         && (Boolean) pre.get("loaded")) {
-                    if ((Boolean) pre.get("passenger")) {
-                        throw new IllegalStateException("the session rode a vehicle");
-                    }
                     ticks.add(new Map[] {pre, post});
+                    boats.add(steered);
+                    steered = new ArrayList<>();
+                    // a passenger at the send sends its rotation every tick (and the vehicle's move), not sendPosition's packet
+                    boolean passenger = (Boolean) post.get("passenger");
+                    riding.add(passenger || (Boolean) pre.get("passenger"));
                     // sendPosition: a position (reminder reset), a rotation (last sent changed) or the flags changed
                     boolean position = ((Number) post.get("positionReminder")).longValue() == 0;
                     boolean rotation = !post.get("yRotLast").equals(pre.get("yRotLast")) || !post.get("xRotLast").equals(pre.get("xRotLast"));
                     boolean status = !pre.get("lastOnGround").equals(post.get("onGround"))
                             || !pre.get("lastHorizontalCollision").equals(post.get("horizontalCollision"));
-                    sent.add(position || rotation || status);
+                    sent.add(passenger || position || rotation || status);
                 }
             }
+        }
+
+        /** Boat ticks were compared, all equal, in water, under it, on land, in the air, and landing on water from the air. */
+        boolean boatsClean() {
+            return boatMatched > 0 && boatMismatched == 0 && boatLandings > 0
+                    && java.util.stream.Stream.of("IN_WATER", "UNDER_WATER", "ON_LAND", "IN_AIR").allMatch(st -> boatStatuses.getOrDefault(st, 0L) > 0);
         }
 
         /** The client's own state after each tick that sent a movement packet, in order. */
@@ -385,7 +415,15 @@ public class MovementTruth {
                 Map<String, Object>[] tick = ticks.get(next);
                 boolean sentHere = sent.get(next);
                 next++;
-                compare(tick[0], tick[1], sentHere ? sending : before);
+                Colliders.World world = sentHere ? sending : before;
+                for (Map<String, Object>[] boat : boats.get(next - 1)) {
+                    compareBoat(boat[0], boat[1], tick[0], world);
+                }
+                if (riding.get(next - 1)) {
+                    ridingTicks++;
+                } else {
+                    compare(tick[0], tick[1], world);
+                }
                 if (sentHere) {
                     return;
                 }
@@ -453,6 +491,48 @@ public class MovementTruth {
             }
         }
 
+        /** The boat's tick from {@code pre} to {@code post}, in the client tick whose player record starts at {@code player}. */
+        private void compareBoat(Map<String, Object> pre, Map<String, Object> post, Map<String, Object> player, Colliders.World world) {
+            if (Boolean.TRUE.equals(pre.get("interpolating"))) {
+                boatUnknown.merge("interpolating toward a position the server sent", 1L, Long::sum);
+                return;
+            }
+            if (Boolean.TRUE.equals(pre.get("firstTick"))) {
+                boatUnknown.merge("the boat's first tick", 1L, Long::sum);
+                return;
+            }
+            BoatState before = boatState(pre);
+            BoatState expected = boatState(post);
+            if (!java.util.Objects.equals(post.get("oldStatus"), pre.get("status"))) {
+                throw new IllegalStateException("the boat's oldStatus is not its last status at tick " + pre.get("tickCount"));
+            }
+            boatTicks++;
+            boatStatuses.merge(String.valueOf(expected.status()), 1L, Long::sum);
+            if (before.status() == BoatState.Status.IN_AIR && expected.status() == BoatState.Status.IN_WATER) {
+                boatLandings++;
+            }
+            String k = (String) pre.get("input");
+            Boat.Input input = new Boat.Input(k.charAt(0) == 'L', k.charAt(1) == 'R', k.charAt(2) == 'U', k.charAt(3) == 'D');
+            try {
+                BoatState predicted = Boat.tick(before, input, world, new Boat.Conditions((Boolean) pre.get("noGravity"), border(player), List.of()));
+                List<String> d = boatDifferences(predicted, expected);
+                if (d.isEmpty()) {
+                    boatMatched++;
+                } else {
+                    boatMismatched++;
+                    for (String f : d) {
+                        boatDifferingFields.merge(f.substring(0, f.indexOf(':')), 1L, Long::sum);
+                    }
+                    if (boatExamples.size() < 12) {
+                        boatExamples.add("boat tick " + pre.get("tickCount") + " input " + k + " " + before.status() + "->" + expected.status() + ": "
+                                + String.join("; ", d));
+                    }
+                }
+            } catch (Colliders.Unknown e) {
+                boatUnknown.merge(e.getMessage().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]", ""), 1L, Long::sum);
+            }
+        }
+
         Map<String, Object> result() {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("ticks", (long) ticks.size());
@@ -468,8 +548,60 @@ public class MovementTruth {
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
             out.put("examples", examples);
+            out.put("riding", ridingTicks);
+            Map<String, Object> boat = new LinkedHashMap<>();
+            boat.put("ticks", boatTicks);
+            boat.put("matched", boatMatched);
+            boat.put("mismatched", boatMismatched);
+            boat.put("statuses", boatStatuses);
+            boat.put("landings", boatLandings);
+            boat.put("unknown", boatUnknown);
+            boat.put("differingFields", boatDifferingFields);
+            boat.put("examples", boatExamples);
+            out.put("boat", boat);
             return out;
         }
+    }
+
+    private static List<String> boatDifferences(BoatState p, BoatState e) {
+        List<String> d = new ArrayList<>();
+        bits(d, "x", p.x(), e.x());
+        bits(d, "y", p.y(), e.y());
+        bits(d, "z", p.z(), e.z());
+        bits(d, "dx", p.deltaMovement().x(), e.deltaMovement().x());
+        bits(d, "dy", p.deltaMovement().y(), e.deltaMovement().y());
+        bits(d, "dz", p.deltaMovement().z(), e.deltaMovement().z());
+        bits(d, "yRot", p.yRot(), e.yRot());
+        bits(d, "xRot", p.xRot(), e.xRot());
+        bits(d, "deltaRotation", p.deltaRotation(), e.deltaRotation());
+        same(d, "status", p.status(), e.status());
+        bits(d, "lastYd", p.lastYd(), e.lastYd());
+        bits(d, "fallDistance", p.fallDistance(), e.fallDistance());
+        same(d, "onGround", p.onGround(), e.onGround());
+        same(d, "horizontalCollision", p.horizontalCollision(), e.horizontalCollision());
+        same(d, "verticalCollision", p.verticalCollision(), e.verticalCollision());
+        same(d, "verticalCollisionBelow", p.verticalCollisionBelow(), e.verticalCollisionBelow());
+        same(d, "support", p.support(), e.support());
+        same(d, "onGroundNoBlocks", p.onGroundNoBlocks(), e.onGroundNoBlocks());
+        bits(d, "stuckX", p.stuckSpeedMultiplier().x(), e.stuckSpeedMultiplier().x());
+        bits(d, "stuckY", p.stuckSpeedMultiplier().y(), e.stuckSpeedMultiplier().y());
+        bits(d, "stuckZ", p.stuckSpeedMultiplier().z(), e.stuckSpeedMultiplier().z());
+        return d;
+    }
+
+    /** A boat record of the truth agent (status by its ordinal, -1: none). */
+    @SuppressWarnings("unchecked")
+    private static BoatState boatState(Map<String, Object> r) {
+        List<Object> pos = (List<Object>) r.get("pos");
+        List<Object> support = (List<Object>) r.get("support");
+        int status = ((Number) r.get("status")).intValue();
+        return new BoatState(f64(pos.get(0)), f64(pos.get(1)), f64(pos.get(2)), vec(r.get("deltaMovement")), f32(r.get("yRot")), f32(r.get("xRot")),
+                f32(r.get("deltaRotation")), status < 0 ? null : BoatState.Status.values()[status], f64(r.get("lastYd")), f64(r.get("fallDistance")),
+                (Boolean) r.get("onGround"), (Boolean) r.get("horizontalCollision"), (Boolean) r.get("verticalCollision"),
+                (Boolean) r.get("verticalCollisionBelow"),
+                support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
+                        ((Number) support.get(2)).intValue()),
+                (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")));
     }
 
     private static List<String> differences(PlayerState p, PlayerState e) {
