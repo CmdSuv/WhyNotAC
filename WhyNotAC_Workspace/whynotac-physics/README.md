@@ -252,10 +252,16 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     kodla yeniden kurulan parkurda (`truth-boat.jsonl.gz`) oynatır. **Son oturum (havuzda kürek, dönüş, geri gitme ve
     kıyıya çarpma; çukurun dibine batma; yerçekimsiz asılıp suya düşme; buzda ve mavi buzda taş duvara düz ve açıyla
     gitme; buza ve slime'a düşme; çimende sürüklenme):** teknenin 826 tikinin hepsi bit bit eşit: 277'si suda, 29'u
-    suyun altında, 324'ü karada, 196'sı havada, 1 havadan suya iniş; 834 `MoveVehicle` paketinin hepsi teknenin kendi
-    durumuna eşit. Tüm oturum: 14 304 tikin 13 256'sı eşit, 0 fark. Kapsam dışı: istemcinin teknenin konumuna doğru
-    yumuşattığı (`interpolating`, 8 tik) ve ilk tikler. Negatif kontroller (ikisi de yakalandı): ileri itiş
-    0.04 → 0.041, havada sürtünme 0.9 → 0.91. **Katı varlık:** inen oyuncu, istemcinin hâlâ tuttuğu teknenin tepesinde
+    suyun altında, 324'ü karada, 196'sı havada, 1 havadan suya iniş (interpolasyonsuz tikler); 834 `MoveVehicle` paketinin hepsi teknenin kendi
+    durumuna eşit. Tüm oturum: 14 304 tikin 13 256'sı eşit, 0 fark. Kapsam dışı: teknenin ilk tiki. Negatif kontroller
+    (ikisi de yakalandı): ileri itiş 0.04 → 0.041, havada sürtünme 0.9 → 0.91.
+  - **Binişte interpolasyon (`InterpolationHandler.interpolate`, `BoatState.Interpolation`):** oyuncu bindiğinde
+    tekne sunucunun son gönderdiği konuma doğru hâlâ yumuşatılıyor olabilir. Adım `baseTick`'ten sonra, `floatBoat`'tan
+    önce çalışır: tekne son adımdan beri hareket ettiyse hedef de, kutusu hedefte hiçbir şeye çarpmıyorsa, onunla
+    kayar; sonra `1 / steps` kadar hedefe doğru (`Mth.lerp`, yaw `Mth.rotLerp`) ve `Entity.setRot`. Binişteki durum
+    varlık replikasından gelir (`ClientEntities.mounted`: replika teknenin client'taki interpolasyonunu izler). **Son
+    oturum:** 8 binişin 8'inde replikanın teknesi client'ınkine bit bit eşit; interpolasyonlu 8 tik dahil teknenin 834
+    tikinin hepsi eşit. Negatif kontroller (ikisi de yakalandı): adım `1 / (steps + 1)`, interpolasyonu atlamak. **Katı varlık:** inen oyuncu, istemcinin hâlâ tuttuğu teknenin tepesinde
     durur (oyuncunun y'si teknenin tepesine bit bit eşit); motor katı varlıkları modellemez, bu tikler `MovementTruth`'ta
     açıklanmamış fark değil, "indiği teknenin üstünde" bilinmeyenidir (11 tik).
   - **Kapsam dışında `Colliders.Unknown`:**

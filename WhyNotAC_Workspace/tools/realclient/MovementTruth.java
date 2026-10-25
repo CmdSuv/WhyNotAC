@@ -98,6 +98,24 @@ public class MovementTruth {
             }
         });
         chain.addAll(replicas.listeners());
+        // Last: the replica's boat at each mount, for the ticks that interpolate toward where the server put it.
+        java.util.Set<Integer> mounting = new java.util.HashSet<>();
+        chain.add((session, event) -> {
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetPassengers set
+                    && set.passengerIds().length > 0) {
+                mounting.add(set.vehicleId()); // every boat of the session carries the player
+            }
+            for (java.util.Iterator<Integer> it = mounting.iterator(); it.hasNext(); ) {
+                int id = it.next();
+                List<ClientEntities.Mounted> mounted = replicas.entities().entities(session).mounted(id);
+                if (mounted != null) {
+                    it.remove();
+                    if (mounted.size() == 1 && mounted.getFirst().exact()) {
+                        comparison.mounted.put(id, mounted.getFirst());
+                    }
+                }
+            }
+        });
         Replayer.replay(RecordingReader.open(Path.of(args[0])), chain);
         Map<String, Object> result = comparison.result();
         result.put("blockChangesDuringPlay", blockChanges[0]);
@@ -409,6 +427,12 @@ public class MovementTruth {
         long boatMatched;
         long boatMismatched;
         long boatLandings;
+        long boatInterpolating;
+        /** The replica's boat at its player's mount (ClientEntities.mounted), by id. */
+        final Map<Integer, ClientEntities.Mounted> mounted = new HashMap<>();
+        /** The interpolation each boat's last compared tick left (none: absent). */
+        private final Map<Integer, BoatState.Interpolation> interpolations = new HashMap<>();
+        private final java.util.Set<Integer> boatsSeen = new java.util.HashSet<>();
         final Map<String, Long> boatStatuses = new TreeMap<>();
         final Map<String, Long> boatUnknown = new TreeMap<>();
         final Map<String, Long> boatDifferingFields = new TreeMap<>();
@@ -585,15 +609,33 @@ public class MovementTruth {
         private void compareBoat(Map<String, Object> pre, Map<String, Object> post, Map<String, Object> player, Colliders.World world) {
             BoatState last = boatState(post);
             lastBoat = BoatState.box(last.x(), last.y(), last.z());
-            if (Boolean.TRUE.equals(pre.get("interpolating"))) {
-                boatUnknown.merge("interpolating toward a position the server sent", 1L, Long::sum);
-                return;
+            int id = ((Number) pre.get("id")).intValue();
+            boolean first = boatsSeen.add(id);
+            BoatState.Interpolation interpolation = interpolations.remove(id);
+            if (first) {
+                ClientEntities.Mounted m = mounted.get(id);
+                interpolation = m == null || m.steps() == 0 ? null : new BoatState.Interpolation(m.steps(), m.target(), m.targetYRot(),
+                        m.targetXRot(), m.previousPosition(), m.previousYRot(), m.previousXRot());
+                if (m == null && Boolean.TRUE.equals(pre.get("interpolating"))) {
+                    boatUnknown.merge("interpolating toward a position the server sent, the replica's state at the mount not known", 1L, Long::sum);
+                    return;
+                }
+            }
+            if (Boolean.TRUE.equals(pre.get("interpolating")) != (interpolation != null)) {
+                throw new IllegalStateException("the boat's interpolation at tick " + pre.get("tickCount") + " is not the client's: "
+                        + pre.get("interpolating") + " vs " + interpolation);
             }
             if (Boolean.TRUE.equals(pre.get("firstTick"))) {
                 boatUnknown.merge("the boat's first tick", 1L, Long::sum);
                 return;
             }
-            BoatState before = boatState(pre);
+            if (interpolation != null) {
+                boatInterpolating++;
+            }
+            BoatState t = boatState(pre);
+            BoatState before = new BoatState(t.x(), t.y(), t.z(), t.deltaMovement(), t.yRot(), t.xRot(), t.deltaRotation(), t.status(), t.lastYd(),
+                    t.fallDistance(), t.onGround(), t.horizontalCollision(), t.verticalCollision(), t.verticalCollisionBelow(), t.support(),
+                    t.onGroundNoBlocks(), t.stuckSpeedMultiplier(), interpolation);
             BoatState expected = boatState(post);
             if (!java.util.Objects.equals(post.get("oldStatus"), pre.get("status"))) {
                 throw new IllegalStateException("the boat's oldStatus is not its last status at tick " + pre.get("tickCount"));
@@ -607,6 +649,9 @@ public class MovementTruth {
             Boat.Input input = new Boat.Input(k.charAt(0) == 'L', k.charAt(1) == 'R', k.charAt(2) == 'U', k.charAt(3) == 'D');
             try {
                 BoatState predicted = Boat.tick(before, input, world, new Boat.Conditions((Boolean) pre.get("noGravity"), border(player), List.of()));
+                if (predicted.interpolation() != null) {
+                    interpolations.put(id, predicted.interpolation());
+                }
                 List<String> d = boatDifferences(predicted, expected);
                 if (d.isEmpty()) {
                     boatMatched++;
@@ -647,6 +692,7 @@ public class MovementTruth {
             boat.put("mismatched", boatMismatched);
             boat.put("statuses", boatStatuses);
             boat.put("landings", boatLandings);
+            boat.put("interpolating", boatInterpolating);
             boat.put("unknown", boatUnknown);
             boat.put("differingFields", boatDifferingFields);
             boat.put("examples", boatExamples);

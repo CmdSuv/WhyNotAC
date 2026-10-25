@@ -16,8 +16,8 @@ import java.util.List;
  * the tick started).
  *
  * <p>The scope is any boat, chest boat or raft (all {@link BoatState#WIDTH} by {@link BoatState#HEIGHT}, none overriding
- * the movement), steered by the local player, not interpolating toward a position the server sent, in water, on land or
- * in the air, against the world border or not, past the blocks that move it from inside (cobwebs, powder snow, honey
+ * the movement), steered by the local player, interpolating toward a position the server sent before the player took it
+ * or not ({@code InterpolationHandler.interpolate}, after {@code baseTick}), in water, on land or in the air, against the world border or not, past the blocks that move it from inside (cobwebs, powder snow, honey
  * slides, bubble columns). The block shapes are the player's ({@link Colliders}) with what a boat's context holds: it
  * never descends and walks on no powder snow. Outside the scope, or where the client's world is not known,
  * {@link Colliders.Unknown} is thrown. Sources: the decompiled client, {@code AbstractBoat} and {@code Entity}.
@@ -65,7 +65,7 @@ public final class Boat {
     private double z;
     private Vec3d delta;
     private float yRot;
-    private final float xRot;
+    private float xRot;
     private float deltaRotation;
     private BoatState.Status status;
     private final BoatState.Status oldStatus;
@@ -82,6 +82,7 @@ public final class Boat {
     private BlockPos support;
     private boolean onGroundNoBlocks;
     private Vec3d stuck;
+    private BoatState.Interpolation interpolation;
     /** {@code oldPosition()}: where the tick started ({@code setOldPosAndRot}). */
     private final Vec3d oldPosition;
     /** {@code movementThisTick}. */
@@ -108,6 +109,7 @@ public final class Boat {
         support = pre.support();
         onGroundNoBlocks = pre.onGroundNoBlocks();
         stuck = pre.stuckSpeedMultiplier();
+        interpolation = pre.interpolation();
         oldPosition = new Vec3d(x, y, z);
     }
 
@@ -120,7 +122,7 @@ public final class Boat {
 
     private BoatState state() {
         return new BoatState(x, y, z, delta, yRot, xRot, deltaRotation, status, lastYd, fallDistance, onGround, horizontalCollision, verticalCollision,
-                verticalCollisionBelow, support, onGroundNoBlocks, stuck);
+                verticalCollisionBelow, support, onGroundNoBlocks, stuck, interpolation);
     }
 
     private void run(Input input) throws Colliders.Unknown {
@@ -141,6 +143,8 @@ public final class Boat {
         if (lava.height() > 0.0) { // isInLava (not a new entity's first tick)
             fallDistance *= 0.5;
         }
+        // --- the interpolation's step toward where the server last put it ---
+        interpolate();
         // --- the local player steers it: floatBoat, controlBoat, then the move ---
         floatBoat();
         controlBoat(input);
@@ -404,6 +408,58 @@ public final class Boat {
             }
         }
         return out;
+    }
+
+    /**
+     * {@code InterpolationHandler.interpolate}: the target moves with the boat when the boat moved since the last step
+     * and its box at the moved target collides with nothing; then a step of {@code 1 / steps} toward it ({@code Mth.lerp},
+     * the yaw by {@code Mth.rotLerp}) and {@code Entity.setRot} ({@code % 360}, the pitch clamped). The last step leaves
+     * no interpolation (its later {@code cancel} changes nothing the tick reads).
+     */
+    private void interpolate() throws Colliders.Unknown {
+        if (interpolation == null) {
+            return;
+        }
+        BoatState.Interpolation i = interpolation;
+        double d = 1.0 / i.steps();
+        Vec3d target = i.target();
+        Vec3d here = new Vec3d(x, y, z);
+        if (i.previousPosition() != null) {
+            Vec3d moved = here.subtract(i.previousPosition());
+            Vec3d shifted = target.add(moved);
+            if (noCollision(BoatState.box(shifted.x(), shifted.y(), shifted.z()))) {
+                target = shifted;
+            }
+        }
+        float targetYRot = i.targetYRot();
+        float targetXRot = i.targetXRot();
+        if (i.previousPosition() != null) { // previousTickRot is set and cleared with previousTickPosition
+            targetYRot += yRot - i.previousYRot();
+            targetXRot += xRot - i.previousXRot();
+        }
+        double nx = VanillaMath.lerp(d, x, target.x());
+        double ny = VanillaMath.lerp(d, y, target.y());
+        double nz = VanillaMath.lerp(d, z, target.z());
+        float nyRot = (float) VanillaMath.rotLerp(d, (double) yRot, (double) targetYRot);
+        float nxRot = (float) VanillaMath.lerp(d, (double) xRot, (double) targetXRot);
+        x = nx;
+        y = ny;
+        z = nz;
+        setRot(nyRot, nxRot);
+        interpolation = i.steps() == 1 ? null
+                : new BoatState.Interpolation(i.steps() - 1, target, targetYRot, targetXRot, new Vec3d(x, y, z), yRot, xRot);
+    }
+
+    /** {@code Entity.setRot}: {@code setYRot(yRot % 360)}, {@code setXRot(xRot % 360)}; non-finite values are discarded, the pitch clamped. */
+    private void setRot(float newYRot, float newXRot) {
+        float wrappedY = newYRot % 360.0F;
+        if (Float.isFinite(wrappedY)) {
+            yRot = wrappedY;
+        }
+        float wrappedX = newXRot % 360.0F;
+        if (Float.isFinite(wrappedX)) {
+            xRot = Math.clamp(wrappedX % 360.0F, -90.0F, 90.0F);
+        }
     }
 
     /** {@code CollisionGetter.noCollision(boat, box)}: no block, no entity it collides with, and not the border's shape. */

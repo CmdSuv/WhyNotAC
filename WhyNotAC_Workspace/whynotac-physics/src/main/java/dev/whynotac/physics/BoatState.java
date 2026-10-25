@@ -16,10 +16,33 @@ import dev.whynotac.math.vector.Vec3d;
  * @param fallDistance         NaN when not known: every use of it then makes the tick {@link Colliders.Unknown}
  * @param support              {@code mainSupportingBlockPos}, null when empty
  * @param stuckSpeedMultiplier set by blocks the box was inside last tick (cobwebs, powder snow); zero otherwise
+ * @param interpolation        its {@code InterpolationHandler} toward a position the server sent before the player took
+ *                             it, while steps are left; null when none runs
  */
 public record BoatState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, float deltaRotation, Status status,
         double lastYd, double fallDistance, boolean onGround, boolean horizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow,
-        BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier) {
+        BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, Interpolation interpolation) {
+
+    /** A boat no interpolation moves. */
+    public BoatState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, float deltaRotation, Status status, double lastYd,
+            double fallDistance, boolean onGround, boolean horizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow,
+            BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier) {
+        this(x, y, z, deltaMovement, yRot, xRot, deltaRotation, status, lastYd, fallDistance, onGround, horizontalCollision, verticalCollision,
+                verticalCollisionBelow, support, onGroundNoBlocks, stuckSpeedMultiplier, null);
+    }
+
+    /**
+     * {@code InterpolationHandler} with steps left: the target ({@code InterpolationData}) and where its last step (or its
+     * start) left the boat ({@code previousTickPosition}, {@code previousTickRot}; null when cancelled).
+     */
+    public record Interpolation(int steps, Vec3d target, float targetYRot, float targetXRot, Vec3d previousPosition, float previousYRot,
+            float previousXRot) {
+        public Interpolation {
+            if (steps <= 0) {
+                throw new IllegalArgumentException("no steps left");
+            }
+        }
+    }
 
     /** {@code EntityType.Builder.sized(1.375F, 0.5625F)}: every boat, chest boat and raft. */
     public static final float WIDTH = 1.375F;
