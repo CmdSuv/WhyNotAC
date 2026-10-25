@@ -1,4 +1,5 @@
 import dev.whynotac.math.vanilla.MouseTurnModel;
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.recording.read.RecordingReader;
@@ -47,9 +48,14 @@ public class RealClientCheck {
         long steadyTicks = 0;
         long steadyFirst = Long.MIN_VALUE;
         java.util.Set<Integer> teleports = new java.util.HashSet<>();
+        boolean riding = false;
+        boolean afterRide = false;
         RecordingReader reader = RecordingReader.open(Path.of(args[0]));
         {
             for (TimelineEvent event : reader) {
+                if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetPassengers set) {
+                    riding = set.passengerIds().length > 0; // every boat of the session carries the player
+                }
                 if (!(event instanceof TimelineEvent.Inbound in)) {
                     continue;
                 }
@@ -79,11 +85,15 @@ public class RealClientCheck {
                     }
                     case ServerboundPacket.MovePlayer move -> {
                         inTick |= inPlay && !teleportReply; // a teleport reply is frame-start work, not a tick
-                        if (move.hasRotation()) {
+                        // A passenger's rotation is its boat's heading, not a mouse step; the first one after it is a new start.
+                        if (move.hasRotation() && riding) {
+                            afterRide = true;
+                        } else if (move.hasRotation()) {
                             // A teleport reply carries the rotation the server set: the mouse's steps start again from it.
-                            if (teleportReply) {
+                            if (teleportReply || afterRide) {
                                 teleports.add(rotations.size());
                             }
+                            afterRide = false;
                             rotations.add(move);
                         }
                     }
