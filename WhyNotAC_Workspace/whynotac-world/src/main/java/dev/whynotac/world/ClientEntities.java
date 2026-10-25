@@ -44,7 +44,8 @@ import java.util.function.Consumer;
  *
  * <h2>What is not known</h2>
  * Positions of passengers (placed by their vehicle), of a vehicle this player may control, and of types
- * the client moves itself ({@link ClientMotion}) are reported as lost. After lost events ({@code Gap}) or
+ * the client moves itself ({@link ClientMotion}) are reported as lost; a boat's state at the moment its player
+ * mounts it is kept for the movement check ({@link #mounted}). After lost events ({@code Gap}) or
  * an entity packet WhyNotAC could not read, entities are unknown until the server adds them again.
  *
  * <p>Confined to the session's analysis thread.
@@ -65,8 +66,9 @@ public final class ClientEntities {
     private static final int GAME_MODE_SPECTATOR = ClientboundPacket.PlayerInfoUpdate.SPECTATOR;
     private static final int POSE_STANDING = ClientboundPacket.EntityPose.STANDING.ordinal();
     private static final int POSE_SLEEPING = ClientboundPacket.EntityPose.SLEEPING.ordinal();
-    /** {@code Entity.DATA_SHARED_FLAGS_ID} and {@code Entity.DATA_POSE}. */
+    /** {@code Entity.DATA_SHARED_FLAGS_ID}, {@code Entity.DATA_NO_GRAVITY} and {@code Entity.DATA_POSE}. */
     private static final int DATA_FLAGS = 0;
+    private static final int DATA_NO_GRAVITY = 5;
     /** The attribute the size scales with ({@code Attributes.SCALE}). */
     static final String SCALE_ATTRIBUTE = "minecraft:scale";
     private static final int DATA_POSE = 6;
@@ -311,6 +313,13 @@ public final class ClientEntities {
                 }
             }
             case ClientboundPacket.SetEntityData data -> entityData(seq, data);
+            case ClientboundPacket.SetEntityMotion motion -> {
+                Head head = heads.get(motion.entityId());
+                if (head != null && head.type != null && ClientMotion.interpolatesOnly(head.type)) {
+                    // handleSetEntityMotion: lerpMotion sets the motion; a boat the client does not control zeroes it in its tick
+                    enqueue(seq, head.id, new Op.Motion(seq, motion.clientMotion()));
+                }
+            }
             case ClientboundPacket.UpdateAttributes attributes -> updateAttributes(seq, attributes);
             case ClientboundPacket.SetPassengers passengers -> setPassengers(seq, passengers);
             case ClientboundPacket.Unmodeled unmodeled -> unmodeled(seq, unmodeled.type());
@@ -447,6 +456,7 @@ public final class ClientEntities {
         int data0 = 0;
         int data1 = 0;
         int attached = UNSET;
+        int noGravity = NONE;
         EntitySizes.Entry size = sizes.entry(head.type);
         int babyIndex = size == null ? -1 : size.babyIndex();
         List<EntitySizes.DataField> fields = size == null ? List.of() : size.data();
@@ -457,6 +467,8 @@ public final class ClientEntities {
                 flags = (int) entry.value() & 0xFF;
             } else if (entry.index() == babyIndex && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
                 baby = entry.value() != 0 ? 1 : 0; // the flag isBaby() reads (DATA_BABY_ID of the type's class)
+            } else if (entry.index() == DATA_NO_GRAVITY && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
+                noGravity = entry.value() != 0 ? 1 : 0;
             } else if (FIREWORK_ROCKET.equals(head.type) && entry.index() == DATA_ROCKET_ATTACHED
                     && entry.kind() == ClientboundPacket.SetEntityData.Kind.OPTIONAL_UNSIGNED_INT) {
                 attached = (int) Math.max(entry.value(), NONE); // empty: -1
@@ -476,8 +488,8 @@ public final class ClientEntities {
                 }
             }
         }
-        if (pose != NONE || flags != NONE || baby != NONE || dataSet != 0 || attached != UNSET) {
-            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1, attached));
+        if (pose != NONE || flags != NONE || baby != NONE || dataSet != 0 || attached != UNSET || noGravity != NONE) {
+            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1, attached, noGravity));
         }
     }
 
@@ -589,8 +601,9 @@ public final class ClientEntities {
             vehicle.passengers.add(id);
             if (p == self) {
                 if (vehicle != self && vehicle.passengers.getFirst() == id) {
-                    // The player may control it (isLocalInstanceAuthoritative): its position is the client's own physics.
-                    enqueue(seq, vehicle.id, Op.LOSE_POSITION);
+                    // The player may control it (isLocalInstanceAuthoritative): its position is the client's own physics. A boat's
+                    // state at that moment is kept for the movement check (mounted).
+                    enqueue(seq, vehicle.id, new Op.Control(seq));
                 }
             } else {
                 enqueue(seq, id, new Op.Vehicle(seq, vehicle.id));
@@ -918,6 +931,7 @@ public final class ClientEntities {
                 for (State m : moved) {
                     m.onGround = move.onGround();
                     m.onGroundKnown = true;
+                    m.groundSet();
                 }
                 out.addAll(moved);
             }
@@ -945,6 +959,7 @@ public final class ClientEntities {
                 for (State r : result) {
                     r.onGround = sync.onGround();
                     r.onGroundKnown = true;
+                    r.groundSet();
                 }
                 out.addAll(result);
             }
@@ -982,6 +997,9 @@ public final class ClientEntities {
                     if (data.attached() != UNSET) {
                         s.attached = data.attached();
                     }
+                    if (data.noGravity() != NONE) {
+                        s.noGravity = data.noGravity() == 1;
+                    }
                 }
                 out.add(s);
             }
@@ -996,6 +1014,21 @@ public final class ClientEntities {
                     s.scale = scale.value(); // a non-living entity: the client throws (Server tried to update attributes of a non-living entity)
                     s.scaleLow = Math.min(s.scaleLow, s.scale); // NaN stays NaN
                     s.scaleHigh = Math.max(s.scaleHigh, s.scale);
+                }
+                out.add(s);
+            }
+            case Op.Motion motion -> {
+                if (s.present && !s.lostAll && !s.lostPosition) {
+                    s.motion = motion.motion();
+                }
+                out.add(s);
+            }
+            case Op.Control control -> {
+                if (s.present && !s.lostAll) {
+                    if (!s.lostPosition && ClientMotion.interpolatesOnly(s.type)) {
+                        s.mounted = s.mounted(control.seq());
+                    }
+                    s.lostPosition = true;
                 }
                 out.add(s);
             }
@@ -1062,6 +1095,7 @@ public final class ClientEntities {
         for (State r : result) {
             r.onGround = t.onGround();
             r.onGroundKnown = true;
+            r.groundSet();
         }
         out.addAll(result);
     }
@@ -1245,22 +1279,26 @@ public final class ClientEntities {
             branches++;
         }
         int from = out.size();
-        tickNow(s, out);
+        tickNow(s, lower, out);
         for (int i = from; i < out.size(); i++) {
             out.get(i).ticked = true;
         }
     }
 
-    private void tickNow(State s, List<State> out) {
+    private void tickNow(State s, long lower, List<State> out) {
         if (!s.kind.living()) {
             // Entity.baseTick -> checkBelowWorld -> onBelowWorld: discard.
             double belowWorld = s.minY - 64;
             Tri below = s.y - s.rPos < belowWorld ? (s.y + s.rPos < belowWorld ? Tri.TRUE : Tri.MAYBE) : Tri.FALSE;
             if (below == Tri.MAYBE) {
-                out.add(s.copy());
+                boatTick(s.copy(), lower, out);
                 branches++;
             }
-            out.add(below == Tri.FALSE ? s : State.absent());
+            if (below == Tri.FALSE) {
+                boatTick(s, lower, out);
+            } else {
+                out.add(State.absent());
+            }
             return;
         }
         // LivingEntity.aiStep (RemotePlayer.aiStep for players): interpolation, then the head.
@@ -1289,6 +1327,31 @@ public final class ClientEntities {
                 t.yHeadRot = (float) VanillaMath.rotLerp(step, (double) t.yHeadRot, t.headTarget);
                 t.headSteps--;
             }
+        }
+    }
+
+    /**
+     * The rest of a non-living entity's tick that stays in the world: for a boat the client does not control
+     * ({@code AbstractBoat.tick}), after {@code baseTick} the interpolation's step, then its motion set to zero (the
+     * effects of the blocks it meets after that are the movement check's to rule out); nothing for the others.
+     */
+    private void boatTick(State s, long lower, List<State> out) {
+        if (!ClientMotion.interpolatesOnly(s.type)) {
+            out.add(s);
+            return;
+        }
+        s.everTicked = true;
+        s.hasTickStart = true;
+        s.sx = s.x;
+        s.sy = s.y;
+        s.sz = s.z;
+        s.rStart = s.rPos;
+        s.tickStartLower = lower;
+        s.motion = null;
+        if (s.steps > 0) {
+            interpolate(s, out);
+        } else {
+            out.add(s);
         }
     }
 
@@ -1512,6 +1575,45 @@ public final class ClientEntities {
     public record PossibleState(boolean present, boolean known, boolean positionKnown, String type, boolean player, double x, double y, double z,
                                 double positionRadius, float yRot, float xRot, float rotationRadius, float yHeadRot, float headRadius, int pose,
                                 int flags, int onGround, int vehicle, EntitySizes.Size size, EntitySizes.Box bounds, int pickable, float pickRadius) {}
+
+    /**
+     * A boat's client state when the client's own player became its controlling passenger
+     * ({@code handleSetEntityPassengersPacket}, the player first): until then the client moved it by interpolation
+     * alone (and set its motion to zero in each tick); from then on its own physics moves it, which the replica does
+     * not follow. {@code exact}: every value is the client's to the bit (no radius). {@code steps}, {@code target} and
+     * the target's rotation: its {@code InterpolationHandler} ({@code steps} 0: none running); {@code previousPosition}
+     * ({@code previousTickPosition}, null: none) and the previous rotation (when {@code hasPreviousRotation}).
+     * {@code onGround} 1, 0 or -1 (not known); {@code groundSetAt}: where it was when a packet last set that flag (null:
+     * none since it was added). {@code motion}: its motion from a {@code SetEntityMotion} after its last tick (null: that
+     * tick's zero). {@code everTicked} false: its first tick is still to come. {@code lastTickStart}: where its last tick
+     * started (null: none), with the client's packets up to {@code lastTickLower} processed by then.
+     */
+    public record Mounted(long sequence, String type, boolean exact, Vec3d position, float yRot, float xRot, int steps, Vec3d target,
+                          float targetYRot, float targetXRot, Vec3d previousPosition, boolean hasPreviousRotation, float previousYRot,
+                          float previousXRot, int onGround, Vec3d groundSetAt, boolean noGravity, Vec3d motion, boolean everTicked,
+                          Vec3d lastTickStart, long lastTickLower) {}
+
+    /**
+     * The client's state for the boat {@code entityId} at its player's mount, one per candidate (equal ones once); null
+     * when not known for some candidate: the mount not processed in it, the boat not followed before (lost, or ridden by
+     * the player before), or not a boat.
+     */
+    public List<Mounted> mounted(int entityId) {
+        Track track = tracks.get(entityId);
+        if (track == null) {
+            return null;
+        }
+        List<Mounted> out = new ArrayList<>(1);
+        for (State state : track.candidates) {
+            if (state.mounted == null) {
+                return null;
+            }
+            if (!out.contains(state.mounted)) {
+                out.add(state.mounted);
+            }
+        }
+        return out.isEmpty() ? null : out;
+    }
 
     /**
      * Every state the client may hold for {@code entityId} now: each candidate, after any further prefix
@@ -2160,7 +2262,13 @@ public final class ClientEntities {
 
         /** -1: not in the packet. {@code baby}: 0 or 1. {@code dataSet}: which of the size's data values are in it (bit 0, bit 1). */
         /** {@code attached}: a firework rocket's target ({@code -1}: none), {@code UNSET} when the packet does not set it. */
-        record Data(long seq, int pose, int flags, int baby, int dataSet, int data0, int data1, int attached) implements Op {}
+        record Data(long seq, int pose, int flags, int baby, int dataSet, int data0, int data1, int attached, int noGravity) implements Op {}
+
+        /** {@code SetEntityMotion} for a boat: its motion until its next tick. */
+        record Motion(long seq, Vec3d motion) implements Op {}
+
+        /** The client's own player became the controlling passenger of this vehicle: from now on it moves it itself. */
+        record Control(long seq) implements Op {}
 
         /** The scale attribute's value; NaN when it is not known exactly. */
         record Scale(long seq, double value) implements Op {}
@@ -2246,6 +2354,28 @@ public final class ClientEntities {
         boolean tickedKnown = true;
         /** A firework rocket's {@code DATA_ATTACHED_TO_TARGET}: the entity id, or {@code -1} for none. */
         int attached = NONE;
+        /** {@code Entity.DATA_NO_GRAVITY}. */
+        boolean noGravity;
+        // A boat the client does not control (ClientMotion.interpolatesOnly), for the movement check at its player's mount:
+        /** Its motion from a {@code SetEntityMotion} since its last tick, or null (its tick set it to zero). */
+        Vec3d motion;
+        /** It has ticked: {@code Entity.firstTick} is over. */
+        boolean everTicked;
+        /** Where its last tick started ({@code tickStartLower}: the client had processed every packet up to there by then). */
+        boolean hasTickStart;
+        double sx;
+        double sy;
+        double sz;
+        double rStart;
+        long tickStartLower;
+        /** Where it was when a packet last set its ground flag ({@code Entity.setOnGround}, which finds its supporting block there). */
+        boolean hasGround;
+        double gx;
+        double gy;
+        double gz;
+        double rGround;
+        /** Its state when the client's own player became its controlling passenger, or null. */
+        Mounted mounted;
         /**
          * The prefixes its last tick could fall in, for a rocket attached to the player ({@link #rocketsBoosting}): its
          * chunk is where the player was, which the replica does not hold.
@@ -2260,6 +2390,30 @@ public final class ClientEntities {
 
         static State absent() {
             return new State();
+        }
+
+        /** A packet set the ground flag of a boat (see {@link #hasGround}). */
+        void groundSet() {
+            if (type != null && ClientMotion.interpolatesOnly(type)) {
+                hasGround = true;
+                gx = x;
+                gy = y;
+                gz = z;
+                rGround = rPos;
+            }
+        }
+
+        /** This candidate as {@link Mounted}, at the mount processed at {@code seq}. */
+        Mounted mounted(long seq) {
+            boolean active = steps > 0;
+            boolean exact = rPos == 0.0 && rRot == 0.0 && onGroundKnown && tickedKnown && (!active || rTarget == 0.0 && rTargetRot == 0.0)
+                    && (!hasPrevPos || !posMoved || rPrev == 0.0) && (!hasPrevRot || !rotMoved || rPrevRot == 0.0)
+                    && (!hasTickStart || rStart == 0.0) && (!hasGround || rGround == 0.0);
+            Vec3d previous = !hasPrevPos ? null : posMoved ? new Vec3d(px, py, pz) : new Vec3d(x, y, z);
+            return new Mounted(seq, type, exact, new Vec3d(x, y, z), yRot, xRot, steps, new Vec3d(tx, ty, tz), tyRot, txRot, previous,
+                    hasPrevRot, rotMoved ? pyRot : yRot, rotMoved ? pxRot : xRot, onGroundKnown ? (onGround ? 1 : 0) : -1,
+                    hasGround ? new Vec3d(gx, gy, gz) : null, noGravity, motion, everTicked, hasTickStart ? new Vec3d(sx, sy, sz) : null,
+                    tickStartLower);
         }
 
         static State lostAll() {
@@ -2367,6 +2521,21 @@ public final class ClientEntities {
             c.ticked = ticked;
             c.tickedKnown = tickedKnown;
             c.attached = attached;
+            c.noGravity = noGravity;
+            c.motion = motion;
+            c.everTicked = everTicked;
+            c.hasTickStart = hasTickStart;
+            c.sx = sx;
+            c.sy = sy;
+            c.sz = sz;
+            c.rStart = rStart;
+            c.tickStartLower = tickStartLower;
+            c.hasGround = hasGround;
+            c.gx = gx;
+            c.gy = gy;
+            c.gz = gz;
+            c.rGround = rGround;
+            c.mounted = mounted;
             c.tickLower = tickLower;
             c.tickUpper = tickUpper;
             c.addedSeq = addedSeq;
@@ -2384,15 +2553,22 @@ public final class ClientEntities {
                 return true;
             }
             if (lostAll) {
-                return java.util.Objects.equals(type, o.type) && attached == o.attached; // lost in place: the type stays known
+                // lost in place: the type stays known, and a boat's state at its player's mount
+                return java.util.Objects.equals(type, o.type) && attached == o.attached && java.util.Objects.equals(mounted, o.mounted);
             }
             if (kind != o.kind || !java.util.Objects.equals(type, o.type) || player != o.player || addedSeq != o.addedSeq || minY != o.minY
                     || lostPosition != o.lostPosition
                     || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
                     || Double.compare(scaleLow, o.scaleLow) != 0 || Double.compare(scaleHigh, o.scaleHigh) != 0
                     || data0 != o.data0 || data1 != o.data1 || anim != o.anim || animO != o.animO || spectator != o.spectator
-                    || attached != o.attached) {
+                    || attached != o.attached || noGravity != o.noGravity || !java.util.Objects.equals(mounted, o.mounted)) {
                 return false;
+            }
+            if (type != null && ClientMotion.interpolatesOnly(type) && (!java.util.Objects.equals(motion, o.motion) || everTicked != o.everTicked
+                    || hasTickStart != o.hasTickStart || tickStartLower != o.tickStartLower || hasGround != o.hasGround
+                    || hasTickStart && (Double.compare(sx, o.sx) != 0 || Double.compare(sy, o.sy) != 0 || Double.compare(sz, o.sz) != 0 || rStart != o.rStart)
+                    || hasGround && (Double.compare(gx, o.gx) != 0 || Double.compare(gy, o.gy) != 0 || Double.compare(gz, o.gz) != 0 || rGround != o.rGround))) {
+                return false; // what the movement check reads at a mount
             }
             if (lostPosition) {
                 return true;

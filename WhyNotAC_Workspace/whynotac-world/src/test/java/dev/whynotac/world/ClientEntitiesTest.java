@@ -117,6 +117,68 @@ class ClientEntitiesTest {
     }
 
     @Test
+    void boatsTheClientDoesNotControlInterpolateLikeLivingEntities() {
+        out(add(5, "minecraft:oak_boat", 0.5, 64.0, 0.5));
+        sync();
+        double target = PositionCodec.decode(new Vec3d(0.5, 64.0, 0.5), PositionCodec.delta(0.5, 1.3), 0, 0).x();
+        out(move(5, 0.5, 1.3));
+        sync();
+        double x = 0.5;
+        for (int steps = 3; steps >= 1; steps--) {
+            tick();
+            x = VanillaMath.lerp(1.0 / steps, x, target);
+            assertEquals(x, entities.exactPosition(5).x(), 0.0, "step " + (4 - steps));
+        }
+        assertNull(entities.mounted(5), "nobody rode it");
+    }
+
+    @Test
+    void aBoatsClientStateIsKeptWhenItsPlayerMountsIt() {
+        out(add(5, "minecraft:oak_boat", 0.5, 64.0, 0.5));
+        sync();
+        tick();
+        out(new ClientboundPacket.EntityPositionSync(5, new Vec3d(0.5, 63.9, 0.5), Vec3d.ZERO, 90.0F, 0.0F, false));
+        sync();
+        tick(); // one of the three steps: a third of the way down
+        double y = VanillaMath.lerp(1.0 / 3, 64.0, 63.9);
+        out(ClientboundPacket.SetEntityMotion.received(5, new Vec3d(0.0, 0.25, 0.0)));
+        out(data(5, 5, ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1)); // DATA_NO_GRAVITY
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        List<ClientEntities.Mounted> mounted = entities.mounted(5);
+        assertNotNull(mounted);
+        assertEquals(1, mounted.size());
+        ClientEntities.Mounted m = mounted.getFirst();
+        assertTrue(m.exact());
+        assertEquals(new Vec3d(0.5, y, 0.5), m.position());
+        assertEquals(2, m.steps(), "two steps of the interpolation left");
+        assertEquals(new Vec3d(0.5, 63.9, 0.5), m.target());
+        assertEquals(new Vec3d(0.5, y, 0.5), m.previousPosition(), "the last step's position");
+        assertEquals(new Vec3d(0.5, 64.0, 0.5), m.lastTickStart(), "its last tick started before that step");
+        assertEquals(new Vec3d(0.0, 0.25, 0.0), m.motion(), "set after its last tick");
+        assertTrue(m.noGravity());
+        assertTrue(m.everTicked());
+        assertEquals(0, m.onGround());
+        assertEquals(new Vec3d(0.5, 64.0, 0.5), m.groundSetAt(), "the sync set the flag where the boat was then");
+        assertNull(entities.exactPosition(5), "the client moves it itself now");
+        tick();
+        assertEquals(mounted, entities.mounted(5), "kept after its tick");
+    }
+
+    @Test
+    void aBoatAnotherPassengerControlsStaysFollowed() {
+        out(add(5, "minecraft:oak_boat", 0.5, 64.0, 0.5));
+        out(add(6, "minecraft:zombie", 0.5, 64.0, 0.5));
+        sync();
+        tick();
+        out(new ClientboundPacket.SetPassengers(5, new int[] {6, SELF}));
+        sync();
+        tick();
+        assertNull(entities.mounted(5));
+        assertEquals(new Vec3d(0.5, 64.0, 0.5), entities.exactPosition(5), "its first passenger, not the player, controls it");
+    }
+
+    @Test
     void entitiesWithoutInterpolationMoveAtOnce() {
         out(add(5, "minecraft:end_crystal", 0.5, 64.0, 0.5));
         sync();

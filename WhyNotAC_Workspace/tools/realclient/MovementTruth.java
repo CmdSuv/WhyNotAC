@@ -17,6 +17,7 @@ import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.recording.read.RecordingReader;
 import dev.whynotac.recording.replay.Replayer;
 import dev.whynotac.world.BlockStates;
+import dev.whynotac.world.ClientEntities;
 import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.Replicas;
 import java.nio.file.Files;
@@ -100,7 +101,7 @@ public class MovementTruth {
         Replayer.replay(RecordingReader.open(Path.of(args[0])), chain);
         Map<String, Object> result = comparison.result();
         result.put("blockChangesDuringPlay", blockChanges[0]);
-        Map<String, Object> tracker = track(Path.of(args[0]), comparison.sentTicks());
+        Map<String, Object> tracker = track(Path.of(args[0]), comparison.sentTicks(), truth);
         result.put("tracker", tracker);
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
@@ -108,7 +109,8 @@ public class MovementTruth {
                 && ((Number) result.get("inPowderSnow")).longValue() > 0 && comparison.boatsClean()
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
-                && ((Number) tracker.get("rocketBoosts")).longValue() > 0;
+                && ((Number) tracker.get("rocketBoosts")).longValue() > 0
+                && ((Number) tracker.get("mounts")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("mountsDiffering"));
         System.exit(clean ? 0 : 1);
     }
 
@@ -119,8 +121,18 @@ public class MovementTruth {
     /** The client ran on this machine: its Math.cos is this JVM's (null: none of the platforms the engine knows). */
     private static final PlatformCos CLIENT_COSINE = java.util.Objects.requireNonNull(PlatformCos.current(), "this JVM's Math.cos");
 
-    private static Map<String, Object> track(Path recording, List<PlayerState> sentTicks) throws Exception {
+    private static Map<String, Object> track(Path recording, List<PlayerState> sentTicks, List<Map<String, Object>> truthRecords) throws Exception {
         Replicas replicas = Replicas.vanilla();
+        // The replica's boat at each mount (ClientEntities.mounted) must be the client's at the start of the boat's first tick.
+        Map<Integer, Map<String, Object>> firstBoatTick = new HashMap<>();
+        for (Map<String, Object> r : truthRecords) {
+            if ("boatPre".equals(r.get("hook"))) {
+                firstBoatTick.putIfAbsent(((Number) r.get("id")).intValue(), r);
+            }
+        }
+        java.util.Set<Integer> mounting = new java.util.LinkedHashSet<>();
+        long[] mounts = new long[2]; // compared, differing
+        List<String> mountExamples = new ArrayList<>();
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -136,10 +148,31 @@ public class MovementTruth {
                 afterAccept[0] = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
                 moved[0] |= in.packet() instanceof ServerboundPacket.MovePlayer && !reply;
             }
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetPassengers set
+                    && set.passengerIds().length > 0) {
+                mounting.add(set.vehicleId()); // every boat of the session carries the player
+            }
             MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session),
                     replicas.inventory().inventory(session));
             if (tick == null) {
                 return;
+            }
+            for (java.util.Iterator<Integer> it = mounting.iterator(); it.hasNext(); ) {
+                int id = it.next();
+                List<ClientEntities.Mounted> mounted = replicas.entities().entities(session).mounted(id);
+                if (mounted == null) {
+                    continue;
+                }
+                it.remove();
+                Map<String, Object> pre = firstBoatTick.get(id);
+                mounts[0]++;
+                String d = pre == null ? "no boat tick in the truth" : mountDifference(mounted, pre);
+                if (d != null) {
+                    mounts[1]++;
+                    if (mountExamples.size() < 8) {
+                        mountExamples.add("boat " + id + ": " + d);
+                    }
+                }
             }
             outcomes.merge(tick.outcome().name(), 1L, Long::sum);
             if (tick.outcome() == MovementTracker.Outcome.NO_CLAIM && examples.size() < 40) {
@@ -187,8 +220,42 @@ public class MovementTruth {
         out.put("unexplained", counts[3]);
         out.put("pushesFollowed", tracker.pushesFollowed());
         out.put("rocketBoosts", tracker.rocketBoosts());
+        out.put("mounts", mounts[0]);
+        out.put("mountsDiffering", mounts[1]);
+        out.put("mountExamples", mountExamples);
         out.put("examples", examples);
         return out;
+    }
+
+    /** Null if the replica's only state for the boat at the mount is exactly the client's before its first tick, else how not. */
+    @SuppressWarnings("unchecked")
+    private static String mountDifference(List<ClientEntities.Mounted> mounted, Map<String, Object> pre) {
+        if (mounted.size() != 1 || !mounted.getFirst().exact()) {
+            return mounted.size() + " states, exact " + mounted.stream().map(ClientEntities.Mounted::exact).toList();
+        }
+        ClientEntities.Mounted m = mounted.getFirst();
+        List<Object> pos = (List<Object>) pre.get("pos");
+        List<String> d = new ArrayList<>();
+        if (Double.compare(m.position().x(), f64(pos.get(0))) != 0 || Double.compare(m.position().y(), f64(pos.get(1))) != 0
+                || Double.compare(m.position().z(), f64(pos.get(2))) != 0) {
+            d.add("position " + m.position() + " vs client " + f64(pos.get(0)) + " " + f64(pos.get(1)) + " " + f64(pos.get(2)));
+        }
+        if (Float.compare(m.yRot(), f32(pre.get("yRot"))) != 0 || Float.compare(m.xRot(), f32(pre.get("xRot"))) != 0) {
+            d.add("rotation " + m.yRot() + " " + m.xRot() + " vs client " + f32(pre.get("yRot")) + " " + f32(pre.get("xRot")));
+        }
+        if (m.steps() > 0 != Boolean.TRUE.equals(pre.get("interpolating"))) {
+            d.add("interpolating " + (m.steps() > 0) + " vs client " + pre.get("interpolating"));
+        }
+        if ((m.onGround() == 1) != Boolean.TRUE.equals(pre.get("onGround")) || m.onGround() < 0) {
+            d.add("onGround " + m.onGround() + " vs client " + pre.get("onGround"));
+        }
+        if (m.noGravity() != Boolean.TRUE.equals(pre.get("noGravity"))) {
+            d.add("noGravity " + m.noGravity() + " vs client " + pre.get("noGravity"));
+        }
+        if (m.everTicked() == Boolean.TRUE.equals(pre.get("firstTick"))) {
+            d.add("ticked " + m.everTicked() + " vs client firstTick " + pre.get("firstTick"));
+        }
+        return d.isEmpty() ? null : String.join("; ", d);
     }
 
     /**

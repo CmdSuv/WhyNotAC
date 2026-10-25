@@ -13,8 +13,12 @@ import java.util.Set;
  *       {@code RemotePlayer.aiStep} only interpolates. Fluids and pushing change velocity only.</li>
  *   <li>Most non-living entities run their own physics on the client (items, experience orbs, TNT,
  *       falling blocks, arrows, tridents, thrown items, fireballs, fireworks, fishing hooks, eyes of ender,
- *       llama spit, shulker bullets); boats and minecarts also depend on who controls them and on feature
- *       flags. Only the types in {@link #STATIC} never move.</li>
+ *       llama spit, shulker bullets); minecarts also depend on who controls them and on feature flags. Only
+ *       the types in {@link #STATIC} never move.</li>
+ *   <li>Boats and rafts ({@link #interpolatesOnly}) move on the client only by interpolation unless its own player
+ *       controls them: {@code AbstractBoat.tick} interpolates, then runs its physics only where
+ *       {@code isLocalInstanceAuthoritative} (its controlling passenger is the client's own player) and otherwise
+ *       sets the motion to zero without moving; nothing else in its tick moves it.</li>
  * </ul>
  * Not followed yet, and therefore never to be relied on near them: a moving piston
  * ({@code PistonMovingBlockEntity} moves every entity on the client) and a peeking shulker
@@ -37,6 +41,11 @@ final class ClientMotion {
             "minecraft:lightning_bolt", "minecraft:ominous_item_spawner");
 
     static boolean movesItself(String type, EntityTypes.Kind kind) {
-        return kind.living() ? LIVING.contains(type) : !STATIC.contains(type);
+        return kind.living() ? LIVING.contains(type) : !STATIC.contains(type) && !interpolatesOnly(type);
+    }
+
+    /** Every boat, chest boat and raft ({@code AbstractBoat}): moved by interpolation alone unless the client's own player controls it. */
+    static boolean interpolatesOnly(String type) {
+        return type.endsWith("_boat") || type.endsWith("_raft");
     }
 }
