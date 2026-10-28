@@ -132,7 +132,9 @@ public class MovementTruth {
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0
-                && ((Number) tracker.get("mounts")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("mountsDiffering"));
+                && ((Number) tracker.get("mounts")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("mountsDiffering"))
+                && ((Number) tracker.get("rideExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rideUnexplained"))
+                && Long.valueOf(0).equals(tracker.get("rideTruthMissing"));
         System.exit(clean ? 0 : 1);
     }
 
@@ -155,6 +157,16 @@ public class MovementTruth {
         java.util.Set<Integer> mounting = new java.util.LinkedHashSet<>();
         long[] mounts = new long[2]; // compared, differing
         List<String> mountExamples = new ArrayList<>();
+        // Each vehicle move the client sent is its boat's state after a tick (verify_truth): at an explained ride tick, that
+        // state must be one of the ride's.
+        List<Map<String, Object>> boatPosts = new ArrayList<>();
+        for (Map<String, Object> r : truthRecords) {
+            if ("boatPost".equals(r.get("hook"))) {
+                boatPosts.add(r);
+            }
+        }
+        int[] boatIndex = {0};
+        long[] rides = new long[2]; // explained ride ticks compared, the client's boat not a state
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -197,6 +209,33 @@ public class MovementTruth {
                 }
             }
             outcomes.merge(tick.outcome().name(), 1L, Long::sum);
+            if (tick.sentVehicle() != null) {
+                Map<String, Object> post = boatIndex[0] < boatPosts.size() ? boatPosts.get(boatIndex[0]) : null;
+                boatIndex[0]++;
+                if (tick.outcome() == MovementTracker.Outcome.EXPLAINED && post != null) {
+                    rides[0]++;
+                    BoatState truth = boatState(post);
+                    boolean found = false;
+                    List<String> nearest = null;
+                    for (BoatState b : tracker.rideStates()) {
+                        List<String> d = boatDifferences(b, truth);
+                        found |= d.isEmpty();
+                        if (nearest == null || d.size() < nearest.size()) {
+                            nearest = d;
+                        }
+                    }
+                    if (!found) {
+                        rides[1]++;
+                        if (examples.size() < 12) {
+                            examples.add("ride tick " + tick.number() + ": the client's boat is no state of " + tracker.rideStates().size()
+                                    + "; nearest differs in " + nearest);
+                        }
+                    }
+                }
+            }
+            if (tick.outcome() == MovementTracker.Outcome.UNEXPLAINED && tick.riding() && examples.size() < 12) {
+                examples.add("unexplained ride tick " + tick.number() + ": sent " + tick.sentVehicle() + ", e.g. predicted " + tick.closestBoat());
+            }
             if (tick.outcome() == MovementTracker.Outcome.NO_CLAIM && examples.size() < 40) {
                 examples.add("no claim at tick " + tick.number() + ": " + tick.reason());
             }
@@ -213,7 +252,7 @@ public class MovementTruth {
                 moved[0] = false;
                 PlayerState truth = sentIndex[0] < sentTicks.size() ? sentTicks.get(sentIndex[0]) : null;
                 sentIndex[0]++;
-                if (tick.outcome() == MovementTracker.Outcome.EXPLAINED && truth != null) {
+                if (tick.outcome() == MovementTracker.Outcome.EXPLAINED && truth != null && !tick.riding()) { // a ride's: above
                     counts[0]++;
                     boolean found = false;
                     List<String> nearest = null;
@@ -242,6 +281,11 @@ public class MovementTruth {
         out.put("unexplained", counts[3]);
         out.put("pushesFollowed", tracker.pushesFollowed());
         out.put("rocketBoosts", tracker.rocketBoosts());
+        out.put("rideExplained", tracker.rideExplained());
+        out.put("rideUnexplained", tracker.rideUnexplained());
+        out.put("rideNoClaim", tracker.rideNoClaim());
+        out.put("rideTruthCompared", rides[0]);
+        out.put("rideTruthMissing", rides[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
         out.put("mountExamples", mountExamples);

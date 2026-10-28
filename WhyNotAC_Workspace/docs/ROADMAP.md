@@ -16,7 +16,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `prediction-sequence` (P-M), `action-grammar` (P-M), `movement` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
-| Hareket fiziği (`whynotac-physics`) | Yaya kısmı ve tekne tamam | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu) lav (Nether'in hızlı lavı dahil) ve iskele dahil) gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü SHADOW'da, canlıların itmesini takımlarıyla (görev #33) ve client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
+| Hareket fiziği (`whynotac-physics`) | Yaya kısmı ve tekne tamam | Çarpışma çekirdeği resmi client'ın koduyla, yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu) lav (Nether'in hızlı lavı dahil) ve iskele dahil) gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü (sürülen tekne dahil) SHADOW'da, canlıların itmesini takımlarıyla (görev #33) ve client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
 | Kalıcı depolama, karar, yapay zekâ modülleri | Planlı | `whynotac-storage`, `whynotac-verdict`, `whynotac-ai` |
 
 ## Kapı kuralı
@@ -85,7 +85,7 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
   motorunun kapsamında bit bit). Elytra ile süzülme (bit bit, client'ın CPU'sunun `Math.cos`'u dahil) ve havai fişek
   roketinin itmesi motorda, dünya sınırı da (sabit ve lerp'li, client'ın tikleriyle), toz kar da (düşüşe, ayağın
   yüksekliğine, shift'e ve client'ın envanterinden izlenen deri botlara göre; botla tırmanma, donma hızın
-  özniteliğiyle). Tekne (`AbstractBoat.tick`, oyuncunun sürdüğü) motorda, gerçek client'ın 826 tikiyle bit bit. Kalan: motorun kapsamı dışındaki hareketler (at, domuz, deve ve öteki binekler, minecart, riptide, mızrak).
+  özniteliğiyle). Tekne (`AbstractBoat.tick`, oyuncunun sürdüğü, binişteki interpolasyonu dahil) motorda, gerçek client'ın 834 tikiyle bit bit; `movement` kontrolü sürülen tekneyi binişten itibaren izler (`BoatRide`: gerçek client oturumunda 834 tikin hepsi iddia edildi ve açıklandı). Kalan: motorun kapsamı dışındaki hareketler (at, domuz, deve ve öteki binekler, minecart, riptide, mızrak).
 
 ## Faz 4 — Doğrulama ve veri
 

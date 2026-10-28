@@ -3,6 +3,7 @@ package dev.whynotac.analysis.movement;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
@@ -83,9 +84,23 @@ public final class MovementTracker {
      * @param since     where the current tracking began (the anchor's sequence)
      * @param closest   for an unexplained tick: the hypothesis' prediction closest to what was sent, else null
      * @param sent      for an unexplained tick: the movement packet, or null when none was sent
+     * @param closestBoat for an unexplained tick of a boat the player steers: the prediction closest to what was sent
+     * @param sentVehicle for a tick of a boat the player steers: its {@code MoveVehicle}
      */
     public record Tick(long number, long sequence, long nanoTime, Outcome outcome, String reason, int hypotheses, long since, PlayerState closest,
-            ServerboundPacket.MovePlayer sent) {}
+            ServerboundPacket.MovePlayer sent, BoatState closestBoat, ServerboundPacket.MoveVehicle sentVehicle) {
+
+        /** A tick on foot (or of nothing). */
+        public Tick(long number, long sequence, long nanoTime, Outcome outcome, String reason, int hypotheses, long since, PlayerState closest,
+                ServerboundPacket.MovePlayer sent) {
+            this(number, sequence, nanoTime, outcome, reason, hypotheses, since, closest, sent, null, null);
+        }
+
+        /** A tick of the boat the player steers ({@link BoatRide}). */
+        public boolean riding() {
+            return closestBoat != null || sentVehicle != null;
+        }
+    }
 
     /** An unexplained tick's reason when every state it may have started in was using an item while it attacked or used one. */
     public static final String ACTED_WHILE_USING = "attacked, interacted or used an item while already using one";
@@ -170,6 +185,32 @@ public final class MovementTracker {
     private long lastBaseFlags = Long.MIN_VALUE;
     private long lastGlideStart = Long.MIN_VALUE;
 
+    // --- the boat the player steers (BoatRide) -----------------------------------------------------------------------
+    /** Packets about a ride, server order: what starts or ends one, and the vehicle's own ({@link #serverVehicle}'s). */
+    private final ArrayDeque<RidePacket> ridePending = new ArrayDeque<>();
+    /** The vehicle the server last put the player on (server order), or -1. */
+    private int serverVehicle = -1;
+    private BoatRide ride;
+    /** Ride ticks: explained, not claimed (by reason), unexplained. */
+    private long rideExplained;
+    private long rideUnexplained;
+    private final Map<String, Long> rideNoClaim = new java.util.TreeMap<>();
+    /** The positions the client sent (replies to teleports too): {client tick, x, y, z}, the last few. */
+    private final ArrayDeque<double[]> sentPositions = new ArrayDeque<>();
+    private static final int MAX_SENT_POSITIONS = 8;
+
+    /** A packet about a ride; {@code ambiguous}: at some tick the client may or may not have processed it. */
+    private static final class RidePacket {
+        final long sequence;
+        final ClientboundPacket packet;
+        boolean ambiguous;
+
+        RidePacket(long sequence, ClientboundPacket packet) {
+            this.sequence = sequence;
+            this.packet = packet;
+        }
+    }
+
     // --- the settle anchor's bookkeeping (from what the client sent) --------------------------------------------------
     private PlayerState.Keys currentKeys = PlayerState.Keys.NONE;
     private int keylessTicks;
@@ -206,6 +247,24 @@ public final class MovementTracker {
         return rocketBoosts;
     }
 
+    /** Ticks of a boat the player steers that some state explained, that none did, and those not claimed by reason (diagnostics). */
+    public long rideExplained() {
+        return rideExplained;
+    }
+
+    public long rideUnexplained() {
+        return rideUnexplained;
+    }
+
+    public Map<String, Long> rideNoClaim() {
+        return java.util.Collections.unmodifiableMap(rideNoClaim);
+    }
+
+    /** The states the boat the player steers may be in now (empty when none is followed), for audits. */
+    public List<BoatState> rideStates() {
+        return ride == null ? List.of() : ride.states;
+    }
+
     /** Why the player is not tracked, or null while it is. */
     public String lostReason() {
         return hypotheses == null ? lostReason : null;
@@ -236,6 +295,11 @@ public final class MovementTracker {
             }
             case TimelineEvent.Gap gap -> {
                 lose("events were lost");
+                if (ride != null) {
+                    ride.unclaim("events were lost");
+                }
+                ridePending.clear();
+                sentPositions.clear();
                 teamChange(gap.sequence(), ClientTeams.LOST); // until a login
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
                 pings.clear();
@@ -245,6 +309,12 @@ public final class MovementTracker {
             case TimelineEvent.Inbound in -> {
                 if (in.packet() instanceof ServerboundPacket.ClientTickEnd) {
                     return closeTick(in, world, entities);
+                }
+                if (in.packet() instanceof ServerboundPacket.MovePlayer move && move.hasPosition()) {
+                    sentPositions.add(new double[] {ticks, move.x(), move.y(), move.z()});
+                    if (sentPositions.size() > MAX_SENT_POSITIONS) {
+                        sentPositions.pollFirst();
+                    }
                 }
                 inbound.add(in);
             }
@@ -273,6 +343,7 @@ public final class MovementTracker {
             case ClientboundPacket.Untranslatable u when u.type().equals("minecraft:set_player_team") -> teamChange(seq, ClientTeams.LOST);
             default -> { }
         }
+        ridePacket(seq, packet);
         if (!aboutSelf(packet)) {
             return;
         }
@@ -284,6 +355,52 @@ public final class MovementTracker {
             pending.remove(0);
             queueBase++;
             baseApplied = Math.max(baseApplied, queueBase);
+        }
+    }
+
+    /** Queues what a ride reads ({@link #ridePending}), following the vehicle in server order. */
+    private void ridePacket(long seq, ClientboundPacket packet) {
+        boolean queue = switch (packet) {
+            case ClientboundPacket.SetPassengers p -> {
+                boolean on = false;
+                for (int id : p.passengerIds()) {
+                    on |= id == selfId;
+                }
+                if (on) {
+                    serverVehicle = p.vehicleId();
+                } else if (p.vehicleId() == serverVehicle) {
+                    serverVehicle = -1;
+                }
+                yield true;
+            }
+            case ClientboundPacket.Login ignored -> {
+                serverVehicle = -1;
+                sentPositions.clear();
+                yield true;
+            }
+            case ClientboundPacket.Respawn ignored -> {
+                serverVehicle = -1;
+                sentPositions.clear();
+                yield true;
+            }
+            case ClientboundPacket.RemoveEntities ignored -> true;
+            case ClientboundPacket.PlayerPosition ignored -> true;
+            case ClientboundPacket.MoveVehicle ignored -> true;
+            case ClientboundPacket.Untranslatable ignored -> true;
+            case ClientboundPacket.SetEntityMotion m -> m.entityId() == serverVehicle;
+            case ClientboundPacket.SetEntityData d -> d.entityId() == serverVehicle;
+            case ClientboundPacket.TeleportEntity t -> t.entityId() == serverVehicle;
+            default -> false;
+        };
+        if (!queue) {
+            return;
+        }
+        ridePending.add(new RidePacket(seq, packet));
+        if (ridePending.size() > MAX_PENDING) {
+            ridePending.pollFirst();
+            if (ride != null) {
+                ride.unclaim("too many packets waiting for the client");
+            }
         }
     }
 
@@ -438,6 +555,9 @@ public final class MovementTracker {
         int interactions;
         boolean loaded;
         String unmodelled;
+        /** The boat's {@code PaddleBoat} and the passenger's {@code MoveVehicle} ({@link BoatRide}). */
+        final List<ServerboundPacket.PaddleBoat> paddles = new ArrayList<>(1);
+        final List<ServerboundPacket.MoveVehicle> vehicleMoves = new ArrayList<>(1);
         /** {@code handleKeybinds}' item actions in order: a {@link Hand} for each {@code UseItem}, {@link #RELEASE} for a release. */
         final List<Object> itemActions = new ArrayList<>();
         /**
@@ -518,8 +638,14 @@ public final class MovementTracker {
                 case ServerboundPacket.ContainerClick ignored -> t.handsTouched = true;
                 case ServerboundPacket.SetCreativeModeSlot ignored -> t.handsTouched = true;
                 case ServerboundPacket.PlayerAbilities ignored -> t.unmodelled = "flying toggled";
-                case ServerboundPacket.MoveVehicle ignored -> t.unmodelled = "vehicle";
-                case ServerboundPacket.PaddleBoat ignored -> t.unmodelled = "vehicle";
+                case ServerboundPacket.MoveVehicle move -> {
+                    t.unmodelled = "vehicle";
+                    t.vehicleMoves.add(move);
+                }
+                case ServerboundPacket.PaddleBoat paddle -> {
+                    t.unmodelled = "vehicle";
+                    t.paddles.add(paddle);
+                }
                 case ServerboundPacket.Untranslatable ignored -> t.unmodelled = "a packet WhyNotAC cannot read";
                 default -> { }
             }
@@ -541,16 +667,152 @@ public final class MovementTracker {
             since = pendingAt(fresh.applied() - 1).sequence();
         }
         observeBase(in); // the anchor below starts from what the client sent in this very tick
+        Tick riding = rideTick(number, end, in, w, world, entities);
         Tick result;
         if (hypotheses != null) {
             result = tracked(number, end, in, w, world, entities);
         } else {
             result = untracked(number, end, in, w, world, entities);
         }
+        if (riding != null) {
+            result = riding; // the player rides: its own tick has no claim, the boat's may
+        }
         settleBookkeeping(number, end, in);
         base = base.withBorder(base.border().ticked(entities.lastTickRanNormally()));
         prune();
         return result;
+    }
+
+    // --- the boat the player steers ----------------------------------------------------------------------------------
+
+    /**
+     * The ride's part of a tick ({@link BoatRide}): the ride packets the client processed before it, in order, then the
+     * boat's tick. Null when the player steers no boat.
+     */
+    private Tick rideTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+        long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
+        View view = new View(world, entities, selfId);
+        while (!ridePending.isEmpty() && ridePending.peekFirst().sequence < certain) {
+            rideApply(ridePending.pollFirst(), number, view, world, entities);
+        }
+        boolean ambiguous = false;
+        for (RidePacket p : ridePending) {
+            if (p.sequence >= windowEnd) {
+                break;
+            }
+            p.ambiguous = true; // the client may or may not have processed it before this tick
+            ambiguous = true;
+        }
+        if (ride == null) {
+            return null;
+        }
+        if (ambiguous || w[0] != w[1]) {
+            ride.unclaim("packets the client may or may not have processed");
+        }
+        BoatRide.Step step = ride.tick(in.paddles, in.vehicleMoves, baseSent.input(), view, entities, selfId, base.border());
+        ServerboundPacket.MoveVehicle sentVehicle = in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast();
+        if (step == null) {
+            rideNoClaim.merge(ride.unclaimed, 1L, Long::sum);
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.NO_CLAIM, "riding: " + ride.unclaimed, 0, ride.since, null, null, null,
+                    sentVehicle);
+        }
+        if (step.explained()) {
+            rideExplained++;
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, ride.states.size(), ride.since, null, null, null,
+                    sentVehicle);
+        }
+        rideUnexplained++;
+        return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, step.reason(), 0, ride.since, null, null, step.closest(),
+                sentVehicle);
+    }
+
+    /** A ride packet the client processed before the tick {@code number}. */
+    private void rideApply(RidePacket p, long number, View view, ClientWorld world, ClientEntities entities) {
+        switch (p.packet) {
+            case ClientboundPacket.SetPassengers set -> {
+                int[] ids = set.passengerIds();
+                boolean on = false;
+                for (int id : ids) {
+                    on |= id == selfId;
+                }
+                boolean controls = ids.length > 0 && ids[0] == selfId; // getControllingPassenger: the first
+                if (ride != null && (set.vehicleId() == ride.vehicle ? !controls : on)) {
+                    ride = null; // off it, or put on another vehicle
+                }
+                if (controls && ride == null) {
+                    ride = p.ambiguous ? BoatRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
+                            : BoatRide.start(set.vehicleId(), p.sequence, entities.mounted(set.vehicleId()), view, world, positionsDuring(number - 1));
+                }
+                if (on) {
+                    sentPositions.clear(); // a passenger sends no position: where it is follows its vehicle
+                }
+            }
+            case ClientboundPacket.RemoveEntities removed -> {
+                for (int id : removed.entityIds()) {
+                    if (ride != null && (id == ride.vehicle || id == selfId)) {
+                        ride = null;
+                    }
+                }
+            }
+            case ClientboundPacket.Login ignored -> ride = null;
+            case ClientboundPacket.Respawn ignored -> ride = null;
+            case ClientboundPacket.PlayerPosition ignored -> {
+                if (ride != null) {
+                    ride.unclaim("the player teleported while riding");
+                }
+            }
+            case ClientboundPacket.MoveVehicle ignored -> {
+                if (ride != null) {
+                    ride.unclaim("the server moved the vehicle"); // handleMoveVehicle snaps it and answers outside the tick
+                }
+            }
+            case ClientboundPacket.TeleportEntity teleport -> {
+                if (ride != null && teleport.entityId() == ride.vehicle) {
+                    ride.unclaim("the server moved the vehicle");
+                }
+            }
+            case ClientboundPacket.Untranslatable untranslatable -> {
+                if (ride != null) {
+                    ride.unclaim("a packet WhyNotAC cannot read: " + untranslatable.type());
+                }
+            }
+            case ClientboundPacket.SetEntityMotion motion -> {
+                if (ride != null && motion.entityId() == ride.vehicle) {
+                    ride.setMotion(motion.clientMotion());
+                }
+            }
+            case ClientboundPacket.SetEntityData data -> {
+                if (ride != null && data.entityId() == ride.vehicle) {
+                    for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
+                        if (e.index() == 5 && e.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) { // DATA_NO_GRAVITY
+                            ride.noGravity = e.value() != 0;
+                        }
+                    }
+                }
+            }
+            default -> { }
+        }
+    }
+
+    /**
+     * Where the player was during client tick {@code tick}, each within {@link BoatRide#UNSENT} of the client's: the
+     * positions it sent in it and the last one before (it moves no further without sending one). Null when not known.
+     */
+    private List<Vec3d> positionsDuring(long tick) {
+        List<Vec3d> out = new ArrayList<>(2);
+        double[] before = null;
+        for (double[] p : sentPositions) {
+            if (p[0] < tick) {
+                before = p;
+            } else if (p[0] == tick) {
+                out.add(new Vec3d(p[1], p[2], p[3]));
+            }
+        }
+        if (before == null) {
+            return null;
+        }
+        out.add(new Vec3d(before[1], before[2], before[3]));
+        return out;
     }
 
     /** {@code ClientLevel.tick}, after the entities: the world border's step, when the level ran normally. */

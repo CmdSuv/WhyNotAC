@@ -433,9 +433,11 @@ class ClientWorldTest {
         in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(3, 70, 3),
                 BlockFace.UP, 7));
         assertTrue(world.mayHaveChangedIn(3, 70, 3, 4, 71, 4, after), "the client's own prediction");
-        out(new ClientboundPacket.ChunkCacheCenter(0, 0));
+        long view = sequence;
+        out(new ClientboundPacket.ChunkCacheCenter(20, 0)); // range 10 + 3: chunk 0 leaves it, chunk 10 stays in
         sync();
-        assertTrue(world.mayHaveChangedIn(8, 70, 8, 8, 70, 8, after), "the view changed");
+        assertTrue(world.mayHaveChangedIn(8, 70, 8, 8, 70, 8, view), "the view hid its chunk");
+        assertFalse(world.mayHaveChangedIn(168, 70, 8, 168, 70, 8, view), "a chunk the view kept");
     }
 
     private static int state(String block, String properties) {

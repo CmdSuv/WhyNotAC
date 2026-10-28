@@ -346,7 +346,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   roket ve canlı itmesi, itip itmediğine takımlar kesin karar vermiyor, hareketi farklı etkileyebilecek yerleşmemiş blok (tutabileceği
   her durum adım için aynıysa, ör. çimenin yayıldığı toprak, blok bilinir: `ClientWorld.possibleStates`,
   `OnFoot.sameForMovement`), piston, kesin bilinmeyen bir dünya sınırı yakın,
-  hız dışında bir öznitelik, uçma, binek, başka kamera, sunucunun döndürmesi, okunamayan paket.
+  hız dışında bir öznitelik, uçma, binek (sürülen tekne ayrıca izlenir: aşağıda), başka kamera, sunucunun döndürmesi,
+  okunamayan paket.
 - **Çapalar:** yeni oyuncu (giriş ya da varlık verisi tutmayan yeniden doğuş: client'ın varsayılanları) ve
   duran oyuncu: 12 tik tuşsuz, en az 3 tik arayla bit bit aynı iki konum paketi, arada gönderim yok, sonda yerde.
   Arada 0.003'ten hızlı her yatay hareket gönderim eşiğini aşardı; durum dünyadan hesaplanır ve bir tik daha
@@ -385,6 +386,29 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   durmak kanıttır. `ClientPushersTest` ve `ClientTeamsTest` itici sorgusunu (sıra, tick, belirsizlik) ve takım
   kurallarını tek tek sınar.
 - **Maliyet:** gerçek client oturumunda tick başına ortalama 1.33 hipotez, ≈ 60 µs.
+- **Sürülen tekne (`BoatRide`):** oyuncu bir teknenin ilk yolcusu olunca (client'ın `isLocalInstanceAuthoritative`'i)
+  client tekneyi kendi fiziğiyle hareket ettirir: her tikte `AbstractBoat.tick` (`PaddleBoat` gönderir), sonra yolcunun
+  tick'i dönüşünü ve `MoveVehicle`'ı (teknenin tikten sonraki konumu, dönüşü, yer bayrağı) gönderir. Takipçi teknenin
+  olabileceği durumları izler: her tikte her durum `Boat` ile ilerletilir ve gönderilen kürek ile araç paketini bit bit
+  vermeyenler düşer; hiçbiri vermezse tick kanıttır ("hiçbir vanilla client tekneyi böyle sürmez": tekneyle uçma ve hız
+  hileleri). Tekne bir önceki tikin tuşlarıyla döner ve kürek çeker (`rideTick`'in `setInput`'u). **Binişteki durum:**
+  varlık replikası yolcusuz tekneyi client gibi izler (yalnızca interpolasyonla hareket eder, her tikte hızı sıfırlanır)
+  ve biniş anındaki durumunu saklar (`ClientEntities.mounted`): konum, dönüş, interpolasyon, yer bayrağı, son tikten beri
+  gelen hız. Durum son tikin başladığı yerden hesaplanır (bloklar o zamandan beri değişmemişse:
+  `ClientWorld.mayHaveChangedIn`); düşüş, dönüş ve tuş yoktur; tekneyi daha önce tutmuş olabilecek her blok için bir
+  durum (yok, örümcek ağı, toz kar). **İddia yok (biniş bitene kadar):** client'ın binişi bir tik önce işlemiş olabilmesi,
+  replikanın izlemediği tekne (kaybolmuş ya da daha önce sürülmüş), teknenin ilk tiki, son tikinden beri çevresinde blok
+  değişikliği ya da içinden iten bir blok (ağ, toz kar, bal, kabarcık sütunu), son tikinde oyuncunun onu itmiş olabilmesi
+  (kutusu teknenin 0.2 genişletilmiş kutusuna değiyorsa), teknenin değebileceği bir varlık (`canVehicleCollide`:
+  çarpışılabilen ya da itilebilen her varlık), kesin bilinmeyen dünya sınırı, sunucunun aracı ya da oyuncuyu taşıması
+  (`MoveVehicle`, ışınlama), client'ın işleyip işlemediği belirsiz paket, okunamayan paket. Sunucunun `SetEntityMotion`'ı
+  hızı, varlık verisi yerçekimsizliği değiştirir. **Doğrulama:** `MovementTruth` her açıklanan biniş tikinde
+  client'ın kendi teknesinin (truth ajanının `boatPost`'u) durumlar arasında olmasını ister. Son oturumda 8 binişin 834
+  tikinin hepsi baştan sona iddia edildi ve açıklandı, 0 açıklanamayan, 834/834 tikte client'ın teknesi kümede. Negatif
+  kontroller (hepsi açıklanamayan tik verdi): ileri itiş 0.04 → 0.041, tuşların hiç dümen çevirmemesi, küreklerin yer
+  değiştirmesi, binişte interpolasyonu yok saymak, binişte durumu "havada" saymak. `MovementCheckTest`: sentetik bir
+  client'ın durarak, ileri ve sola sürdüğü 40 tik açıklanır; yarım blok yukarıdaki `MoveVehicle` kanıttır; oyuncunun
+  itmiş olabileceği teknede iddia yoktur.
 
 ## Planlanan aileler
 

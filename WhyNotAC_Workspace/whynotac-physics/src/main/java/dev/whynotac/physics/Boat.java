@@ -32,7 +32,7 @@ public final class Boat {
      * columns closed above). A berry bush holds only living entities; a bubble column open above moves a boat on the
      * server alone ({@code AbstractBoat.onAboveBubbleColumn}).
      */
-    static final java.util.Set<String> MOVING_INSIDE = java.util.Set.of("minecraft:bubble_column", "minecraft:honey_block", "minecraft:cobweb",
+    public static final java.util.Set<String> MOVING_INSIDE = java.util.Set.of("minecraft:bubble_column", "minecraft:honey_block", "minecraft:cobweb",
             Colliders.POWDER_SNOW);
 
     /** {@code AbstractBoat.setInput}: the keys the passenger held at its last {@code rideTick}, which this tick steers by. */

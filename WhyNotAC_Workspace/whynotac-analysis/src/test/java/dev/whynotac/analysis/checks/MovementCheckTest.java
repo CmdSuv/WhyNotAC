@@ -12,6 +12,8 @@ import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.Boat;
+import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
@@ -655,6 +657,49 @@ class MovementCheckTest {
         out.write(value);
     }
 
+    // --- a boat the player steers ---
+
+    private static final int BOAT = 40;
+    /** The synthetic client's boat, and the keys its next tick steers by (AbstractBoat.setInput). */
+    private BoatState boat;
+    private Boat.Input boatInput = Boat.Input.NONE;
+
+    /** An oak boat put on the stone at (x, 64, z), its ground flag set by a sync; the player ticks a few times on foot. */
+    private void boatOnGround(double x, double z) throws Colliders.Unknown {
+        out(ClientboundPacket.AddEntity.received(BOAT, new UUID(4, 4), "minecraft:oak_boat", x, 64.0, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.EntityPositionSync(BOAT, new Vec3d(x, 64.0, z), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** The server puts the player on the boat; the client handles it before its next tick, the boat then as it held it. */
+    private void mount(double x, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[] {SELF}));
+        sync();
+        boat = new BoatState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, 0.0F, Boat.status(x, 64.0, z, GROUND), 0.0, 0.0, true, false, false, false,
+                Boat.supportingBlock(x, 64.0, z, GROUND), false, Vec3d.ZERO);
+    }
+
+    /** One ride tick: the boat's (PaddleBoat), then the passenger's (its input, its rotation, the vehicle's move moved by {@code cheat}). */
+    private void rideTick(PlayerState.Keys keys, Vec3d cheat) throws Colliders.Unknown {
+        boat = Boat.tick(boat, boatInput, GROUND, new Boat.Conditions(false, null, List.of()));
+        boolean[] paddles = Boat.paddles(boatInput);
+        in(new ServerboundPacket.PaddleBoat(paddles[0], paddles[1]));
+        if (!keys.equals(sentInput)) {
+            in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
+            sentInput = keys;
+        }
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(boat.x(), boat.y(), boat.z()).add(cheat), boat.yRot(), boat.xRot(), boat.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+        boatInput = new Boat.Input(keys.left(), keys.right(), keys.forward(), keys.backward()); // LocalPlayer.rideTick
+    }
+
+    private List<MovementTracker.Tick> rideTicks() {
+        return ticks.stream().filter(t -> t.sentVehicle() != null || t.reason() != null && t.reason().startsWith("riding")).toList();
+    }
+
     private int count(MovementTracker.Outcome outcome) {
         return outcomes.getOrDefault(outcome, 0);
     }
@@ -678,6 +723,51 @@ class MovementCheckTest {
         assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
         assertEquals(0, count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
         assertEquals(125, count(MovementTracker.Outcome.EXPLAINED));
+    }
+
+    @Test
+    void aBoatSteeredByAVanillaClientIsExplainedFromItsMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        PlayerState.Keys left = new PlayerState.Keys(true, false, true, false, false, false, false);
+        for (int i = 0; i < 40; i++) {
+            rideTick(i < 3 ? NONE : i < 25 ? FORWARD : left, Vec3d.ZERO);
+        }
+        List<MovementTracker.Tick> rides = rideTicks();
+        assertEquals(40, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(boat.x() > 6.6 || boat.z() > 6.6 || boat.x() < 6.4 || boat.z() < 6.4, "it moved: " + boat);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aBoatMovedHalfABlockUpIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        rideTick(FORWARD, new Vec3d(0.0, 0.5, 0.0));
+        assertEquals(1, evidence.size(), String.valueOf(rideTicks()));
+        Evidence e = evidence.get(0);
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertTrue(e.summary().startsWith("steered a boat as no vanilla client could"), e.summary());
+        assertTrue(e.details().get("offset").startsWith("0.000000,0.500000,0.000000"), e.details().toString());
+    }
+
+    @Test
+    void noBoatClaimWhereThePlayerMayHavePushedItBeforeTheMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(1.4, 0.5); // its box (0.7125 to 2.0875 across) within 0.2 of the player's (0.2 to 0.8)
+        mount(1.4, 0.5);
+        for (int i = 0; i < 5; i++) {
+            rideTick(FORWARD, new Vec3d(0.0, i == 4 ? 0.5 : 0.0, 0.0));
+        }
+        List<MovementTracker.Tick> rides = rideTicks();
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM && t.reason().contains("pushed")), String.valueOf(rides));
+        assertEquals(List.of(), evidence);
     }
 
     @Test

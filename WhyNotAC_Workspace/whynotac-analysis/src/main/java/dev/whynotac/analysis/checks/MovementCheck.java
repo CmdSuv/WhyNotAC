@@ -7,6 +7,7 @@ import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.analysis.movement.EngineTags;
 import dev.whynotac.analysis.movement.MovementTracker;
+import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -30,6 +31,10 @@ import java.util.TreeMap;
  * anything claimed over a span in which the client may have held other tags than the engine takes as vanilla
  * ({@link EngineTags}: what it climbs, stands on and swims in, from the server's {@code update_tags}).
  *
+ * <p>A boat the player steers is followed the same way from its mount ({@code BoatRide}): the client's own state for it
+ * then (the entity replica's), each tick of its physics from every state it may be in, and the vehicle move and paddle
+ * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats).
+ *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
  * rounds it differently) produces this too; fly, speed, step, no-slow, jump and velocity cheats on foot all
  * do. At most one finding per {@link #REPORT_INTERVAL_NANOS} per session.
@@ -37,7 +42,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
@@ -98,6 +103,25 @@ public final class MovementCheck implements TimelineListener {
         details.put("clientTick", Long.toString(tick.number()));
         details.put("unexplainedTicks", Long.toString(state.unexplainedSinceReport));
         details.put("reason", tick.reason());
+        if (tick.riding()) {
+            ServerboundPacket.MoveVehicle vehicle = tick.sentVehicle();
+            details.put("sent", vehicle == null ? "nothing" : "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y()) + ","
+                    + format(vehicle.position().z()) + " rot " + vehicle.yaw() + "," + vehicle.pitch() + " onGround=" + vehicle.onGround());
+            BoatState boat = tick.closestBoat();
+            if (boat != null) {
+                details.put("predicted", format(boat.x()) + "," + format(boat.y()) + "," + format(boat.z()) + " rot " + boat.yRot() + ","
+                        + boat.xRot() + " onGround=" + boat.onGround() + " status=" + boat.status());
+                if (vehicle != null) {
+                    details.put("offset", format(vehicle.position().x() - boat.x()) + "," + format(vehicle.position().y() - boat.y()) + ","
+                            + format(vehicle.position().z() - boat.z()));
+                }
+            }
+            sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
+                    tick.nanoTime(), "steered a boat as no vanilla client could (tick " + tick.number() + ")", details, admissibility));
+            state.lastReportNanos = tick.nanoTime();
+            state.unexplainedSinceReport = 0;
+            return;
+        }
         ServerboundPacket.MovePlayer sent = tick.sent();
         details.put("sent", sent == null ? "nothing" : describe(sent));
         PlayerState closest = tick.closest();

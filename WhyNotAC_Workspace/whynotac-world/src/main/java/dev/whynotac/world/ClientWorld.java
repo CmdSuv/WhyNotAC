@@ -100,6 +100,11 @@ public final class ClientWorld {
     private final ArrayDeque<long[]> changes = new ArrayDeque<>();
     /** Changes before and at this sequence are not kept (a new level, lost events, too many). */
     private long changesDropped = Long.MIN_VALUE;
+    /**
+     * Changes of the view, which hide or show the chunks whose distance from the centre crosses the radius:
+     * {sequence, centre x and z and radius before, the same after}, ascending.
+     */
+    private final ArrayDeque<long[]> viewChanges = new ArrayDeque<>();
     private static final int MAX_CHANGES = 4096;
 
     private long chunksLoaded;
@@ -153,8 +158,16 @@ public final class ClientWorld {
         change(sequence, Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
     }
 
+    private void viewChange(long sequence, int oldX, int oldZ, int oldRadius) {
+        viewChanges.add(new long[] {sequence, oldX, oldZ, oldRadius, storage.centerX, storage.centerZ, storage.radius});
+        if (viewChanges.size() > MAX_CHANGES) {
+            changesDropped = Math.max(changesDropped, viewChanges.pollFirst()[0]);
+        }
+    }
+
     private void dropChanges(long sequence) {
         changes.clear();
+        viewChanges.clear();
         changesDropped = Math.max(changesDropped, sequence);
     }
 
@@ -226,16 +239,20 @@ public final class ClientWorld {
             case ClientboundPacket.ChunkCacheCenter center -> {
                 if (storage != null) {
                     viewChanged(sequence);
-                    changeEverywhere(sequence);
+                    int oldX = storage.centerX;
+                    int oldZ = storage.centerZ;
                     storage.centerX = center.x();
                     storage.centerZ = center.z();
+                    viewChange(sequence, oldX, oldZ, storage.radius);
                 }
             }
             case ClientboundPacket.ChunkCacheRadius radius -> {
                 serverChunkRadius = radius.radius();
                 if (storage != null) {
                     viewChanged(sequence);
-                    changeEverywhere(sequence);
+                    int oldX = storage.centerX;
+                    int oldZ = storage.centerZ;
+                    int oldRadius = storage.radius;
                     Storage resized = storage.resized(Storage.range(radius.radius()));
                     for (Column column : storage.slots) {
                         if (column != null && resized.slots[resized.index(column.x, column.z)] != column) {
@@ -243,6 +260,7 @@ public final class ClientWorld {
                         }
                     }
                     storage = resized;
+                    viewChange(sequence, oldX, oldZ, oldRadius);
                 }
             }
             case ClientboundPacket.LevelChunk chunk -> loadChunk(sequence, chunk);
@@ -773,6 +791,21 @@ public final class ClientWorld {
             }
             if (c[1] <= maxX && c[4] >= minX && c[2] <= maxY && c[5] >= minY && c[3] <= maxZ && c[6] >= minZ) {
                 return true;
+            }
+        }
+        for (java.util.Iterator<long[]> it = viewChanges.descendingIterator(); it.hasNext(); ) {
+            long[] v = it.next();
+            if (v[0] < since) {
+                break;
+            }
+            for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
+                for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+                    boolean before = Math.abs(cx - v[1]) <= v[3] && Math.abs(cz - v[2]) <= v[3];
+                    boolean after = Math.abs(cx - v[4]) <= v[6] && Math.abs(cz - v[5]) <= v[6];
+                    if (before != after) {
+                        return true; // the chunk was hidden or shown
+                    }
+                }
             }
         }
         for (int x = minX; x <= maxX; x++) {
