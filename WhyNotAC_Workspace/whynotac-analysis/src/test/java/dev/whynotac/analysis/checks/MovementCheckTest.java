@@ -784,7 +784,17 @@ class MovementCheckTest {
         keybinds.add(new ServerboundPacket.PaddleBoat(true, false));
         tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
         assertEquals(2, evidence.size(), String.valueOf(ticks));
-        assertEquals("PaddleBoat", evidence.get(1).details().get("sent"));
+        assertTrue(evidence.get(1).summary().contains("(PaddleBoat)"), evidence.get(1).summary());
+        now += 2 * SECOND;
+        keybinds.add(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP, 90));
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(3, evidence.size(), String.valueOf(ticks));
+        assertTrue(evidence.get(2).summary().contains("(PlayerCommand START_RIDING_JUMP)"), evidence.get(2).summary());
+        now += 2 * SECOND;
+        keybinds.add(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.OPEN_INVENTORY, 0));
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(4, evidence.size(), String.valueOf(ticks));
+        assertTrue(evidence.get(3).summary().contains("(PlayerCommand OPEN_INVENTORY)"), evidence.get(3).summary());
     }
 
     @Test

@@ -33,9 +33,9 @@ import java.util.TreeMap;
  *
  * <p>A boat the player steers is followed the same way from its mount ({@code BoatRide}): the client's own state for it
  * then (the entity replica's), each tick of its physics from every state it may be in, and the vehicle move and paddle
- * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). A vehicle move or paddle
- * packet while the client rode nothing is one too: a vanilla client sends them only as a passenger, and on foot they
- * would otherwise only end the claim; so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
+ * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). What only a passenger
+ * sends (a vehicle move, a paddle packet, a riding jump, the vehicle's inventory) while the client rode nothing is one
+ * too: on foot it would otherwise only end the claim; so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
  * sends them only with {@code mayfly} or while flying).
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
@@ -106,10 +106,12 @@ public final class MovementCheck implements TimelineListener {
         details.put("clientTick", Long.toString(tick.number()));
         details.put("unexplainedTicks", Long.toString(state.unexplainedSinceReport));
         details.put("reason", tick.reason());
-        if (MovementTracker.VEHICLE_ON_FOOT.equals(tick.reason())) {
+        if (tick.reason() != null && tick.reason().startsWith(MovementTracker.VEHICLE_ON_FOOT)) {
             ServerboundPacket.MoveVehicle vehicle = tick.sentVehicle();
-            details.put("sent", vehicle == null ? "PaddleBoat" : "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y())
-                    + "," + format(vehicle.position().z()));
+            if (vehicle != null) {
+                details.put("sent", "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y()) + ","
+                        + format(vehicle.position().z()));
+            }
             sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
                     tick.nanoTime(), tick.reason() + " (tick " + tick.number() + ")", details, admissibility));
             state.lastReportNanos = tick.nanoTime();

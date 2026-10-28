@@ -105,11 +105,13 @@ public final class MovementTracker {
     /** An unexplained tick's reason when every state it may have started in was using an item while it attacked or used one. */
     public static final String ACTED_WHILE_USING = "attacked, interacted or used an item while already using one";
     /**
-     * An unexplained tick's reason when it sent a vehicle move or paddle packet while the client rode nothing: a vanilla
-     * client sends them only as a passenger ({@code LocalPlayer.tick}, {@code handleMoveVehicle} and
-     * {@code handleTeleportEntity} for its root vehicle, {@code AbstractBoat.tick} for a boat it controls).
+     * The start of an unexplained tick's reason when it sent what only a passenger sends while the client rode nothing
+     * (the packets follow in brackets): a vehicle move ({@code LocalPlayer.tick}, {@code handleMoveVehicle} and
+     * {@code handleTeleportEntity} for its root vehicle), a paddle packet ({@code AbstractBoat.tick} for a boat it
+     * controls), a riding jump ({@code sendRidingJump}, for a jumping vehicle it controls; the client never sends its stop)
+     * or the vehicle's inventory ({@code sendOpenInventory}, when {@code isServerControlledInventory}).
      */
-    public static final String VEHICLE_ON_FOOT = "sent a vehicle move while riding nothing";
+    public static final String VEHICLE_ON_FOOT = "sent what only a passenger sends while riding nothing";
     /** An unexplained tick's reason when it sent its abilities while no state it may have been in could fly. */
     public static final String ABILITIES_WITHOUT_FLIGHT = "sent its flight abilities while it could not fly";
     static final int MAX_HYPOTHESES = 64;
@@ -277,7 +279,7 @@ public final class MovementTracker {
         return rideExplained;
     }
 
-    /** Ticks that sent a vehicle move or paddle packet while the client certainly rode nothing ({@link #VEHICLE_ON_FOOT}). */
+    /** Ticks that sent what only a passenger sends while the client certainly rode nothing ({@link #VEHICLE_ON_FOOT}). */
     public long vehicleOnFoot() {
         return vehicleOnFoot;
     }
@@ -595,6 +597,8 @@ public final class MovementTracker {
         boolean loaded;
         /** {@code PlayerAbilities}: only {@code LocalPlayer.aiStep} sends it, for a player that may fly or flies. */
         int abilities;
+        /** Riding jumps and vehicle inventories ({@link #VEHICLE_ON_FOOT}). */
+        final List<ServerboundPacket.PlayerCommand.Action> passengerCommands = new ArrayList<>(1);
         String unmodelled;
         /** The boat's {@code PaddleBoat} and the passenger's {@code MoveVehicle} ({@link BoatRide}). */
         final List<ServerboundPacket.PaddleBoat> paddles = new ArrayList<>(1);
@@ -649,7 +653,11 @@ public final class MovementTracker {
                             t.glideStarts++;
                             lastGlideStart = in.sequence();
                         }
-                        case OPEN_INVENTORY -> { }
+                        case OPEN_INVENTORY -> t.passengerCommands.add(command.action());
+                        case START_RIDING_JUMP, STOP_RIDING_JUMP -> {
+                            t.unmodelled = "player command " + command.action();
+                            t.passengerCommands.add(command.action());
+                        }
                         default -> t.unmodelled = "player command " + command.action();
                     }
                 }
@@ -754,10 +762,18 @@ public final class MovementTracker {
         if (!mayHaveRidden) {
             ridingNothing++;
         }
-        if (!mayHaveRidden && (!in.vehicleMoves.isEmpty() || !in.paddles.isEmpty())) {
+        if (!mayHaveRidden && (!in.vehicleMoves.isEmpty() || !in.paddles.isEmpty() || !in.passengerCommands.isEmpty())) {
             vehicleOnFoot++;
-            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, VEHICLE_ON_FOOT, 0, onNoVehicleSince, null, null, null,
-                    in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast());
+            List<String> what = new ArrayList<>();
+            if (!in.vehicleMoves.isEmpty()) {
+                what.add("MoveVehicle");
+            }
+            if (!in.paddles.isEmpty()) {
+                what.add("PaddleBoat");
+            }
+            in.passengerCommands.forEach(a -> what.add("PlayerCommand " + a));
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, VEHICLE_ON_FOOT + " (" + String.join(", ", what) + ")", 0,
+                    onNoVehicleSince, null, null, null, in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast());
         }
         if (ride == null) {
             return null;
