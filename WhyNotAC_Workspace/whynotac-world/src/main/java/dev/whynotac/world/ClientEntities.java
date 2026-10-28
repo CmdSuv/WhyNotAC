@@ -1696,17 +1696,26 @@ public final class ClientEntities {
      * counted: {@code self}, and entities WhyNotAC lost track of only if the replica is complete.
      */
     public boolean mayHavePusherNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
-        return mayHaveNear(self, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, false);
+        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, false);
     }
 
-    private boolean mayHaveNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius,
-            boolean collidersOnly) {
+    /**
+     * {@link #mayHavePusherNear} for a boat the player steers ({@code vehicle}): the entities it may meet
+     * ({@code AbstractBoat.canVehicleCollide}: those it can collide with or that are pushable), but the player and itself.
+     */
+    public boolean mayHaveVehicleColliderNear(int self, int vehicle, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
+            double unknownRadius) {
+        return mayHaveNear(self, vehicle, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, false);
+    }
+
+    private boolean mayHaveNear(int self, int other, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
+            double unknownRadius, boolean collidersOnly) {
         if (!complete) {
             return true;
         }
         boolean[] near = {false};
         for (Track track : tracks.values()) {
-            if (track.id == self) {
+            if (track.id == self || track.id == other) {
                 continue;
             }
             Head head = heads.get(track.id);
@@ -1758,7 +1767,7 @@ public final class ClientEntities {
      * push are followed by {@link #pushers}.
      */
     public boolean mayHaveColliderNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
-        return mayHaveNear(self, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, true);
+        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, true);
     }
 
     /**

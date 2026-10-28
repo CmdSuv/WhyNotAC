@@ -92,6 +92,15 @@ public final class ClientWorld {
     private final ArrayDeque<long[]> moverChanges = new ArrayDeque<>();
     /** Changes before and at this sequence were dropped. */
     private long moverChangesDropped = Long.MIN_VALUE;
+    /**
+     * Every change to the blocks the client holds, as it processes them: a block or section update, a chunk loaded or
+     * forgotten, a change of the view (everywhere), the client's own predictions and their confirmation (at the event
+     * that confirmed them, which is no earlier): {sequence, minX, minY, minZ, maxX, maxY, maxZ}, ascending.
+     */
+    private final ArrayDeque<long[]> changes = new ArrayDeque<>();
+    /** Changes before and at this sequence are not kept (a new level, lost events, too many). */
+    private long changesDropped = Long.MIN_VALUE;
+    private static final int MAX_CHANGES = 4096;
 
     private long chunksLoaded;
     private long chunksIgnored;
@@ -133,6 +142,22 @@ public final class ClientWorld {
         return state >= 0 && state < movers.length && movers[state];
     }
 
+    private void change(long sequence, long minX, long minY, long minZ, long maxX, long maxY, long maxZ) {
+        changes.add(new long[] {sequence, minX, minY, minZ, maxX, maxY, maxZ});
+        if (changes.size() > MAX_CHANGES) {
+            changesDropped = Math.max(changesDropped, changes.pollFirst()[0]);
+        }
+    }
+
+    private void changeEverywhere(long sequence) {
+        change(sequence, Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
+    }
+
+    private void dropChanges(long sequence) {
+        changes.clear();
+        changesDropped = Math.max(changesDropped, sequence);
+    }
+
     private void moverChange(long sequence, long minX, long minY, long minZ, long maxX, long maxY, long maxZ) {
         moverChanges.add(new long[] {sequence, minX, minY, minZ, maxX, maxY, maxZ});
         if (moverChanges.size() > MAX_MOVER_CHANGES) {
@@ -146,9 +171,12 @@ public final class ClientWorld {
     public void onEvent(TimelineEvent event) {
         switch (event) {
             case TimelineEvent.Outbound out -> onOutbound(out.sequence(), out.packet());
-            case TimelineEvent.Inbound in -> onInbound(in.packet());
-            case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.transactionId());
-            case TimelineEvent.Gap ignored -> markAllStale();
+            case TimelineEvent.Inbound in -> onInbound(in.sequence(), in.packet());
+            case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.sequence(), ack.transactionId());
+            case TimelineEvent.Gap gap -> {
+                markAllStale();
+                dropChanges(gap.sequence());
+            }
             case TimelineEvent.Disconnected ignored -> release(); // the session ends: nothing will read this world again
             default -> { }
         }
@@ -184,16 +212,21 @@ public final class ClientWorld {
     private void onOutbound(long sequence, ClientboundPacket packet) {
         switch (packet) {
             case ClientboundPacket.Ping ping -> pingSequence.put(ping.id(), sequence);
-            case ClientboundPacket.Login login -> newLevel(login.dimension(), login.chunkRadius());
+            case ClientboundPacket.Login login -> {
+                newLevel(login.dimension(), login.chunkRadius());
+                dropChanges(sequence);
+            }
             case ClientboundPacket.Respawn respawn -> {
                 // The client keeps its world unless the dimension key changes (ClientPacketListener.handleRespawn).
                 if (respawn.dimension() == null || dimension == null || !respawn.dimension().key().equals(dimension.key())) {
                     newLevel(respawn.dimension(), serverChunkRadius);
+                    dropChanges(sequence);
                 }
             }
             case ClientboundPacket.ChunkCacheCenter center -> {
                 if (storage != null) {
                     viewChanged(sequence);
+                    changeEverywhere(sequence);
                     storage.centerX = center.x();
                     storage.centerZ = center.z();
                 }
@@ -202,6 +235,7 @@ public final class ClientWorld {
                 serverChunkRadius = radius.radius();
                 if (storage != null) {
                     viewChanged(sequence);
+                    changeEverywhere(sequence);
                     Storage resized = storage.resized(Storage.range(radius.radius()));
                     for (Column column : storage.slots) {
                         if (column != null && resized.slots[resized.index(column.x, column.z)] != column) {
@@ -214,6 +248,8 @@ public final class ClientWorld {
             case ClientboundPacket.LevelChunk chunk -> loadChunk(sequence, chunk);
             case ClientboundPacket.ForgetLevelChunk forget -> {
                 Column dropped = storage == null ? null : storage.drop(forget.x(), forget.z());
+                change(sequence, (long) forget.x() << 4, Long.MIN_VALUE, (long) forget.z() << 4, ((long) forget.x() << 4) + 15, Long.MAX_VALUE,
+                        ((long) forget.z() << 4) + 15);
                 if (dropped != null) {
                     drop(dropped);
                     pend(sequence, Pending.CHUNK, chunkKey(forget.x(), forget.z()));
@@ -235,31 +271,37 @@ public final class ClientWorld {
                 setBlocks(sequence, update.sectionX(), update.sectionY(), update.sectionZ(), indices, values);
             }
             case ClientboundPacket.BlockChangedAck ack -> pendingBlockAcks.add(new long[] {sequence, ack.sequence()});
-            case ClientboundPacket.Untranslatable untranslatable when isWorldPacket(untranslatable.type()) -> markAllStale();
+            case ClientboundPacket.Untranslatable untranslatable when isWorldPacket(untranslatable.type()) -> {
+                markAllStale();
+                dropChanges(sequence);
+            }
             default -> { }
         }
     }
 
-    private void onInbound(ServerboundPacket packet) {
+    private void onInbound(long eventSequence, ServerboundPacket packet) {
         switch (packet) {
             case ServerboundPacket.UseItemOn use -> {
                 BlockPosition p = use.position();
-                predict(p.x(), p.y(), p.z(), use.sequence(), false);
+                predict(eventSequence, p.x(), p.y(), p.z(), use.sequence(), false);
                 BlockFace face = use.face();
-                predict(p.x() + face.stepX(), p.y() + face.stepY(), p.z() + face.stepZ(), use.sequence(), true);
+                predict(eventSequence, p.x() + face.stepX(), p.y() + face.stepY(), p.z() + face.stepZ(), use.sequence(), true);
             }
             // ABORT_DESTROY_BLOCK predicts nothing: MultiPlayerGameMode sends it outside startPrediction and changes no block
             // (only the crack overlay), and the server's handleBlockBreakAction changes none either.
             case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK
                     || action.action() == ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK ->
-                    predict(action.position().x(), action.position().y(), action.position().z(), action.sequence(), false);
+                    predict(eventSequence, action.position().x(), action.position().y(), action.position().z(), action.sequence(), false);
             // A plain item use (buckets, lily pads...) may place a block where the client's ray hits, which only physics can locate.
-            case ServerboundPacket.UseItem use -> unlocatedPredictions.add(use.sequence());
+            case ServerboundPacket.UseItem use -> {
+                unlocatedPredictions.add(use.sequence());
+                changeEverywhere(eventSequence);
+            }
             default -> { }
         }
     }
 
-    private void onAcknowledged(int transactionId) {
+    private void onAcknowledged(long eventSequence, int transactionId) {
         Long pingSeq = pingSequence.remove(transactionId);
         if (pingSeq == null) {
             return;
@@ -282,6 +324,13 @@ public final class ClientWorld {
         }
         if (confirmedBlockAck != Integer.MIN_VALUE) {
             int acked = confirmedBlockAck;
+            for (Map.Entry<Long, Integer> prediction : predictions.entrySet()) {
+                if (prediction.getValue() <= acked) {
+                    // the client puts the server's state back where it predicted: a change, recorded no earlier than it happened
+                    long key = prediction.getKey();
+                    change(eventSequence, blockX(key), blockY(key), blockZ(key), blockX(key), blockY(key), blockZ(key));
+                }
+            }
             predictions.values().removeIf(sequence -> sequence <= acked);
             earliestPredictions.keySet().retainAll(predictions.keySet());
             earliestPredictions.replaceAll((key, sequence) -> sequence <= acked ? acked + 1 : sequence); // some later one is left
@@ -345,6 +394,8 @@ public final class ClientWorld {
                 chunksUnreadable++;
             }
         }
+        change(sequence, (long) chunk.x() << 4, Long.MIN_VALUE, (long) chunk.z() << 4, ((long) chunk.x() << 4) + 15, Long.MAX_VALUE,
+                ((long) chunk.z() << 4) + 15);
         Column replaced = storage.replace(column);
         if (replaced != null) {
             drop(replaced);
@@ -373,7 +424,17 @@ public final class ClientWorld {
         }
         blockUpdates += indices.length;
         int[] befores = new int[indices.length];
+        long[] box = {Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE};
         for (int i = 0; i < indices.length; i++) {
+            long bx = sectionX << 4 | indices[i] & 15;
+            long by = sectionY << 4 | indices[i] >>> 8;
+            long bz = sectionZ << 4 | indices[i] >>> 4 & 15;
+            box[0] = Math.min(box[0], bx);
+            box[1] = Math.min(box[1], by);
+            box[2] = Math.min(box[2], bz);
+            box[3] = Math.max(box[3], bx);
+            box[4] = Math.max(box[4], by);
+            box[5] = Math.max(box[5], bz);
             int before = column.sections != null ? column.sections[sectionIndex].get(indices[i]) : Section.INVALID;
             befores[i] = before;
             if (mover(before) || mover(values[i])) {
@@ -383,6 +444,7 @@ public final class ClientWorld {
                 moverChange(sequence, x, y, z, x, y, z);
             }
         }
+        change(sequence, box[0], box[1], box[2], box[3], box[4], box[5]);
         if (column.sections != null) {
             // A new section, shared again: every player near the change applies it to the same section.
             Section old = column.sections[sectionIndex];
@@ -398,9 +460,10 @@ public final class ClientWorld {
         }
     }
 
-    private void predict(int x, int y, int z, int sequence, boolean withNeighbours) {
+    private void predict(long eventSequence, int x, int y, int z, int sequence, boolean withNeighbours) {
         int[][] offsets = withNeighbours ? PREDICTION_NEIGHBOURS : PREDICTION_SELF;
         for (int[] o : offsets) {
+            change(eventSequence, x + o[0], y + o[1], z + o[2], x + o[0], y + o[1], z + o[2]);
             predictions.merge(blockKey(x + o[0], y + o[1], z + o[2]), sequence, Math::max);
             earliestPredictions.merge(blockKey(x + o[0], y + o[1], z + o[2]), sequence, Math::min);
         }
@@ -694,6 +757,36 @@ public final class ClientWorld {
         return false;
     }
 
+    /**
+     * Whether the blocks the client holds in the box (block coordinates, inclusive) may have changed at or after
+     * {@code since}: a change was sent or predicted there since (see {@link #changes}), or a block there is not settled
+     * now ({@link #settled}). True where that is not known: changes dropped since, no level.
+     */
+    public boolean mayHaveChangedIn(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, long since) {
+        if (storage == null || since <= changesDropped || hasUnlocatedPrediction()) {
+            return true;
+        }
+        for (java.util.Iterator<long[]> it = changes.descendingIterator(); it.hasNext(); ) {
+            long[] c = it.next();
+            if (c[0] < since) {
+                break;
+            }
+            if (c[1] <= maxX && c[4] >= minX && c[2] <= maxY && c[5] >= minY && c[3] <= maxZ && c[6] >= minZ) {
+                return true;
+            }
+        }
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    if (!settled(x, y, z)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     /** True while an item use the client may have predicted a block change for is not confirmed. */
     public boolean hasUnlocatedPrediction() {
         return !unlocatedPredictions.isEmpty();
@@ -803,6 +896,19 @@ public final class ClientWorld {
     /** {@code BlockPos.asLong}: x 26 bits, z 26 bits, y 12 bits. */
     static long blockKey(int x, int y, int z) {
         return ((long) x & 0x3FFFFFF) << 38 | ((long) z & 0x3FFFFFF) << 12 | (long) y & 0xFFF;
+    }
+
+    /** {@code BlockPos.getX}, {@code getY}, {@code getZ} of a {@link #blockKey}. */
+    static int blockX(long key) {
+        return (int) (key >> 38);
+    }
+
+    static int blockY(long key) {
+        return (int) (key << 52 >> 52);
+    }
+
+    static int blockZ(long key) {
+        return (int) (key << 26 >> 38);
     }
 
     // --- the client's chunk storage -----------------------------------------------------------------------

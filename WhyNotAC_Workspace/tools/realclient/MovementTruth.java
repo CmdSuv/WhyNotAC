@@ -78,6 +78,10 @@ public class MovementTruth {
         // First in the chain: the replicas hold the world as it was before this event.
         chain.add((session, event) -> {
             handled.onEvent(event);
+            comparison.entities = replicas.entities().entities(session);
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.Login login) {
+                comparison.selfId = login.entityId();
+            }
             if (event instanceof TimelineEvent.Inbound in) {
                 boolean reply = afterAccept[0] && in.packet() instanceof ServerboundPacket.MovePlayer;
                 afterAccept[0] = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
@@ -432,6 +436,11 @@ public class MovementTruth {
         final Map<Integer, ClientEntities.Mounted> mounted = new HashMap<>();
         /** The interpolation each boat's last compared tick left (none: absent). */
         private final Map<Integer, BoatState.Interpolation> interpolations = new HashMap<>();
+        /** Boats whose last tick was not run: an interpolation then is not followed. */
+        private final java.util.Set<Integer> skipped = new java.util.HashSet<>();
+        /** The client's entities as the replica holds them before the event being handled, and its player's id. */
+        ClientEntities entities;
+        int selfId = -1;
         private final java.util.Set<Integer> boatsSeen = new java.util.HashSet<>();
         final Map<String, Long> boatStatuses = new TreeMap<>();
         final Map<String, Long> boatUnknown = new TreeMap<>();
@@ -618,24 +627,36 @@ public class MovementTruth {
                         m.targetXRot(), m.previousPosition(), m.previousYRot(), m.previousXRot());
                 if (m == null && Boolean.TRUE.equals(pre.get("interpolating"))) {
                     boatUnknown.merge("interpolating toward a position the server sent, the replica's state at the mount not known", 1L, Long::sum);
+                    skipped.add(id);
                     return;
                 }
             }
+            if (skipped.contains(id) && Boolean.TRUE.equals(pre.get("interpolating"))) {
+                boatUnknown.merge("interpolating after a tick that was not compared", 1L, Long::sum);
+                return;
+            }
+            skipped.remove(id);
             if (Boolean.TRUE.equals(pre.get("interpolating")) != (interpolation != null)) {
                 throw new IllegalStateException("the boat's interpolation at tick " + pre.get("tickCount") + " is not the client's: "
                         + pre.get("interpolating") + " vs " + interpolation);
             }
             if (Boolean.TRUE.equals(pre.get("firstTick"))) {
                 boatUnknown.merge("the boat's first tick", 1L, Long::sum);
+                skipped.add(id);
                 return;
-            }
-            if (interpolation != null) {
-                boatInterpolating++;
             }
             BoatState t = boatState(pre);
             BoatState before = new BoatState(t.x(), t.y(), t.z(), t.deltaMovement(), t.yRot(), t.xRot(), t.deltaRotation(), t.status(), t.lastYd(),
                     t.fallDistance(), t.onGround(), t.horizontalCollision(), t.verticalCollision(), t.verticalCollisionBelow(), t.support(),
                     t.onGroundNoBlocks(), t.stuckSpeedMultiplier(), interpolation);
+            if (entities != null && mayMeetEntity(before, id)) {
+                boatUnknown.merge("an entity the boat may meet is near (canVehicleCollide)", 1L, Long::sum);
+                skipped.add(id);
+                return;
+            }
+            if (interpolation != null) {
+                boatInterpolating++;
+            }
             BoatState expected = boatState(post);
             if (!java.util.Objects.equals(post.get("oldStatus"), pre.get("status"))) {
                 throw new IllegalStateException("the boat's oldStatus is not its last status at tick " + pre.get("tickCount"));
@@ -667,7 +688,24 @@ public class MovementTruth {
                 }
             } catch (Colliders.Unknown e) {
                 boatUnknown.merge(e.getMessage().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]", ""), 1L, Long::sum);
+                skipped.add(id);
             }
+        }
+
+        /**
+         * Whether an entity the boat collides with ({@code canVehicleCollide}, which {@link Boat} is not given here) may be
+         * where its tick could take it: its box widened by how far the motion, an interpolation and a margin reach.
+         */
+        private boolean mayMeetEntity(BoatState before, int boat) {
+            Box b = before.box();
+            Vec3d d = before.deltaMovement();
+            double reach = Math.abs(d.x()) + Math.abs(d.y()) + Math.abs(d.z()) + 1.5;
+            if (before.interpolation() != null) {
+                Vec3d t = before.interpolation().target();
+                reach += Math.abs(t.x() - before.x()) + Math.abs(t.y() - before.y()) + Math.abs(t.z() - before.z());
+            }
+            return entities.mayHaveVehicleColliderNear(selfId, boat, b.minX() - reach, b.minY() - reach, b.minZ() - reach, b.maxX() + reach,
+                    b.maxY() + reach, b.maxZ() + reach, 64.0);
         }
 
         Map<String, Object> result() {

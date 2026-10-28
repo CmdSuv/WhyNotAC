@@ -110,6 +110,7 @@ jobs:
             ${{ runner.temp }}/realclient/*.json
             ${{ runner.temp }}/realclient/dump.jsonl
             ${{ runner.temp }}/realclient/truth.jsonl
+            ${{ runner.temp }}/realclient/plugins/WhyNotAC/recordings/
             ${{ runner.temp }}/realclient/game/screenshots/
             ${{ runner.temp }}/realclient/game/crash-reports/
           if-no-files-found: warn

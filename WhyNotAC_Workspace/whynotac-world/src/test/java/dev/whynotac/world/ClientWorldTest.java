@@ -418,6 +418,26 @@ class ClientWorldTest {
     /** Half the size of the eyes' box in these tests. */
     private static final double R = 1.0E-4;
 
+    @Test
+    void blockChangesAreKnownSinceASequence() {
+        airWorld();
+        long before = sequence;
+        assertFalse(world.mayHaveChangedIn(0, 70, 0, 1, 71, 1, before), "nothing changed since");
+        put(1, 70, 1, STONE);
+        assertTrue(world.mayHaveChangedIn(0, 70, 0, 1, 71, 1, before), "not settled yet");
+        sync();
+        long after = sequence;
+        assertTrue(world.mayHaveChangedIn(0, 70, 0, 1, 71, 1, before), "changed at or after it");
+        assertFalse(world.mayHaveChangedIn(0, 70, 0, 1, 71, 1, after), "settled, and nothing since");
+        assertFalse(world.mayHaveChangedIn(3, 70, 3, 4, 71, 4, before), "elsewhere");
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(3, 70, 3),
+                BlockFace.UP, 7));
+        assertTrue(world.mayHaveChangedIn(3, 70, 3, 4, 71, 4, after), "the client's own prediction");
+        out(new ClientboundPacket.ChunkCacheCenter(0, 0));
+        sync();
+        assertTrue(world.mayHaveChangedIn(8, 70, 8, 8, 70, 8, after), "the view changed");
+    }
+
     private static int state(String block, String properties) {
         for (int id = 0; id < STATES.size(); id++) {
             if (STATES.block(id).equals(block) && STATES.properties(id).equals(properties)) {

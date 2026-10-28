@@ -120,6 +120,38 @@ public final class Boat {
         return tick.state();
     }
 
+    /**
+     * {@code AbstractBoat.getStatus} of a boat at {@code (x, y, z)}: what a tick starting there sets (the next tick's
+     * {@code oldStatus}).
+     */
+    public static BoatState.Status status(double x, double y, double z, Colliders.World world) throws Colliders.Unknown {
+        Boat boat = new Boat(new BoatState(x, y, z, Vec3d.ZERO, 0.0F, 0.0F, 0.0F, null, 0.0, 0.0, false, false, false, false, null, false, Vec3d.ZERO),
+                world, Conditions.NONE);
+        Box box = boat.box();
+        boat.requireInScope(box, "at the start of a tick");
+        return boat.getStatus(box);
+    }
+
+    /**
+     * {@code Entity.checkSupportingBlock(true, null)} for a boat at {@code (x, y, z)} ({@code setOnGround(true)} from a
+     * packet): the supporting block below its box, null when there is none.
+     */
+    public static BlockPos supportingBlock(double x, double y, double z, Colliders.World world) throws Colliders.Unknown {
+        Boat boat = new Boat(new BoatState(x, y, z, Vec3d.ZERO, 0.0F, 0.0F, 0.0F, null, 0.0, 0.0, false, false, false, false, null, false, Vec3d.ZERO),
+                world, Conditions.NONE);
+        Box box = boat.box();
+        Box below = Box.of(box.minX(), box.minY() - 1.0E-6, box.minZ(), box.maxX(), box.minY(), box.maxZ());
+        return Colliders.supportingBlock(world, boat.context(), below, x, y, z);
+    }
+
+    /**
+     * {@code controlBoat}'s {@code setPaddleState(left, right)}, which {@code ServerboundPaddleBoatPacket} then carries:
+     * the left paddle turns right or paddles ahead, the right one the other way.
+     */
+    public static boolean[] paddles(Input input) {
+        return new boolean[] {input.right() && !input.left() || input.up(), input.left() && !input.right() || input.up()};
+    }
+
     private BoatState state() {
         return new BoatState(x, y, z, delta, yRot, xRot, deltaRotation, status, lastYd, fallDistance, onGround, horizontalCollision, verticalCollision,
                 verticalCollisionBelow, support, onGroundNoBlocks, stuck, interpolation);
