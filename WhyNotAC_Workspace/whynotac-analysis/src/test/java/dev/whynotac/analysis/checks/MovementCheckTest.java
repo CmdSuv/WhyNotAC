@@ -690,7 +690,9 @@ class MovementCheckTest {
             sentInput = keys;
         }
         in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
-        in(new ServerboundPacket.MoveVehicle(new Vec3d(boat.x(), boat.y(), boat.z()).add(cheat), boat.yRot(), boat.xRot(), boat.onGround()));
+        BoatState.Interpolation left = boat.interpolation(); // ServerboundMoveVehiclePacket.fromEntity: its target while it interpolates
+        in(new ServerboundPacket.MoveVehicle((left != null ? left.target() : new Vec3d(boat.x(), boat.y(), boat.z())).add(cheat),
+                left != null ? left.targetYRot() : boat.yRot(), left != null ? left.targetXRot() : boat.xRot(), boat.onGround()));
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
         boatInput = new Boat.Input(keys.left(), keys.right(), keys.forward(), keys.backward()); // LocalPlayer.rideTick
@@ -738,6 +740,27 @@ class MovementCheckTest {
         assertEquals(40, rides.size(), String.valueOf(rides));
         assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
         assertTrue(boat.x() > 6.6 || boat.z() > 6.6 || boat.x() < 6.4 || boat.z() < 6.4, "it moved: " + boat);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aBoatMountedWhileItInterpolatesIsExplained() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        // the server moves it a little: the client's boat eases toward there over 3 ticks (AbstractBoat's InterpolationHandler)
+        out(new ClientboundPacket.EntityPositionSync(BOAT, new Vec3d(6.5, 64.0, 6.6), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        mount(6.5, 6.5);
+        boat = new BoatState(boat.x(), boat.y(), boat.z(), boat.deltaMovement(), boat.yRot(), boat.xRot(), boat.deltaRotation(), boat.status(),
+                boat.lastYd(), boat.fallDistance(), boat.onGround(), boat.horizontalCollision(), boat.verticalCollision(), boat.verticalCollisionBelow(),
+                boat.support(), boat.onGroundNoBlocks(), boat.stuckSpeedMultiplier(),
+                new BoatState.Interpolation(3, new Vec3d(6.5, 64.0, 6.6), 0.0F, 0.0F, new Vec3d(6.5, 64.0, 6.5), 0.0F, 0.0F));
+        for (int i = 0; i < 10; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        List<MovementTracker.Tick> rides = rideTicks();
+        assertEquals(10, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
         assertEquals(List.of(), evidence);
     }
 

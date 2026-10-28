@@ -61,7 +61,8 @@ def client_sent(records):
 
 
 def client_vehicle_moves(records):
-    """The MoveVehicle packets the client sent: each steered boat's state after its tick, sent by its passenger's tick after it."""
+    """The MoveVehicle packets the client sent: each steered boat's state after its tick, sent by its passenger's tick after it
+    (ServerboundMoveVehiclePacket.fromEntity: while the boat still interpolates, the interpolation's target and rotations)."""
     moves = []
     boat = None
     for r in records:
@@ -69,7 +70,11 @@ def client_vehicle_moves(records):
             boat = r
         elif r["hook"] == "post":
             if boat is not None and r["passenger"]:
-                moves.append({"pos": tuple(bits(c) for c in boat["pos"]), "rot": (bits(boat["yRot"]), bits(boat["xRot"])), "onGround": boat["onGround"]})
+                if boat["interpolating"]:
+                    moves.append({"pos": tuple(bits(c) for c in boat["interpolationPos"]),
+                                  "rot": (bits(boat["interpolationYRot"]), bits(boat["interpolationXRot"])), "onGround": boat["onGround"]})
+                else:
+                    moves.append({"pos": tuple(bits(c) for c in boat["pos"]), "rot": (bits(boat["yRot"]), bits(boat["xRot"])), "onGround": boat["onGround"]})
             boat = None
     return moves
 

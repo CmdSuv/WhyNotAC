@@ -59,6 +59,7 @@ public final class Recorder {
     private static Field boatDeltaRotation, boatStatus, boatOldStatus, boatWaterLevel, boatLandFriction, boatLastYd, boatInputLeft, boatInputRight,
             boatInputUp, boatInputDown, entityId, firstTick;
     private static Method getControllingPassenger, isNoGravity, getInterpolation, hasActiveInterpolation, getType, getPassengers;
+    private static Method interpolationPosition, interpolationYRot, interpolationXRot;
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -160,7 +161,14 @@ public final class Recorder {
             line.append(",\"input\":\"").append(boatInputLeft.getBoolean(boat) ? 'L' : '-').append(boatInputRight.getBoolean(boat) ? 'R' : '-')
                     .append(boatInputUp.getBoolean(boat) ? 'U' : '-').append(boatInputDown.getBoolean(boat) ? 'D' : '-').append('"');
             bool(line, "noGravity", (Boolean) isNoGravity.invoke(boat));
-            bool(line, "interpolating", (Boolean) hasActiveInterpolation.invoke(getInterpolation.invoke(boat)));
+            Object interpolation = getInterpolation.invoke(boat);
+            boolean interpolating = (Boolean) hasActiveInterpolation.invoke(interpolation);
+            bool(line, "interpolating", interpolating);
+            if (interpolating) { // ServerboundMoveVehiclePacket.fromEntity sends these while the entity interpolates
+                vec(line, "interpolationPos", interpolationPosition.invoke(interpolation));
+                f32(line, "interpolationYRot", (Float) interpolationYRot.invoke(interpolation));
+                f32(line, "interpolationXRot", (Float) interpolationXRot.invoke(interpolation));
+            }
             bool(line, "firstTick", firstTick.getBoolean(boat));
             bool(line, "wasTouchingWater", wasTouchingWater.getBoolean(boat));
             bool(line, "inPowderSnow", isInPowderSnow.getBoolean(boat));
@@ -383,6 +391,9 @@ public final class Recorder {
         isNoGravity = method(loader, entity, "isNoGravity()");
         getInterpolation = method(loader, boat, "getInterpolation()");
         hasActiveInterpolation = method(loader, "net.minecraft.world.entity.InterpolationHandler", "hasActiveInterpolation()");
+        interpolationPosition = method(loader, "net.minecraft.world.entity.InterpolationHandler", "position()");
+        interpolationYRot = method(loader, "net.minecraft.world.entity.InterpolationHandler", "yRot()");
+        interpolationXRot = method(loader, "net.minecraft.world.entity.InterpolationHandler", "xRot()");
         getType = method(loader, entity, "getType()");
         getPassengers = method(loader, entity, "getPassengers()");
         localPlayerClass = Class.forName(mappings.get(local).obf(), false, loader);

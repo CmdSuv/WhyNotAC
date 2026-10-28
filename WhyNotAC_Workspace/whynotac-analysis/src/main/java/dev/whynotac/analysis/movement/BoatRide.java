@@ -243,13 +243,18 @@ final class BoatRide {
                 return null;
             }
             Vec3d p = move.position();
-            boolean same = Double.compare(after.x(), p.x()) == 0 && Double.compare(after.y(), p.y()) == 0 && Double.compare(after.z(), p.z()) == 0
-                    && Float.compare(after.yRot(), move.yaw()) == 0 && Float.compare(after.xRot(), move.pitch()) == 0
+            // ServerboundMoveVehiclePacket.fromEntity: while the boat still interpolates, the interpolation's target and rotations
+            BoatState.Interpolation left = after.interpolation();
+            Vec3d at = left != null ? left.target() : new Vec3d(after.x(), after.y(), after.z());
+            float yaw = left != null ? left.targetYRot() : after.yRot();
+            float pitch = left != null ? left.targetXRot() : after.xRot();
+            boolean same = Double.compare(at.x(), p.x()) == 0 && Double.compare(at.y(), p.y()) == 0 && Double.compare(at.z(), p.z()) == 0
+                    && Float.compare(yaw, move.yaw()) == 0 && Float.compare(pitch, move.pitch()) == 0
                     && after.onGround() == move.onGround() && paddle.left() == expected[0] && paddle.right() == expected[1];
             if (same) {
                 next.add(after);
             } else {
-                double distance = Math.abs(after.x() - p.x()) + Math.abs(after.y() - p.y()) + Math.abs(after.z() - p.z());
+                double distance = Math.abs(at.x() - p.x()) + Math.abs(at.y() - p.y()) + Math.abs(at.z() - p.z());
                 if (distance < closestDistance) {
                     closestDistance = distance;
                     closest = after;

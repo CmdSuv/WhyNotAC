@@ -391,7 +391,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   tick'i dönüşünü ve `MoveVehicle`'ı (teknenin tikten sonraki konumu, dönüşü, yer bayrağı) gönderir. Takipçi teknenin
   olabileceği durumları izler: her tikte her durum `Boat` ile ilerletilir ve gönderilen kürek ile araç paketini bit bit
   vermeyenler düşer; hiçbiri vermezse tick kanıttır ("hiçbir vanilla client tekneyi böyle sürmez": tekneyle uçma ve hız
-  hileleri). Tekne bir önceki tikin tuşlarıyla döner ve kürek çeker (`rideTick`'in `setInput`'u). **Binişteki durum:**
+  hileleri). Tekne bir önceki tikin tuşlarıyla döner ve kürek çeker (`rideTick`'in `setInput`'u). Tekne hâlâ
+  interpolasyondaysa (`ServerboundMoveVehiclePacket.fromEntity`) araç paketi teknenin konumunu değil, interpolasyonun
+  hedefini ve dönüşlerini taşır; binişte birden çok adımı kalmış bir tekne bunu ilk tiklerinde gösterir. **Binişteki durum:**
   varlık replikası yolcusuz tekneyi client gibi izler (yalnızca interpolasyonla hareket eder, her tikte hızı sıfırlanır)
   ve biniş anındaki durumunu saklar (`ClientEntities.mounted`): konum, dönüş, interpolasyon, yer bayrağı, son tikten beri
   gelen hız. Durum son tikin başladığı yerden hesaplanır (bloklar o zamandan beri değişmemişse:
