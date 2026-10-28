@@ -110,6 +110,8 @@ public final class MovementTracker {
      * {@code handleTeleportEntity} for its root vehicle, {@code AbstractBoat.tick} for a boat it controls).
      */
     public static final String VEHICLE_ON_FOOT = "sent a vehicle move while riding nothing";
+    /** An unexplained tick's reason when it sent its abilities while no state it may have been in could fly. */
+    public static final String ABILITIES_WITHOUT_FLIGHT = "sent its flight abilities while it could not fly";
     static final int MAX_HYPOTHESES = 64;
     static final int MAX_PENDING = 4096;
     static final int MAX_PINGS = 4096;
@@ -591,6 +593,8 @@ public final class MovementTracker {
         int stabs;
         int interactions;
         boolean loaded;
+        /** {@code PlayerAbilities}: only {@code LocalPlayer.aiStep} sends it, for a player that may fly or flies. */
+        int abilities;
         String unmodelled;
         /** The boat's {@code PaddleBoat} and the passenger's {@code MoveVehicle} ({@link BoatRide}). */
         final List<ServerboundPacket.PaddleBoat> paddles = new ArrayList<>(1);
@@ -674,7 +678,7 @@ public final class MovementTracker {
                 case ServerboundPacket.SetCarriedItem ignored -> t.handsTouched = true;
                 case ServerboundPacket.ContainerClick ignored -> t.handsTouched = true;
                 case ServerboundPacket.SetCreativeModeSlot ignored -> t.handsTouched = true;
-                case ServerboundPacket.PlayerAbilities ignored -> t.unmodelled = "flying toggled";
+                case ServerboundPacket.PlayerAbilities ignored -> t.abilities++;
                 case ServerboundPacket.MoveVehicle move -> {
                     t.unmodelled = "vehicle";
                     t.vehicleMoves.add(move);
@@ -948,8 +952,8 @@ public final class MovementTracker {
         if (next.isEmpty()) {
             long from = since;
             lose("unexplained movement");
-            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, actedWhileUsing ? ACTED_WHILE_USING : "no vanilla client sends this", 0,
-                    from, closest(predictions, in.move), in.move);
+            String reason = actedWhileUsing ? ACTED_WHILE_USING : in.abilities > 0 ? ABILITIES_WITHOUT_FLIGHT : "no vanilla client sends this";
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, reason, 0, from, closest(predictions, in.move), in.move);
         }
         lastHands = hands();
         sent = merged(next);
@@ -1426,6 +1430,12 @@ public final class MovementTracker {
         }
         if (in.unmodelled != null) {
             throw new Lose(in.unmodelled);
+        }
+        if (in.abilities > 0) {
+            // LocalPlayer.aiStep sends the abilities when a spectator starts flying, a double jump toggles flying (both
+            // with mayfly) or flying stops on the ground; a state that may fly or flies is out of scope above, and the
+            // client changes neither itself without them
+            return;
         }
         if (in.inputs > 1 || in.sprints > 1 || in.moves > 1 || in.glideStarts > 1) {
             throw new Lose("several input, sprint, gliding or movement packets in one tick");
@@ -1917,7 +1927,8 @@ public final class MovementTracker {
     /** The settle anchor (see the class comment) for the tick just sent, or null. */
     private Hypothesis settleAnchor(long number, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         ServerboundPacket.MovePlayer move = in.move;
-        if (move == null || !move.hasPosition() || !base.ticking() || w[0] != w[1] || in.unmodelled != null || in.attacks > 0 || in.moves > 1) {
+        if (move == null || !move.hasPosition() || !base.ticking() || w[0] != w[1] || in.unmodelled != null || in.abilities > 0 || in.attacks > 0
+                || in.moves > 1) {
             return null;
         }
         PlayerState.Keys now = in.input != null ? keys(in.input) : currentKeys;
@@ -1987,7 +1998,7 @@ public final class MovementTracker {
 
     /** The settle anchor's record of the position packets and of the keys, from what the client sent. */
     private void settleBookkeeping(long number, TimelineEvent.Inbound end, TickInput in) {
-        if (in.unmodelled != null || in.attacks > 0 || !base.ticking()) {
+        if (in.unmodelled != null || in.abilities > 0 || in.attacks > 0 || !base.ticking()) {
             quietSincePosition = false;
         }
         if (in.input != null) {

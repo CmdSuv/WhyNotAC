@@ -418,6 +418,11 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   zamandan beri işlemiş olabileceği hiçbir paket onu bindiremezse, tikin araç paketi kanıttır ("sent a vehicle move
   while riding nothing"). Gerçek client oturumunda kural 13506 tikte devredeydi, 0 bulgu; `MovementCheckTest`:
   araçsızken `MoveVehicle` ve `PaddleBoat` bulgu, inişten hemen sonraki (client'ın hâlâ binmiş olabileceği) tik değil.
+- **Uçamazken yetenek paketi:** aynı şekilde `PlayerAbilities` de iddiayı bitirirdi. `LocalPlayer.aiStep` onu yalnızca
+  `mayfly` (izleyicinin uçmaya başlaması, çift zıplamayla uçma) ya da uçarken yere inince gönderir; client ikisini de
+  kendisi açamaz (yalnızca sunucunun yetenek paketi, oyun modu, giriş ve yeniden doğma). Uçabilen ya da uçan bir durum
+  zaten kapsam dışıdır (iddia yok); öteki durumlar bu paketi gönderemez, hepsi elenirse tik kanıttır ("sent its flight
+  abilities while it could not fly"). `MovementCheckTest`: hayatta kalma modunda bulgu, sunucu uçmaya izin verince iddia yok.
 
 ## Planlanan aileler
 

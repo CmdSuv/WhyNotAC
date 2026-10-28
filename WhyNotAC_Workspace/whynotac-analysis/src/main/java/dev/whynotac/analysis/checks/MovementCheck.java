@@ -35,7 +35,8 @@ import java.util.TreeMap;
  * then (the entity replica's), each tick of its physics from every state it may be in, and the vehicle move and paddle
  * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). A vehicle move or paddle
  * packet while the client rode nothing is one too: a vanilla client sends them only as a passenger, and on foot they
- * would otherwise only end the claim.
+ * would otherwise only end the claim; so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
+ * sends them only with {@code mayfly} or while flying).
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
  * rounds it differently) produces this too; fly, speed, step, no-slow, jump and velocity cheats on foot all
@@ -148,7 +149,8 @@ public final class MovementCheck implements TimelineListener {
             }
         }
         sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(), tick.nanoTime(),
-                (MovementTracker.ACTED_WHILE_USING.equals(tick.reason()) ? tick.reason() : "moved on foot as no vanilla client could") + " (tick "
+                (MovementTracker.ACTED_WHILE_USING.equals(tick.reason()) || MovementTracker.ABILITIES_WITHOUT_FLIGHT.equals(tick.reason()) ? tick.reason()
+                        : "moved on foot as no vanilla client could") + " (tick "
                         + tick.number() + ")", details, admissibility));
         state.lastReportNanos = tick.nanoTime();
         state.unexplainedSinceReport = 0;

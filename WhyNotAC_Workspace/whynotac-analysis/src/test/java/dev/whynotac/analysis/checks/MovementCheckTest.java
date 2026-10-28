@@ -809,6 +809,28 @@ class MovementCheckTest {
     }
 
     @Test
+    void togglingFlightWhileNotAllowedToFlyIsAFinding() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        // a survival client never sends its abilities: here they would cover a step half a block up
+        keybinds.add(new ServerboundPacket.PlayerAbilities(true));
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.5, 0.0));
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, evidence.get(0).evidenceClass());
+        assertTrue(evidence.get(0).summary().startsWith(MovementTracker.ABILITIES_WITHOUT_FLIGHT), evidence.get(0).summary());
+    }
+
+    @Test
+    void noFindingForFlightTheServerAllows() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        out(new ClientboundPacket.PlayerAbilities(false, false, true, false, 0.05F, 0.1F));
+        sync();
+        keybinds.add(new ServerboundPacket.PlayerAbilities(true));
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.5, 0.0));
+        assertEquals(List.of(), evidence);
+        assertEquals(MovementTracker.Outcome.NO_CLAIM, ticks.getLast().outcome(), String.valueOf(ticks.getLast()));
+    }
+
+    @Test
     void movingAHundredthOfABlockFurtherIsAFinding() throws Exception {
         ticks(5, NONE, 30.0F);
         ticks(20, FORWARD, 30.0F);
