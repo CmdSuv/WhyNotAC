@@ -134,6 +134,7 @@ public class MovementTruth {
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0
                 && ((Number) tracker.get("mounts")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("mountsDiffering"))
                 && ((Number) tracker.get("rideExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rideUnexplained"))
+                && ((Number) tracker.get("ridingNothing")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("vehicleOnFoot"))
                 && Long.valueOf(0).equals(tracker.get("rideTruthMissing"));
         System.exit(clean ? 0 : 1);
     }
@@ -283,6 +284,8 @@ public class MovementTruth {
         out.put("rocketBoosts", tracker.rocketBoosts());
         out.put("rideExplained", tracker.rideExplained());
         out.put("rideUnexplained", tracker.rideUnexplained());
+        out.put("vehicleOnFoot", tracker.vehicleOnFoot());
+        out.put("ridingNothing", tracker.ridingNothing());
         out.put("rideNoClaim", tracker.rideNoClaim());
         out.put("rideTruthCompared", rides[0]);
         out.put("rideTruthMissing", rides[1]);

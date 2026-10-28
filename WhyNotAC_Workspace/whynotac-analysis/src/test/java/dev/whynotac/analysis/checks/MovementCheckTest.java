@@ -771,6 +771,44 @@ class MovementCheckTest {
     }
 
     @Test
+    void aVehicleMoveWhileRidingNothingIsAFinding() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        // on foot it would only end the claim: here it covers a step half a block too far
+        keybinds.add(new ServerboundPacket.MoveVehicle(new Vec3d(0.5, 64.0, 0.5), 0.0F, 0.0F, true));
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.5));
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        Evidence e = evidence.get(0);
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertTrue(e.summary().startsWith(MovementTracker.VEHICLE_ON_FOOT), e.summary());
+        now += 2 * SECOND;
+        keybinds.add(new ServerboundPacket.PaddleBoat(true, false));
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(2, evidence.size(), String.valueOf(ticks));
+        assertEquals("PaddleBoat", evidence.get(1).details().get("sent"));
+    }
+
+    @Test
+    void aVehicleMoveRightAfterADismountIsNoFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        for (int i = 0; i < 5; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[0]));
+        sync();
+        // sent before the client took the player off (an answer to the server's vehicle move, say): it still rode
+        keybinds.add(new ServerboundPacket.MoveVehicle(new Vec3d(boat.x(), boat.y(), boat.z()), boat.yRot(), boat.xRot(), boat.onGround()));
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(List.of(), evidence);
+        now += 2 * SECOND;
+        keybinds.add(new ServerboundPacket.MoveVehicle(new Vec3d(boat.x(), boat.y(), boat.z()), boat.yRot(), boat.xRot(), boat.onGround()));
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO); // a whole tick off it
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        assertTrue(evidence.get(0).summary().startsWith(MovementTracker.VEHICLE_ON_FOOT), evidence.get(0).summary());
+    }
+
+    @Test
     void movingAHundredthOfABlockFurtherIsAFinding() throws Exception {
         ticks(5, NONE, 30.0F);
         ticks(20, FORWARD, 30.0F);

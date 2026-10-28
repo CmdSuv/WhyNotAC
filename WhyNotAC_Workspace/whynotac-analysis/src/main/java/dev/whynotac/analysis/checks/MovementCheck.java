@@ -33,7 +33,9 @@ import java.util.TreeMap;
  *
  * <p>A boat the player steers is followed the same way from its mount ({@code BoatRide}): the client's own state for it
  * then (the entity replica's), each tick of its physics from every state it may be in, and the vehicle move and paddle
- * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats).
+ * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). A vehicle move or paddle
+ * packet while the client rode nothing is one too: a vanilla client sends them only as a passenger, and on foot they
+ * would otherwise only end the claim.
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
  * rounds it differently) produces this too; fly, speed, step, no-slow, jump and velocity cheats on foot all
@@ -42,7 +44,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
@@ -103,6 +105,16 @@ public final class MovementCheck implements TimelineListener {
         details.put("clientTick", Long.toString(tick.number()));
         details.put("unexplainedTicks", Long.toString(state.unexplainedSinceReport));
         details.put("reason", tick.reason());
+        if (MovementTracker.VEHICLE_ON_FOOT.equals(tick.reason())) {
+            ServerboundPacket.MoveVehicle vehicle = tick.sentVehicle();
+            details.put("sent", vehicle == null ? "PaddleBoat" : "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y())
+                    + "," + format(vehicle.position().z()));
+            sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
+                    tick.nanoTime(), tick.reason() + " (tick " + tick.number() + ")", details, admissibility));
+            state.lastReportNanos = tick.nanoTime();
+            state.unexplainedSinceReport = 0;
+            return;
+        }
         if (tick.riding()) {
             ServerboundPacket.MoveVehicle vehicle = tick.sentVehicle();
             details.put("sent", vehicle == null ? "nothing" : "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y()) + ","

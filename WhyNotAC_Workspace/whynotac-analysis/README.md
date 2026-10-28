@@ -409,6 +409,15 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   değiştirmesi, binişte interpolasyonu yok saymak, binişte durumu "havada" saymak. `MovementCheckTest`: sentetik bir
   client'ın durarak, ileri ve sola sürdüğü 40 tik açıklanır; yarım blok yukarıdaki `MoveVehicle` kanıttır; oyuncunun
   itmiş olabileceği teknede iddia yoktur.
+- **Araçsızken araç paketi:** yürürken bir `MoveVehicle` ya da `PaddleBoat` yaya iddiasını bitirirdi; hile her tike bir
+  tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken gönderir
+  (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin
+  `AbstractBoat.tick`'i) ve araca yalnızca `SetPassengers` ile biner. Takipçi client'ın olabileceği araçları client
+  sırasıyla izler (oyuncuyu listeleyen `SetPassengers` ekler, listelemeyen ya da aracın kaldırılması çıkarır, yeni oyuncu
+  ve `Respawn` boşaltır; kayıp olay ya da okunamayan paket "bilinmiyor" yapar). Bir önceki tikte kesin araçsızsa ve o
+  zamandan beri işlemiş olabileceği hiçbir paket onu bindiremezse, tikin araç paketi kanıttır ("sent a vehicle move
+  while riding nothing"). Gerçek client oturumunda kural 13506 tikte devredeydi, 0 bulgu; `MovementCheckTest`:
+  araçsızken `MoveVehicle` ve `PaddleBoat` bulgu, inişten hemen sonraki (client'ın hâlâ binmiş olabileceği) tik değil.
 
 ## Planlanan aileler
 

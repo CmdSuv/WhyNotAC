@@ -104,6 +104,12 @@ public final class MovementTracker {
 
     /** An unexplained tick's reason when every state it may have started in was using an item while it attacked or used one. */
     public static final String ACTED_WHILE_USING = "attacked, interacted or used an item while already using one";
+    /**
+     * An unexplained tick's reason when it sent a vehicle move or paddle packet while the client rode nothing: a vanilla
+     * client sends them only as a passenger ({@code LocalPlayer.tick}, {@code handleMoveVehicle} and
+     * {@code handleTeleportEntity} for its root vehicle, {@code AbstractBoat.tick} for a boat it controls).
+     */
+    public static final String VEHICLE_ON_FOOT = "sent a vehicle move while riding nothing";
     static final int MAX_HYPOTHESES = 64;
     static final int MAX_PENDING = 4096;
     static final int MAX_PINGS = 4096;
@@ -198,16 +204,33 @@ public final class MovementTracker {
     /** The positions the client sent (replies to teleports too): {client tick, x, y, z}, the last few. */
     private final ArrayDeque<double[]> sentPositions = new ArrayDeque<>();
     private static final int MAX_SENT_POSITIONS = 8;
+    /**
+     * The vehicles the client may have the player on, from the ride packets it certainly processed: a
+     * {@code SetPassengers} listing the player adds its vehicle (the only way a client mounts; it may also ignore one for
+     * a vehicle it does not know), one not listing it or the vehicle's removal takes it away, a new player has none.
+     * Null when not known: no new player yet, events lost, a packet WhyNotAC cannot read.
+     */
+    private java.util.Set<Integer> clientVehicles;
+    /** Where {@link #clientVehicles} last became empty. */
+    private long onNoVehicleSince = Long.MIN_VALUE;
+    private long vehicleOnFoot;
+    private long ridingNothing;
 
-    /** A packet about a ride; {@code ambiguous}: at some tick the client may or may not have processed it. */
+    /**
+     * A packet about a ride; {@code ambiguous}: at some tick the client may or may not have processed it;
+     * {@code mayMount}: processing it may put the player on a vehicle (a {@code SetPassengers} listing it, by its id when
+     * the server sent it, or a packet WhyNotAC cannot read).
+     */
     private static final class RidePacket {
         final long sequence;
         final ClientboundPacket packet;
+        final boolean mayMount;
         boolean ambiguous;
 
-        RidePacket(long sequence, ClientboundPacket packet) {
+        RidePacket(long sequence, ClientboundPacket packet, boolean mayMount) {
             this.sequence = sequence;
             this.packet = packet;
+            this.mayMount = mayMount;
         }
     }
 
@@ -250,6 +273,16 @@ public final class MovementTracker {
     /** Ticks of a boat the player steers that some state explained, that none did, and those not claimed by reason (diagnostics). */
     public long rideExplained() {
         return rideExplained;
+    }
+
+    /** Ticks that sent a vehicle move or paddle packet while the client certainly rode nothing ({@link #VEHICLE_ON_FOOT}). */
+    public long vehicleOnFoot() {
+        return vehicleOnFoot;
+    }
+
+    /** Ticks over which the client certainly rode nothing: those {@link #VEHICLE_ON_FOOT} is claimed over. */
+    public long ridingNothing() {
+        return ridingNothing;
     }
 
     public long rideUnexplained() {
@@ -300,6 +333,7 @@ public final class MovementTracker {
                 }
                 ridePending.clear();
                 sentPositions.clear();
+                clientVehicles = null; // until a new player
                 teamChange(gap.sequence(), ClientTeams.LOST); // until a login
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
                 pings.clear();
@@ -360,6 +394,7 @@ public final class MovementTracker {
 
     /** Queues what a ride reads ({@link #ridePending}), following the vehicle in server order. */
     private void ridePacket(long seq, ClientboundPacket packet) {
+        boolean mayMount = packet instanceof ClientboundPacket.Untranslatable;
         boolean queue = switch (packet) {
             case ClientboundPacket.SetPassengers p -> {
                 boolean on = false;
@@ -371,6 +406,7 @@ public final class MovementTracker {
                 } else if (p.vehicleId() == serverVehicle) {
                     serverVehicle = -1;
                 }
+                mayMount = on || selfId < 0;
                 yield true;
             }
             case ClientboundPacket.Login ignored -> {
@@ -395,9 +431,10 @@ public final class MovementTracker {
         if (!queue) {
             return;
         }
-        ridePending.add(new RidePacket(seq, packet));
+        ridePending.add(new RidePacket(seq, packet, mayMount));
         if (ridePending.size() > MAX_PENDING) {
             ridePending.pollFirst();
+            clientVehicles = null; // until a new player
             if (ride != null) {
                 ride.unclaim("too many packets waiting for the client");
             }
@@ -692,8 +729,13 @@ public final class MovementTracker {
     private Tick rideTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
         View view = new View(world, entities, selfId);
+        // the client rode nothing since the last tick when it rode nothing after the packets it certainly processed by
+        // then, and none it may have processed since may have put it on a vehicle
+        boolean mayHaveRidden = clientVehicles == null || !clientVehicles.isEmpty();
         while (!ridePending.isEmpty() && ridePending.peekFirst().sequence < certain) {
-            rideApply(ridePending.pollFirst(), number, view, world, entities);
+            RidePacket p = ridePending.pollFirst();
+            mayHaveRidden |= p.mayMount;
+            rideApply(p, number, view, world, entities);
         }
         boolean ambiguous = false;
         for (RidePacket p : ridePending) {
@@ -702,6 +744,16 @@ public final class MovementTracker {
             }
             p.ambiguous = true; // the client may or may not have processed it before this tick
             ambiguous = true;
+            mayHaveRidden |= p.mayMount;
+        }
+        mayHaveRidden |= clientVehicles == null || !clientVehicles.isEmpty();
+        if (!mayHaveRidden) {
+            ridingNothing++;
+        }
+        if (!mayHaveRidden && (!in.vehicleMoves.isEmpty() || !in.paddles.isEmpty())) {
+            vehicleOnFoot++;
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, VEHICLE_ON_FOOT, 0, onNoVehicleSince, null, null, null,
+                    in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast());
         }
         if (ride == null) {
             return null;
@@ -728,6 +780,7 @@ public final class MovementTracker {
 
     /** A ride packet the client processed before the tick {@code number}. */
     private void rideApply(RidePacket p, long number, View view, ClientWorld world, ClientEntities entities) {
+        followVehicles(p);
         switch (p.packet) {
             case ClientboundPacket.SetPassengers set -> {
                 int[] ids = set.passengerIds();
@@ -791,6 +844,39 @@ public final class MovementTracker {
                 }
             }
             default -> { }
+        }
+    }
+
+    /** The vehicles the client may have the player on ({@link #clientVehicles}) once it processed {@code p}. */
+    private void followVehicles(RidePacket p) {
+        switch (p.packet) {
+            case ClientboundPacket.Login ignored -> clientVehicles = new java.util.HashSet<>(); // a new player
+            case ClientboundPacket.Respawn ignored -> clientVehicles = new java.util.HashSet<>();
+            case ClientboundPacket.Untranslatable ignored -> clientVehicles = null;
+            case ClientboundPacket.SetPassengers set when clientVehicles != null -> {
+                if (p.mayMount) {
+                    clientVehicles.add(set.vehicleId());
+                } else if (clientVehicles.remove(set.vehicleId()) && clientVehicles.isEmpty()) {
+                    onNoVehicleSince = p.sequence; // ejectPassengers
+                }
+            }
+            case ClientboundPacket.RemoveEntities removed when clientVehicles != null -> {
+                boolean was = !clientVehicles.isEmpty();
+                for (int id : removed.entityIds()) {
+                    if (id == selfId) {
+                        clientVehicles = null;
+                        return;
+                    }
+                    clientVehicles.remove(id); // its passengers stop riding (Entity.setRemoved)
+                }
+                if (was && clientVehicles.isEmpty()) {
+                    onNoVehicleSince = p.sequence;
+                }
+            }
+            default -> { }
+        }
+        if (clientVehicles != null && clientVehicles.isEmpty() && (p.packet instanceof ClientboundPacket.Login || p.packet instanceof ClientboundPacket.Respawn)) {
+            onNoVehicleSince = p.sequence;
         }
     }
 
