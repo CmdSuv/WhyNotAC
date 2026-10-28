@@ -584,7 +584,8 @@ public final class OnFoot {
         if (levitation > 0) {
             vy += (0.05 * levitation - moved.y()) * 0.2;
         } else if (world.isLoaded(below.x() >> 4, below.z() >> 4)) {
-            vy -= moved.y() <= 0.0 && conditions.effects().slowFalling() ? Math.min(GRAVITY, 0.01) : GRAVITY; // getEffectiveGravity
+            // getEffectiveGravity reads the motion the move left (getDeltaMovement), not the climb's 0.2
+            vy -= delta.y() <= 0.0 && conditions.effects().slowFalling() ? Math.min(GRAVITY, 0.01) : GRAVITY;
         } else if (y > minY()) {
             vy = -0.1;
         } else {
