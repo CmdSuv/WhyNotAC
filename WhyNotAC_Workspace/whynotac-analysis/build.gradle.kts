@@ -17,3 +17,9 @@ tasks.withType<Test>().configureEach {
     systemProperty("whynotac.policyDoc", rootProject.file("docs/POLICY.md").absolutePath)
     inputs.file(rootProject.file("docs/POLICY.md"))
 }
+
+// The replay gate (RegressionReplayTest) replays every check over the honest sessions in regression/.
+tasks.withType<Test>().configureEach {
+    systemProperty("whynotac.regressionCorpus", rootProject.file("regression").absolutePath)
+    inputs.dir(rootProject.file("regression"))
+}

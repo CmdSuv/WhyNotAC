@@ -90,7 +90,9 @@ fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
 ## Faz 4 — Doğrulama ve veri
 
 - **Regresyon kaydı ve replay kapısı** (`VAL-10`, kritik): CI kayıtları saklanır. Her kontrol
-  sürümü bunların hepsinde yeniden oynatılır. Canlı ve replay eşitliği kapıdır.
+  sürümü bunların hepsinde yeniden oynatılır. Canlı ve replay eşitliği kapıdır. Yapıldı: [regression/](../regression/README.md)
+  kümesi ve `RegressionReplayTest` (her derlemede bütün kontroller, 0 kanıt ve 0 reddedilen aday; ortasına yarım blok
+  adım konan oturumu hareket kontrolü bulur). Tekne interpolasyonu hatasının oturumu kümede: düzeltmesiz kapı kırılır.
 - **Meşru davranış kataloğu** (`E1`, `DATA-01`, `VAL-13`): vanilla seçenekleri, erişilebilirlik
   yolları, izinli makrolar. Gerçek client senaryo matrisi.
 - **Paylar** (`VAL-4`): her kanıt, dürüst trafiğin sınıra ne kadar yaklaştığını raporlar.
