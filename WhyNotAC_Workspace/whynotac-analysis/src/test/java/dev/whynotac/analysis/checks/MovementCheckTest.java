@@ -823,6 +823,52 @@ class MovementCheckTest {
     }
 
     @Test
+    void aHorseMountedAgainIsNotJudgedFromItsFirstMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        horseOnGround(6.5, 6.5);
+        mountHorse(6.5, 6.5);
+        for (int i = 0; i < 40; i++) {
+            horseRideTick(i < 30 ? FORWARD : NONE, Vec3d.ZERO, -1); // the keys let go before the dismount: they move nothing at the next mount
+        }
+        assertTrue(Math.abs(horse.x() - 6.5) + Math.abs(horse.z() - 6.5) > 0.5, "it moved: " + horse);
+        int first = horseTicks().size();
+        // off it and on again where the player left it: the replica followed none of that ride, so no state at this mount
+        out(new ClientboundPacket.SetPassengers(HORSE, new int[] {}));
+        out(new ClientboundPacket.SetPassengers(HORSE, new int[] {SELF}));
+        sync();
+        for (int i = 0; i < 10; i++) {
+            horseRideTick(FORWARD, Vec3d.ZERO, -1);
+        }
+        List<MovementTracker.Tick> again = horseTicks().subList(first, horseTicks().size());
+        assertEquals(10, again.size(), String.valueOf(again));
+        assertTrue(again.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM), String.valueOf(again));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aBoatMountedAgainIsNotJudgedFromItsFirstMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        for (int i = 0; i < 30; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        assertTrue(Math.abs(boat.x() - 6.5) + Math.abs(boat.z() - 6.5) > 0.5, "it moved: " + boat);
+        int first = rideTicks().size();
+        // off it and on again where the player left it: the replica followed none of that ride, so no state at this mount
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[] {}));
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[] {SELF}));
+        sync();
+        for (int i = 0; i < 10; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        List<MovementTracker.Tick> again = rideTicks().subList(first, rideTicks().size());
+        assertEquals(10, again.size(), String.valueOf(again));
+        assertTrue(again.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM), String.valueOf(again));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
     void aBoatMountedWhileItInterpolatesIsExplained() throws Exception {
         ticks(5, NONE, 30.0F);
         boatOnGround(6.5, 6.5);

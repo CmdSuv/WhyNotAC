@@ -1144,13 +1144,11 @@ public final class ClientEntities {
                 out.add(s);
             }
             case Op.Control control -> {
+                // a vehicle not followed (lost, ridden by the player before, ...) has no state at this mount: not the last one's
+                boolean known = s.present && !s.lostAll && !s.lostPosition;
+                s.mounted = known && ClientMotion.interpolatesOnly(s.type) ? s.mounted(control.seq()) : null;
+                s.horseMounted = known && s.horse != null ? s.horseMounted(control.seq()) : null;
                 if (s.present && !s.lostAll) {
-                    if (!s.lostPosition && ClientMotion.interpolatesOnly(s.type)) {
-                        s.mounted = s.mounted(control.seq());
-                    }
-                    if (!s.lostPosition && s.horse != null) {
-                        s.horseMounted = s.horseMounted(control.seq());
-                    }
                     s.lostPosition = true;
                 }
                 out.add(s);

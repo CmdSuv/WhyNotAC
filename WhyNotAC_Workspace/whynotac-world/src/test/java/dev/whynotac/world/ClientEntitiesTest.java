@@ -165,6 +165,22 @@ class ClientEntitiesTest {
         assertEquals(mounted, entities.mounted(5), "kept after its tick");
     }
 
+    @Test
+    void aBoatMountedAgainHasNoStateFromTheLastMount() {
+        out(add(5, "minecraft:oak_boat", 0.5, 64.0, 0.5));
+        sync();
+        tick();
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        assertNotNull(entities.mounted(5));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {}));
+        sync();
+        tick();
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF})); // where the player left it: not followed
+        sync();
+        assertNull(entities.mounted(5), "the first mount's state is not this one's");
+    }
+
     /** The client's own player sends where it is (a MovePlayer with a position, in a tick of its own). */
     private void selfAt(double x, double y, double z) {
         entities.onEvent(new TimelineEvent.Inbound(sequence++, sequence, 0, new ServerboundPacket.MovePlayer(x, y, z, 0.0F, 0.0F, true, false, true, false)));
