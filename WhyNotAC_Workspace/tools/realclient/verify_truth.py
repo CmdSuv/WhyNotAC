@@ -81,18 +81,29 @@ def client_vehicle_moves(records):
 
 
 def server_vehicle_moves(events):
-    """MoveVehicle packets on the server timeline, and how many vehicle moves the server sent back (its corrections)."""
+    """MoveVehicle packets on the server timeline from the vehicle's ticks, the vehicle moves the server sent back (its
+    corrections: "moved wrongly") and the client's answers to them. The client answers each where it handles it, at frame
+    start and not in a tick (ClientPacketListener.handleMoveVehicle: snapped to the server's position when it is more
+    than 1e-5 away, then ServerboundMoveVehiclePacket.fromEntity): the next MoveVehicle after one, left out here, and
+    counted as matching when it is at the correction's position."""
     moves = []
     corrections = 0
+    answered = 0
+    pending = None
     for e in events:
         if e["type"] == "Outbound" and e["packet"]["type"] == "MoveVehicle":
             corrections += 1
+            pending = tuple(bits(e["packet"]["position"][a]["bits"]) for a in ("x", "y", "z"))
         if e["type"] != "Inbound" or e["packet"]["type"] != "MoveVehicle":
             continue
         p = e["packet"]
-        moves.append({"pos": tuple(bits(p["position"][a]["bits"]) for a in ("x", "y", "z")),
-                      "rot": (bits(p["yaw"]["bits"]), bits(p["pitch"]["bits"])), "onGround": p["onGround"]})
-    return moves, corrections
+        pos = tuple(bits(p["position"][a]["bits"]) for a in ("x", "y", "z"))
+        if pending is not None:
+            answered += pos == pending
+            pending = None
+            continue
+        moves.append({"pos": pos, "rot": (bits(p["yaw"]["bits"]), bits(p["pitch"]["bits"])), "onGround": p["onGround"]})
+    return moves, corrections, answered
 
 
 def server_received(events):
@@ -141,11 +152,12 @@ def main():
     check(aligned and len(sent) > 50, "every movement packet the server recorded is exactly the client's own state when it sent it, "
                                       f"bit for bit, in order ({detail})")
     vehicle_sent = client_vehicle_moves(records)
-    vehicle_received, corrections = server_vehicle_moves(events)
+    vehicle_received, corrections, answered = server_vehicle_moves(events)
     vmismatch = next((i for i, (a, b) in enumerate(zip(vehicle_sent, vehicle_received)) if a != b), None)
-    valigned = vmismatch is None and len(vehicle_sent) == len(vehicle_received) and corrections == 0
-    vdetail = (f"{len(vehicle_sent)} packets" if valigned else
-               f"client {len(vehicle_sent)} vs server {len(vehicle_received)}, {corrections} server corrections; first difference at {vmismatch}: "
+    valigned = vmismatch is None and len(vehicle_sent) == len(vehicle_received) and answered == corrections
+    vdetail = (f"{len(vehicle_sent)} packets, {corrections} server corrections answered at their position" if valigned else
+               f"client {len(vehicle_sent)} vs server {len(vehicle_received)}, {corrections} server corrections ({answered} answered at their "
+               f"position); first difference at {vmismatch}: "
                f"client {vehicle_sent[vmismatch] if vmismatch is not None else '-'} server {vehicle_received[vmismatch] if vmismatch is not None else '-'}")
     check(valigned and len(vehicle_sent) > 50, "every vehicle move the server recorded is exactly the steered boat's own state after its tick, "
                                                f"bit for bit, in order ({vdetail})")
