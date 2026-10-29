@@ -507,9 +507,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   **İddia yok:** koşumsuz, yavru ya da ölçekli ghast, binişte ya da sürüşte yerinde duran ghast (biri üstüne çıkınca
   sunucu bunu açar: client artık sürmez), koşumu değişen; atınkilerin geri kalanı da. Ghast'la binek zıplaması kanıttır;
   koşumsuz ghast'ta `MoveVehicle` eyer kuralıyla kanıttır. **Doğrulama:** gerçek client parkurunda iki ghast ayağı (yukarı bakarak ileri, zıplama
-  tuşuyla yukarı, geri ve yana; aşağı bakarak çime iniş; eğim binişten önce verilir); CI kapısı motorun ghast tiklerinin
-  client'la bit bit aynı olmasını (yükselirken ve eğimle sürülürken tikler dahil) ve takipçinin onları açıklamasını
-  ister. `HappyGhastTest`: bakış
+  tuşuyla yukarı, geri ve yana; aşağı bakarak çime iniş; eğim binişten önce verilir): `Horse` motoru ghast'ın 245 tikinin
+  hepsinde client'la bit bit aynı (40'ı zıplama tuşuyla yükselirken, 130'u eğimle sürülürken), takipçi 245 tikin hepsini
+  iddia edip açıkladı, her birinde client'ın kendi ghast'ı kümede. `HappyGhastTest`: bakış
   boyunca ileri ve yer çekimsiz, aşağı bakınca aşağı, geri yarı hızla, zıplama tuşuyla yukarı, kısa yoldan %8 dönüş, suda
   0.8, düşüş sayılmaz; `MovementCheckTest`: 45 tik ileri, yukarı ve eğimli sürüş açıklanır, hızından ileri `MoveVehicle`
   bulgu, koşumsuz ghast'ta `MoveVehicle` bulgu, yerinde duran ghast'ta iddia yok; mutasyonlar (zıplama tuşu, uçuş hızı,
