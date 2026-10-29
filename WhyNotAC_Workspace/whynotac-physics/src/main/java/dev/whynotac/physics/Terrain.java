@@ -135,6 +135,12 @@ final class Terrain {
      * then skips the fluid altogether).
      */
     static FluidPush fluidPushing(Colliders.World world, Box full, byte kind, double scale, Vec3d delta, boolean player) throws Colliders.Unknown {
+        return fluidPushing(world, full, kind, scale, delta, player, true);
+    }
+
+    /** {@link #fluidPushing}, for an entity fluids push ({@code isPushedByFluid}) or not (its fluid height alone). */
+    static FluidPush fluidPushing(Colliders.World world, Box full, byte kind, double scale, Vec3d delta, boolean player, boolean pushed)
+            throws Colliders.Unknown {
         BlockStates states = world.states();
         Box near = full.inflate(1.0, 1.0, 1.0); // touchingUnloadedChunk
         for (int cx = Colliders.floor(near.minX()) >> 4; cx <= VanillaMath.ceil(near.maxX()) >> 4; cx++) {
@@ -161,6 +167,9 @@ final class Terrain {
                     if (top >= box.minY()) {
                         touching = true;
                         height = Math.max(top - box.minY(), height);
+                        if (!pushed) {
+                            continue;
+                        }
                         Vec3d flow = flow(world, p, s, kind);
                         if (height < 0.4) {
                             flow = flow.scale(height);

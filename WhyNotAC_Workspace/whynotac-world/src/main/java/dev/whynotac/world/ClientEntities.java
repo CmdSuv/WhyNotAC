@@ -122,6 +122,8 @@ public final class ClientEntities {
             "minecraft:zombie_horse", "minecraft:camel", "minecraft:camel_husk", "minecraft:llama", "minecraft:trader_llama", "minecraft:nautilus",
             "minecraft:zombie_nautilus", PIG, STRIDER);
     public static final String HAPPY_GHAST = ClientMotion.HAPPY_GHAST;
+    /** The nautilus and the zombie nautilus ({@code AbstractNautilus}). */
+    public static final Set<String> NAUTILUSES = ClientMotion.NAUTILUSES;
     /** {@code HappyGhast.STAYS_STILL}: while set its client does not let the player control it ({@code isOnStillTimeout}). */
     private static final int DATA_GHAST_STAYS_STILL = 18;
 
@@ -577,8 +579,9 @@ public final class ClientEntities {
                 baby = entry.value() != 0 ? 1 : 0; // the flag isBaby() reads (DATA_BABY_ID of the type's class)
             } else if (entry.index() == DATA_NO_GRAVITY && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
                 noGravity = entry.value() != 0 ? 1 : 0;
-            } else if (horse && entry.index() == DATA_HORSE_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
-                horseFlags = (int) entry.value() & 0xFF;
+            } else if ((horse || NAUTILUSES.contains(head.type)) && entry.index() == DATA_HORSE_FLAGS
+                    && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
+                horseFlags = (int) entry.value() & 0xFF; // a nautilus's: TamableAnimal.DATA_FLAGS_ID (4: tame)
             } else if (HAPPY_GHAST.equals(head.type) && entry.index() == DATA_GHAST_STAYS_STILL
                     && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
                 horseFlags = entry.value() != 0 ? 1 : 0; // kept where a horse's flags are

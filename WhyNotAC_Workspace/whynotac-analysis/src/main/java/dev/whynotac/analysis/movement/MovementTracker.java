@@ -965,10 +965,11 @@ public final class MovementTracker {
                 }
                 String type = entities.type(set.vehicleId());
                 boolean horse = type != null && (ClientEntities.HORSE_TYPES.contains(type) || type.equals(ClientEntities.PIG)
-                        || type.equals(ClientEntities.STRIDER) || type.equals(ClientEntities.HAPPY_GHAST));
+                        || type.equals(ClientEntities.STRIDER) || type.equals(ClientEntities.HAPPY_GHAST) || ClientEntities.NAUTILUSES.contains(type));
                 if (controls && ride == null && horseRide == null && horse) {
                     // a horse the player rides first: it steers it once saddled (HorseRide.start rules out the others); a pig
-                    // while the player holds a carrot on a stick too, a strider a warped fungus on a stick; a happy ghast in a harness
+                    // while the player holds a carrot on a stick too, a strider a warped fungus on a stick; a happy ghast in a harness;
+                    // a nautilus saddled
                     horseRide = p.ambiguous ? HorseRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
                             : HorseRide.start(set.vehicleId(), p.sequence, entities.horseMounted(set.vehicleId()), view, world, keysBefore);
                 } else if (controls && ride == null && horseRide == null) {

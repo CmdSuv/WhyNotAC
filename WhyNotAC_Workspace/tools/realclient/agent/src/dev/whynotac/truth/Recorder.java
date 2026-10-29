@@ -78,6 +78,10 @@ public final class Recorder {
     private static Method ghastStaysStill;
     private static Object flyingSpeed;
     private static Class<?> ghastClass;
+    // a nautilus the player rides: the dash its rider's jump left pending, its cooldown, its dashing flag
+    private static Field nautilusJumpPendingScale, nautilusDashCooldown;
+    private static Method nautilusIsDashing;
+    private static Class<?> nautilusClass;
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -252,12 +256,20 @@ public final class Recorder {
         f64(line, "lavaHeight", lava);
         boolean strider = striderClass.isInstance(horse);
         boolean ghast = ghastClass.isInstance(horse);
+        boolean nautilus = nautilusClass.isInstance(horse);
         boolean pig = pigClass.isInstance(horse) || strider;
         if (strider) {
             bool(line, "suffocating", (Boolean) striderIsSuffocating.invoke(horse));
             bool(line, "noAi", (Boolean) mobIsNoAi.invoke(horse));
         }
-        if (ghast) { // no jump nor rearing; whether it stays still, its flying speed
+        if (nautilus) { // no rearing; the dash pending, its cooldown and flag
+            f32(line, "jumpPendingScale", nautilusJumpPendingScale.getFloat(horse));
+            bool(line, "allowStandSliding", false);
+            bool(line, "standing", false);
+            line.append(",\"standCounter\":0");
+            line.append(",\"dashCooldown\":").append(nautilusDashCooldown.getInt(horse));
+            bool(line, "dashing", (Boolean) nautilusIsDashing.invoke(horse));
+        } else if (ghast) { // no jump nor rearing; whether it stays still, its flying speed
             f32(line, "jumpPendingScale", 0.0F);
             bool(line, "allowStandSliding", false);
             bool(line, "standing", false);
@@ -281,7 +293,7 @@ public final class Recorder {
         }
         f32(line, "speed", speed.getFloat(horse));
         f64(line, "movementSpeed", (Double) getAttributeValue.invoke(horse, movementSpeed));
-        f64(line, "jumpStrength", pig || ghast ? 0.0 : (Double) getAttributeValue.invoke(horse, jumpStrength));
+        f64(line, "jumpStrength", pig || ghast || nautilus ? 0.0 : (Double) getAttributeValue.invoke(horse, jumpStrength));
         f32(line, "maxUpStep", (Float) maxUpStep.invoke(horse));
         f64(line, "gravity", (Double) getEffectiveGravity.invoke(horse));
         effects(line, (java.util.Map<?, ?>) activeEffects.get(horse));
@@ -584,6 +596,10 @@ public final class Recorder {
         mobIsNoAi = method(loader, TruthAgent.MOB, "isNoAi()");
         ghastClass = Class.forName(mappings.get(TruthAgent.HAPPY_GHAST).obf(), false, loader);
         ghastStaysStill = method(loader, TruthAgent.HAPPY_GHAST, "staysStill()");
+        nautilusClass = Class.forName(mappings.get(TruthAgent.NAUTILUS).obf(), false, loader);
+        nautilusJumpPendingScale = field(loader, TruthAgent.NAUTILUS, "playerJumpPendingScale");
+        nautilusDashCooldown = field(loader, TruthAgent.NAUTILUS, "dashCooldown");
+        nautilusIsDashing = method(loader, TruthAgent.NAUTILUS, "isDashing()");
         String steering = "net.minecraft.world.entity.ItemBasedSteering";
         steeringBoosting = field(loader, steering, "boosting");
         steeringBoostTime = field(loader, steering, "boostTime");

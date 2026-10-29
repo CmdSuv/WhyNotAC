@@ -9,8 +9,8 @@ import java.util.List;
 /**
  * One {@code AbstractHorse.tick()} of a horse (donkey, mule, skeleton or zombie horse) the local player rides and
  * controls (saddled, the player its first passenger: {@code getControllingPassenger}), bit for bit as the 1.21.11 client
- * runs it; a pig's ({@code Mob.tick}), a strider's ({@code Strider.tick}, {@link Strider}) and a happy ghast's
- * ({@code HappyGhast.tick}, {@link Flying}) alike. The tick runs
+ * runs it; a pig's ({@code Mob.tick}), a strider's ({@code Strider.tick}, {@link Strider}), a happy ghast's
+ * ({@code HappyGhast.tick}, {@link Flying}) and a nautilus's ({@code AbstractNautilus.tick}, {@link Nautilus}) alike. The tick runs
  * before its rider's: {@code Entity.baseTick} (fluid currents, a fall in lava halved), then
  * {@code LivingEntity.aiStep}: the interpolation's step toward where the server last put it, the motion's small parts
  * zeroed (a non-player's: each horizontal axis below 0.003), and {@code travelRidden}: the rider's input
@@ -66,21 +66,31 @@ public final class Horse {
      * @param entities          the boxes of the entities it collides with ({@code canCollideWith}), as the client holds them
      * @param strider           a strider's own tick ({@link Strider}), or null
      * @param flying            a happy ghast's ({@link Flying}), or null
+     * @param nautilus          a nautilus's ({@link Nautilus}), or null
      */
     public record Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
-            boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider, Flying flying) {
+            boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider, Flying flying,
+            Nautilus nautilus) {
         public Conditions {
             entities = List.copyOf(entities);
         }
 
         public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
+                boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider, Flying flying) {
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, strider, flying,
+                    null);
+        }
+
+        public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
                 boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider) {
-            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, strider, null);
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, strider, null,
+                    null);
         }
 
         public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
                 boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities) {
-            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, null, null);
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, null, null,
+                    null);
         }
     }
 
@@ -113,6 +123,18 @@ public final class Horse {
      */
     public record Strider(float speed, float suffocatingSpeed, java.util.Set<String> warmBlocks) {}
 
+    /**
+     * A nautilus ({@code AbstractNautilus}, a zombie nautilus alike): it goes where its rider steers and looks
+     * ({@code getRiddenInput}: the rider's strafe, ahead along the rider's pitch, backward half as fast), turns half the
+     * way to its rider's yaw each tick ({@code tickRidden}), and dashes along its rider's look at a riding jump
+     * ({@code executeRidersJump}; then 40 ticks before the next, {@code dashCooldown}). Its ridden speed
+     * ({@code getRiddenSpeed}) is the movement speed attribute times 0.0325 in water, else 0.02; in water it moves with
+     * no gravity and keeps 0.9 of its motion ({@code travelInWater}); no fluid pushes it ({@code isPushedByFluid}).
+     *
+     * @param movementSpeed the movement speed attribute's value
+     */
+    public record Nautilus(double movementSpeed) {}
+
     private final Colliders.World world;
     private final BlockStates states;
     private final Conditions conditions;
@@ -143,6 +165,7 @@ public final class Horse {
     private double waterHeight;
     private double lavaHeight;
     private boolean suffocating;
+    private int dashCooldown;
     /** {@code getSpeed()}: what {@code travelRidden} set ({@code getRiddenSpeed}). */
     private float speed;
     /** {@code oldPosition()}: where the tick started ({@code setOldPosAndRot}). */
@@ -177,6 +200,7 @@ public final class Horse {
         interpolation = pre.interpolation();
         lavaHeight = pre.lavaHeight();
         suffocating = pre.suffocating();
+        dashCooldown = pre.dashCooldown();
         speed = conditions.speed();
         oldPosition = new Vec3d(x, y, z);
     }
@@ -227,7 +251,32 @@ public final class Horse {
         }
         return new HorseState(s.x(), s.y(), s.z(), s.deltaMovement(), s.yRot(), s.xRot(), s.onGround(), s.horizontalCollision(), s.verticalCollision(),
                 s.verticalCollisionBelow(), s.fallDistance(), s.support(), s.onGroundNoBlocks(), s.stuckSpeedMultiplier(), s.inPowderSnow(),
-                s.noJumpDelay(), jumpPendingScale(power), slide, standing, standCounter, s.interpolation(), s.lavaHeight(), s.suffocating());
+                s.noJumpDelay(), jumpPendingScale(power), slide, standing, standCounter, s.interpolation(), s.lavaHeight(), s.suffocating(),
+                s.dashCooldown());
+    }
+
+    /**
+     * {@code AbstractNautilus.onPlayerJump(power)} on a saddled nautilus, as the rider's tick releases a riding jump: with
+     * its dash cooled down the jump waits for its next tick (a power under 0 too; a rider's tick sends one only then,
+     * {@code LocalPlayer.aiStep}: {@code getJumpCooldown() == 0}).
+     */
+    public static HorseState onNautilusJump(HorseState s, int power) {
+        return s.dashCooldown() > 0 ? s : withDash(s, jumpPendingScale(power), s.dashCooldown());
+    }
+
+    /**
+     * {@code AbstractNautilus.onSyncedDataUpdated(DASH)}, as the client handles the dashing flag's data during the ride: a
+     * cooled-down dash cools down 40 ticks again ({@code dashCooldown == 0 ? 40 : dashCooldown}).
+     */
+    public static HorseState onDashSynced(HorseState s) {
+        return s.dashCooldown() == 0 ? withDash(s, s.jumpPendingScale(), 40) : s;
+    }
+
+    private static HorseState withDash(HorseState s, float jumpPendingScale, int dashCooldown) {
+        return new HorseState(s.x(), s.y(), s.z(), s.deltaMovement(), s.yRot(), s.xRot(), s.onGround(), s.horizontalCollision(), s.verticalCollision(),
+                s.verticalCollisionBelow(), s.fallDistance(), s.support(), s.onGroundNoBlocks(), s.stuckSpeedMultiplier(), s.inPowderSnow(),
+                s.noJumpDelay(), jumpPendingScale, s.allowStandSliding(), s.standing(), s.standCounter(), s.interpolation(), s.lavaHeight(),
+                s.suffocating(), dashCooldown);
     }
 
     /**
@@ -244,7 +293,7 @@ public final class Horse {
     private HorseState state() {
         return new HorseState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, verticalCollision, verticalCollisionBelow, fallDistance, support,
                 onGroundNoBlocks, stuck, inPowderSnow, noJumpDelay, jumpPendingScale, allowStandSliding, standing, standCounter, interpolation,
-                lavaHeight, suffocating);
+                lavaHeight, suffocating, dashCooldown);
     }
 
     private void run(Rider rider) throws Colliders.Unknown {
@@ -287,26 +336,40 @@ public final class Horse {
         Flying flying = conditions.flying();
         if (flying != null) {
             // travelRidden: HappyGhast.getRiddenInput, tickRidden, then travel (travelFlying)
-            float up = 0.0F;
-            float ahead = 0.0F;
-            if (rider.zza() != 0.0F) {
-                float cos = VanillaMath.cos(rider.xRot() * VanillaMath.DEG_TO_RAD);
-                float sin = -VanillaMath.sin(rider.xRot() * VanillaMath.DEG_TO_RAD);
-                if (rider.zza() < 0.0F) {
-                    cos *= -0.5F;
-                    sin *= -0.5F;
-                }
-                up = sin;
-                ahead = cos;
-            }
+            float[] look = lookInput(rider);
             if (rider.jumping()) {
-                up += 0.5F;
+                look[1] += 0.5F;
             }
-            Vec3d steered = new Vec3d(rider.xxa(), up, ahead).scale(flying.inputScale());
+            Vec3d steered = new Vec3d(look[0], look[1], look[2]).scale(flying.inputScale());
             float turned = yRot + VanillaMath.wrapDegrees(rider.yRot() - yRot) * 0.08F;
             setRot(turned, rider.xRot() * 0.5F);
             travelFlying(steered, flying.speed());
             applyEffectsFromBlocks();
+            return;
+        }
+        Nautilus nautilus = conditions.nautilus();
+        if (nautilus != null) {
+            // travelRidden: AbstractNautilus.getRiddenInput, tickRidden (half the way to its rider's yaw; the dash its rider's
+            // last tick released: isLocalInstanceAuthoritative, never isJumping on the client), then travel at the ridden speed
+            float[] look = lookInput(rider);
+            Vec3d steered = new Vec3d(look[0], look[1], look[2]);
+            float turned = yRot + VanillaMath.wrapDegrees(rider.yRot() - yRot) * 0.5F;
+            setRot(turned, rider.xRot() * 0.5F);
+            if (jumpPendingScale > 0.0F) {
+                dash(jumpPendingScale, rider, nautilus);
+            }
+            jumpPendingScale = 0.0F;
+            speed = wasTouchingWater ? 0.0325F * (float) nautilus.movementSpeed() : 0.02F * (float) nautilus.movementSpeed();
+            if (wasTouchingWater || lavaHeight > 0.0) {
+                travelInFluid(steered);
+            } else {
+                travelInAir(steered);
+            }
+            applyEffectsFromBlocks();
+            // --- AbstractNautilus.tick, after LivingEntity.tick: the dash cools down ---
+            if (dashCooldown > 0) {
+                dashCooldown--;
+            }
             return;
         }
         // travelRidden: getRiddenInput, tickRidden, then travel at the ridden speed
@@ -354,6 +417,43 @@ public final class Horse {
                 delta = delta.scale(0.5).add(0.0, 0.05, 0.0);
             }
         }
+    }
+
+    /**
+     * {@code getRiddenInput} of a mount that goes where its rider looks ({@code HappyGhast}, {@code AbstractNautilus}): the
+     * rider's strafe, and moving ahead along the rider's pitch (backward half as fast). Returns {x, up, ahead}.
+     */
+    private static float[] lookInput(Rider rider) {
+        float up = 0.0F;
+        float ahead = 0.0F;
+        if (rider.zza() != 0.0F) {
+            float cos = VanillaMath.cos(rider.xRot() * VanillaMath.DEG_TO_RAD);
+            float sin = -VanillaMath.sin(rider.xRot() * VanillaMath.DEG_TO_RAD);
+            if (rider.zza() < 0.0F) {
+                cos *= -0.5F;
+                sin *= -0.5F;
+            }
+            up = sin;
+            ahead = cos;
+        }
+        return new float[] {rider.xxa(), up, ahead};
+    }
+
+    /**
+     * {@code AbstractNautilus.executeRidersJump}: along its rider's look ({@code getLookAngle}, {@code calculateViewVector}),
+     * 1.2 in water (else 0.5) times the jump's scale, the movement speed attribute and the block's speed factor
+     * ({@code getBlockSpeedFactor}, no movement efficiency); then 40 ticks before the next.
+     */
+    private void dash(float scale, Rider rider, Nautilus nautilus) throws Colliders.Unknown {
+        float pitch = rider.xRot() * VanillaMath.DEG_TO_RAD;
+        float yaw = -rider.yRot() * VanillaMath.DEG_TO_RAD;
+        float cosYaw = VanillaMath.cos(yaw);
+        float sinYaw = VanillaMath.sin(yaw);
+        float cosPitch = VanillaMath.cos(pitch);
+        float sinPitch = VanillaMath.sin(pitch);
+        Vec3d look = new Vec3d(sinYaw * cosPitch, -sinPitch, cosYaw * cosPitch);
+        delta = delta.add(look.scale((wasTouchingWater ? 1.2F : 0.5F) * scale * nautilus.movementSpeed() * Terrain.blockSpeedFactor(world, support, x, y, z)));
+        dashCooldown = 40;
     }
 
     /**
@@ -435,7 +535,12 @@ public final class Horse {
         double startY = y;
         double gravity = effectiveGravity(falling);
         Box before = box();
-        if (wasTouchingWater) {
+        if (wasTouchingWater && conditions.nautilus() != null) {
+            delta = delta.add(Vec3d.inputVector(input, speed, yRot)); // AbstractNautilus.travelInWater: its speed, no gravity
+            move(delta);
+            requireInScope(before, box(), "along the move");
+            delta = delta.scale(0.9);
+        } else if (wasTouchingWater) {
             float slowDown = conditions.effects().dolphinsGrace() ? 0.96F : conditions.waterSlowDown(); // not sprinting; no water movement efficiency
             delta = delta.add(Vec3d.inputVector(input, 0.02F, yRot)); // moveRelative
             move(delta);
@@ -655,7 +760,7 @@ public final class Horse {
     }
 
     private boolean updateFluidHeightAndDoFluidPushing(byte kind, double scale) throws Colliders.Unknown {
-        Terrain.FluidPush push = Terrain.fluidPushing(world, box(), kind, scale, delta, false);
+        Terrain.FluidPush push = Terrain.fluidPushing(world, box(), kind, scale, delta, false, conditions.nautilus() == null); // isPushedByFluid
         delta = push.delta();
         if (kind == BlockStates.FLUID_WATER) {
             waterHeight = push.height();

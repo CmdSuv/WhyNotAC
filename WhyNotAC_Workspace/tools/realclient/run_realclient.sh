@@ -440,6 +440,19 @@ boat 74.5 -36.5 80.5 -60 -38.5 -60 ""; paddle w/2.0 w,d/1.0 -/0.5; unboat
 boat 74.5 -34.5 82.5 -55 -34.5 -90 ",NoGravity:1b"; paddle -/0.3; fall; paddle -/1.5 w/1.0 -/0.3; unboat
 boat 74.5 -22.5 80.5 -55 -25.0 -90 ",NoGravity:1b"; paddle -/0.3; fall; paddle -/2.5 w/0.8 -/0.3; unboat
 boat 44.5 -44.5 45.5 -60 -42.5 -90 ""; paddle w/1.5 a/0.5 -/0.5; unboat
+# Nautiluses, in the boats' pool after them and on the grass south of it (z -24.5): a nautilus is tame (its owner the
+# player: its saddle counts only then), saddled and NoAI (it stays where it is put), the player put on it from the grass
+# with a pitch the leg sets (no mouse motion in the course). It swims where its rider looks (up looking up, out of the
+# water and back), dashes along that look at a released jump (1.2 of it in water, 0.5 on land), the jump key pressed and
+# let go while the dash cools down does nothing, and the next dash once it has; backward and sideways; on land it walks
+# slowly and dashes. The truth agent records its tick (AbstractNautilus.tick).
+OWNER=$(python3 -I -c 'import hashlib, struct, sys; h = bytearray(hashlib.md5(("OfflinePlayer:" + sys.argv[1]).encode()).digest()); h[6] = h[6] & 0x0f | 0x30; h[8] = h[8] & 0x3f | 0x80; print("[I;" + ",".join(str(v) for v in struct.unpack(">iiii", bytes(h))) + "]")' "$NAME")
+nautilus() { echo "kill @e[tag=wnn]" > "$FIFO"; echo "tp $NAME $1 -60 $2 -90 $3" > "$FIFO"; sleep 1.5
+  echo "summon minecraft:nautilus $4 $5 $6 {Tags:[\"wnn\"],NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Owner:$OWNER,Rotation:[-90f,0f],equipment:{saddle:{id:\"minecraft:saddle\",count:1}}}" > "$FIFO"; sleep 1.5
+  echo "ride $NAME mount @e[tag=wnn,limit=1]" > "$FIFO"; sleep 1.0; }
+unnautilus() { echo "tp $NAME $1 -60 $2 -90 0" > "$FIFO"; sleep 0.5; echo "kill @e[tag=wnn]" > "$FIFO"; sleep 2.0; }
+nautilus 41.5 -26.5 -15 41.5 -62 -34.5; paddle w/1.0 space/0.4 -/0.5 space/0.3 -/1.5 space/0.4 -/1.0 s/0.5 a/0.5 -/0.5; unnautilus 41.5 -26.5
+nautilus 44.5 -22.5 0 45.5 -60 -24.5; paddle w/1.0 space/0.4 -/1.0 w/1.0 -/0.5; unnautilus 44.5 -21.5
 # Horses, west of everything (x -120..-40, z -71..-57, forceloaded with the rest at the start): four lanes, each ridden
 # from x -78.5, the course on both sides of it (the rider's yaw may turn between the mount and its first tick, a mouse
 # motion through the X server the leg does not send: it then rides another way). Grass (z -70); a stone step one block

@@ -22,6 +22,8 @@ import java.util.List;
  *       {@code isEyeInFluid}): water and flowing water, lava and flowing lava.
  *   <li>{@code minecraft:powder_snow_walkable_mobs} ({@code PowderSnowBlock.canEntityWalkOnPowderSnow}): not the player.
  *   <li>{@code minecraft:strider_warm_blocks} ({@code Strider.tick}'s suffocation): exactly lava.
+ *   <li>{@code minecraft:can_float_while_ridden} ({@code LivingEntity.floatInWaterWhileRidden}): exactly
+ *       {@link dev.whynotac.physics.Horse#FLOATS_WHILE_RIDDEN}.
  * </ul>
  */
 public final class EngineTags {
@@ -33,6 +35,13 @@ public final class EngineTags {
     public static final int LAVA = 4;
     /** {@code BuiltInRegistries.ENTITY_TYPE}: the player. */
     public static final int PLAYER = 155;
+    /** {@code BuiltInRegistries.ENTITY_TYPE}: the camel, camel husk, donkey, horse, mule and zombie horse ({@link dev.whynotac.physics.Horse#FLOATS_WHILE_RIDDEN}). */
+    public static final int CAMEL = 19;
+    public static final int CAMEL_HUSK = 20;
+    public static final int DONKEY = 36;
+    public static final int HORSE = 66;
+    public static final int MULE = 87;
+    public static final int ZOMBIE_HORSE = 151;
 
     private final int[] climbable;
     private final int[] canGlideThrough;
@@ -92,6 +101,10 @@ public final class EngineTags {
         }
         if (!tags.certainlyExactly(ClientTags.BLOCK, "minecraft:strider_warm_blocks", striderWarmBlocks)) {
             return "minecraft:strider_warm_blocks";
+        }
+        if (!tags.certainlyExactly(ClientTags.ENTITY_TYPE, "minecraft:can_float_while_ridden",
+                new int[] {CAMEL, CAMEL_HUSK, DONKEY, HORSE, MULE, ZOMBIE_HORSE})) {
+            return "minecraft:can_float_while_ridden";
         }
         return null;
     }

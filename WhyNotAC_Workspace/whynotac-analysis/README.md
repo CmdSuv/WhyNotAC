@@ -232,7 +232,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   `OnFoot.CLIMBABLE`, `minecraft:can_glide_through` tam olarak `OnFoot.CAN_GLIDE_THROUGH`,
   `minecraft:fall_damage_resetting` tam olarak `OnFoot.FALL_DAMAGE_RESETTING`, `minecraft:fences` ve `minecraft:walls` adı `*_fence` ve `*_wall` olan bloklar, sıvı etiketleri
   `minecraft:water` ve `minecraft:lava` su/akan su ve lav/akan lav, `minecraft:powder_snow_walkable_mobs` oyuncuyu
-  tutmaz. Client'ın etiketleri (`ClientTags`, sunucunun `update_tags`'i) iddianın çapasından beri bunlardan başka olmuş
+  tutmaz, `minecraft:strider_warm_blocks` tam olarak lav, `minecraft:can_float_while_ridden` (varlık türü; derin suda
+  sürülen bineği yükseltir) tam olarak `Horse.FLOATS_WHILE_RIDDEN` (at, zombi at, katır, eşek, deve, deve kabuğu; sicil
+  numaraları `UpdateTagsTranslationTest`'te oyununkilere bağlı). Client'ın etiketleri (`ClientTags`, sunucunun `update_tags`'i) iddianın çapasından beri bunlardan başka olmuş
   olabiliyorsa bulgu açılmaz (tik açıklanamamış kalır, iddia edilmez). Vanilla sunucuda E2E ve gerçek client'ın
   `/whynotac self` çıktısı `engineTags=vanilla` der.
 
@@ -514,6 +516,34 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   0.8, düşüş sayılmaz; `MovementCheckTest`: 45 tik ileri, yukarı ve eğimli sürüş açıklanır, hızından ileri `MoveVehicle`
   bulgu, koşumsuz ghast'ta `MoveVehicle` bulgu, yerinde duran ghast'ta iddia yok; mutasyonlar (zıplama tuşu, uçuş hızı,
   yerinde durma, `wrapDegrees`, 0.91F, geri çarpanı, düşüş) testleri kırar.
+- **Sürülen nautilus (`HorseRide`, nautilus olarak; zombi nautilus da):** eyerli ve evcil nautilus'un (`isSaddled`
+  `canUseSlot`'tan geçer: eyer yalnızca evcil nautilus'ta sayılır; evcillik `TamableAnimal` bayraklarında) ilk yolcusu
+  oyuncuysa client onu kendi fiziğiyle sürer (`Horse.Nautilus`): girdi binicinin son tikindeki yan adımı ve ileri/geri
+  tuşu, ileri binicinin bakışı boyunca (`cos`/`-sin` eğim; geri yarı hızla, ölçeksiz, zıplama tuşu yok); dönüşü her tik
+  binicinin yönüne yolun yarısı (`tickRidden`, eğimi binicininkinin yarısı); hızı hareket hızı özniteliğinin suda 0.0325,
+  karada 0.02 katı (`getRiddenSpeed`); suda yer çekimsiz gider ve hızının 0.9'unu tutar (`travelInWater`), hiçbir sıvı onu
+  itmez (`isPushedByFluid`); lavda ve karada sıradan yol. Binek zıplaması atılmadır (`executeRidersJump`): binicinin bakışı
+  boyunca suda 1.2, karada 0.5 kere zıplamanın ölçeği, öznitelik ve bloğun hız çarpanı; sonra 40 tik bekleme
+  (`dashCooldown`). Binici tuşlarını yalnızca bekleme bitmişken işler (`LocalPlayer.aiStep`: `getJumpCooldown() == 0`;
+  yoksa ölçek 0, sayaç donar); `DASH` verisi bekleme bitmişken gelirse bekleme yeniden 40 olur (`onSyncedDataUpdated`).
+  Binişte bekleme bilinmez (client binişten önce kurmuş olabilir: 0 ile 40 arası): ilk atılmaya kadar bir bırakış zıplama
+  gönderebilir de göndermeyebilir de, gücü denetlenmez; client'ın kendi atılmasından sonra bekleme kesindir. **Kanıt:**
+  bekleme kesin sürerken gönderilen binek zıplaması ("while its nautilus's dash cools down"), bekleme bitmişken
+  zıplamasız bırakış, tuşun tuttuğundan başka güç ve hızından öte `MoveVehicle`. **İddia yok:** evcil değil, eyersiz,
+  yavru ya da ölçekli nautilus, eyeri değişen ya da sürüşte evcilliği kalkan; atınkilerin geri kalanı (suyun binişten
+  önce itmesi dışında: nautilus'u itmez). **Doğrulama:** gerçek client parkurunda iki nautilus ayağı (teknelerin
+  havuzunda yukarı bakarak ileri, sudan çıkıp geri düşerek, atılma, beklemede basılıp bırakılan tuş, bekleme bitince
+  ikinci atılma, geri ve yana; çimde yürüme ve atılma; evcil: sahibi oyuncu): `Horse` motoru nautilus'un 252 tikinin
+  hepsinde client'la bit bit aynı (144'ü suda, 108'i karada, 3 atılma, biri karada, 30'u eğimle sürülürken; bekleme
+  sayacı ve tikin hızı da), takipçi 252 tikin hepsini iddia edip açıkladı, her birinde client'ın kendi nautilus'u kümede.
+  `NautilusTest`: suda yer çekimsiz yüzme hızı (zombi nautilus'un özniteliğiyle
+  de), bakışla yukarı, geri yarı hızla, yarım dönüş, akıntı itmez (atı iter), karada yürüme hızı ve yer çekimi, bakış
+  boyunca suda 1.2 ve karada 0.5 atılma, 40 tik bekleme ve bitince yeniden atılma, `DASH` verisi; `MovementCheckTest`:
+  100 tik ileri, iki atılma ve beklemede basılıp bırakılan tuş açıklanır, beklemenin bitişine taşan basılı tuşun eksi
+  gücüyle (-80) zayıf atılma açıklanır, `DASH` verisinden sonra zıplamasız bırakış açıklanır, beklemede atılma, başka
+  güçte atılma, bekleme bitmişken zıplamasız bırakış ve hızından öte hareket bulgu, evcil olmayan nautilus'ta iddia yok;
+  mutasyonlar (0.9, 0.5 karada, itilmezlik, yarım dönüş, bekleme sayacı, suda hız, atılmanın türü, `DASH`, bekleme
+  dalı, bilinen sayaç, zıplamasız bırakış, evcillik) testleri kırar.
 - **Araçsızken araç paketi:** yürürken bir `MoveVehicle`, `PaddleBoat` ya da binek zıplaması yaya iddiasını bitirirdi;
   hile her tike bir tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken
   gönderir (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin

@@ -40,7 +40,9 @@ final class VanillaTagsPacket {
                         tag("minecraft:can_glide_through", canGlideThrough), tag("minecraft:fall_damage_resetting", fallDamageResetting),
                         tag("minecraft:fences", fences), tag("minecraft:walls", walls),
                         tag("minecraft:strider_warm_blocks", List.of(states.blockId(states.firstStateOf("minecraft:lava")))))),
-                new ClientboundPacket.UpdateTags.RegistryTags("minecraft:entity_type", List.of(tag("minecraft:powder_snow_walkable_mobs", List.of()))),
+                new ClientboundPacket.UpdateTags.RegistryTags("minecraft:entity_type", List.of(tag("minecraft:powder_snow_walkable_mobs", List.of()),
+                        tag("minecraft:can_float_while_ridden", List.of(EngineTags.HORSE, EngineTags.ZOMBIE_HORSE, EngineTags.MULE, EngineTags.DONKEY,
+                                EngineTags.CAMEL, EngineTags.CAMEL_HUSK)))),
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:fluid", List.of(
                         tag("minecraft:water", List.of(EngineTags.WATER, EngineTags.FLOWING_WATER)),
                         tag("minecraft:lava", List.of(EngineTags.LAVA, EngineTags.FLOWING_LAVA))))));

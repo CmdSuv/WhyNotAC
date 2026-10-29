@@ -66,14 +66,17 @@ final class ClientMotion {
     /** The happy ghast, which its player steers in a harness ({@code HappyGhast.getControllingPassenger}), kept as a horse is. */
     static final String HAPPY_GHAST = "minecraft:happy_ghast";
 
+    /** The nautilus and the zombie nautilus, which their player steers saddled ({@code AbstractNautilus.getControllingPassenger}), kept as a horse is. */
+    static final Set<String> NAUTILUSES = Set.of("minecraft:nautilus", "minecraft:zombie_nautilus");
+
     /**
      * The living vehicles the replica keeps for their player's mount ({@link ClientEntities#horseMounted}): the horses, the
-     * pig, the strider and the happy ghast.
+     * pig, the strider, the happy ghast and the nautiluses.
      */
     static final Set<String> RIDDEN = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
-            "minecraft:zombie_horse", PIG, STRIDER, HAPPY_GHAST);
+            "minecraft:zombie_horse", PIG, STRIDER, HAPPY_GHAST, "minecraft:nautilus", "minecraft:zombie_nautilus");
 
-    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse, a pig, a strider or a happy ghast. */
+    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse, a pig, a strider, a happy ghast or a nautilus. */
     static boolean keptAtMount(String type) {
         return type != null && (interpolatesOnly(type) || RIDDEN.contains(type));
     }

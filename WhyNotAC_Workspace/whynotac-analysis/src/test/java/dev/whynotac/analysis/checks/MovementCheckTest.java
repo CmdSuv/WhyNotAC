@@ -8,6 +8,7 @@ import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.movement.EngineTags;
 import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
@@ -883,6 +884,93 @@ class MovementCheckTest {
         now += SECOND / 20;
     }
 
+    // --- a nautilus the player rides ---
+
+    private static final int NAUTILUS = 45;
+    private static final Horse.Conditions NAUTILUS_CONDITIONS = new Horse.Conditions(0.0F, 0.0, 1.0F, 0.08, Horse.Effects.NONE, 0.8F, false, 0.875F,
+            0.95F, null, List.of(), null, null, new Horse.Nautilus(1.0));
+
+    /** A tame, saddled nautilus put on the stone at (x, 64, z); the player ticks a few times on foot. */
+    private void nautilusOnGround(double x, double z) throws Colliders.Unknown {
+        out(ClientboundPacket.AddEntity.received(NAUTILUS, new UUID(9, 9), "minecraft:nautilus", x, 64.0, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0,
+                0));
+        out(new ClientboundPacket.SetEntityData(NAUTILUS, List.of(new ClientboundPacket.SetEntityData.DataEntry(17,
+                ClientboundPacket.SetEntityData.Kind.BYTE, 4)), 0)); // tame (TamableAnimal)
+        out(new ClientboundPacket.SetEquipment(NAUTILUS, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                new Stack("minecraft:saddle", 1, List.of(), List.of(), null, false)))));
+        out(new ClientboundPacket.EntityPositionSync(NAUTILUS, new Vec3d(x, 64.0, z), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        villagers.add(new double[] {x, 64.0, z, 0.875F, 0.95F});
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** The server puts the player on the nautilus; the client handles it before its next tick (its dash cooled down). */
+    private void mountNautilus(double x, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(NAUTILUS, new int[] {SELF}));
+        sync();
+        villagers.removeIf(v -> v.length > 3);
+        horse = new HorseState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, 64.0, z, GROUND,
+                NAUTILUS_CONDITIONS), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null, 0.0, false, 0);
+        riderKeys = NONE;
+        nautilusJump = null;
+        jumpRidingTicks = 0;
+        jumpRidingScale = 0.0F;
+    }
+
+    /** The synthetic client's {@code LocalPlayer.jumpRidingTicks} and {@code jumpRidingScale}, and the power its last tick sent (or null). */
+    private int jumpRidingTicks;
+    private float jumpRidingScale;
+    private Integer nautilusJump;
+
+    /**
+     * One ride tick: the nautilus's (the input its rider's last tick left, the rotation this tick sends, the jump released
+     * then), then the passenger's ({@code LocalPlayer.aiStep}): once its dash cooled down its riding jump when the jump key
+     * was let go (and {@code spam}: one even while it cools down), its input, its rotation and the nautilus's move moved by
+     * {@code cheat}.
+     */
+    private void nautilusRideTick(PlayerState.Keys keys, float pitch, Vec3d cheat, boolean spam) throws Colliders.Unknown {
+        nautilusRideTick(keys, pitch, cheat, spam, null);
+    }
+
+    /** {@link #nautilusRideTick}, a jump released sending {@code power} (null: the key's; {@code MIN_VALUE}: none). */
+    private void nautilusRideTick(PlayerState.Keys keys, float pitch, Vec3d cheat, boolean spam, Integer power) throws Colliders.Unknown {
+        if (nautilusJump != null) {
+            horse = Horse.onNautilusJump(horse, nautilusJump);
+        }
+        float[] input = Horse.riderInput(riderKeys);
+        horse = Horse.tick(horse, new Horse.Rider(input[0], input[1], 30.0F, pitch), GROUND, NAUTILUS_CONDITIONS);
+        nautilusJump = null;
+        if (horse.dashCooldown() == 0 || spam) { // getJumpCooldown() == 0
+            if (jumpRidingTicks < 0 && ++jumpRidingTicks == 0) {
+                jumpRidingScale = 0.0F;
+            }
+            if (riderKeys.jump() && !keys.jump() || spam) {
+                jumpRidingTicks = -10;
+                if (power == null || power != Integer.MIN_VALUE) {
+                    nautilusJump = power != null ? power : (int) Math.floor(jumpRidingScale * 100.0F);
+                    in(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP, nautilusJump));
+                }
+            } else if (!riderKeys.jump() && keys.jump()) {
+                jumpRidingTicks = 0;
+                jumpRidingScale = 0.0F;
+            } else if (riderKeys.jump()) {
+                jumpRidingTicks++;
+                jumpRidingScale = jumpRidingTicks < 10 ? jumpRidingTicks * 0.1F : 0.8F + 2.0F / (jumpRidingTicks - 9) * 0.1F;
+            }
+        } else {
+            jumpRidingScale = 0.0F;
+        }
+        if (!keys.equals(sentInput)) {
+            in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
+            sentInput = keys;
+        }
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, pitch, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+        riderKeys = keys;
+    }
+
     // --- a happy ghast the player steers ---
 
     private static final int GHAST = 44;
@@ -1268,6 +1356,126 @@ class MovementCheckTest {
     }
 
     @Test
+    void aNautilusRiddenByAVanillaClientIsExplainedDashesAndAll() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 100; i++) {
+            // ahead; a dash; the jump key held and let go while it cools down (no jump); a dash once it has
+            PlayerState.Keys keys = i < 8 ? FORWARD : i < 13 ? JUMP : i < 20 ? FORWARD : i < 24 ? JUMP : i < 60 ? NONE : i < 66 ? JUMP : NONE;
+            nautilusRideTick(keys, i < 30 ? 0.0F : -20.0F, Vec3d.ZERO, false);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(100, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(horse.dashCooldown() > 0 && horse.dashCooldown() < 40, "it dashed again: " + horse);
+        assertTrue(horse.x() < 6.0 && horse.z() > 8.0, "ahead and dashing where its rider looks: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void theJumpKeyHeldAsItsDashCoolsDownGivesAWeakDash() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 60; i++) {
+            // a dash (released at tick 5); the key held from tick 30, let go a tick after the dash has cooled down (tick 45):
+            // the count is still under 0, so is the power sent (-80), and a weak dash follows
+            nautilusRideTick(i < 5 || i >= 30 && i < 46 ? JUMP : NONE, 0.0F, Vec3d.ZERO, false);
+            if (i == 46) {
+                assertEquals(-80, nautilusJump);
+            }
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertEquals(27, horse.dashCooldown(), "the weak dash at tick 47: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void theDashingFlagsDataCoolsItsDashAgain() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 60; i++) {
+            if (i == 47) { // the server's DASH reaches a client whose dash has cooled down: 40 ticks again
+                out(new ClientboundPacket.SetEntityData(NAUTILUS, List.of(new ClientboundPacket.SetEntityData.DataEntry(19,
+                        ClientboundPacket.SetEntityData.Kind.BOOLEAN, 0)), 0));
+                sync();
+                horse = Horse.onDashSynced(horse);
+            }
+            nautilusRideTick(i < 5 || i >= 50 && i < 53 ? JUMP : NONE, 0.0F, Vec3d.ZERO, false); // no jump sent at tick 53
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(horseTicks()));
+        assertEquals(27, horse.dashCooldown());
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aDashOfAnotherPowerThanItsJumpKeyHeldIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 50; i++) {
+            // after its first dash the count is known: the key held through its cooldown gives -80, not a full dash
+            nautilusRideTick(i < 5 || i >= 30 && i < 46 ? JUMP : NONE, 0.0F, Vec3d.ZERO, false, i == 46 ? 90 : null);
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a nautilus as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void noDashAtAReleaseOnceItsDashHasCooledDownIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 52; i++) {
+            nautilusRideTick(i < 5 || i >= 47 && i < 50 ? JUMP : NONE, 0.0F, Vec3d.ZERO, false, i == 50 ? Integer.MIN_VALUE : null);
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a nautilus as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void noClaimForANautilusNotTame() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        out(new ClientboundPacket.SetEntityData(NAUTILUS, List.of(new ClientboundPacket.SetEntityData.DataEntry(17,
+                ClientboundPacket.SetEntityData.Kind.BYTE, 0)), 0)); // its saddle no use (isSaddled: canUseSlot)
+        sync();
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 5; i++) {
+            nautilusRideTick(FORWARD, 0.0F, Vec3d.ZERO, false);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: a nautilus not saddled and tame, a baby or scaled".equals(t.reason())),
+                String.valueOf(horseTicks()));
+    }
+
+    @Test
+    void aNautilusDashWhileItCoolsDownIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 12; i++) {
+            nautilusRideTick(i < 5 ? JUMP : NONE, 0.0F, Vec3d.ZERO, i == 9); // a dash, then a jump sent four ticks into its cooldown
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a nautilus as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void aNautilusFasterThanItWalksIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        mountNautilus(6.5, 6.5);
+        for (int i = 0; i < 20; i++) {
+            nautilusRideTick(FORWARD, 0.0F, i == 12 ? new Vec3d(-0.02, 0.0, 0.03) : Vec3d.ZERO, false); // nautilus speed
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a nautilus as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
     void noClaimForAHappyGhastStayingStill() throws Exception {
         ticks(5, NONE, 30.0F);
         ghastInTheAir(6.5, 6.5, true, true);
@@ -1481,6 +1689,25 @@ class MovementCheckTest {
         ticks(20, FORWARD, 30.0F);
         tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.01));
         assertEquals(List.of(), evidence, "the client may have climbed what the engine does not");
+        assertEquals(1, count(MovementTracker.Outcome.UNEXPLAINED), "the tick is still unexplained, only not claimed");
+    }
+
+    @Test
+    void noFindingWhileTheClientMayFloatOtherMountsThanTheEngine() throws Exception {
+        // a datapack makes a skeleton horse float while ridden (can_float_while_ridden): the engine's ride is not the client's
+        ClientboundPacket.UpdateTags vanilla = VanillaTagsPacket.packet();
+        List<ClientboundPacket.UpdateTags.RegistryTags> registries = new ArrayList<>(vanilla.registries());
+        ClientboundPacket.UpdateTags.RegistryTags types = registries.get(1);
+        List<ClientboundPacket.UpdateTags.Tag> tags = new ArrayList<>(types.tags());
+        tags.set(1, new ClientboundPacket.UpdateTags.Tag("minecraft:can_float_while_ridden", new int[] {EngineTags.HORSE, EngineTags.ZOMBIE_HORSE,
+                EngineTags.MULE, EngineTags.DONKEY, EngineTags.CAMEL, EngineTags.CAMEL_HUSK, 125}));
+        registries.set(1, new ClientboundPacket.UpdateTags.RegistryTags("minecraft:entity_type", tags));
+        out(new ClientboundPacket.UpdateTags(registries));
+        sync();
+        ticks(5, NONE, 30.0F);
+        ticks(20, FORWARD, 30.0F);
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.01));
+        assertEquals(List.of(), evidence, "the engine takes the tags as vanilla's");
         assertEquals(1, count(MovementTracker.Outcome.UNEXPLAINED), "the tick is still unexplained, only not claimed");
     }
 

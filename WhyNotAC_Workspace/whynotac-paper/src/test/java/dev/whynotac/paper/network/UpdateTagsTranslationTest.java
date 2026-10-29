@@ -58,5 +58,11 @@ class UpdateTagsTranslationTest {
         assertEquals(BuiltInRegistries.FLUID.getId(Fluids.FLOWING_LAVA), EngineTags.FLOWING_LAVA);
         assertEquals(BuiltInRegistries.FLUID.getId(Fluids.LAVA), EngineTags.LAVA);
         assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.PLAYER), EngineTags.PLAYER);
+        assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.CAMEL), EngineTags.CAMEL);
+        assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.CAMEL_HUSK), EngineTags.CAMEL_HUSK);
+        assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.DONKEY), EngineTags.DONKEY);
+        assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.HORSE), EngineTags.HORSE);
+        assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.MULE), EngineTags.MULE);
+        assertEquals(BuiltInRegistries.ENTITY_TYPE.getId(EntityType.ZOMBIE_HORSE), EngineTags.ZOMBIE_HORSE);
     }
 }
