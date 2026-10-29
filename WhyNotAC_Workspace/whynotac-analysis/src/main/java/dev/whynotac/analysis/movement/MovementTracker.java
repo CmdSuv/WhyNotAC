@@ -485,7 +485,7 @@ public final class MovementTracker {
             case ClientboundPacket.MoveVehicle ignored -> true;
             case ClientboundPacket.Untranslatable ignored -> true;
             case ClientboundPacket.SetEntityMotion m -> m.entityId() == serverVehicle;
-            case ClientboundPacket.SetEntityData d -> d.entityId() == serverVehicle;
+            case ClientboundPacket.SetEntityData d -> d.entityId() == serverVehicle || d.entityId() == selfId; // the rider's sprint too
             case ClientboundPacket.TeleportEntity t -> t.entityId() == serverVehicle;
             case ClientboundPacket.UpdateAttributes a -> a.entityId() == serverVehicle;
             case ClientboundPacket.MobEffect e -> e.entityId() == serverVehicle;
@@ -523,6 +523,7 @@ public final class MovementTracker {
             case ClientboundPacket.RemoveMobEffect e -> e.entityId() == selfId;
             case ClientboundPacket.PlayerAbilities ignored -> true;
             case ClientboundPacket.GameEvent ignored -> true;
+            case ClientboundPacket.SetTime ignored -> true; // the game time a ridden camel's pose reads (gameTimeAtLeast)
             case ClientboundPacket.SetHealth ignored -> true;
             case ClientboundPacket.SetEntityData d -> d.entityId() == selfId;
             case ClientboundPacket.SetPassengers ignored -> true;
@@ -787,8 +788,9 @@ public final class MovementTracker {
             since = pendingAt(fresh.applied() - 1).sequence();
         }
         PlayerState.Keys keysBefore = baseSent.input(); // the rider's keys in its last tick, for a horse it mounts now
+        boolean sprintBefore = baseSent.sprinting(); // and its sprint (sendIsSprintingIfNeeded: what it is after each tick on foot)
         observeBase(in); // the anchor below starts from what the client sent in this very tick
-        Tick riding = rideTick(number, end, in, w, world, entities, keysBefore);
+        Tick riding = rideTick(number, end, in, w, world, entities, keysBefore, sprintBefore);
         Tick result;
         if (hypotheses != null) {
             result = tracked(number, end, in, w, world, entities);
@@ -811,9 +813,11 @@ public final class MovementTracker {
      * boat's tick. Null when the player steers no boat.
      */
     private Tick rideTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities,
-            PlayerState.Keys keysBefore) {
+            PlayerState.Keys keysBefore, boolean sprintBefore) {
         long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
         View view = new View(world, entities, selfId);
+        // the rider's isSprinting at a mount now: what it sent in its last tick on foot (on a vehicle it may not have sent it)
+        mountSprint = clientVehicles != null && clientVehicles.isEmpty() ? sprintBefore : null;
         // the client rode nothing since the last tick when it rode nothing after the packets it certainly processed by
         // then, and none it may have processed since may have put it on a vehicle
         boolean mayHaveRidden = clientVehicles == null || !clientVehicles.isEmpty();
@@ -921,6 +925,23 @@ public final class MovementTracker {
     }
 
     /** The horse's part of a tick ({@link HorseRide}). */
+    /** The rider's {@code isSprinting} for a horse it mounts before this tick (null: not known). */
+    private Boolean mountSprint;
+    /** The client's game time once it processed the packets certainly processed so far, from below ({@code SetTime}; 0 in a new level). */
+    private long baseGameTime;
+
+    /** A lower bound of the client's game time now: the base's, or 0 where it may have entered a new level since. */
+    private long gameTimeAtLeast() {
+        long[] w = window();
+        for (long i = w[0]; i < w[1]; i++) {
+            ClientboundPacket packet = pendingAt(i).packet();
+            if (packet instanceof ClientboundPacket.Login || packet instanceof ClientboundPacket.Respawn || packet instanceof ClientboundPacket.Untranslatable) {
+                return 0L;
+            }
+        }
+        return baseGameTime;
+    }
+
     private Tick horseTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, boolean ambiguous, View view, ClientEntities entities) {
         if (ambiguous || w[0] != w[1]) {
             horseRide.unclaim("packets the client may or may not have processed");
@@ -929,7 +950,7 @@ public final class MovementTracker {
             horseRide.unclaim("a stop of a riding jump, which the client never sends");
         }
         HorseRide.Step step = horseRide.tick(in.vehicleMoves, in.move, in.ridingJumps, baseSent.input(), view, entities, selfId, base.border(),
-                horseRide.pig ? holding(CARROT_ON_A_STICK) : horseRide.strider ? holding(WARPED_FUNGUS_ON_A_STICK) : Boolean.TRUE);
+                horseRide.pig ? holding(CARROT_ON_A_STICK) : horseRide.strider ? holding(WARPED_FUNGUS_ON_A_STICK) : Boolean.TRUE, baseSent.sprinting());
         ServerboundPacket.MoveVehicle sentVehicle = in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast();
         if (step == null) {
             horseNoClaim.merge(horseRide.unclaimed, 1L, Long::sum);
@@ -965,13 +986,15 @@ public final class MovementTracker {
                 }
                 String type = entities.type(set.vehicleId());
                 boolean horse = type != null && (ClientEntities.HORSE_TYPES.contains(type) || type.equals(ClientEntities.PIG)
-                        || type.equals(ClientEntities.STRIDER) || type.equals(ClientEntities.HAPPY_GHAST) || ClientEntities.NAUTILUSES.contains(type));
+                        || type.equals(ClientEntities.STRIDER) || type.equals(ClientEntities.HAPPY_GHAST) || ClientEntities.NAUTILUSES.contains(type)
+                        || ClientEntities.CAMELS.contains(type));
                 if (controls && ride == null && horseRide == null && horse) {
                     // a horse the player rides first: it steers it once saddled (HorseRide.start rules out the others); a pig
                     // while the player holds a carrot on a stick too, a strider a warped fungus on a stick; a happy ghast in a harness;
                     // a nautilus saddled
                     horseRide = p.ambiguous ? HorseRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
-                            : HorseRide.start(set.vehicleId(), p.sequence, entities.horseMounted(set.vehicleId()), view, world, keysBefore);
+                            : HorseRide.start(set.vehicleId(), p.sequence, entities.horseMounted(set.vehicleId()), view, world, keysBefore, mountSprint,
+                                    gameTimeAtLeast());
                 } else if (controls && ride == null && horseRide == null) {
                     ride = p.ambiguous ? BoatRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
                             : BoatRide.start(set.vehicleId(), p.sequence, entities.mounted(set.vehicleId()), view, world, positionsDuring(number - 1));
@@ -1047,6 +1070,17 @@ public final class MovementTracker {
             case ClientboundPacket.SetEntityData data -> {
                 if (horseRide != null && data.entityId() == horseRide.vehicle) {
                     horseRide.apply(data);
+                }
+                if (data.entityId() == selfId) {
+                    for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
+                        if (e.index() == 0) { // DATA_SHARED_FLAGS_ID: its sprint flag sets the rider's isSprinting
+                            Boolean sprinting = p.ambiguous ? null : (e.value() & (1 << 3)) != 0;
+                            mountSprint = sprinting;
+                            if (horseRide != null) {
+                                horseRide.riderSprinting(sprinting);
+                            }
+                        }
+                    }
                 }
                 if (ride != null && data.entityId() == ride.vehicle) {
                     for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
@@ -2114,6 +2148,12 @@ public final class MovementTracker {
                 b = applyBase(b, packet).withApplied(i + 1);
             } catch (Lose e) {
                 b = b.withApplied(i + 1);
+            }
+            if (packet instanceof ClientboundPacket.SetTime time) {
+                baseGameTime = time.gameTime(); // setTimeFromServer: counted on by its ticks, from below this
+            } else if (packet instanceof ClientboundPacket.Login || packet instanceof ClientboundPacket.Respawn
+                    || packet instanceof ClientboundPacket.Untranslatable) {
+                baseGameTime = 0L; // a new ClientLevel's game time is 0 until the server's
             }
             switch (packet) {
                 case ClientboundPacket.Login ignored -> baseMayGlide = false;

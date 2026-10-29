@@ -69,14 +69,18 @@ final class ClientMotion {
     /** The nautilus and the zombie nautilus, which their player steers saddled ({@code AbstractNautilus.getControllingPassenger}), kept as a horse is. */
     static final Set<String> NAUTILUSES = Set.of("minecraft:nautilus", "minecraft:zombie_nautilus");
 
+    /** The camel and the camel husk, which their player steers saddled ({@code AbstractHorse.getControllingPassenger}), kept as a horse is. */
+    static final Set<String> CAMELS = Set.of("minecraft:camel", "minecraft:camel_husk");
+
     /**
      * The living vehicles the replica keeps for their player's mount ({@link ClientEntities#horseMounted}): the horses, the
-     * pig, the strider, the happy ghast and the nautiluses.
+     * camels, the pig, the strider, the happy ghast and the nautiluses.
      */
     static final Set<String> RIDDEN = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
-            "minecraft:zombie_horse", PIG, STRIDER, HAPPY_GHAST, "minecraft:nautilus", "minecraft:zombie_nautilus");
+            "minecraft:zombie_horse", "minecraft:camel", "minecraft:camel_husk", PIG, STRIDER, HAPPY_GHAST, "minecraft:nautilus",
+            "minecraft:zombie_nautilus");
 
-    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse, a pig, a strider, a happy ghast or a nautilus. */
+    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse, a camel, a pig, a strider, a happy ghast or a nautilus. */
     static boolean keptAtMount(String type) {
         return type != null && (interpolatesOnly(type) || RIDDEN.contains(type));
     }

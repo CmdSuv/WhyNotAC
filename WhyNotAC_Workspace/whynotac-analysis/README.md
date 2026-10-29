@@ -543,7 +543,34 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   gücüyle (-80) zayıf atılma açıklanır, `DASH` verisinden sonra zıplamasız bırakış açıklanır, beklemede atılma, başka
   güçte atılma, bekleme bitmişken zıplamasız bırakış ve hızından öte hareket bulgu, evcil olmayan nautilus'ta iddia yok;
   mutasyonlar (0.9, 0.5 karada, itilmezlik, yarım dönüş, bekleme sayacı, suda hız, atılmanın türü, `DASH`, bekleme
-  dalı, bilinen sayaç, zıplamasız bırakış, evcillik) testleri kırar.
+  dalı, bilinen sayaç, zıplamasız bırakış, evcillik) testleri kırar. Replika nautilus'un `DASH` verisini görüp
+  görmediğini tutar: hiç görmediyse (ve oyuncu onu önceden sürmediyse) bekleme binişte kesin 0'dır.
+- **Sürülen deve (`HorseRide`, deve olarak; deve kabuğu da):** eyerli devenin (deve her zaman evcildir: `isTamed`)
+  ilk yolcusu oyuncuysa client onu at gibi sürer, şu farklarla (`Horse.Camel`): hızı hareket hızı özelliği, binici
+  koşarken ve atılması soğumuşken 0.1 fazlası (`getRiddenSpeed`, `tickRidden`'dan sonra); binek zıplaması atılmadır
+  (`executeRidersJump`): kendi bakışı boyunca düzlemde (`multiply(1, 0, 1).normalize()`) 22.2222 kere ölçek, öznitelik
+  ve bloğun hız çarpanı, yukarı 1.4285 kere ölçek ve zıplama gücü (`getJumpPower`); sonra 55 tik bekleme, atılma bayrağı
+  bekleme 50'nin altına inince yerde ya da sıvıda kalkar ve soğumuş bir atılmayı 55'e yeniden kurar
+  (`onSyncedDataUpdated`; uzun bir düşüşten iniş). Binicinin zıplaması yalnızca yerdeyken bekler (`Camel.onPlayerJump`);
+  binici tuşları yalnızca bekleme bitmişken işler. Binicinin koşusu, son tikinde gönderdiği (`sendIsSprintingIfNeeded`
+  kontrol ettiği araçta da her tik), arada sunucunun oyuncu verisiyle gelen ortak bayraklar onu değiştirir; kontrol
+  etmediği bir araçtan sonra bilinmez (ikisi de denenir). Deve yalnızca ayaktayken, duruş değişimi
+  (`LAST_POSE_CHANGE_TICK`) client'ın oyun saatinden en az 52 tik gerideyken (`isInPoseTransition`; oyun saatini
+  client'ın kesin işlediği son `SetTime` alttan sınırlar, yeni seviyede 0) ve `DASH` verisi hiç görülmemişken (bekleme
+  ve bayrak kesin 0) iddia edilir. **Kanıt:** beklemede atılma, bekleme bitmişken zıplamasız bırakış, tuşun tuttuğundan
+  başka güç ve hızından (koşu dahil) öte `MoveVehicle`. **İddia yok:** oturan, kalkmakta olabilen, `DASH` verisi
+  görülmüş, eyersiz, yavru ya da ölçekli deve, sürüşte oturan ya da kalkan (duruş verisi değişen); atınkilerin geri
+  kalanı. **Doğrulama:** gerçek client parkurunda iki deve ayağı (doğuya yürüyüş, koşu, koşarken atılma, bekleme
+  sürerken koşu, iniş; batıya duruştan atılma, bekleme bitince yürürken ikinci atılma): `Horse` motoru devenin 224
+  tikinin hepsinde client'la bit bit aynı (30'u koşu bonusuyla, 3 atılma, 12'si bekleme sürerken koşu, 3 bayrak
+  temizlenmesi; bekleme sayacı, bayrak ve tikin hızı da), takipçi 224 tikin hepsini iddia edip açıkladı, her birinde
+  client'ın kendi devesi kümede. `CamelTest`: yürüyüş ve koşu hızı (bekleme sürerken ve bilinmezken koşu yok), yerde atılma (bakış boyunca,
+  yarım ölçekle de), havadaki zıplama yere kadar bekler, beklemede zıplama yok, bayrak 50'nin altında yerde kalkar,
+  uzun düşüşten inişte 55, `DASH` verisi; `MovementCheckTest`: 100 tik yürüyüş, koşu, iki atılma ve koşunun bırakılıp
+  yeniden alınması açıklanır, sunucunun koşu bayrağı bir sonraki tike yetişir, düşerken bırakılan zıplama atılmaz,
+  `DASH` verisi beklemeyi yeniden kurar, hızından öte hareket ve beklemede atılma bulgu, oyun saati bilinmeyen, oturan
+  ve `DASH` verisi görülmüş devede iddia yok; mutasyonlar (koşu şartı, 50 eşiği, 55'e yeniden kurma, havada zıplama,
+  düzlem normalize, ölçek, oyun saati, `DASH`, koşu yankısı, binişteki koşu) testleri kırar.
 - **Araçsızken araç paketi:** yürürken bir `MoveVehicle`, `PaddleBoat` ya da binek zıplaması yaya iddiasını bitirirdi;
   hile her tike bir tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken
   gönderir (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin

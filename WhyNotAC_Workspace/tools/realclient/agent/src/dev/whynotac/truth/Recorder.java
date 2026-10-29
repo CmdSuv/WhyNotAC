@@ -65,6 +65,7 @@ public final class Recorder {
     private static Method horseIsStanding, maxUpStep, getEffectiveGravity, getAttributeValue, entityControllingPassenger, entityInterpolation;
     private static Object movementSpeed, jumpStrength;
     private static Object tickingHorse; // the horse whose tick() is running, if it is recorded
+    private static Object tickingCamel; // the camel whose tick() is running, if it is recorded (its AbstractHorse.tick() records nothing)
     private static Object tickingPig; // the pig whose Mob.tick() is running, if it is recorded
     // a pig the player steers: its ItemBasedSteering (the boost it counts itself)
     private static Field pigSteering, steeringBoosting, steeringBoostTime;
@@ -82,6 +83,10 @@ public final class Recorder {
     private static Field nautilusJumpPendingScale, nautilusDashCooldown;
     private static Method nautilusIsDashing;
     private static Class<?> nautilusClass;
+    // a camel the player rides: its dash's cooldown and flag; any rider's sprint
+    private static Field camelDashCooldown;
+    private static Method camelIsDashing, entityIsSprinting;
+    private static Class<?> camelClass;
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -145,8 +150,8 @@ public final class Recorder {
     public static void horsePre(Object horse) {
         synchronized (LOCK) {
             tickingHorse = null;
-            if (closing || failed || out == null) {
-                return;
+            if (closing || failed || out == null || camelClass.isInstance(horse)) {
+                return; // a camel's: inside its Camel.tick(), which records it
             }
             try {
                 Object rider = entityControllingPassenger.invoke(horse);
@@ -174,6 +179,42 @@ public final class Recorder {
                 }
             }
             tickingHorse = null;
+        }
+    }
+
+    /** At the start of {@code Camel.tick()}: recorded as a horse is, its own tick around {@code AbstractHorse.tick()}. */
+    public static void camelPre(Object camel) {
+        synchronized (LOCK) {
+            tickingCamel = null;
+            if (closing || failed || out == null) {
+                return;
+            }
+            try {
+                Object rider = entityControllingPassenger.invoke(camel);
+                if (localPlayerClass.isInstance(rider)) {
+                    tickingCamel = camel;
+                    writeHorse("horsePre", camel, rider);
+                }
+            } catch (Throwable e) {
+                failed = true;
+                System.err.println("[whynotac-truth] recording stopped: " + e);
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void camelPost() {
+        synchronized (LOCK) {
+            if (tickingCamel != null && !failed) {
+                try {
+                    writeHorse("horsePost", tickingCamel, entityControllingPassenger.invoke(tickingCamel));
+                } catch (Throwable e) {
+                    failed = true;
+                    System.err.println("[whynotac-truth] recording stopped: " + e);
+                    e.printStackTrace();
+                }
+            }
+            tickingCamel = null;
         }
     }
 
@@ -290,6 +331,10 @@ public final class Recorder {
             bool(line, "allowStandSliding", horseAllowStandSliding.getBoolean(horse));
             bool(line, "standing", (Boolean) horseIsStanding.invoke(horse));
             line.append(",\"standCounter\":").append(horseStandCounter.getInt(horse));
+            if (camelClass.isInstance(horse)) {
+                line.append(",\"dashCooldown\":").append(camelDashCooldown.getInt(horse));
+                bool(line, "dashing", (Boolean) camelIsDashing.invoke(horse));
+            }
         }
         f32(line, "speed", speed.getFloat(horse));
         f64(line, "movementSpeed", (Double) getAttributeValue.invoke(horse, movementSpeed));
@@ -304,6 +349,7 @@ public final class Recorder {
             f32(line, "riderYRot", yRot.getFloat(rider));
             f32(line, "riderXRot", xRot.getFloat(rider));
             bool(line, "riderJumping", livingJumping.getBoolean(rider));
+            bool(line, "riderSprinting", (Boolean) entityIsSprinting.invoke(rider));
         }
         out.append(line).append("}\n");
     }
@@ -600,6 +646,10 @@ public final class Recorder {
         nautilusJumpPendingScale = field(loader, TruthAgent.NAUTILUS, "playerJumpPendingScale");
         nautilusDashCooldown = field(loader, TruthAgent.NAUTILUS, "dashCooldown");
         nautilusIsDashing = method(loader, TruthAgent.NAUTILUS, "isDashing()");
+        camelClass = Class.forName(mappings.get(TruthAgent.CAMEL).obf(), false, loader);
+        camelDashCooldown = field(loader, TruthAgent.CAMEL, "dashCooldown");
+        camelIsDashing = method(loader, TruthAgent.CAMEL, "isDashing()");
+        entityIsSprinting = method(loader, "net.minecraft.world.entity.Entity", "isSprinting()");
         String steering = "net.minecraft.world.entity.ItemBasedSteering";
         steeringBoosting = field(loader, steering, "boosting");
         steeringBoostTime = field(loader, steering, "boostTime");

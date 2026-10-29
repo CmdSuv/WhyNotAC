@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The horse (donkey, mule, skeleton or zombie horse), pig, strider, happy ghast or nautilus the client's own player rides and steers,
+ * The horse (donkey, mule, skeleton or zombie horse), camel, pig, strider, happy ghast or nautilus the client's own player rides and steers,
  * tick by tick (decompiled 1.21.11): every state it may be in ({@link HorseState}), what its next tick reads of its rider, and what it is. While
  * the player is its controlling passenger ({@code AbstractHorse.getControllingPassenger}: saddled, the player its first
  * passenger) the client moves it with its own physics: each client tick it runs {@code AbstractHorse.tick}
@@ -37,8 +37,13 @@ import java.util.Set;
  * release, a release without one, or another power than the key's (once a press while riding makes the count known)
  * is unexplained. A nautilus's rider handles its keys only once its dash has cooled down ({@code getJumpCooldown() == 0}:
  * 40 ticks after a dash, its {@code DASH} data setting it again when cooled down); before its first dash in the claim the
- * cooldown is not known, so a release may send a jump or not, of whatever power, and a jump sent while it certainly cools
- * down is unexplained.
+ * cooldown is not known (the client got its {@code DASH} data: else it is 0), so a release may send a jump or not, of
+ * whatever power, and a jump sent while it certainly cools down is unexplained. A camel's likewise (55 ticks), its speed
+ * 0.1 more while its rider sprints and the dash has cooled down: the rider's {@code isSprinting} as its last tick sent it
+ * ({@code sendIsSprintingIfNeeded}, on the camel too), or as the server's data on the player then set it (its shared
+ * flags); not known after a vehicle the player did not control, both then. A camel is claimed standing alone, its pose's
+ * change ({@code LAST_POSE_CHANGE_TICK}) at least 52 ticks behind the client's game time ({@code isInPoseTransition}:
+ * the last {@code SetTime} the client certainly processed bounds it from below), with no {@code DASH} data seen.
  *
  * <h2>The mount</h2>
  * Until the mount the client moved the horse by interpolation alone; the entity replica keeps its state at the mount
@@ -72,6 +77,8 @@ final class HorseRide {
     /** {@code TamableAnimal.isTame}: a nautilus's flags, where a horse's are. */
     static final int TAMABLE_FLAG_TAME = 4;
     static final int MOB_FLAG_NO_AI = 1;
+    /** {@code Pose.STANDING}, as the replica holds a pose. */
+    static final int POSE_STANDING = ClientboundPacket.EntityPose.STANDING.ordinal();
     static final String MOVEMENT_SPEED = "minecraft:movement_speed";
     static final String JUMP_STRENGTH = "minecraft:jump_strength";
     static final String STEP_HEIGHT = "minecraft:step_height";
@@ -96,6 +103,12 @@ final class HorseRide {
     boolean ghast;
     /** A nautilus ({@code AbstractNautilus}): it swims where its rider steers and looks, and dashes ({@link Horse.Nautilus}). */
     boolean nautilus;
+    /** A camel ({@code Camel}): ridden as a horse, faster while its rider sprints, and dashes ({@link Horse.Camel}). */
+    boolean camel;
+    /** A camel's rider's {@code isSprinting} for its next tick; null not known. */
+    Boolean riderSprinting;
+    /** A camel's {@code LAST_POSE_CHANGE_TICK} at the mount. */
+    long poseChange;
     /** Its flying speed attribute's value. */
     double flyingSpeed;
     /** The movement speed attribute's value ({@code getAttributeValue}, a double: a pig's ridden speed is computed from it). */
@@ -145,9 +158,11 @@ final class HorseRide {
     static double defaultAttribute(String type, String attribute) {
         // Pig.createAttributes, Strider.createAttributes, HappyGhast.createAttributes: the animal's, a speed of 0.25, 0.175F
         // and 0.05 (a flying speed of 0.05)
-        // (AbstractNautilus.createAttributes: a speed of 1.0, ZombieNautilus's 1.1F)
+        // (AbstractNautilus.createAttributes: a speed of 1.0, ZombieNautilus's 1.1F; Camel.createAttributes, the camel husk's
+        // too: 0.09F, a jump strength of 0.42F and a step height of 1.5)
         boolean pig = type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER) || type.equals(ClientEntities.HAPPY_GHAST)
                 || ClientEntities.NAUTILUSES.contains(type);
+        boolean camel = ClientEntities.CAMELS.contains(type);
         return switch (attribute) {
             case MOVEMENT_SPEED -> switch (type) {
                 case "minecraft:donkey", "minecraft:mule", ClientEntities.STRIDER -> 0.175F; // createBaseChestedHorseAttributes
@@ -156,11 +171,12 @@ final class HorseRide {
                 case ClientEntities.HAPPY_GHAST -> 0.05;
                 case "minecraft:nautilus" -> 1.0;
                 case "minecraft:zombie_nautilus" -> 1.1F;
+                case "minecraft:camel", "minecraft:camel_husk" -> 0.09F;
                 default -> 0.225F; // createBaseHorseAttributes
             };
             case ClientEntities.SUFFOCATING_SPEED -> 0.175F + 0.175F * (double) -0.34F; // calculateValue: the base, plus the base times the amount
-            case JUMP_STRENGTH -> pig ? 0.0 : type.equals("minecraft:donkey") || type.equals("minecraft:mule") ? 0.5 : 0.7;
-            case STEP_HEIGHT -> pig ? 0.6 : 1.0;
+            case JUMP_STRENGTH -> pig ? 0.0 : camel ? 0.42F : type.equals("minecraft:donkey") || type.equals("minecraft:mule") ? 0.5 : 0.7;
+            case STEP_HEIGHT -> pig ? 0.6 : camel ? 1.5 : 1.0;
             case GRAVITY -> 0.08;
             case FLYING_SPEED -> type.equals(ClientEntities.HAPPY_GHAST) ? 0.05 : 0.4;
             default -> throw new IllegalArgumentException(attribute);
@@ -169,22 +185,29 @@ final class HorseRide {
 
     /**
      * {@code EntityType.Builder.sized}: every horse is 1.3964844 wide, a donkey 1.5 tall and the others 1.6; a pig 0.9 each
-     * way; a strider 0.9 wide and 1.7 tall; a happy ghast 4 each way; a nautilus 0.875 wide and 0.95 tall.
+     * way; a strider 0.9 wide and 1.7 tall; a happy ghast 4 each way; a nautilus 0.875 wide and 0.95 tall; a camel, standing,
+     * 1.7 wide and 2.375 tall.
      */
     static float height(String type) {
         return type.equals(ClientEntities.HAPPY_GHAST) ? 4.0F : type.equals(ClientEntities.PIG) ? 0.9F : type.equals(ClientEntities.STRIDER) ? 1.7F
-                : ClientEntities.NAUTILUSES.contains(type) ? 0.95F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+                : ClientEntities.NAUTILUSES.contains(type) ? 0.95F : ClientEntities.CAMELS.contains(type) ? 2.375F
+                : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
     }
 
     static float width(String type) {
         return type.equals(ClientEntities.HAPPY_GHAST) ? 4.0F : type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER) ? 0.9F
-                : ClientEntities.NAUTILUSES.contains(type) ? 0.875F : 1.3964844F;
+                : ClientEntities.NAUTILUSES.contains(type) ? 0.875F : ClientEntities.CAMELS.contains(type) ? 1.7F : 1.3964844F;
     }
 
     /** {@code BlockTags.STRIDER_WARM_BLOCKS} (vanilla; {@link EngineTags} holds the client to it). */
     static final Set<String> STRIDER_WARM_BLOCKS = Set.of("minecraft:lava");
 
     Horse.Conditions conditions(dev.whynotac.physics.Border border, List<Box> entities) {
+        return conditions(border, entities, false);
+    }
+
+    /** {@link #conditions}, a camel's rider sprinting or not. */
+    Horse.Conditions conditions(dev.whynotac.physics.Border border, List<Box> entities, boolean sprinting) {
         // maxUpStep: the step height, at least 1 under a player; getGravity: 0 with no gravity; a pig's getRiddenSpeed:
         // the attribute times 0.225 and its boost's factor
         // the attribute times 0.225 and its boost's factor; a strider's times 0.55, or 0.35 suffocating (with its modifier)
@@ -194,7 +217,7 @@ final class HorseRide {
         return new Horse.Conditions(ridden, jumpStrength, Math.max(stepHeight, 1.0F), noGravity ? 0.0 : gravityAttribute,
                 new Horse.Effects(jumpBoost, false, 0, false), type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F,
                 Horse.FLOATS_WHILE_RIDDEN.contains(type), width(type), height(type), border, entities, s, ghast ? Horse.Flying.of(flyingSpeed) : null,
-                nautilus ? new Horse.Nautilus(speedAttribute) : null);
+                nautilus ? new Horse.Nautilus(speedAttribute) : null, camel ? new Horse.Camel(speedAttribute, sprinting) : null);
     }
 
     /**
@@ -203,6 +226,15 @@ final class HorseRide {
      */
     static HorseRide start(int vehicle, long since, List<ClientEntities.HorseMounted> mounted, Colliders.World view, ClientWorld world,
             PlayerState.Keys keys) {
+        return start(vehicle, since, mounted, view, world, keys, Boolean.FALSE, 0L);
+    }
+
+    /**
+     * {@link #start}, with the rider's {@code isSprinting} at the mount (null: not known) and a lower bound of the client's
+     * game time then (a camel's).
+     */
+    static HorseRide start(int vehicle, long since, List<ClientEntities.HorseMounted> mounted, Colliders.World view, ClientWorld world,
+            PlayerState.Keys keys, Boolean riderSprinting, long gameTimeAtLeast) {
         if (mounted == null) {
             return unclaimed(vehicle, since, "a vehicle the replica did not follow before the mount");
         }
@@ -217,6 +249,7 @@ final class HorseRide {
         boolean pig = m.type().equals(ClientEntities.PIG);
         boolean ghast = m.type().equals(ClientEntities.HAPPY_GHAST);
         boolean nautilus = ClientEntities.NAUTILUSES.contains(m.type());
+        boolean camel = ClientEntities.CAMELS.contains(m.type());
         boolean steered = pig || strider; // by an item on a stick: neither tame nor read their rider's keys
         if (ghast && (m.saddle() != 1 || m.baby() || Double.compare(m.scale(), 1.0) != 0)) {
             return unclaimed(vehicle, since, "a happy ghast with no harness, a baby or scaled");
@@ -224,14 +257,23 @@ final class HorseRide {
         if (ghast && (m.flags() & 1) != 0) { // isOnStillTimeout: getControllingPassenger is null
             return unclaimed(vehicle, since, "a happy ghast staying still (its rider does not steer it)");
         }
-        if (!ghast && (m.saddle() != 1 || !steered && (m.flags() & (nautilus ? TAMABLE_FLAG_TAME : FLAG_TAME)) == 0 || m.baby()
+        if (!ghast && (m.saddle() != 1 || !steered && !camel && (m.flags() & (nautilus ? TAMABLE_FLAG_TAME : FLAG_TAME)) == 0 || m.baby()
                 || Double.compare(m.scale(), 1.0) != 0)) {
-            // a nautilus's saddle counts only on a tame one (isSaddled: canUseSlot)
+            // a nautilus's saddle counts only on a tame one (isSaddled: canUseSlot); a camel is always tamed (Camel.isTamed)
             return unclaimed(vehicle, since, steered ? "a " + (pig ? "pig" : "strider") + " not saddled, a baby or scaled"
                     : "a " + (nautilus ? "nautilus" : "horse") + " not saddled and tame, a baby or scaled");
         }
         if (strider && (m.mobFlags() & MOB_FLAG_NO_AI) != 0) {
             return unclaimed(vehicle, since, "a NoAI strider (its suffocation is the server's)");
+        }
+        if (camel && (m.pose() != POSE_STANDING || m.poseChange() < 0)) { // isCamelSitting
+            return unclaimed(vehicle, since, "a camel sitting");
+        }
+        if (camel && gameTimeAtLeast - m.poseChange() < 52) { // refuseToMove: isInPoseTransition
+            return unclaimed(vehicle, since, "a camel that may still be standing up");
+        }
+        if (camel && m.dashSeen()) {
+            return unclaimed(vehicle, since, "a camel whose dash the client may be cooling down (its dash data seen)");
         }
         if (m.motion() == null) {
             return unclaimed(vehicle, since, "the horse's motion at the mount not known (the player may have pushed it)");
@@ -249,6 +291,9 @@ final class HorseRide {
         ride.strider = strider;
         ride.ghast = ghast;
         ride.nautilus = nautilus;
+        ride.camel = camel;
+        ride.riderSprinting = riderSprinting;
+        ride.poseChange = m.poseChange();
         ride.steering = m.boost() == 1 ? ItemSteering.synced() : ItemSteering.NONE;
         ride.boostTotal = m.boostTotal();
         try {
@@ -321,7 +366,7 @@ final class HorseRide {
                 m.targetXRot(), m.previousPosition(), m.previousYRot(), m.previousXRot());
         ride.states = List.of(new HorseState(at.x(), at.y(), at.z(), m.motion(), m.yRot(), m.xRot(), onGround, false, false, false, 0.0, support, false,
                 Vec3d.ZERO, false, 0, 0.0F, false, !nautilus && (m.flags() & FLAG_STANDING) != 0, 0, interpolation, 0.0, false, // no lava where it has been
-                nautilus ? -1 : 0)); // a nautilus's dash cooldown: whatever the client set before the ride
+                nautilus && m.dashSeen() ? -1 : 0)); // a dash cooldown: 0 unless its DASH data may have set it
         ride.keys = keys;
         return ride;
     }
@@ -363,11 +408,21 @@ final class HorseRide {
                         return;
                     } else if (nautilus && e.index() == 19 && e.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) { // DASH
                         states = states.stream().map(Horse::onDashSynced).toList();
+                    } else if (camel && e.index() == ClientEntities.DATA_CAMEL_DASH && e.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
+                        boolean dashing = e.value() != 0;
+                        states = states.stream().map(s -> Horse.onCamelDashSynced(s, dashing)).toList();
+                    } else if (camel && e.index() == 19 && e.kind() == ClientboundPacket.SetEntityData.Kind.LONG && e.value() != poseChange) {
+                        unclaim("the camel sat down or stood up"); // LAST_POSE_CHANGE_TICK
+                        return;
+                    } else if (camel && e.index() == 6 && e.kind() == ClientboundPacket.SetEntityData.Kind.POSE && e.value() != POSE_STANDING) {
+                        unclaim("the camel no longer standing"); // DATA_POSE
+                        return;
                     } else if (nautilus && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE
                             && (e.value() & TAMABLE_FLAG_TAME) == 0) { // TamableAnimal.DATA_FLAGS_ID
                         unclaim("the nautilus no longer tame");
                         return;
-                    } else if (!pig && !strider && !ghast && !nautilus && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_ID_FLAGS
+                    } else if (!pig && !strider && !ghast && !nautilus && !camel && e.index() == 17
+                            && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_ID_FLAGS (a camel's: always tamed, never rearing)
                         boolean standing = (e.value() & FLAG_STANDING) != 0;
                         if ((e.value() & FLAG_TAME) == 0) {
                             unclaim("the horse no longer tame");
@@ -467,6 +522,24 @@ final class HorseRide {
      */
     Step tick(List<ServerboundPacket.MoveVehicle> moves, ServerboundPacket.MovePlayer rot, List<ServerboundPacket.PlayerCommand> jumps,
             PlayerState.Keys now, Colliders.World view, ClientEntities entities, int self, ClientBorder border, Boolean carrot) {
+        return tick(moves, rot, jumps, now, view, entities, self, border, carrot, false);
+    }
+
+    /** {@link #tick}, {@code sprintAfter} the rider's {@code isSprinting} after its tick (what it sent: a camel's next tick reads it). */
+    Step tick(List<ServerboundPacket.MoveVehicle> moves, ServerboundPacket.MovePlayer rot, List<ServerboundPacket.PlayerCommand> jumps,
+            PlayerState.Keys now, Colliders.World view, ClientEntities entities, int self, ClientBorder border, Boolean carrot, boolean sprintAfter) {
+        Step step = rideTick(moves, rot, jumps, now, view, entities, self, border, carrot);
+        riderSprinting = sprintAfter;
+        return step;
+    }
+
+    /** The server's data on the player, processed between two of the client's ticks: its shared flags' sprint (null: not known when). */
+    void riderSprinting(Boolean sprinting) {
+        riderSprinting = sprinting;
+    }
+
+    private Step rideTick(List<ServerboundPacket.MoveVehicle> moves, ServerboundPacket.MovePlayer rot, List<ServerboundPacket.PlayerCommand> jumps,
+            PlayerState.Keys now, Colliders.World view, ClientEntities entities, int self, ClientBorder border, Boolean carrot) {
         if (unclaimed != null) {
             return null;
         }
@@ -511,41 +584,45 @@ final class HorseRide {
         if (steered) {
             steering = steering.tick(boostTotal); // tickRidden: tickBoost, before getRiddenSpeed
         }
-        Horse.Conditions conditions = conditions(collision, List.of());
+        // a camel's speed reads its rider's sprint (getRiddenSpeed): both where it is not known
+        List<Boolean> sprints = !camel ? List.of(false) : riderSprinting == null ? List.of(false, true) : List.of(riderSprinting);
         Set<HorseState> next = new LinkedHashSet<>();
         HorseState closest = null;
         double closestDistance = Double.POSITIVE_INFINITY;
-        for (HorseState s : states) {
-            HorseState after;
-            try {
-                after = Horse.tick(s, rider, view, conditions);
-            } catch (Colliders.Unknown e) {
-                unclaim(e.getMessage());
-                return null;
-            }
-            Vec3d p = move.position();
-            // ServerboundMoveVehiclePacket.fromEntity: while the horse still interpolates, the interpolation's target and rotations
-            BoatState.Interpolation left = after.interpolation();
-            Vec3d at = left != null ? left.target() : new Vec3d(after.x(), after.y(), after.z());
-            float yaw = left != null ? left.targetYRot() : after.yRot();
-            float pitch = left != null ? left.targetXRot() : after.xRot();
-            boolean same = Double.compare(at.x(), p.x()) == 0 && Double.compare(at.y(), p.y()) == 0 && Double.compare(at.z(), p.z()) == 0
-                    && Float.compare(yaw, move.yaw()) == 0 && Float.compare(pitch, move.pitch()) == 0 && after.onGround() == move.onGround();
-            if (same) {
-                next.add(after);
-            } else {
-                double distance = Math.abs(at.x() - p.x()) + Math.abs(at.y() - p.y()) + Math.abs(at.z() - p.z());
-                if (distance < closestDistance) {
-                    closestDistance = distance;
-                    closest = after;
+        for (boolean sprinting : sprints) {
+            Horse.Conditions conditions = conditions(collision, List.of(), sprinting);
+            for (HorseState s : states) {
+                HorseState after;
+                try {
+                    after = Horse.tick(s, rider, view, conditions);
+                } catch (Colliders.Unknown e) {
+                    unclaim(e.getMessage());
+                    return null;
+                }
+                Vec3d p = move.position();
+                // ServerboundMoveVehiclePacket.fromEntity: while the horse still interpolates, the interpolation's target and rotations
+                BoatState.Interpolation left = after.interpolation();
+                Vec3d at = left != null ? left.target() : new Vec3d(after.x(), after.y(), after.z());
+                float yaw = left != null ? left.targetYRot() : after.yRot();
+                float pitch = left != null ? left.targetXRot() : after.xRot();
+                boolean same = Double.compare(at.x(), p.x()) == 0 && Double.compare(at.y(), p.y()) == 0 && Double.compare(at.z(), p.z()) == 0
+                        && Float.compare(yaw, move.yaw()) == 0 && Float.compare(pitch, move.pitch()) == 0 && after.onGround() == move.onGround();
+                if (same) {
+                    next.add(after);
+                } else {
+                    double distance = Math.abs(at.x() - p.x()) + Math.abs(at.y() - p.y()) + Math.abs(at.z() - p.z());
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        closest = after;
+                    }
                 }
             }
         }
         if (next.isEmpty()) {
             keys = now;
             unclaim("unexplained horse movement");
-            return new Step(false, "no vanilla client rides a " + (pig ? "pig" : strider ? "strider" : ghast ? "happy ghast" : nautilus ? "nautilus" : "horse")
-                    + " so", closest);
+            return new Step(false, "no vanilla client rides a " + (pig ? "pig" : strider ? "strider" : ghast ? "happy ghast" : nautilus ? "nautilus"
+                    : camel ? "camel" : "horse") + " so", closest);
         }
         if (steered || ghast) { // not PlayerRideableJumping: no riding jump (LocalPlayer.jumpableVehicle)
             keys = now;
@@ -564,7 +641,7 @@ final class HorseRide {
         // the rider's LocalPlayer.aiStep: the riding jump from its keys (the last tick's jump key, then this tick's), on a
         // nautilus only once its dash has cooled down (its tick just ran: every state's cooldown alike)
         int cooldown = 0;
-        if (nautilus) {
+        if (nautilus || camel) {
             cooldown = next.iterator().next().dashCooldown();
             for (HorseState s : next) {
                 cooldown = s.dashCooldown() == cooldown ? cooldown : -1;
@@ -575,7 +652,7 @@ final class HorseRide {
             keys = now;
             if (!jumps.isEmpty()) {
                 unclaim("unexplained riding jump");
-                return new Step(false, "sent a riding jump while its nautilus's dash cools down", null);
+                return new Step(false, "sent a riding jump while its " + (camel ? "camel" : "nautilus") + "'s dash cools down", null);
             }
             ticked = List.copyOf(next);
             if (next.size() > MAX_STATES) {
@@ -617,17 +694,17 @@ final class HorseRide {
             return new Step(false, (released == null ? "sent a riding jump its jump key did not release"
                     : jumps.isEmpty() ? "released the jump key of a riding jump it did not send"
                     : "sent a riding jump of another power than its jump key held (" + jumps.getFirst().data() + ", not " + released + ")")
-                    + (nautilus ? " on a nautilus" : ""), null);
+                    + (nautilus ? " on a nautilus" : camel ? " on a camel" : ""), null);
         }
         ticked = List.copyOf(next);
         if (released != null) {
             int power = jumps.getFirst().data();
             List<HorseState> jumped = new ArrayList<>(next.size());
             for (HorseState s : next) {
-                jumped.add(nautilus ? Horse.onNautilusJump(s, power) : Horse.onPlayerJump(s, power, !noAi));
+                jumped.add(nautilus ? Horse.onNautilusJump(s, power) : camel ? Horse.onCamelJump(s, power) : Horse.onPlayerJump(s, power, !noAi));
             }
-            if (nautilus) {
-                jumpKnown = true; // the rider handled its keys (the count -10, its scale 0 once the dash cools down)
+            if (nautilus || camel) {
+                jumpKnown = true; // the rider handled its keys (the count -10, its scale 0 while the dash cools down)
             }
             next = new LinkedHashSet<>(jumped);
         }

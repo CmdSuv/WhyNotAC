@@ -487,6 +487,17 @@ horse -69.5; paddle space/0.4 -/1.5 w/0.8 w,space/1.0 w/1.5 -/1.0; unhorse
 horse -89.5; paddle w/2.5 w,space/0.7 w/2.0 -/0.5; unhorse
 horse -61.5; paddle w/3.0 -/0.5 s/1.0 -/0.5; unhorse
 horse -57.5 nudge; paddle w/4.0 -/1.5; unhorse
+# Camels, on the grass lane (z -69.5) from x -78.5: a saddled camel (always tamed), NoAI (it never sits down by itself),
+# its pose's change long before the client's game time (summoned standing: LastPoseTick 0), ridden east walking, then
+# sprinting (the sprint key: 0.1 faster), then dashing (the jump key held and let go: along its look and up), sprinting
+# on while the dash cools down (no faster), landing (its dashing flag cleared); then west, a dash from standing, the
+# cooldown waited out, and a second dash walking. The truth agent records its tick (Camel.tick, around AbstractHorse.tick).
+camel() { echo "kill @e[tag=wnc]" > "$FIFO"; echo "tp $NAME -79.5 -60 -69.5 $1 0" > "$FIFO"; sleep 1.5
+  echo "summon minecraft:camel -78.5 -60 -69.5 {Tags:[\"wnc\"],NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Rotation:[$1f,0f],equipment:{saddle:{id:\"minecraft:saddle\",count:1}}}" > "$FIFO"; sleep 1.5
+  echo "ride $NAME mount @e[tag=wnc,limit=1]" > "$FIFO"; sleep 1.0; }
+uncamel() { echo "tp $NAME -79.5 -60 -71.5 -90 0" > "$FIFO"; sleep 0.5; echo "kill @e[tag=wnc]" > "$FIFO"; sleep 2.0; }
+camel -90; paddle w/0.5 w,Control_L/1.0 w,Control_L,space/0.5 w,Control_L/0.6 -/0.8; uncamel
+camel 90; paddle space/0.4 -/3.2 w/0.3 w,space/0.4 w/0.6 -/0.8; uncamel
 # Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
 # stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks
 # (Pig.getRiddenInput) up the step ring and into the wall ring; boosted by the use key (the server's boost time reaches

@@ -150,7 +150,7 @@ public class MovementTruth {
                 && ((Number) tracker.get("horseExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("horseUnexplained"))
                 && Long.valueOf(0).equals(tracker.get("horseTruthMissing")) && ((Number) tracker.get("pigTruthCompared")).longValue() > 0
                 && ((Number) tracker.get("striderTruthCompared")).longValue() > 0 && ((Number) tracker.get("ghastTruthCompared")).longValue() > 0
-                && ((Number) tracker.get("nautilusTruthCompared")).longValue() > 0
+                && ((Number) tracker.get("nautilusTruthCompared")).longValue() > 0 && ((Number) tracker.get("camelTruthCompared")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0
                 && ((Number) tracker.get("ridingUnsaddled")).longValue() > 0;
         System.exit(clean ? 0 : 1);
@@ -186,8 +186,8 @@ public class MovementTruth {
         int[] boatIndex = {0};
         long[] rides = new long[2]; // explained ride ticks compared, the client's boat not a state
         // explained horse ticks compared, the client's horse not a state, the pig's among them, those boosting, the strider's,
-        // the happy ghast's, the nautilus's
-        long[] horses = new long[7];
+        // the happy ghast's, the nautilus's, the camel's
+        long[] horses = new long[8];
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -266,6 +266,8 @@ public class MovementTruth {
                         horses[5]++;
                     } else if (String.valueOf(post.get("type")).endsWith("nautilus")) {
                         horses[6]++;
+                    } else if (String.valueOf(post.get("type")).contains("camel")) {
+                        horses[7]++;
                     }
                     HorseState truth = horseState(post);
                     boolean found = false;
@@ -354,6 +356,7 @@ public class MovementTruth {
         out.put("striderTruthCompared", horses[4]);
         out.put("ghastTruthCompared", horses[5]);
         out.put("nautilusTruthCompared", horses[6]);
+        out.put("camelTruthCompared", horses[7]);
         out.put("horseTruthMissing", horses[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
@@ -610,7 +613,8 @@ public class MovementTruth {
         boolean horsesClean() {
             return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0 && pigTicks > 0 && pigBoosted > 0
                     && striderBoosted > 0 && striderSuffocating > 0 && striderOnLava > 0 && striderInLava > 0 && ghastRising > 0 && ghastPitched > 0
-                    && nautilusDashed > 0 && nautilusDashedOnLand > 0 && nautilusInWater > 0 && nautilusOnLand > 0 && nautilusPitched > 0;
+                    && nautilusDashed > 0 && nautilusDashedOnLand > 0 && nautilusInWater > 0 && nautilusOnLand > 0 && nautilusPitched > 0
+                    && camelSprinting > 0 && camelDashed > 0 && camelCooling > 0 && camelDashingCleared > 0;
         }
 
         boolean boatsClean() {
@@ -841,6 +845,12 @@ public class MovementTruth {
         long nautilusInWater;
         long nautilusOnLand;
         long nautilusPitched;
+        /** The camel's ({@code Camel}): its rider's sprint taken, a dash, sprinting while its dash cools down, its dashing flag cleared. */
+        long camelTicks;
+        long camelSprinting;
+        long camelDashed;
+        long camelCooling;
+        long camelDashingCleared;
         long horseMatched;
         long horseMismatched;
         long horseJumps;
@@ -894,7 +904,7 @@ public class MovementTruth {
             HorseState before = new HorseState(t.x(), t.y(), t.z(), t.deltaMovement(), t.yRot(), t.xRot(), t.onGround(), t.horizontalCollision(),
                     t.verticalCollision(), t.verticalCollisionBelow(), t.fallDistance(), t.support(), t.onGroundNoBlocks(), t.stuckSpeedMultiplier(),
                     t.inPowderSnow(), t.noJumpDelay(), t.jumpPendingScale(), t.allowStandSliding(), t.standing(), t.standCounter(), interpolation,
-                    t.lavaHeight(), t.suffocating(), t.dashCooldown());
+                    t.lavaHeight(), t.suffocating(), t.dashCooldown(), t.dashing());
             double reach = interpolation == null ? 0.0 : Math.abs(interpolation.target().x() - t.x()) + Math.abs(interpolation.target().y() - t.y())
                     + Math.abs(interpolation.target().z() - t.z());
             if (entities != null && entities.mayHaveVehicleColliderNear(selfId, id, before.x() - 3.0 - reach, before.y() - 3.0 - reach,
@@ -920,7 +930,9 @@ public class MovementTruth {
             boolean ghast = type.equals("minecraft:happy_ghast");
             // a nautilus (AbstractNautilus): 0.875 by 0.95, swimming where its rider steers and looks, dashing at its jump
             boolean nautilus = type.equals("minecraft:nautilus") || type.equals("minecraft:zombie_nautilus");
-            float height = ghast ? 4.0F : nautilus ? 0.95F : strider ? 1.7F : pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+            // a camel (Camel): 1.7 by 2.375 standing, ridden as a horse, faster while its rider sprints, dashing at its jump
+            boolean camel = type.equals("minecraft:camel") || type.equals("minecraft:camel_husk");
+            float height = ghast ? 4.0F : nautilus ? 0.95F : camel ? 2.375F : strider ? 1.7F : pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
             float speed = (float) f64(pre.get("movementSpeed"));
             ItemSteering steered = null;
             Horse.Strider striding = null;
@@ -940,8 +952,9 @@ public class MovementTruth {
             Horse.Conditions conditions = new Horse.Conditions(speed, f64(pre.get("jumpStrength")), f32(pre.get("maxUpStep")),
                     f64(pre.get("gravity")), new Horse.Effects(e.jumpBoost(), e.slowFalling(), e.levitation(), e.dolphinsGrace()),
                     type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type),
-                    ghast ? 4.0F : nautilus ? 0.875F : pig ? 0.9F : 1.3964844F, height, border(player), List.of(), striding,
-                    ghast ? Horse.Flying.of(f64(pre.get("flyingSpeed"))) : null, nautilus ? new Horse.Nautilus(f64(pre.get("movementSpeed"))) : null);
+                    ghast ? 4.0F : nautilus ? 0.875F : camel ? 1.7F : pig ? 0.9F : 1.3964844F, height, border(player), List.of(), striding,
+                    ghast ? Horse.Flying.of(f64(pre.get("flyingSpeed"))) : null, nautilus ? new Horse.Nautilus(f64(pre.get("movementSpeed"))) : null,
+                    camel ? new Horse.Camel(f64(pre.get("movementSpeed")), Boolean.TRUE.equals(pre.get("riderSprinting"))) : null);
             if (e.slowFalling()) {
                 horseUnknown.merge("slow falling (the recorded gravity is the effective one)", 1L, Long::sum);
                 horsesSkipped.add(id);
@@ -960,6 +973,24 @@ public class MovementTruth {
                 }
                 if (f32(pre.get("riderXRot")) != 0.0F && f32(pre.get("riderZza")) != 0.0F) {
                     ghastPitched++;
+                }
+            }
+            // a camel's speed (getRiddenSpeed, after tickRidden): 0.1 more while its rider sprints and its dash has cooled down
+            boolean dashes = camel && before.jumpPendingScale() > 0.0F && before.onGround();
+            boolean bonus = camel && Boolean.TRUE.equals(pre.get("riderSprinting")) && !dashes && before.dashCooldown() == 0;
+            if (camel) {
+                camelTicks++;
+                if (bonus) {
+                    camelSprinting++;
+                }
+                if (dashes) {
+                    camelDashed++;
+                }
+                if (Boolean.TRUE.equals(pre.get("riderSprinting")) && before.dashCooldown() > 0) {
+                    camelCooling++;
+                }
+                if (before.dashing() && !Boolean.TRUE.equals(post.get("dashing"))) {
+                    camelDashingCleared++;
                 }
             }
             if (nautilus) {
@@ -1021,6 +1052,9 @@ public class MovementTruth {
                     // water sets it again, LivingEntity.checkFallDamage)
                     float attribute = (float) f64(pre.get("movementSpeed"));
                     bits(d, "speed", Boolean.TRUE.equals(post.get("wasTouchingWater")) ? 0.0325F * attribute : 0.02F * attribute, f32(post.get("speed")));
+                }
+                if (camel) {
+                    bits(d, "speed", (float) f64(pre.get("movementSpeed")) + (bonus ? 0.1F : 0.0F), f32(post.get("speed")));
                 }
                 if (pig) { // the boost it counted and the speed it set (setSpeed(getRiddenSpeed))
                     same(d, "boosting", steered.boosting(), Boolean.TRUE.equals(post.get("boosting")));
@@ -1099,6 +1133,11 @@ public class MovementTruth {
             horse.put("nautilusInWater", nautilusInWater);
             horse.put("nautilusOnLand", nautilusOnLand);
             horse.put("nautilusPitched", nautilusPitched);
+            horse.put("camelTicks", camelTicks);
+            horse.put("camelSprinting", camelSprinting);
+            horse.put("camelDashed", camelDashed);
+            horse.put("camelCooling", camelCooling);
+            horse.put("camelDashingCleared", camelDashingCleared);
             horse.put("unknown", horseUnknown);
             horse.put("differingFields", horseDifferingFields);
             horse.put("examples", horseExamples);
@@ -1171,7 +1210,8 @@ public class MovementTruth {
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), (Boolean) r.get("inPowderSnow"),
                 ((Number) r.get("noJumpDelay")).intValue(), f32(r.get("jumpPendingScale")), (Boolean) r.get("allowStandSliding"),
                 (Boolean) r.get("standing"), ((Number) r.get("standCounter")).intValue(), null, f64(r.get("lavaHeight")),
-                Boolean.TRUE.equals(r.get("suffocating")), r.get("dashCooldown") == null ? 0 : ((Number) r.get("dashCooldown")).intValue());
+                Boolean.TRUE.equals(r.get("suffocating")), r.get("dashCooldown") == null ? 0 : ((Number) r.get("dashCooldown")).intValue(),
+                Boolean.TRUE.equals(r.get("dashing")) && String.valueOf(r.get("type")).contains("camel"));
     }
 
     private static List<String> horseDifferences(HorseState p, HorseState e) {
@@ -1201,9 +1241,10 @@ public class MovementTruth {
         same(d, "standing", p.standing(), e.standing());
         same(d, "standCounter", p.standCounter(), e.standCounter());
         bits(d, "lavaHeight", p.lavaHeight(), e.lavaHeight());
-        if (p.dashCooldown() >= 0) { // a nautilus's, once known (the tracker's is not before its first dash)
+        if (p.dashCooldown() >= 0) { // a nautilus's or camel's, once known (the tracker's is not before its first dash)
             same(d, "dashCooldown", p.dashCooldown(), e.dashCooldown());
         }
+        same(d, "dashing", p.dashing(), e.dashing()); // a camel's
         same(d, "suffocating", p.suffocating(), e.suffocating());
         return d;
     }

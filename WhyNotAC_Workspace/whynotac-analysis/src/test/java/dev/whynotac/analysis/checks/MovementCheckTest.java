@@ -939,16 +939,34 @@ class MovementCheckTest {
         }
         float[] input = Horse.riderInput(riderKeys);
         horse = Horse.tick(horse, new Horse.Rider(input[0], input[1], 30.0F, pitch), GROUND, NAUTILUS_CONDITIONS);
-        nautilusJump = null;
-        if (horse.dashCooldown() == 0 || spam) { // getJumpCooldown() == 0
+        nautilusJump = riderJump(keys, horse.dashCooldown() == 0, spam, power);
+        if (!keys.equals(sentInput)) {
+            in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
+            sentInput = keys;
+        }
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, pitch, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+        riderKeys = keys;
+    }
+
+    /**
+     * The rider's {@code LocalPlayer.aiStep} on a vehicle whose dash cools down: once {@code cooledDown} (and {@code spam}:
+     * even before) the jump key's count, and the riding jump a release sends ({@code power}: null the key's, {@code
+     * MIN_VALUE} none); returns the power sent, or null.
+     */
+    private Integer riderJump(PlayerState.Keys keys, boolean cooledDown, boolean spam, Integer power) {
+        Integer sent = null;
+        if (cooledDown || spam) { // getJumpCooldown() == 0
             if (jumpRidingTicks < 0 && ++jumpRidingTicks == 0) {
                 jumpRidingScale = 0.0F;
             }
             if (riderKeys.jump() && !keys.jump() || spam) {
                 jumpRidingTicks = -10;
                 if (power == null || power != Integer.MIN_VALUE) {
-                    nautilusJump = power != null ? power : (int) Math.floor(jumpRidingScale * 100.0F);
-                    in(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP, nautilusJump));
+                    sent = power != null ? power : (int) Math.floor(jumpRidingScale * 100.0F);
+                    in(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP, sent));
                 }
             } else if (!riderKeys.jump() && keys.jump()) {
                 jumpRidingTicks = 0;
@@ -960,12 +978,94 @@ class MovementCheckTest {
         } else {
             jumpRidingScale = 0.0F;
         }
+        return sent;
+    }
+
+    // --- a camel the player rides ---
+
+    private static final int CAMEL = 46;
+    /** The synthetic client's rider's {@code isSprinting} (what the camel's next tick reads) and {@code wasSprinting} (what it sent). */
+    private boolean camelRiderSprinting;
+    private boolean camelSentSprinting;
+
+    private static Horse.Conditions camelConditions(boolean sprinting) {
+        return new Horse.Conditions(0.0F, 0.42F, 1.5F, 0.08, Horse.Effects.NONE, 0.8F, true, 1.7F, 2.375F, null, List.of(), null, null, null,
+                new Horse.Camel(0.09F, sprinting));
+    }
+
+    /** A saddled camel put on the stone at (x, 64, z), the client's game time set first ({@code gameTime}; null: never); a few ticks on foot. */
+    private void camelOnGround(double x, double z, Long gameTime, long lastPoseChange) throws Colliders.Unknown {
+        camelOnGround(x, 64.0, z, gameTime, lastPoseChange);
+    }
+
+    /** {@link #camelOnGround} at the height {@code y}. */
+    private void camelOnGround(double x, double y, double z, Long gameTime, long lastPoseChange) throws Colliders.Unknown {
+        if (gameTime != null) {
+            out(new ClientboundPacket.SetTime(gameTime, gameTime, true));
+        }
+        out(ClientboundPacket.AddEntity.received(CAMEL, new UUID(10, 10), "minecraft:camel", x, y, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.SetEquipment(CAMEL, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                new Stack("minecraft:saddle", 1, List.of(), List.of(), null, false)))));
+        if (lastPoseChange != 0L) {
+            out(new ClientboundPacket.SetEntityData(CAMEL, List.of(new ClientboundPacket.SetEntityData.DataEntry(19,
+                    ClientboundPacket.SetEntityData.Kind.LONG, lastPoseChange)), 0));
+        }
+        out(new ClientboundPacket.EntityPositionSync(CAMEL, new Vec3d(x, y, z), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        villagers.add(new double[] {x, y, z, 1.7F, 2.375F});
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** The server puts the player on the camel; the client handles it before its next tick (the rider not sprinting). */
+    private void mountCamel(double x, double z) throws Colliders.Unknown {
+        mountCamel(x, 64.0, z);
+    }
+
+    private void mountCamel(double x, double y, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(CAMEL, new int[] {SELF}));
+        sync();
+        villagers.removeIf(v -> v.length > 3);
+        horse = new HorseState(x, y, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, y, z, GROUND,
+                camelConditions(false)), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null, 0.0, false, 0, false);
+        riderKeys = NONE;
+        nautilusJump = null;
+        jumpRidingTicks = 0;
+        jumpRidingScale = 0.0F;
+        camelRiderSprinting = false;
+        camelSentSprinting = false;
+    }
+
+    /**
+     * One ride tick: the camel's (the input its rider's last tick left, its sprint, the jump released then), then the
+     * passenger's: the riding jump once the dash cooled down, its sprint ({@code sprint}: null kept) sent when changed, its
+     * input, its rotation and the camel's move moved by {@code cheat}.
+     */
+    private void camelRideTick(PlayerState.Keys keys, Boolean sprint, Vec3d cheat, Integer power) throws Colliders.Unknown {
+        camelRideTick(keys, sprint, cheat, power, false);
+    }
+
+    /** {@link #camelRideTick}, a riding jump sent at once when {@code spam}, cooled down or not. */
+    private void camelRideTick(PlayerState.Keys keys, Boolean sprint, Vec3d cheat, Integer power, boolean spam) throws Colliders.Unknown {
+        if (nautilusJump != null) {
+            horse = Horse.onCamelJump(horse, nautilusJump);
+        }
+        float[] input = Horse.riderInput(riderKeys);
+        horse = Horse.tick(horse, new Horse.Rider(input[0], input[1], 30.0F, 0.0F), GROUND, camelConditions(camelRiderSprinting));
+        nautilusJump = riderJump(keys, horse.dashCooldown() == 0, spam, power);
+        if (sprint != null) {
+            camelRiderSprinting = sprint;
+        }
         if (!keys.equals(sentInput)) {
             in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
             sentInput = keys;
         }
-        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, pitch, false, true, false, false));
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
         in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        if (camelRiderSprinting != camelSentSprinting) { // sendIsSprintingIfNeeded, on a vehicle it controls
+            in(new ServerboundPacket.PlayerCommand(SELF, camelRiderSprinting ? ServerboundPacket.PlayerCommand.Action.START_SPRINTING
+                    : ServerboundPacket.PlayerCommand.Action.STOP_SPRINTING, 0));
+            camelSentSprinting = camelRiderSprinting;
+        }
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
         riderKeys = keys;
@@ -1473,6 +1573,174 @@ class MovementCheckTest {
         }
         assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
         assertTrue(evidence.getFirst().summary().startsWith("rode a nautilus as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void aCamelRiddenByAVanillaClientIsExplainedSprintsAndDashes() throws Exception {
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 6.5, 1000L, 0L);
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 100; i++) {
+            // ahead, then sprinting (from tick 10); a dash released at tick 25 (no sprint while it cools down), the sprint
+            // let go and taken again, and a second dash once it has cooled down
+            PlayerState.Keys keys = i >= 20 && i < 25 || i >= 85 && i < 89 ? JUMP : FORWARD;
+            if (i == 30) { // its flags as the server sets them: a camel is tamed whatever they say (Camel.isTamed)
+                out(new ClientboundPacket.SetEntityData(CAMEL, List.of(new ClientboundPacket.SetEntityData.DataEntry(17,
+                        ClientboundPacket.SetEntityData.Kind.BYTE, 0)), 0));
+                sync();
+            }
+            camelRideTick(keys, i == 10 || i == 60 ? Boolean.TRUE : i == 50 ? Boolean.FALSE : null, Vec3d.ZERO, null);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(100, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(horse.dashCooldown() > 40 && horse.dashCooldown() < 55, "it dashed again: " + horse);
+        assertTrue(horse.x() < 0.0 && horse.z() > 15.0, "ahead and dashing: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aCamelFasterThanItsSprintIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 6.5, 1000L, 0L);
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 20; i++) {
+            camelRideTick(FORWARD, i == 2 ? Boolean.TRUE : null, i == 12 ? new Vec3d(-0.02, 0.0, 0.03) : Vec3d.ZERO, null); // camel speed
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a camel as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void aJumpReleasedAsTheCamelFallsDoesNotDash() throws Exception {
+        for (int x = 4; x <= 8; x++) {
+            for (int z = 4; z <= 7; z++) {
+                place(x, 64, z, STONE);
+                place(x, 65, z, STONE);
+            }
+        }
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 66.0, 6.5, 1000L, 0L);
+        mountCamel(6.5, 66.0, 6.5);
+        PlayerState.Keys forwardJump = new PlayerState.Keys(true, false, false, false, true, false, false);
+        boolean fell = false;
+        for (int i = 0; i < 60; i++) {
+            // the jump key held while it walks off the platform, let go as it falls: Camel.onPlayerJump ignores a jump off
+            // the ground, which its rider sends all the same (its dash has cooled down)
+            fell |= horse.y() < 65.5; // off the platform, falling
+            camelRideTick(fell ? FORWARD : forwardJump, null, Vec3d.ZERO, null);
+        }
+        assertTrue(fell && horse.y() == 64.0, "it fell off: " + horse);
+        assertEquals(0, horse.dashCooldown(), "no dash");
+        assertTrue(horseTicks().stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(horseTicks()));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aCamelsDashingDataCoolsItsDashAgain() throws Exception {
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 6.5, 1000L, 0L);
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 70; i++) {
+            if (i == 5) { // the server's DASH reaches a client whose dash has cooled down: 55 ticks again
+                out(new ClientboundPacket.SetEntityData(CAMEL, List.of(new ClientboundPacket.SetEntityData.DataEntry(18,
+                        ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1)), 0));
+                sync();
+                horse = Horse.onCamelDashSynced(horse, true);
+            }
+            // a release at tick 12 sends nothing, one at tick 66 dashes
+            camelRideTick(i >= 8 && i < 12 || i >= 62 && i < 66 ? JUMP : NONE, null, Vec3d.ZERO, null);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(horseTicks()));
+        assertTrue(horse.dashCooldown() > 45, "it dashed at last: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aCamelDashWhileItCoolsDownIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 6.5, 1000L, 0L);
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 30; i++) {
+            // a dash released at tick 5, then a jump sent at tick 20, while it still cools down
+            camelRideTick(i < 5 ? JUMP : NONE, null, Vec3d.ZERO, null, i == 20);
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a camel as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void theServersSprintFlagReachesTheCamelsNextTick() throws Exception {
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 6.5, 1000L, 0L);
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 20; i++) {
+            if (i == 9) {
+                // the server's flags from before the rider stopped sprinting: the client sprints again before its next tick
+                out(new ClientboundPacket.SetEntityData(SELF, List.of(new ClientboundPacket.SetEntityData.DataEntry(0,
+                        ClientboundPacket.SetEntityData.Kind.BYTE, 1 << 3)), 0));
+                sync();
+                camelRiderSprinting = true;
+            }
+            camelRideTick(FORWARD, i == 3 ? Boolean.TRUE : i == 7 ? Boolean.FALSE : null, Vec3d.ZERO, null);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(horseTicks()));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void noClaimForACamelThatMayStillBeStandingUpOrSits() throws Exception {
+        ticks(5, NONE, 30.0F);
+        camelOnGround(6.5, 6.5, null, 0L); // the client's game time not known: 0, the pose's change may be under 52 ticks ago
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 3; i++) {
+            camelRideTick(FORWARD, null, Vec3d.ZERO, null);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: a camel that may still be standing up".equals(t.reason())), String.valueOf(horseTicks()));
+        out(new ClientboundPacket.SetPassengers(CAMEL, new int[] {}));
+        out(new ClientboundPacket.RemoveEntities(new int[] {CAMEL}));
+        sync();
+        ticks.clear();
+        camelOnGround(6.5, 6.5, 1000L, -900L); // sat down at 900
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 3; i++) {
+            camelRideTick(FORWARD, null, Vec3d.ZERO, null);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: a camel sitting".equals(t.reason())), String.valueOf(horseTicks()));
+        out(new ClientboundPacket.SetPassengers(CAMEL, new int[] {}));
+        out(new ClientboundPacket.RemoveEntities(new int[] {CAMEL}));
+        sync();
+        ticks.clear();
+        camelOnGround(6.5, 6.5, 1000L, 0L);
+        out(new ClientboundPacket.SetEntityData(CAMEL, List.of(new ClientboundPacket.SetEntityData.DataEntry(18,
+                ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1)), 0)); // another rider's dash: its client cooldown not known
+        sync();
+        mountCamel(6.5, 6.5);
+        for (int i = 0; i < 3; i++) {
+            camelRideTick(FORWARD, null, Vec3d.ZERO, null);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: a camel whose dash the client may be cooling down (its dash data seen)".equals(t.reason())),
+                String.valueOf(horseTicks()));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aNautilusWhoseDashMayBeCoolingDownIsJudgedOnceItHasDashed() throws Exception {
+        ticks(5, NONE, 30.0F);
+        nautilusOnGround(6.5, 6.5);
+        out(new ClientboundPacket.SetEntityData(NAUTILUS, List.of(new ClientboundPacket.SetEntityData.DataEntry(19,
+                ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1)), 0)); // another rider's dash: its client cooldown 40 then
+        sync();
+        mountNautilus(6.5, 6.5);
+        horse = Horse.withDashCooldown(horse, 25); // the synthetic client's, what is left of it
+        for (int i = 0; i < 80; i++) {
+            // a release while it cools down sends nothing; once it has cooled down a release dashes; then a jump sent while
+            // that dash cools down is a finding
+            nautilusRideTick(i < 4 || i >= 35 && i < 40 ? JUMP : NONE, 0.0F, Vec3d.ZERO, i == 60);
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a nautilus as no vanilla client could"), evidence.getFirst().summary());
+        assertTrue(horseTicks().subList(0, 60).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(horseTicks()));
     }
 
     @Test

@@ -9,8 +9,9 @@ import java.util.List;
 /**
  * One {@code AbstractHorse.tick()} of a horse (donkey, mule, skeleton or zombie horse) the local player rides and
  * controls (saddled, the player its first passenger: {@code getControllingPassenger}), bit for bit as the 1.21.11 client
- * runs it; a pig's ({@code Mob.tick}), a strider's ({@code Strider.tick}, {@link Strider}), a happy ghast's
- * ({@code HappyGhast.tick}, {@link Flying}) and a nautilus's ({@code AbstractNautilus.tick}, {@link Nautilus}) alike. The tick runs
+ * runs it; a camel's ({@code Camel.tick}, {@link Camel}), a pig's ({@code Mob.tick}), a strider's ({@code Strider.tick},
+ * {@link Strider}), a happy ghast's ({@code HappyGhast.tick}, {@link Flying}) and a nautilus's ({@code AbstractNautilus.tick},
+ * {@link Nautilus}) alike. The tick runs
  * before its rider's: {@code Entity.baseTick} (fluid currents, a fall in lava halved), then
  * {@code LivingEntity.aiStep}: the interpolation's step toward where the server last put it, the motion's small parts
  * zeroed (a non-player's: each horizontal axis below 0.003), and {@code travelRidden}: the rider's input
@@ -67,12 +68,20 @@ public final class Horse {
      * @param strider           a strider's own tick ({@link Strider}), or null
      * @param flying            a happy ghast's ({@link Flying}), or null
      * @param nautilus          a nautilus's ({@link Nautilus}), or null
+     * @param camel             a camel's ({@link Camel}), or null
      */
     public record Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
             boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider, Flying flying,
-            Nautilus nautilus) {
+            Nautilus nautilus, Camel camel) {
         public Conditions {
             entities = List.copyOf(entities);
+        }
+
+        public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
+                boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider, Flying flying,
+                Nautilus nautilus) {
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, strider, flying,
+                    nautilus, null);
         }
 
         public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
@@ -135,6 +144,19 @@ public final class Horse {
      */
     public record Nautilus(double movementSpeed) {}
 
+    /**
+     * A camel ({@code Camel}, a camel husk alike): ridden as a horse is, its speed the movement speed attribute, 0.1 more
+     * while its rider sprints and its dash has cooled down ({@code getRiddenSpeed}, after {@code tickRidden}); its riding
+     * jump a dash ({@code executeRidersJump}): along its own look on the level, 22.2222 times the jump's scale, the
+     * attribute and the block's speed factor, and up 1.4285 times the scale and its jump power ({@code getJumpPower}); then
+     * 55 ticks before the next ({@code dashCooldown}), its dashing flag cleared once the cooldown is under 50 on the ground
+     * or in a fluid ({@code Camel.tick}; {@code onSyncedDataUpdated}: a dash cooled down then cools down 55 ticks again).
+     *
+     * @param movementSpeed  the movement speed attribute's value
+     * @param riderSprinting its rider's {@code isSprinting} as the tick reads it (what the rider's last tick left it)
+     */
+    public record Camel(double movementSpeed, boolean riderSprinting) {}
+
     private final Colliders.World world;
     private final BlockStates states;
     private final Conditions conditions;
@@ -166,6 +188,7 @@ public final class Horse {
     private double lavaHeight;
     private boolean suffocating;
     private int dashCooldown;
+    private boolean dashing;
     /** {@code getSpeed()}: what {@code travelRidden} set ({@code getRiddenSpeed}). */
     private float speed;
     /** {@code oldPosition()}: where the tick started ({@code setOldPosAndRot}). */
@@ -201,6 +224,7 @@ public final class Horse {
         lavaHeight = pre.lavaHeight();
         suffocating = pre.suffocating();
         dashCooldown = pre.dashCooldown();
+        dashing = pre.dashing();
         speed = conditions.speed();
         oldPosition = new Vec3d(x, y, z);
     }
@@ -252,7 +276,24 @@ public final class Horse {
         return new HorseState(s.x(), s.y(), s.z(), s.deltaMovement(), s.yRot(), s.xRot(), s.onGround(), s.horizontalCollision(), s.verticalCollision(),
                 s.verticalCollisionBelow(), s.fallDistance(), s.support(), s.onGroundNoBlocks(), s.stuckSpeedMultiplier(), s.inPowderSnow(),
                 s.noJumpDelay(), jumpPendingScale(power), slide, standing, standCounter, s.interpolation(), s.lavaHeight(), s.suffocating(),
-                s.dashCooldown());
+                s.dashCooldown(), s.dashing());
+    }
+
+    /**
+     * {@code Camel.onPlayerJump(power)} on a saddled camel, as the rider's tick releases a riding jump: on the ground with
+     * its dash cooled down, {@code AbstractHorse.onPlayerJump} (a camel never rears: {@code canPerformRearing}); else
+     * nothing (a rider's tick sends one only once it has cooled down, wherever the camel is).
+     */
+    public static HorseState onCamelJump(HorseState s, int power) {
+        return s.dashCooldown() > 0 || !s.onGround() ? s : onPlayerJump(s, power, false);
+    }
+
+    /**
+     * {@code Camel.onSyncedDataUpdated(DASH)}, as the client handles the dashing flag's data during the ride: the flag
+     * the data holds, and a cooled-down dash cooling down 55 ticks again.
+     */
+    public static HorseState onCamelDashSynced(HorseState s, boolean dashing) {
+        return withDash(s, s.jumpPendingScale(), s.dashCooldown() == 0 ? 55 : s.dashCooldown(), dashing);
     }
 
     /**
@@ -261,7 +302,7 @@ public final class Horse {
      * {@code LocalPlayer.aiStep}: {@code getJumpCooldown() == 0}).
      */
     public static HorseState onNautilusJump(HorseState s, int power) {
-        return s.dashCooldown() > 0 ? s : withDash(s, jumpPendingScale(power), s.dashCooldown());
+        return s.dashCooldown() > 0 ? s : withDash(s, jumpPendingScale(power), s.dashCooldown(), s.dashing());
     }
 
     /**
@@ -269,14 +310,19 @@ public final class Horse {
      * cooled-down dash cools down 40 ticks again ({@code dashCooldown == 0 ? 40 : dashCooldown}).
      */
     public static HorseState onDashSynced(HorseState s) {
-        return s.dashCooldown() == 0 ? withDash(s, s.jumpPendingScale(), 40) : s;
+        return s.dashCooldown() == 0 ? withDash(s, s.jumpPendingScale(), 40, s.dashing()) : s;
     }
 
-    private static HorseState withDash(HorseState s, float jumpPendingScale, int dashCooldown) {
+    /** {@code s} with another dash cooldown. */
+    public static HorseState withDashCooldown(HorseState s, int dashCooldown) {
+        return withDash(s, s.jumpPendingScale(), dashCooldown, s.dashing());
+    }
+
+    private static HorseState withDash(HorseState s, float jumpPendingScale, int dashCooldown, boolean dashing) {
         return new HorseState(s.x(), s.y(), s.z(), s.deltaMovement(), s.yRot(), s.xRot(), s.onGround(), s.horizontalCollision(), s.verticalCollision(),
                 s.verticalCollisionBelow(), s.fallDistance(), s.support(), s.onGroundNoBlocks(), s.stuckSpeedMultiplier(), s.inPowderSnow(),
                 s.noJumpDelay(), jumpPendingScale, s.allowStandSliding(), s.standing(), s.standCounter(), s.interpolation(), s.lavaHeight(),
-                s.suffocating(), dashCooldown);
+                s.suffocating(), dashCooldown, dashing);
     }
 
     /**
@@ -293,7 +339,7 @@ public final class Horse {
     private HorseState state() {
         return new HorseState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, verticalCollision, verticalCollisionBelow, fallDistance, support,
                 onGroundNoBlocks, stuck, inPowderSnow, noJumpDelay, jumpPendingScale, allowStandSliding, standing, standCounter, interpolation,
-                lavaHeight, suffocating, dashCooldown);
+                lavaHeight, suffocating, dashCooldown, dashing);
     }
 
     private void run(Rider rider) throws Colliders.Unknown {
@@ -385,11 +431,19 @@ public final class Horse {
             input = new Vec3d(strafe, 0.0, forward);
         }
         setRot(rider.yRot(), rider.xRot() * 0.5F); // getRiddenRotation
+        Camel camel = conditions.camel();
         if (onGround) {
             if (jumpPendingScale > 0.0F) { // && !isJumping(): never on the client
-                executeRidersJump(jumpPendingScale, input);
+                if (camel != null) {
+                    camelDash(jumpPendingScale, camel);
+                } else {
+                    executeRidersJump(jumpPendingScale, input);
+                }
             }
             jumpPendingScale = 0.0F;
+        }
+        if (camel != null) { // Camel.getRiddenSpeed, after tickRidden's dash
+            speed = (float) camel.movementSpeed() + (camel.riderSprinting() && dashCooldown == 0 ? 0.1F : 0.0F);
         }
         // shouldTravelInFluid: in water or lava, unless it stands on the fluid where it is (a strider on lava)
         boolean standsOnFluid = strider != null && states.fluidKind(state(BlockPos.containing(x, y, z))) == BlockStates.FLUID_LAVA;
@@ -406,6 +460,19 @@ public final class Horse {
         }
         if (!standing) {
             allowStandSliding = false;
+        }
+        if (camel != null) {
+            // --- Camel.tick, after AbstractHorse.tick: its dashing flag cleared under 50 on the ground or in a fluid (never a
+            // passenger here), which cools a cooled-down dash 55 ticks again (onSyncedDataUpdated); the dash cools down ---
+            if (dashing && dashCooldown < 50 && (onGround || wasTouchingWater || lavaHeight > 0.0)) {
+                dashing = false;
+                if (dashCooldown == 0) {
+                    dashCooldown = 55;
+                }
+            }
+            if (dashCooldown > 0) {
+                dashCooldown--;
+            }
         }
         if (strider != null && lavaHeight > 0.0) {
             // --- Strider.floatStrider (isInLava): above lava's stable shape with no lava over it, on the ground; else lifted ---
@@ -454,6 +521,26 @@ public final class Horse {
         Vec3d look = new Vec3d(sinYaw * cosPitch, -sinPitch, cosYaw * cosPitch);
         delta = delta.add(look.scale((wasTouchingWater ? 1.2F : 0.5F) * scale * nautilus.movementSpeed() * Terrain.blockSpeedFactor(world, support, x, y, z)));
         dashCooldown = 40;
+    }
+
+    /**
+     * {@code Camel.executeRidersJump}: along its own look ({@code getLookAngle}: the yaw and pitch {@code tickRidden} just
+     * set) on the level ({@code multiply(1, 0, 1).normalize()}), 22.2222 times the scale, the movement speed attribute and
+     * the block's speed factor, and up 1.4285 times the scale and its jump power ({@code getJumpPower}: the jump strength
+     * attribute times the block's jump factor, plus jump boost's); then 55 ticks before the next, and it dashes.
+     */
+    private void camelDash(float scale, Camel camel) throws Colliders.Unknown {
+        float boost = conditions.effects().jumpBoost() > 0 ? 0.1F * conditions.effects().jumpBoost() : 0.0F; // 0.1 * (amplifier + 1)
+        double power = (float) conditions.jumpStrength() * 1.0F * blockJumpFactor() + boost;
+        float pitch = xRot * VanillaMath.DEG_TO_RAD;
+        float yaw = -yRot * VanillaMath.DEG_TO_RAD;
+        float cosPitch = VanillaMath.cos(pitch);
+        Vec3d look = new Vec3d(VanillaMath.sin(yaw) * cosPitch, -VanillaMath.sin(pitch), VanillaMath.cos(yaw) * cosPitch);
+        Vec3d level = new Vec3d(look.x(), look.y() * 0.0, look.z()).normalize();
+        delta = delta.add(level.scale(22.2222F * scale * camel.movementSpeed() * Terrain.blockSpeedFactor(world, support, x, y, z))
+                .add(0.0, 1.4285F * scale * power, 0.0));
+        dashCooldown = 55;
+        dashing = true;
     }
 
     /**
