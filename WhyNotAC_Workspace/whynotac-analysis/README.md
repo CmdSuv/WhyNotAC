@@ -487,8 +487,11 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   strider (boğulmasını sunucu belirler), hızlanma bilinmiyorsa, eyersiz/yavru/ölçekli strider; atınkilerin geri kalanı da
   (binişte gezdiği yerde lav varsa da: binilmeden önceki tiklerinde lav onu yüzdürür). Strider'la binek zıplaması
   kanıttır. **Doğrulama:** gerçek client parkurunda iki strider ayağı (çimden lav havuzuna, karşı kıyıya ve akan lav
-  kanalına; biri kullanım tuşuyla hızlanarak); CI kapısı motorun strider tiklerinin client'la bit bit aynı olmasını
-  (boğulurken, lavda dururken ve lavda yüzerken tikler dahil) ve takipçinin strider tiklerini açıklamasını ister. `StriderTest`: lavın sabit şekli (kaynak, üstü lav değil, yarım bloğun
+  kanalına; biri kullanım tuşuyla hızlanarak; AI'ı binişten önce açık: sunucu varlığın verisini tikinin sonunda, binişi
+  hemen gönderir): `Horse` motoru strider'ın 249 tikinin hepsinde client'la bit bit aynı (84'ü hızlanırken, 133'ü
+  boğulurken, 61'i lavın üstünde dururken, 37'si akan lavda batıp yüzerken), takipçi 249 tikin hepsini iddia edip
+  açıkladı, her birinde client'ın kendi strider'ı kümede. NoAI'lı binişte (önceki bir koşu) iddia yoktu, motor yine 246
+  tikte bit bit aynıydı. `StriderTest`: lavın sabit şekli (kaynak, üstü lav değil, yarım bloğun
   üstünden; oyuncu için hiç), lavda duran strider ve batan at, lavda yüzüp yüzeye çıkış, karada boğulup yavaşlama, son
   tikin lavıyla bir tik daha ısınma, NoAI; mutasyonlar (yarım blok yerine bir blok, `floatStrider`'ın yarıya indirmesi,
   son tikin lavı, lavda yürüme, lavda düşüş) testleri kırar. `MovementCheckTest`: taştan lava sürülen 70 tik açıklanır;
@@ -515,8 +518,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   (`isSaddled`: `AbstractHorse`, `AbstractNautilus`, domuz, strider; happy ghast koşum ister: `isWearingBodyArmor`):
   replika bu türlerin eyer (happy ghast'ın gövde) yuvasını aday aday izler (doğuşta boş, `SetEquipment` ile; kayıp ya
   da bilinmeyen eşya "olabilir"), ve client'ın tutabileceği hiçbir durumda eyeri yoksa araç kontrol edilemeyendir
-  ("... on a minecraft:horse with no saddle"). Gerçek client oturumunda kural vagonda 71 tik devredeydi, 0 bulgu; eyersiz
-  evcil atla bir ayak da eklendi (kapı: `ridingUnsaddled`). `MovementCheckTest`: vagondaki yolcunun tikleri
+  ("... on a minecraft:horse with no saddle"). Gerçek client oturumunda kural vagonda 72 tik, eyersiz evcil atta 91 tik
+  devredeydi (W basılıyken; client hiç `MoveVehicle` göndermedi), 0 bulgu. `MovementCheckTest`: vagondaki yolcunun tikleri
   açıklanamayan değil, vagonda ve eyersiz atta gönderilen `MoveVehicle` bulgu, eyerli lamada değil. `ClientEntitiesTest`:
   dokuz türün doğuştaki, eyer ve koşum takılınca ve eyer çıkarılınca durumu; mutasyonlar (eyer yok sayılmaz, eyer
   uygulanmaz, koşum okunmaz) testleri kırar.
