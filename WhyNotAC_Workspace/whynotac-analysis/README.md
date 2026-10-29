@@ -315,7 +315,20 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   elin o anki yığınını alır. Bitiş olayı (9) kullanımı bitirir (aç karnına yemek iddiayı bitirir: client'ın kendi
   açlığı koşmayı sunucudan önce belirler). Çapa her olası kullanımı dener: hiçbiri ya da ellerdeki her yığın.
   İddia yok: blok değiştirebilen kullanım (kova, nilüfer), kendi kendine bitebilen kullanım (fırça, kese),
-  bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
+  riptide'lı ya da gücü bilinmeyen bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
+  Trident'in dönme saldırısı gücünü (`EnchantmentHelper.getTridentSpinAttackStrength`) sunucu tarafındaki çevirici her
+  tam yığın için büyülerinden hesaplar: sunucunun client'a senkronladığı tanımlarla (bir datapack'in değişiklikleri
+  dahil), iki rastgele çekilişte aynı değilse NaN; client'ın kendi hash'lediği yığında ve eski kayıtlarda bilinmez.
+  Gücü 0 olan trident'i bırakmak (`TridentItem.releaseUsing`: client onu fırlatır, oyuncuyu hareket ettirmez) yayınki
+  gibi sıradan bir bırakıştır ve iddiayı bitirmez; hileli bir client riptide'sız trident bırakarak kontrolü susturamaz.
+  Riptide'lı trident'in kullanımı suda ya da yağmurda değilken başlamaz (`TridentItem.use`: `isInWaterOrRain` değilse
+  FAIL): client'ın seviyesi kesin yağmursuzsa (hava olaylarından izlenen yağmur seviyesi en çok 0.2: `isRaining` yok,
+  yeni seviye 0, yağmurun başı 0, sonu 1, sonra her değişim) ve oyuncunun son tikinin başındaki yerine (hızının iki
+  katı kadar geniş) hiçbir sıvı ya da bilinmeyen blok yakın değilse, o kullanım varsayımı kurulmaz. Böyle bir yerde
+  bırakıp riptide gibi fırlayan client ("her yerde riptide") açıklanamayan harekettir. `MovementCheckTest`: riptide'sız
+  trident 15 tik doldurulup bırakılır, sonrası açıklanır; kuru yerde riptide III'lü trident'i (3.0) bırakıp fırlamak
+  bulgu (kural kaldırılınca kırılır); yağmurda aynı bırakış iddiayı bitirir; eşleme kaldırılınca ilk test kırılır.
+  `InventoryPacketViewsTest`: riptide I–III 1.5, 2.25 ve 3.0 verir.
 - **Kullanırken eylem yok:** `handleKeybinds` oyuncu bir eşya kullanırken yalnızca bırakır (kullanma tuşu
   kalkmışsa) ve saldırı ile kullanma tuşlarının tıklarını boşa harcar; saldırı, mızrak dürtmesi, varlıkla etkileşim
   ve yeni kullanım yalnızca kullanmayan bir durumun `startAttack`/`startUseItem`'ından gelir. Bunlardan birini içeren
@@ -436,12 +449,28 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   bit aynı: suda 141 tik, üç zıplama, halka arenadaki basamak ve duvarda 67 yatay çarpışmalı tik dahil. Takipçi aynı
   oturumda 375 tik açıkladı, 0 açıklanamayan; 375/375 tikte client'ın kendi atı (`horsePost`) kümede. İddia edilmeyen
   binişler: havuzda başlayan (141 tik, sıvı), yakında varlık olan (123 tik) ve client'ta binişten hemen önce yeniden
-  oluşturulan at (149 tik, ilk tiki). Binişteki interpolasyon sentetik testle sınanır; gerçek client parkurunda
-  yarım blok ışınlanan atla doğrulanması sıradaki koşudadır.
+  oluşturulan at (149 tik, ilk tiki). Binişteki interpolasyon da gerçek client'ta doğrulandı: yarım blok ışınlanıp
+  hemen binilen atın interpolasyonla geçen tikleri (sonraki koşularda 2 ve 3 tik) motorla bit bit aynı.
   `MovementCheckTest`: sentetik client'ın durup ileri, zıplayarak ve sola sürdüğü 50 tik ve interpolasyon sürerken
   binilen at açıklanır; yarım blok yukarıdaki `MoveVehicle` ve tuşun tuttuğundan güçlü zıplama (100, 30 değil)
   kanıttır; oyuncunun itmiş olabileceği atta iddia yoktur. Replika: `ClientEntitiesTest` hızın yavaşlamasını, itmeyi,
   interpolasyon sırasında korunmasını ve özniteliklerin client'ın aralıklarına kırpılmasını sınar; mutasyonlar (itme kontrolü yok, güç karşılaştırması yok) testleri kırar.
+- **Sürülen domuz (`HorseRide`, domuz olarak):** eyerli domuzun ilk yolcusu havuçlu olta tutarken (ana ya da yan elde:
+  `Pig.getControllingPassenger`) client domuzu kendi fiziğiyle sürer; tiki atınkiyle aynı `LivingEntity` yolu (`Horse`
+  motoru): girdi binicinin tuşlarından bağımsız hep ileri (`getRiddenInput`), dönüş binicininki, adım en az 1, zıplama
+  yok, boyutu 0.9. Hızı hız özniteliği × 0.225 × hızlanma çarpanıdır (`getRiddenSpeed`); hızlanmayı client kendisi sayar
+  (`ItemBasedSteering`): sunucunun `DATA_BOOST_TIME` değeri client'a her ulaştığında 0'dan başlar (`onSynced`, değer ne
+  olursa olsun), domuzu bir oyuncunun kontrol ettiği her tikte hızdan önce bir artar ve toplamı geçince biter; çarpan
+  `1 + 1.15·sin(süre/toplam·π)`. Replika domuzun hızlanmasını binişe kadar izler: kimse sürmemişken başlamış ve sayılmamış
+  (1), hiç başlamamış (0) ya da bir oyuncu (kendisi dahil) sürmüş olabileceği için bilinmiyor (-1). **İddia yok:** elde
+  havuçlu olta kesin değilse ya da yoksa, hızlanma bilinmiyorsa, eyersiz/yavru/ölçekli domuz; atınkilerin geri kalanı da
+  geçerli. Domuzla gönderilen binek zıplaması kanıttır (domuz zıplamaz). **Doğrulama:** gerçek client oturumunda (halka
+  arenada iki, çim şeritte bir domuz; ikisinde kullanım tuşuyla hızlanma) `Horse` motoru domuzun 423 tikinin hepsinde
+  client'la bit bit aynı (228'i hızlanırken; sayılan hızlanma ve `speed` alanı dahil), takipçi 423 tikin hepsini iddia
+  edip açıkladı, her birinde client'ın kendi domuzu kümede. `MovementCheckTest`: hızlanmasıyla sürülen 40 tik
+  açıklanır, hızlanmanın verdiğinden ileri `MoveVehicle` bulgu, havuçlu oltasız sürüşte iddia yok; `tickBoost` adımı
+  çıkarılınca ilk test kırılır. Replika: `ClientEntitiesTest` senkronla başlayan, başka oyuncunun sürmüş olabileceği ve
+  hiç başlamamış hızlanmayı sınar.
 - **Araçsızken araç paketi:** yürürken bir `MoveVehicle`, `PaddleBoat` ya da binek zıplaması yaya iddiasını bitirirdi;
   hile her tike bir tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken
   gönderir (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin
@@ -452,6 +481,15 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   zamandan beri işlemiş olabileceği hiçbir paket onu bindiremezse, tikin araç paketi kanıttır ("sent what only a
   passenger sends while riding nothing"). Gerçek client oturumunda kural 13506 tikte devredeydi, 0 bulgu; `MovementCheckTest`:
   araçsızken `MoveVehicle`, `PaddleBoat`, binek zıplaması ve araç envanteri bulgu, inişten hemen sonraki (client'ın hâlâ binmiş olabileceği) tik değil.
+- **Kontrol edilemeyen araçta sürücü paketi:** `MoveVehicle`'ı client yalnızca kendi kontrol ettiği kök araç için
+  (`isLocalInstanceAuthoritative`), `PaddleBoat`'u sürdüğü tekne, binek zıplamasını sürdüğü binek için gönderir. Bir
+  aracı oyuncu ancak ilk yolcusuysa ve aracın türü oyuncuya kontrol veriyorsa kontrol eder (`getControllingPassenger`,
+  1.21.11: tekne ve sal, `AbstractHorse` (at, eşek, katır, iskelet ve zombi at, deve, lama), `AbstractNautilus`, domuz,
+  strider, happy ghast; `Entity`'ninki null, `Mob`'unki yalnızca bir mob). Client'ın oyuncuyu üstünde tutabileceği her
+  araç (kesin işlenenler ve bu tikte işlemiş olabilecekleri) böyle olmayan bir türdense (vagon, başka bir oyuncu, binilmeyen
+  bir mob) bu paketlerden biri kanıttır ("sent what only a vehicle's controller sends while riding one no player
+  controls"); türü bilinmeyen araçta iddia yok. Gerçek client oturumunda kural vagonda 71 tik devredeydi, 0 bulgu.
+  `MovementCheckTest`: vagondaki yolcunun tikleri açıklanamayan değil, vagonda gönderilen `MoveVehicle` bulgu.
 - **Uçamazken yetenek paketi:** aynı şekilde `PlayerAbilities` de iddiayı bitirirdi. `LocalPlayer.aiStep` onu yalnızca
   `mayfly` (izleyicinin uçmaya başlaması, çift zıplamayla uçma) ya da uçarken yere inince gönderir; client ikisini de
   kendisi açamaz (yalnızca sunucunun yetenek paketi, oyun modu, giriş ve yeniden doğma). Uçabilen ya da uçan bir durum

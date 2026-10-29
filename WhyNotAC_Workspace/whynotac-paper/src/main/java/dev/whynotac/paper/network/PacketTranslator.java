@@ -397,7 +397,32 @@ public final class PacketTranslator {
         added.sort(null);
         removed.sort(null);
         return new Stack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), added, removed,
-                range, false, hash);
+                range, false, hash, spinAttack(stack));
+    }
+
+    /**
+     * {@code EnchantmentHelper.getTridentSpinAttackStrength}: every enchantment on the stack adds what its
+     * {@code trident_spin_attack_strength} effects give at its level (riptide's in vanilla), with the definitions the
+     * client holds too (the server syncs its enchantment registry, a datapack's changes included). The effects need
+     * no entity, only a random draw for some ({@code RemoveBinomial}): NaN when two draws give different strengths.
+     */
+    static float spinAttack(net.minecraft.world.item.ItemStack stack) {
+        net.minecraft.world.item.enchantment.ItemEnchantments enchantments = stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
+                net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY);
+        if (enchantments.isEmpty()) {
+            return 0.0F;
+        }
+        float[] strength = new float[2];
+        for (int draw = 0; draw < 2; draw++) {
+            org.apache.commons.lang3.mutable.MutableFloat value = new org.apache.commons.lang3.mutable.MutableFloat(0.0F);
+            net.minecraft.util.RandomSource random = net.minecraft.util.RandomSource.create(draw);
+            for (it.unimi.dsi.fastutil.objects.Object2IntMap.Entry<net.minecraft.core.Holder<net.minecraft.world.item.enchantment.Enchantment>> e
+                    : enchantments.entrySet()) {
+                e.getKey().value().modifyTridentSpinAttackStrength(random, e.getIntValue(), value);
+            }
+            strength[draw] = value.floatValue();
+        }
+        return Float.compare(strength[0], strength[1]) == 0 ? strength[0] : Float.NaN;
     }
 
     /**

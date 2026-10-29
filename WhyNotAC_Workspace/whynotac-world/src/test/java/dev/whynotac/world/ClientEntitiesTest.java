@@ -235,6 +235,50 @@ class ClientEntitiesTest {
     }
 
     @Test
+    void aPigsBoostStartsWhenItsBoostTimeReachesTheClient() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:pig", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(saddle(5));
+        out(data(5, 17, ClientboundPacket.SetEntityData.Kind.INT, 300)); // ItemBasedSteering.onSynced
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        ClientEntities.HorseMounted m = entities.horseMounted(5).getFirst();
+        assertEquals(1, m.saddle());
+        assertEquals(1, m.boost(), "started, counted in no tick: nobody steered it");
+        assertEquals(300, m.boostTotal());
+        assertEquals(0, m.flags(), "a pig's index 17 is its boost time, not a horse's flags");
+    }
+
+    @Test
+    void aPigsBoostAPlayerMayHaveCountedIsNotKnown() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:pig", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 0))));
+        out(ClientboundPacket.AddEntity.received(6, ALICE, EntityTypes.PLAYER, 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(data(5, 17, ClientboundPacket.SetEntityData.Kind.INT, 300));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {6})); // another player in it may steer it: its ticks count the boost
+        out(new ClientboundPacket.SetPassengers(5, new int[] {}));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        assertEquals(-1, entities.horseMounted(5).getFirst().boost());
+    }
+
+    @Test
+    void aPigNeverBoostedOrBoostedAgainIsKnown() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:pig", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.PlayerInfoUpdate(true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(ALICE, 0))));
+        out(ClientboundPacket.AddEntity.received(6, ALICE, EntityTypes.PLAYER, 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {6})); // not boosting: nothing to count
+        out(new ClientboundPacket.SetPassengers(5, new int[] {}));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        assertEquals(0, entities.horseMounted(5).getFirst().boost());
+        out(new ClientboundPacket.SetPassengers(5, new int[] {}));
+        out(data(5, 17, ClientboundPacket.SetEntityData.Kind.INT, 500)); // after the ride: from 0 again
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        assertNull(entities.horseMounted(5), "ridden by the player before: its position not followed since");
+    }
+
+    @Test
     void aHorsesAttributesAreClampedToTheirRangesAsTheClientDoes() {
         out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
         out(new ClientboundPacket.UpdateAttributes(5, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 2000.0, List.of()),

@@ -149,13 +149,13 @@ class InventoryPacketViewsTest {
     private static Stack reachStickModel() {
         return new Stack("minecraft:stick", 1, List.of("minecraft:attack_range", "minecraft:custom_name"),
             List.of("minecraft:max_stack_size"), new Stack.AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F), false,
-            PacketTranslator.rangeHash(new AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F)));
+            PacketTranslator.rangeHash(new AttackRange(0.5F, 4.25F, 0.0F, 6.0F, 0.125F, 0.75F)), 0.0F);
     }
 
     @Test
     void stacksKeepTheirItemCountAndPatch() {
         assertEquals(new ClientboundPacket.ContainerSetSlot(0, 7, 36, reachStickModel()), setSlot(0, 7, 36, reachStick()));
-        Stack dirt = new Stack("minecraft:dirt", 12, List.of(), List.of(), null, false);
+        Stack dirt = new Stack("minecraft:dirt", 12, List.of(), List.of(), null, false, null, 0.0F); // a full stack: no enchantment, no spin attack
         assertEquals(new ClientboundPacket.ContainerSetContent(3, 9, List.of(Stack.EMPTY, dirt, reachStickModel()), Stack.EMPTY),
                 setContent(3, 9, List.of(ItemStack.EMPTY, new ItemStack(Items.DIRT, 12), reachStick()), ItemStack.EMPTY));
         assertEquals(new ClientboundPacket.SetCursorItem(dirt), cursor(new ItemStack(Items.DIRT, 12)));
@@ -178,7 +178,7 @@ class InventoryPacketViewsTest {
         }
         ClientboundPacket wire = bothViews(new ClientboundSetEquipmentPacket(42, slots), decoded(buf, ClientboundSetEquipmentPacket.STREAM_CODEC));
         assertEquals(new ClientboundPacket.SetEquipment(42, List.of(
-                new ClientboundPacket.SetEquipment.Slot("feet", new Stack("minecraft:leather_boots", 1, List.of(), List.of(), null, false)),
+                new ClientboundPacket.SetEquipment.Slot("feet", new Stack("minecraft:leather_boots", 1, List.of(), List.of(), null, false, null, 0.0F)),
                 new ClientboundPacket.SetEquipment.Slot("mainhand", reachStickModel()), new ClientboundPacket.SetEquipment.Slot("head", Stack.EMPTY))), wire);
     }
 
@@ -202,6 +202,29 @@ class InventoryPacketViewsTest {
      * (CRC32C over the registry-aware encoding); the translator's hash of a full stack's attack range is that
      * same number, so a hashed stack resolves to the range a full stack showed.
      */
+    /**
+     * A trident's riptide level gives its spin attack strength (riptide's definition: 1.5 at I, 0.75 a level more, built
+     * here as the vanilla registry does; the tests hold no data-driven registry), none without one.
+     */
+    @Test
+    void aTridentsRiptideGivesItsSpinAttackStrength() {
+        net.minecraft.world.item.enchantment.Enchantment riptide = net.minecraft.world.item.enchantment.Enchantment.enchantment(
+                net.minecraft.world.item.enchantment.Enchantment.definition(net.minecraft.core.HolderSet.direct(BuiltInRegistries.ITEM.wrapAsHolder(Items.TRIDENT)),
+                        2, 3, net.minecraft.world.item.enchantment.Enchantment.dynamicCost(17, 7),
+                        net.minecraft.world.item.enchantment.Enchantment.constantCost(50), 4, net.minecraft.world.entity.EquipmentSlotGroup.HAND))
+                .withSpecialEffect(net.minecraft.world.item.enchantment.EnchantmentEffectComponents.TRIDENT_SPIN_ATTACK_STRENGTH,
+                        new net.minecraft.world.item.enchantment.effects.AddValue(net.minecraft.world.item.enchantment.LevelBasedValue.perLevel(1.5F, 0.75F)))
+                .build(net.minecraft.resources.Identifier.withDefaultNamespace("riptide"));
+        for (int level = 1; level <= 3; level++) {
+            ItemStack trident = new ItemStack(Items.TRIDENT);
+            trident.enchant(net.minecraft.core.Holder.direct(riptide), level);
+            assertEquals(1.5F + 0.75F * (level - 1), PacketTranslator.stack(trident).spinAttack(), "riptide " + level);
+        }
+        assertEquals(0.0F, PacketTranslator.stack(new ItemStack(Items.TRIDENT)).spinAttack());
+        assertEquals(0.0F, ((ClientboundPacket.ContainerSetSlot) setSlot(0, 1, 36, new ItemStack(Items.TRIDENT))).item().spinAttack(),
+                "the bytes' view too");
+    }
+
     @Test
     void theRangeHashIsTheClientsHashOfTheComponent() {
         net.minecraft.resources.RegistryOps<com.google.common.hash.HashCode> ops = registries.createSerializationContext(net.minecraft.util.HashOps.CRC32C_INSTANCE);

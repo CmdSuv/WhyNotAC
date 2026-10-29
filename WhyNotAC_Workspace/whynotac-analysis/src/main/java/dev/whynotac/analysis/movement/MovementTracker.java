@@ -121,6 +121,8 @@ public final class MovementTracker {
      * or the vehicle's inventory ({@code sendOpenInventory}, when {@code isServerControlledInventory}).
      */
     public static final String VEHICLE_ON_FOOT = "sent what only a passenger sends while riding nothing";
+    /** The reason of a tick that sent what only a vehicle's controller sends while riding one no player controls. */
+    public static final String VEHICLE_UNCONTROLLED = "sent what only a vehicle's controller sends while riding one no player controls";
     /** An unexplained tick's reason when it sent its abilities while no state it may have been in could fly. */
     public static final String ABILITIES_WITHOUT_FLIGHT = "sent its flight abilities while it could not fly";
     static final int MAX_HYPOTHESES = 64;
@@ -179,6 +181,8 @@ public final class MovementTracker {
     /** This tick's {@link #handItems}, by hand. */
     private final Map<Hand, List<HandItem>> handsNow = new java.util.EnumMap<>(Hand.class);
     static final String LEATHER_BOOTS = "minecraft:leather_boots";
+    /** What a pig's rider holds to steer it ({@code Pig.getControllingPassenger}). */
+    static final String CARROT_ON_A_STICK = "minecraft:carrot_on_a_stick";
     /** This tick's feet: leather boots in every state the inventory replica holds, in none, or null (not known). */
     private Boolean leatherBoots;
 
@@ -231,7 +235,11 @@ public final class MovementTracker {
     private java.util.Set<Integer> clientVehicles;
     /** Where {@link #clientVehicles} last became empty. */
     private long onNoVehicleSince = Long.MIN_VALUE;
+    /** Where the client last put the player on a vehicle ({@link #VEHICLE_UNCONTROLLED}'s anchor). */
+    private long mountedSince = Long.MIN_VALUE;
     private long vehicleOnFoot;
+    private long vehicleUncontrolled;
+    private long ridingUncontrolled;
     private long ridingNothing;
 
     /**
@@ -296,6 +304,16 @@ public final class MovementTracker {
     /** Ticks that sent what only a passenger sends while the client certainly rode nothing ({@link #VEHICLE_ON_FOOT}). */
     public long vehicleOnFoot() {
         return vehicleOnFoot;
+    }
+
+    /** Ticks that sent what only a vehicle's controller sends while riding one no player controls ({@link #VEHICLE_UNCONTROLLED}). */
+    public long vehicleUncontrolled() {
+        return vehicleUncontrolled;
+    }
+
+    /** Ticks over which the client rode only vehicles no player controls: those {@link #VEHICLE_UNCONTROLLED} is claimed over. */
+    public long ridingUncontrolled() {
+        return ridingUncontrolled;
     }
 
     /** Ticks over which the client certainly rode nothing: those {@link #VEHICLE_ON_FOOT} is claimed over. */
@@ -792,9 +810,14 @@ public final class MovementTracker {
         // the client rode nothing since the last tick when it rode nothing after the packets it certainly processed by
         // then, and none it may have processed since may have put it on a vehicle
         boolean mayHaveRidden = clientVehicles == null || !clientVehicles.isEmpty();
+        // every vehicle the client may have had the player on since the last tick (for VEHICLE_UNCONTROLLED)
+        java.util.Set<Integer> mayBeOn = clientVehicles == null ? null : new java.util.HashSet<>(clientVehicles);
         while (!ridePending.isEmpty() && ridePending.peekFirst().sequence < certain) {
             RidePacket p = ridePending.pollFirst();
             mayHaveRidden |= p.mayMount;
+            if (mayBeOn != null && p.mayMount && p.packet instanceof ClientboundPacket.SetPassengers set) {
+                mayBeOn.add(set.vehicleId());
+            }
             rideApply(p, number, view, world, entities, keysBefore);
         }
         boolean ambiguous = false;
@@ -805,6 +828,9 @@ public final class MovementTracker {
             p.ambiguous = true; // the client may or may not have processed it before this tick
             ambiguous = true;
             mayHaveRidden |= p.mayMount;
+            if (mayBeOn != null && p.mayMount && p.packet instanceof ClientboundPacket.SetPassengers set) {
+                mayBeOn.add(set.vehicleId());
+            }
         }
         mayHaveRidden |= clientVehicles == null || !clientVehicles.isEmpty();
         if (!mayHaveRidden) {
@@ -822,6 +848,38 @@ public final class MovementTracker {
             in.passengerCommands.forEach(a -> what.add("PlayerCommand " + a));
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, VEHICLE_ON_FOOT + " (" + String.join(", ", what) + ")", 0,
                     onNoVehicleSince, null, null, null, in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast());
+        }
+        // LocalPlayer.tick sends MoveVehicle only for a root vehicle it controls (isLocalInstanceAuthoritative), the boat its
+        // PaddleBoat, the player a riding jump only on a vehicle it controls (jumpableVehicle): a player controls only a
+        // vehicle whose first passenger it is, so never one of a type no player controls, nor what that one rides
+        if (mayHaveRidden && mayBeOn != null && !mayBeOn.isEmpty()) {
+            String type = null;
+            for (int id : mayBeOn) {
+                String t = entities.type(id);
+                if (ClientEntities.playerMayControl(t)) {
+                    type = null;
+                    break;
+                }
+                type = t;
+            }
+            if (type != null) {
+                ridingUncontrolled++;
+            }
+            if (type != null && (!in.vehicleMoves.isEmpty() || !in.paddles.isEmpty() || !in.ridingJumps.isEmpty())) {
+                vehicleUncontrolled++;
+                List<String> what = new ArrayList<>();
+                if (!in.vehicleMoves.isEmpty()) {
+                    what.add("MoveVehicle");
+                }
+                if (!in.paddles.isEmpty()) {
+                    what.add("PaddleBoat");
+                }
+                if (!in.ridingJumps.isEmpty()) {
+                    what.add("a riding jump");
+                }
+                return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, VEHICLE_UNCONTROLLED + " (" + String.join(", ", what)
+                        + " on a " + type + ")", 0, mountedSince, null, null, null, in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast());
+            }
         }
         if (horseRide != null) {
             return horseTick(number, end, in, w, ambiguous, view, entities);
@@ -857,7 +915,8 @@ public final class MovementTracker {
         if (in.ridingJumps.contains(null)) {
             horseRide.unclaim("a stop of a riding jump, which the client never sends");
         }
-        HorseRide.Step step = horseRide.tick(in.vehicleMoves, in.move, in.ridingJumps, baseSent.input(), view, entities, selfId, base.border());
+        HorseRide.Step step = horseRide.tick(in.vehicleMoves, in.move, in.ridingJumps, baseSent.input(), view, entities, selfId, base.border(),
+                horseRide.pig ? holding(CARROT_ON_A_STICK) : Boolean.TRUE);
         ServerboundPacket.MoveVehicle sentVehicle = in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast();
         if (step == null) {
             horseNoClaim.merge(horseRide.unclaimed, 1L, Long::sum);
@@ -892,9 +951,10 @@ public final class MovementTracker {
                     horseRide = null;
                 }
                 String type = entities.type(set.vehicleId());
-                boolean horse = type != null && ClientEntities.HORSE_TYPES.contains(type);
+                boolean horse = type != null && (ClientEntities.HORSE_TYPES.contains(type) || type.equals(ClientEntities.PIG));
                 if (controls && ride == null && horseRide == null && horse) {
-                    // a horse the player rides first: it steers it once saddled (HorseRide.start rules out the others)
+                    // a horse the player rides first: it steers it once saddled (HorseRide.start rules out the others); a pig
+                    // while the player holds a carrot on a stick too
                     horseRide = p.ambiguous ? HorseRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
                             : HorseRide.start(set.vehicleId(), p.sequence, entities.horseMounted(set.vehicleId()), view, world, keysBefore);
                 } else if (controls && ride == null && horseRide == null) {
@@ -994,6 +1054,7 @@ public final class MovementTracker {
             case ClientboundPacket.SetPassengers set when clientVehicles != null -> {
                 if (p.mayMount) {
                     clientVehicles.add(set.vehicleId());
+                    mountedSince = p.sequence;
                 } else if (clientVehicles.remove(set.vehicleId()) && clientVehicles.isEmpty()) {
                     onNoVehicleSince = p.sequence; // ejectPassengers
                 }
@@ -1299,8 +1360,9 @@ public final class MovementTracker {
     }
 
     /** One stack a hand may hold, as far as using it goes: the item (null: none), its use effects and what its use does. */
-    private record HandItem(String item, OnFoot.ItemUse effects, ItemPrototypes.UseKind kind) {
-        static final HandItem NONE = new HandItem(null, null, null);
+    /** {@code riptide}: a trident whose spin attack strength is known and above 0 (its use needs water or rain). */
+    private record HandItem(String item, OnFoot.ItemUse effects, ItemPrototypes.UseKind kind, boolean riptide) {
+        static final HandItem NONE = new HandItem(null, null, null, false);
     }
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
@@ -1413,6 +1475,19 @@ public final class MovementTracker {
         };
     }
 
+    /**
+     * {@code handleGameEvent}'s weather: the rain level a start of rain (0), its end (1) or a change (the value) sets
+     * ({@code ClientLevel.setRainLevel}); null for any other event.
+     */
+    private static Float rainLevel(ClientboundPacket.GameEvent event) {
+        return switch (event.type()) {
+            case 1 -> 0.0F; // START_RAINING
+            case 2 -> 1.0F; // STOP_RAINING
+            case 7 -> event.param(); // RAIN_LEVEL_CHANGE
+            default -> null;
+        };
+    }
+
     private Hypothesis gameEvent(Hypothesis h, ClientboundPacket.GameEvent event) throws Lose {
         int type = event.type();
         if (type == ClientboundPacket.GameEvent.CHANGE_GAME_MODE) {
@@ -1423,8 +1498,12 @@ public final class MovementTracker {
             }
             return h.withSelf(h.self().withGameMode(mode)).withPlayer(p);
         }
-        // weather, sounds, respawn and crafting settings, the level loading signal: nothing that moves the player
-        if (type == 0 || type == 1 || type == 2 || type >= 6 && type <= 13) {
+        Float rain = rainLevel(event);
+        if (rain != null) {
+            return h.withSelf(h.self().withRainLevel(rain));
+        }
+        // thunder, sounds, respawn and crafting settings, the level loading signal: nothing that moves the player
+        if (type == 0 || type >= 6 && type <= 13) {
             return h;
         }
         throw new Lose("game event " + type);
@@ -1479,7 +1558,7 @@ public final class MovementTracker {
         }
         SpeedAttribute speed = s.speed() == null ? null : keepAttributes ? s.speed().copied() : s.speed().baseOnly();
         SelfState self = SelfState.fresh(gameMode < 0 ? s.gameMode() : gameMode, speed,
-                keepAttributes ? s.otherAttributes() : Set.of(), s.border()).withGameMode(gameMode < 0 ? s.gameMode() : gameMode);
+                keepAttributes ? s.otherAttributes() : Set.of(), s.border(), s.rainLevel()).withGameMode(gameMode < 0 ? s.gameMode() : gameMode);
         Vec3d delta = keepData ? old.deltaMovement() : Vec3d.ZERO;
         float yRot = keepData ? old.yRot() : -180.0F;
         float xRot = keepData ? old.xRot() : 0.0F;
@@ -1503,14 +1582,17 @@ public final class MovementTracker {
         return freshPlayer(h, respawnedInto(h.self(), respawn), respawn.gameMode(), keepAttributes, keepData);
     }
 
-    /** A login's state before the player: a new level, its new border. */
+    /** A login's state before the player: a new level, its new border, no rain (the server sends its weather after). */
     private static SelfState loggedIn(ClientboundPacket.Login login) {
-        return SelfState.INITIAL.withBorder(ClientBorder.fresh(login.dimension() == null ? null : login.dimension().key()));
+        return SelfState.INITIAL.withBorder(ClientBorder.fresh(login.dimension() == null ? null : login.dimension().key())).withRainLevel(0.0F);
     }
 
-    /** {@code handleRespawn}: a new level (and border) only into another dimension. */
+    /** {@code handleRespawn}: a new level (and border, and no rain) only into another dimension. */
     private static SelfState respawnedInto(SelfState s, ClientboundPacket.Respawn respawn) {
-        return s.withBorder(s.border().respawned(respawn.dimension() == null ? null : respawn.dimension().key()));
+        String key = respawn.dimension() == null ? null : respawn.dimension().key();
+        String was = s.border().dimension();
+        float rain = key != null && key.equals(was) ? s.rainLevel() : key != null && was != null ? 0.0F : Float.NaN;
+        return s.withBorder(s.border().respawned(key)).withRainLevel(rain);
     }
 
     /** {@code setValuesFromPositionPacket} ({@code PositionMoveRotation.calculateAbsolute}): position and motion. */
@@ -1592,7 +1674,7 @@ public final class MovementTracker {
             }
         }
         PlayerState pre = rotated(h.player(), yRot, xRot);
-        List<Start> starts = itemActions(new Start(pre, self.speed(), self.using()), in);
+        List<Start> starts = itemActions(new Start(pre, self.speed(), self.using()), in, view, self);
         for (int i = 0; i < in.attacks; i++) {
             // Player.causeExtraKnockback, when the client's own simulation of the hit knocks back: slowed, not sprinting
             List<Start> more = new ArrayList<>();
@@ -1708,12 +1790,50 @@ public final class MovementTracker {
     }
 
     /**
+     * {@code Entity.isInWaterOrRain} where a use in this tick reads it: false only when the client's level certainly
+     * does not rain ({@code isRaining}: its rain level at most 0.2, so no rain anywhere: {@code isRainingAt}) and no
+     * fluid lies within reach of where the player was in its last tick's start ({@code isInWater}: the
+     * {@code wasTouchingWater} that tick's {@code baseTick} left), widened by twice its motion; a block not known may
+     * be water.
+     */
+    private static boolean mayBeInWaterOrRain(PlayerState p, View view, SelfState self) {
+        if (!Boolean.FALSE.equals(self.raining())) {
+            return true;
+        }
+        Vec3d d = p.deltaMovement();
+        double m = 2.0 + 2.0 * (Math.abs(d.x()) + Math.abs(d.y()) + Math.abs(d.z()));
+        if (!(m < 16.0)) {
+            return true;
+        }
+        int x0 = (int) Math.floor(p.x() - m);
+        int x1 = (int) Math.floor(p.x() + m);
+        int y0 = (int) Math.floor(p.y() - m);
+        int y1 = (int) Math.floor(p.y() + 1.8 + m);
+        int z0 = (int) Math.floor(p.z() - m);
+        int z1 = (int) Math.floor(p.z() + m);
+        for (int x = x0; x <= x1; x++) {
+            for (int z = z0; z <= z1; z++) {
+                if (!view.isLoaded(x >> 4, z >> 4)) {
+                    return true;
+                }
+                for (int y = y0; y <= y1; y++) {
+                    int state = view.blockState(x, y, z);
+                    if (state == ClientWorld.UNKNOWN || view.states().fluidKind(state) != BlockStates.FLUID_NONE) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * {@code Minecraft.handleKeybinds}' item actions, before the player's tick: an item use may start using the stack in
      * its hand ({@code Item.use}: a consumable the player can eat, a shield, a spear, a bow with ammunition...) or not
      * (an item without a use, a cooldown, food when full), both are followed; a release stops the use. A use that may
      * change blocks where the client's ray hits (buckets, lily pads) ends the claim: the world replica cannot place it.
      */
-    private List<Start> itemActions(Start first, TickInput in) throws Lose {
+    private List<Start> itemActions(Start first, TickInput in, View view, SelfState self) throws Lose {
         List<Start> starts = new ArrayList<>(List.of(first));
         for (Object action : in.itemActions) {
             List<Start> next = new ArrayList<>();
@@ -1728,7 +1848,8 @@ public final class MovementTracker {
                     addIfNew(next, s);
                     if (s.using() == null) { // LocalPlayer.startUsingItem: not while using, not with an empty hand
                         for (HandItem item : items) {
-                            if (item.item() != null) {
+                            // TridentItem.use: a riptide trident fails out of water and rain (isInWaterOrRain)
+                            if (item.item() != null && (!item.riptide() || mayBeInWaterOrRain(s.player(), view, self))) {
                                 addIfNew(next, s.withUsing(new Using(hand, item.item(), item.effects(), item.kind())));
                             }
                         }
@@ -1819,6 +1940,31 @@ public final class MovementTracker {
     }
 
     /** The stack's {@code use_effects} ({@code UseEffects.DEFAULT} where its patch removes them) and use kind. */
+    /**
+     * {@code Player.isHolding(item)}: the item in the main hand or the off hand, in every state the inventory replica
+     * holds (true), in none (false); null when the states differ or a held stack is not known.
+     */
+    private Boolean holding(String item) {
+        if (inventory == null) {
+            return null;
+        }
+        Boolean all = null;
+        for (ClientInventory.View v : inventory.views()) {
+            int slot = v.selected();
+            Stack main = slot < 0 ? null : v.hotbar().get(slot);
+            Stack off = v.offhand();
+            if (main == null || off == null) {
+                return null;
+            }
+            boolean held = item.equals(main.item()) || item.equals(off.item());
+            if (all != null && all != held) {
+                return null;
+            }
+            all = held;
+        }
+        return all;
+    }
+
     private static HandItem handItem(Stack stack) throws Lose {
         if (stack.isEmpty()) {
             return HandItem.NONE;
@@ -1831,7 +1977,12 @@ public final class MovementTracker {
             throw new Lose("an item with use effects of its own");
         }
         OnFoot.ItemUse effects = stack.removed().contains(USE_EFFECTS) ? OnFoot.ItemUse.DEFAULT : new OnFoot.ItemUse(p.useCanSprint(), p.useSpeed());
-        return new HandItem(stack.item(), effects, p.useKind());
+        // TridentItem.releaseUsing: with no spin attack strength (no riptide) the client throws it and does not move; a
+        // strength not known exactly is a riptide's
+        ItemPrototypes.UseKind kind = p.useKind() == ItemPrototypes.UseKind.RELEASE_MOVES && stack.spinAttack() != null
+                && Float.compare(stack.spinAttack(), 0.0F) == 0 ? ItemPrototypes.UseKind.PLAIN : p.useKind();
+        boolean riptide = p.useKind() == ItemPrototypes.UseKind.RELEASE_MOVES && stack.spinAttack() != null && stack.spinAttack() > 0.0F;
+        return new HandItem(stack.item(), effects, kind, riptide);
     }
 
     /** The hands' stacks now, for the next tick's check of a use the server's flags start (null where not known). */
@@ -2037,7 +2188,8 @@ public final class MovementTracker {
                     quietSincePosition = false;
                     yield b.withSelf(b.self().withGameMode((int) event.param()));
                 }
-                yield b;
+                Float rain = rainLevel(event);
+                yield rain == null ? b : b.withSelf(b.self().withRainLevel(rain));
             }
             case ClientboundPacket.TeleportEntity ignored -> quiet(b);
             case ClientboundPacket.EntityPositionSync ignored -> quiet(b);

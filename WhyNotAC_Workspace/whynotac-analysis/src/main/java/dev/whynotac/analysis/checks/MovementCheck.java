@@ -36,9 +36,12 @@ import java.util.TreeMap;
  * then (the entity replica's), each tick of its physics from every state it may be in, and the vehicle move and paddle
  * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). A horse the player rides
  * likewise ({@code HorseRide}): its tick from every state under the rider's input, rotation and riding jump, whose
- * power its jump key decides (horse speed, horse fly and jump power cheats). What only a passenger
+ * power its jump key decides (horse speed, horse fly and jump power cheats), and a pig the player steers with a carrot
+ * on a stick, ahead at the speed its boost gives and with no jump (pig speed and pig fly cheats). What only a passenger
  * sends (a vehicle move, a paddle packet, a riding jump, the vehicle's inventory) while the client rode nothing is one
- * too: on foot it would otherwise only end the claim; so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
+ * too: on foot it would otherwise only end the claim; so is what only a vehicle's controller sends (a vehicle move, a
+ * paddle packet, a riding jump) while it rode only vehicles of types no player controls (a minecart, another player, a
+ * mob but the rideable ones); so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
  * sends them only with {@code mayfly} or while flying).
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
@@ -48,7 +51,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 6;
+    public static final int VERSION = 7;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
@@ -109,7 +112,8 @@ public final class MovementCheck implements TimelineListener {
         details.put("clientTick", Long.toString(tick.number()));
         details.put("unexplainedTicks", Long.toString(state.unexplainedSinceReport));
         details.put("reason", tick.reason());
-        if (tick.reason() != null && tick.reason().startsWith(MovementTracker.VEHICLE_ON_FOOT)) {
+        if (tick.reason() != null && (tick.reason().startsWith(MovementTracker.VEHICLE_ON_FOOT)
+                || tick.reason().startsWith(MovementTracker.VEHICLE_UNCONTROLLED))) {
             ServerboundPacket.MoveVehicle vehicle = tick.sentVehicle();
             if (vehicle != null) {
                 details.put("sent", "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y()) + ","
@@ -135,7 +139,8 @@ public final class MovementCheck implements TimelineListener {
                 }
             }
             sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
-                    tick.nanoTime(), "rode a horse as no vanilla client could (tick " + tick.number() + ")", details, admissibility));
+                    tick.nanoTime(), (tick.reason() != null && tick.reason().contains("pig") ? "rode a pig" : "rode a horse")
+                    + " as no vanilla client could (tick " + tick.number() + ")", details, admissibility));
             state.lastReportNanos = tick.nanoTime();
             state.unexplainedSinceReport = 0;
             return;

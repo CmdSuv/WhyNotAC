@@ -74,10 +74,35 @@ public final class ClientEntities {
     private static final int DATA_POSE = 6;
     /** {@code AbstractHorse.DATA_ID_FLAGS}: after {@code Entity}'s eight, {@code LivingEntity}'s seven, {@code Mob}'s and {@code AgeableMob}'s one each. */
     private static final int DATA_HORSE_FLAGS = 17;
+    /** A pig's first passenger ({@code Op.Rider}): none, the client's own player, another player, another entity. */
+    private static final int RIDER_NONE = 0;
+    private static final int RIDER_SELF = 1;
+    private static final int RIDER_PLAYER = 2;
+    private static final int RIDER_OTHER = 3;
+    /** {@code Pig.DATA_BOOST_TIME}: at the same place as a horse's flags (an int). */
+    private static final int DATA_PIG_BOOST = 17;
     /** {@code Mob.DATA_MOB_FLAGS_ID}: bit 1 is NoAI ({@code isNoAi}). */
     private static final int DATA_MOB_FLAGS = 15;
     /** The horses whose state the replica keeps for their player's mount ({@link #horseMounted}). */
     public static final Set<String> HORSE_TYPES = ClientMotion.HORSES;
+    /** The pig ({@code Pig}): its player steers it with a carrot on a stick, its state kept for the mount as a horse's. */
+    public static final String PIG = ClientMotion.PIG;
+    /**
+     * The types besides boats and rafts whose controlling passenger may be a player ({@code getControllingPassenger},
+     * decompiled 1.21.11: {@code AbstractHorse}, {@code AbstractNautilus}, {@code Pig}, {@code Strider} and
+     * {@code HappyGhast} override it so; {@code Entity}'s is null and {@code Mob}'s only ever a mob).
+     */
+    private static final Set<String> PLAYER_CONTROLLED = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule",
+            "minecraft:skeleton_horse", "minecraft:zombie_horse", "minecraft:camel", "minecraft:camel_husk", "minecraft:llama",
+            "minecraft:trader_llama", "minecraft:nautilus", "minecraft:zombie_nautilus", PIG, "minecraft:strider", "minecraft:happy_ghast");
+
+    /**
+     * Whether a vehicle of {@code type} may be controlled by a player: only on one does a vanilla client send what its
+     * controller sends ({@code MoveVehicle}, {@code PaddleBoat}, a riding jump). True for a type not known.
+     */
+    public static boolean playerMayControl(String type) {
+        return type == null || ClientMotion.interpolatesOnly(type) || PLAYER_CONTROLLED.contains(type);
+    }
     /** The attributes a ridden horse's tick reads: {@code getRiddenSpeed}, {@code getJumpPower}, {@code maxUpStep}, {@code getGravity}. */
     public static final Set<String> HORSE_ATTRIBUTES = Set.of("minecraft:movement_speed", "minecraft:jump_strength", "minecraft:step_height",
             "minecraft:gravity");
@@ -358,7 +383,7 @@ public final class ClientEntities {
             }
             case ClientboundPacket.SetEquipment equipment -> {
                 Head head = heads.get(equipment.entityId());
-                if (head != null && head.type != null && ClientMotion.HORSES.contains(head.type)) {
+                if (head != null && head.type != null && ClientMotion.RIDDEN.contains(head.type)) {
                     for (ClientboundPacket.SetEquipment.Slot slot : equipment.slots()) {
                         if (slot.slot().equals("saddle")) {
                             enqueue(seq, head.id, new Op.Saddle(seq, saddle(slot.item())));
@@ -508,7 +533,9 @@ public final class ClientEntities {
         int noGravity = NONE;
         int horseFlags = NONE;
         int mobFlags = NONE;
+        int pigBoost = UNSET;
         boolean horse = head.type != null && ClientMotion.HORSES.contains(head.type);
+        boolean pig = PIG.equals(head.type);
         EntitySizes.Entry size = sizes.entry(head.type);
         int babyIndex = size == null ? -1 : size.babyIndex();
         List<EntitySizes.DataField> fields = size == null ? List.of() : size.data();
@@ -523,8 +550,10 @@ public final class ClientEntities {
                 noGravity = entry.value() != 0 ? 1 : 0;
             } else if (horse && entry.index() == DATA_HORSE_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
                 horseFlags = (int) entry.value() & 0xFF;
-            } else if (horse && entry.index() == DATA_MOB_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
+            } else if ((horse || pig) && entry.index() == DATA_MOB_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
                 mobFlags = (int) entry.value() & 0xFF;
+            } else if (pig && entry.index() == DATA_PIG_BOOST && entry.kind() == ClientboundPacket.SetEntityData.Kind.INT) {
+                pigBoost = (int) entry.value(); // onSyncedDataUpdated: the boost starts (ItemBasedSteering.onSynced), whatever the value
             } else if (FIREWORK_ROCKET.equals(head.type) && entry.index() == DATA_ROCKET_ATTACHED
                     && entry.kind() == ClientboundPacket.SetEntityData.Kind.OPTIONAL_UNSIGNED_INT) {
                 attached = (int) Math.max(entry.value(), NONE); // empty: -1
@@ -545,8 +574,8 @@ public final class ClientEntities {
             }
         }
         if (pose != NONE || flags != NONE || baby != NONE || dataSet != 0 || attached != UNSET || noGravity != NONE || horseFlags != NONE
-                || mobFlags != NONE) {
-            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1, attached, noGravity, horseFlags, mobFlags));
+                || mobFlags != NONE || pigBoost != UNSET) {
+            enqueue(seq, head.id, new Op.Data(seq, pose, flags, baby, dataSet, data0, data1, attached, noGravity, horseFlags, mobFlags, pigBoost));
         }
     }
 
@@ -569,7 +598,7 @@ public final class ClientEntities {
         if (head == null) {
             return;
         }
-        boolean horse = head.type != null && ClientMotion.HORSES.contains(head.type);
+        boolean horse = head.type != null && ClientMotion.RIDDEN.contains(head.type);
         for (ClientboundPacket.UpdateAttributes.Attribute attribute : packet.attributes()) {
             if (attribute.key().equals(SCALE_ATTRIBUTE)) {
                 enqueue(seq, head.id, new Op.Scale(seq, attributeValue(attribute)));
@@ -610,7 +639,7 @@ public final class ClientEntities {
     /** {@code handleUpdateMobEffect} and {@code handleRemoveMobEffect} for a horse ({@code amplifier} -1: removed). */
     private void horseEffect(long seq, int entityId, String key, int amplifier) {
         Head head = heads.get(entityId);
-        if (head != null && head.type != null && ClientMotion.HORSES.contains(head.type)) {
+        if (head != null && head.type != null && ClientMotion.RIDDEN.contains(head.type)) {
             enqueue(seq, head.id, new Op.Effect(seq, key, amplifier));
         }
     }
@@ -717,6 +746,12 @@ public final class ClientEntities {
             } else {
                 enqueue(seq, id, new Op.Vehicle(seq, vehicle.id));
             }
+        }
+        if (PIG.equals(vehicle.type)) { // after its Control: the mount's state is the one before the player's ticks
+            Head first = vehicle.passengers.isEmpty() ? null : head(vehicle.passengers.getFirst());
+            int rider = first == null ? RIDER_NONE : first == self ? RIDER_SELF
+                    : first.type == null || EntityTypes.PLAYER.equals(first.type) ? RIDER_PLAYER : RIDER_OTHER; // a type not known may be a player
+            enqueue(seq, vehicle.id, new Op.Rider(seq, rider));
         }
     }
 
@@ -1117,6 +1152,9 @@ public final class ClientEntities {
                     if (data.mobFlags() != NONE && s.horse != null) {
                         s.horse = s.horse.withMobFlags(data.mobFlags());
                     }
+                    if (data.pigBoost() != UNSET && s.horse != null) {
+                        s.horse = s.horse.boostSynced(data.pigBoost());
+                    }
                 }
                 out.add(s);
             }
@@ -1168,6 +1206,12 @@ public final class ClientEntities {
             case Op.Effect effect -> {
                 if (s.present && !s.lostAll && s.horse != null) {
                     s.horse = s.horse.withEffect(effect.key(), effect.amplifier());
+                }
+                out.add(s);
+            }
+            case Op.Rider rider -> {
+                if (s.present && !s.lostAll && s.horse != null) {
+                    s.horse = s.horse.ridden(rider.rider());
                 }
                 out.add(s);
             }
@@ -1821,13 +1865,15 @@ public final class ClientEntities {
      * relative to one not followed), set at {@code motionSeq}; {@code sweptMin} and {@code sweptMax} bound where it has
      * been since (the fluids there push it in its ticks); {@code saddle} 1, 0 or -1 (not known); {@code flags} its
      * {@code DATA_ID_FLAGS}, {@code mobFlags} its {@code DATA_MOB_FLAGS_ID}; {@code attributes} the values the server sent
-     * of {@link #HORSE_ATTRIBUTES} (NaN: not known exactly; absent: the type's default); {@code effects} by key and amplifier.
+     * of {@link #HORSE_ATTRIBUTES} (NaN: not known exactly; absent: the type's default); {@code effects} by key and amplifier;
+     * a pig's {@code boost} (0 none, 1 started by the server's boost time and not counted since, -1 not known) and
+     * {@code boostTotal} (its {@code DATA_BOOST_TIME}).
      */
     public record HorseMounted(long sequence, String type, boolean exact, Vec3d position, float yRot, float xRot, int steps, Vec3d target,
                                float targetYRot, float targetXRot, Vec3d previousPosition, boolean hasPreviousRotation, float previousYRot,
                                float previousXRot, int onGround, Vec3d groundSetAt, boolean noGravity, Vec3d motion, boolean everTicked,
                                Vec3d sweptMin, Vec3d sweptMax, long motionSeq, int saddle, int flags, int mobFlags, boolean baby, double scale,
-                               Map<String, Double> attributes, Map<String, Integer> effects) {}
+                               Map<String, Double> attributes, Map<String, Integer> effects, int boost, int boostTotal) {}
 
     /** The type of the entity {@code entityId} once the client has processed everything sent so far (server order), or null. */
     public String type(int entityId) {
@@ -1858,48 +1904,53 @@ public final class ClientEntities {
     }
 
     /**
-     * What a horse's candidate holds for its player's mount beyond the rest of its state; immutable, shared by copies.
-     * {@code motionKnown}: its motion ({@code State.motion}) is the client's; {@code motionSeq}: where it was last set;
-     * {@code sweptMin} and {@code sweptMax}: where it has been since (its position's radius included).
+     * What a horse's or a pig's candidate holds for its player's mount beyond the rest of its state; immutable, shared by
+     * copies. {@code motionKnown}: its motion ({@code State.motion}) is the client's; {@code motionSeq}: where it was last
+     * set; {@code sweptMin} and {@code sweptMax}: where it has been since (its position's radius included). A pig's boost
+     * ({@code ItemBasedSteering}): {@code boost} 0 none, 1 started and not counted since, -1 not known; {@code boostTotal}
+     * its {@code DATA_BOOST_TIME}; {@code rider} its first passenger ({@code RIDER_NONE} ...).
      */
     private record Ridable(boolean motionKnown, long motionSeq, Vec3d sweptMin, Vec3d sweptMax, int saddle, int flags, int mobFlags,
-                           Map<String, Double> attributes, Map<String, Integer> effects) {
+                           Map<String, Double> attributes, Map<String, Integer> effects, int boost, int boostTotal, int rider) {
 
         static Ridable added(long seq, boolean motionKnown, double x, double y, double z) {
             Vec3d at = new Vec3d(x, y, z);
-            return new Ridable(motionKnown, seq, at, at, 0, 0, 0, Map.of(), Map.of()); // defineSynchedData: no flags, no saddle
+            // defineSynchedData: no flags, no saddle, no boost
+            return new Ridable(motionKnown, seq, at, at, 0, 0, 0, Map.of(), Map.of(), 0, 0, RIDER_NONE);
         }
 
         Ridable motionSet(long seq, boolean known, double x, double y, double z, double r) {
-            return new Ridable(known, seq, new Vec3d(x - r, y - r, z - r), new Vec3d(x + r, y + r, z + r), saddle, flags, mobFlags, attributes, effects);
+            return new Ridable(known, seq, new Vec3d(x - r, y - r, z - r), new Vec3d(x + r, y + r, z + r), saddle, flags, mobFlags, attributes, effects,
+                    boost, boostTotal, rider);
         }
 
         Ridable swept(double x, double y, double z, double r) {
             return new Ridable(motionKnown, motionSeq, new Vec3d(Math.min(sweptMin.x(), x - r), Math.min(sweptMin.y(), y - r), Math.min(sweptMin.z(), z - r)),
                     new Vec3d(Math.max(sweptMax.x(), x + r), Math.max(sweptMax.y(), y + r), Math.max(sweptMax.z(), z + r)), saddle, flags, mobFlags,
-                    attributes, effects);
+                    attributes, effects, boost, boostTotal, rider);
         }
 
         Ridable pushed() {
-            return new Ridable(false, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, attributes, effects);
+            return new Ridable(false, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, attributes, effects, boost, boostTotal, rider);
         }
 
         Ridable withSaddle(int value) {
-            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, value, flags, mobFlags, attributes, effects);
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, value, flags, mobFlags, attributes, effects, boost, boostTotal, rider);
         }
 
         Ridable withMobFlags(int value) {
-            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, value, attributes, effects);
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, value, attributes, effects, boost, boostTotal, rider);
         }
 
         Ridable withFlags(int value) {
-            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, value, mobFlags, attributes, effects);
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, value, mobFlags, attributes, effects, boost, boostTotal, rider);
         }
 
         Ridable withAttribute(String key, double value) {
             Map<String, Double> m = new java.util.TreeMap<>(attributes);
             m.put(key, value);
-            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, java.util.Collections.unmodifiableMap(m), effects);
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, java.util.Collections.unmodifiableMap(m), effects,
+                    boost, boostTotal, rider);
         }
 
         Ridable withEffect(String key, int amplifier) {
@@ -1909,7 +1960,23 @@ public final class ClientEntities {
             } else {
                 m.put(key, amplifier);
             }
-            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, attributes, java.util.Collections.unmodifiableMap(m));
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, attributes, java.util.Collections.unmodifiableMap(m),
+                    boost, boostTotal, rider);
+        }
+
+        /**
+         * {@code onSynced}: the server's boost time reached the client, which starts the boost from 0; one a player may
+         * be steering counts it in their ticks, not followed here ({@code boost} -1).
+         */
+        Ridable boostSynced(int total) {
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, attributes, effects,
+                    rider == RIDER_SELF || rider == RIDER_PLAYER ? NONE : 1, total, rider);
+        }
+
+        /** Its first passenger now: a player in it may steer it, and a boost then counts in their ticks. */
+        Ridable ridden(int value) {
+            int b = boost == 1 && (value == RIDER_SELF || value == RIDER_PLAYER) ? NONE : boost;
+            return new Ridable(motionKnown, motionSeq, sweptMin, sweptMax, saddle, flags, mobFlags, attributes, effects, b, boostTotal, value);
         }
     }
 
@@ -2571,8 +2638,9 @@ public final class ClientEntities {
         /** -1: not in the packet. {@code baby}: 0 or 1. {@code dataSet}: which of the size's data values are in it (bit 0, bit 1). */
         /** {@code attached}: a firework rocket's target ({@code -1}: none), {@code UNSET} when the packet does not set it. */
         /** {@code horseFlags} and {@code mobFlags}: a horse's {@code DATA_ID_FLAGS} and {@code DATA_MOB_FLAGS_ID}, -1 when not in the packet. */
+        /** {@code pigBoost}: a pig's {@code DATA_BOOST_TIME}, {@code UNSET} when the packet does not set it. */
         record Data(long seq, int pose, int flags, int baby, int dataSet, int data0, int data1, int attached, int noGravity, int horseFlags,
-                    int mobFlags) implements Op {}
+                    int mobFlags, int pigBoost) implements Op {}
 
         /** {@code SetEntityMotion} for a boat (its motion until its next tick) or a horse. */
         record Motion(long seq, Vec3d motion) implements Op {}
@@ -2588,6 +2656,9 @@ public final class ClientEntities {
 
         /** The client's own player became the controlling passenger of this vehicle: from now on it moves it itself. */
         record Control(long seq) implements Op {}
+
+        /** A pig's first passenger after {@code SetPassengers}: {@code RIDER_NONE}, {@code RIDER_SELF}, {@code RIDER_PLAYER} or {@code RIDER_OTHER}. */
+        record Rider(long seq, int rider) implements Op {}
 
         /** The scale attribute's value; NaN when it is not known exactly. */
         record Scale(long seq, double value) implements Op {}
@@ -2750,7 +2821,7 @@ public final class ClientEntities {
                     hasPrevRot, rotMoved ? pyRot : yRot, rotMoved ? pxRot : xRot, onGroundKnown ? (onGround ? 1 : 0) : -1,
                     hasGround ? new Vec3d(gx, gy, gz) : null, noGravity, horse.motionKnown() ? motion : null, everTicked, horse.sweptMin(),
                     horse.sweptMax(), horse.motionSeq(), horse.saddle(), horse.flags(), horse.mobFlags(), baby, scale, horse.attributes(),
-                    horse.effects());
+                    horse.effects(), horse.boost(), horse.boostTotal());
         }
 
         static State lostAll() {
@@ -2788,7 +2859,7 @@ public final class ClientEntities {
             }
             // Types the client moves itself, or places other than at the packet's position (ClientMotion).
             s.lostPosition = ClientMotion.movesItself(add.type(), add.kind());
-            if (add.type() != null && ClientMotion.HORSES.contains(add.type())) {
+            if (add.type() != null && ClientMotion.RIDDEN.contains(add.type())) {
                 // Entity.recreateFromPacket: setDeltaMovement(the packet's movement)
                 s.motion = add.motion();
                 s.horse = Ridable.added(add.seq(), add.motion() != null && add.motion().isFinite(), s.x, s.y, s.z);

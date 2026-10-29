@@ -19,6 +19,7 @@ import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.Horse;
 import dev.whynotac.physics.HorseState;
+import dev.whynotac.physics.ItemSteering;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.BlockFace;
@@ -770,6 +771,58 @@ class MovementCheckTest {
         riderKeys = keys;
     }
 
+    // --- a pig the player steers ---
+
+    private static final int PIG = 42;
+    /** The synthetic client's pig's boost ({@code ItemBasedSteering}) and the boost time it was sent. */
+    private ItemSteering pigSteering = ItemSteering.NONE;
+    private int pigBoostTotal;
+
+    /** A pig's ridden tick: the default speed (0.25) times 0.225 and the boost's factor, a step of 1 under a player, no float. */
+    private static Horse.Conditions pigConditions(float speed) {
+        return new Horse.Conditions(speed, 0.0, 1.0F, 0.08, Horse.Effects.NONE, 0.8F, false, 0.9F, 0.9F, null, List.of());
+    }
+
+    /** A saddled pig put on the stone at (x, 64, z), the player holding a carrot on a stick; the player ticks a few times on foot. */
+    private void pigOnGround(double x, double z, String held) throws Colliders.Unknown {
+        hold(held, null);
+        out(ClientboundPacket.AddEntity.received(PIG, new UUID(6, 6), "minecraft:pig", x, 64.0, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.SetEquipment(PIG, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                new Stack("minecraft:saddle", 1, List.of(), List.of(), null, false)))));
+        out(new ClientboundPacket.EntityPositionSync(PIG, new Vec3d(x, 64.0, z), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** The server puts the player on the pig; the client handles it before its next tick, the pig then as it held it. */
+    private void mountPig(double x, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(PIG, new int[] {SELF}));
+        sync();
+        horse = new HorseState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, 64.0, z, GROUND,
+                pigConditions(0.05625F)), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null);
+        pigSteering = ItemSteering.NONE;
+    }
+
+    /** The server's boost time reaches the client ({@code onSynced}): the boost starts from 0. */
+    private void boostPig(int total) {
+        out(new ClientboundPacket.SetEntityData(PIG, List.of(new ClientboundPacket.SetEntityData.DataEntry(17,
+                ClientboundPacket.SetEntityData.Kind.INT, total)), 0));
+        sync();
+        pigSteering = ItemSteering.synced();
+        pigBoostTotal = total;
+    }
+
+    /** One ride tick: the pig's (its boost counted, then ahead where the rider looks), then the rider's rotation and the pig's move moved by {@code cheat}. */
+    private void pigRideTick(Vec3d cheat) throws Colliders.Unknown {
+        pigSteering = pigSteering.tick(pigBoostTotal);
+        float speed = (float) (0.25 * 0.225 * pigSteering.factor(pigBoostTotal));
+        horse = Horse.tick(horse, new Horse.Rider(0.0F, 1.0F, 30.0F, 0.0F), GROUND, pigConditions(speed));
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+    }
+
     /** The power of the jump key held so far (jumpRidingScale * 100 for up to 9 ticks held). */
     private int heldJumpPower;
 
@@ -915,6 +968,84 @@ class MovementCheckTest {
         }
         List<MovementTracker.Tick> rides = rideTicks();
         assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM && t.reason().contains("pushed")), String.valueOf(rides));
+        assertEquals(List.of(), evidence);
+    }
+
+    /** The player in a minecart ({@code getControllingPassenger} null: the server moves it); a passenger's ticks, {@code move} adding a MoveVehicle. */
+    private void minecartRide(boolean move) throws Colliders.Unknown {
+        ticks(5, NONE, 30.0F);
+        out(ClientboundPacket.AddEntity.received(43, new UUID(7, 7), "minecraft:minecart", 6.5, 64.0, 6.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        ticks(2, NONE, 30.0F);
+        out(new ClientboundPacket.SetPassengers(43, new int[] {SELF}));
+        sync();
+        for (int i = 0; i < 10; i++) {
+            in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
+            if (move && i >= 3) {
+                in(new ServerboundPacket.MoveVehicle(new Vec3d(6.5 + 0.2 * i, 64.0, 6.5), 30.0F, 0.0F, true)); // minecart speed
+            }
+            in(new ServerboundPacket.ClientTickEnd());
+            now += SECOND / 20;
+        }
+    }
+
+    @Test
+    void aMinecartsPassengerSendsNoVehicleMove() throws Exception {
+        minecartRide(false);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED));
+    }
+
+    @Test
+    void aVehicleMoveForAMinecartIsAFinding() throws Exception {
+        minecartRide(true);
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        assertTrue(evidence.getFirst().summary().startsWith(MovementTracker.VEHICLE_UNCONTROLLED + " (MoveVehicle on a minecraft:minecart)"),
+                evidence.getFirst().summary());
+    }
+
+    @Test
+    void aPigSteeredByAVanillaClientIsExplainedFromItsMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        pigOnGround(6.5, 6.5, "minecraft:carrot_on_a_stick");
+        mountPig(6.5, 6.5);
+        for (int i = 0; i < 40; i++) {
+            if (i == 10) {
+                boostPig(200);
+            }
+            pigRideTick(Vec3d.ZERO);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(40, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(Math.abs(horse.x() - 6.5) + Math.abs(horse.z() - 6.5) > 1.0, "it moved: " + horse);
+        assertTrue(pigSteering.boosting() && pigSteering.boostTime() == 30, String.valueOf(pigSteering));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aPigFasterThanItsBoostIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        pigOnGround(6.5, 6.5, "minecraft:carrot_on_a_stick");
+        mountPig(6.5, 6.5);
+        for (int i = 0; i < 20; i++) {
+            pigRideTick(i == 12 ? new Vec3d(-0.05, 0.0, 0.09) : Vec3d.ZERO); // pig speed: a little further ahead than it goes
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a pig as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void noPigClaimWithoutACarrotOnAStick() throws Exception {
+        ticks(5, NONE, 30.0F);
+        pigOnGround(6.5, 6.5, null);
+        mountPig(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            pigRideTick(Vec3d.ZERO);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(10, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> "riding: the rider holds no carrot on a stick".equals(t.reason())), String.valueOf(rides));
         assertEquals(List.of(), evidence);
     }
 
@@ -1359,6 +1490,65 @@ class MovementCheckTest {
         ticks(5, FORWARD, 30.0F);
         assertEquals(List.of(), evidence);
         assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    /** A trident in the first hotbar slot whose enchantments give {@code spinAttack} (0: no riptide), as the server sends it. */
+    private void holdTrident(float spinAttack) {
+        List<Stack> items = new ArrayList<>();
+        for (int i = 0; i < 46; i++) {
+            items.add(Stack.EMPTY);
+        }
+        items.set(36, new Stack("minecraft:trident", 1, spinAttack > 0.0F ? List.of("minecraft:enchantments") : List.of(), List.of(), null, false,
+                null, spinAttack));
+        out(new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY));
+        sync();
+    }
+
+    /** Charging a trident for 15 ticks and letting it go (TridentItem.releaseUsing after 10 or more), walking on after. */
+    private void throwTrident() throws Colliders.Unknown {
+        ticks(5, NONE, 30.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        ticks(15, FORWARD, 30.0F);
+        keybinds.add(RELEASE);
+        use = null;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(0);
+        ticks(20, FORWARD, 30.0F);
+    }
+
+    @Test
+    void aTridentWithoutRiptideLetGoMovesNothingAndIsFollowed() throws Exception {
+        holdTrident(0.0F);
+        throwTrident();
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aRiptideTridentCannotBeUsedOutOfWaterAndRainSoItsPushIsAFinding() throws Exception {
+        holdTrident(3.0F);
+        ticks(5, NONE, 30.0F); // no rain since the login (a new level), stone and air all around
+        keybinds.add(useItem(Hand.MAIN_HAND)); // TridentItem.use: FAIL, the client uses nothing
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        ticks(15, NONE, 30.0F); // standing, a use or none moves it alike: only the trident's rule tells them apart
+        assertEquals(List.of(), evidence);
+        keybinds.add(RELEASE); // a modified client lets go of a use it could not start, and riptides away
+        tick(NONE, 30.0F, 0.0F, new Vec3d(-1.5, 0.0, 2.6));
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+    }
+
+    @Test
+    void inTheRainARiptideTridentMayBeUsedAndItsReleaseEndsTheClaim() throws Exception {
+        holdTrident(3.0F); // riptide III: 1.5 + 2 * 0.75
+        out(new ClientboundPacket.GameEvent(1, 0.0F)); // START_RAINING
+        out(new ClientboundPacket.GameEvent(7, 1.0F)); // RAIN_LEVEL_CHANGE
+        sync();
+        throwTrident();
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.stream().anyMatch(t -> t.reason() != null && t.reason().startsWith("a trident released")), String.valueOf(ticks));
     }
 
     @Test

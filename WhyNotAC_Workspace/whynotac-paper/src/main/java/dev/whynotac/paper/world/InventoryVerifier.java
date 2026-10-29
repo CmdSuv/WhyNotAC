@@ -187,7 +187,8 @@ public final class InventoryVerifier {
             return ours.isEmpty() && theirs.isEmpty();
         }
         return ours.item().equals(theirs.item()) && ours.count() == theirs.count() && ours.added().equals(theirs.added())
-                && ours.removed().equals(theirs.removed()) && (ours.hashed() || Objects.equals(ours.attackRange(), theirs.attackRange()));
+                && ours.removed().equals(theirs.removed()) && (ours.hashed() || Objects.equals(ours.attackRange(), theirs.attackRange())
+                && Objects.equals(ours.spinAttack(), theirs.spinAttack()));
     }
 
     /** A reach set: {@code none}, {@code ?} (unknown) or {@code max+margin}, comma separated. */

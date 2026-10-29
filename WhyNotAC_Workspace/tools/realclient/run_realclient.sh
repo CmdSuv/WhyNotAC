@@ -472,6 +472,30 @@ horse -69.5; paddle space/0.4 -/1.5 w/0.8 w,space/1.0 w/1.5 -/1.0; unhorse
 horse -89.5; paddle w/2.5 w,space/0.7 w/2.0 -/0.5; unhorse
 horse -61.5; paddle w/3.0 -/0.5 s/1.0 -/0.5; unhorse
 horse -57.5 nudge; paddle w/4.0 -/1.5; unhorse
+# Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
+# stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks
+# (Pig.getRiddenInput) up the step ring and into the wall ring; boosted by the use key (the server's boost time reaches
+# the client, which counts the boost itself: ItemBasedSteering), pressed while no block is in reach (a use on a block
+# leaves the block beside it unsettled until the server answers). NoAI: a carrot on a stick tempts a pig to the player, which it would push.
+# The truth agent records the pig's tick (Mob.tick) in the horse's form.
+pig() { echo "kill @e[tag=wnp]" > "$FIFO"; echo "tp $NAME -79.5 -60 $1 -90 0" > "$FIFO"
+  echo "item replace entity $NAME weapon.mainhand with minecraft:carrot_on_a_stick" > "$FIFO"; sleep 1.5
+  echo "summon minecraft:pig -78.5 -60 $1 {Tags:[\"wnp\"],NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Rotation:[-90f,0f],equipment:{saddle:{id:\"minecraft:saddle\",count:1}}}" > "$FIFO"; sleep 1.5
+  echo "ride $NAME mount @e[tag=wnp,limit=1]" > "$FIFO"; sleep 1.0; }
+unpig() { echo "kill @e[tag=wnp]" > "$FIFO"; sleep 2.0; }
+echo "item replace entity $NAME weapon.offhand with minecraft:air" > "$FIFO"; sleep 0.5
+pig -89.5; paddle -/0.5 Button3/0.2 -/7.0; unpig
+pig -89.5; paddle -/6.0; unpig
+pig -69.5; paddle Button3/0.2 -/4.0; unpig
+echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"
+echo "item replace entity $NAME weapon.offhand with minecraft:shield" > "$FIFO"; sleep 0.5
+# A minecart, on the grass lane: no player controls one (getControllingPassenger null), so the client, ridden and walked
+# with W, sends no vehicle move (the movement check's VEHICLE_UNCONTROLLED is in force over these ticks).
+echo "tp $NAME -79.5 -60 -69.5 -90 0" > "$FIFO"; sleep 1.0
+echo "summon minecraft:minecart -77.5 -60 -69.5 {Tags:[\"wnm\"],Invulnerable:1b}" > "$FIFO"; sleep 1.0
+echo "ride $NAME mount @e[tag=wnm,limit=1]" > "$FIFO"; sleep 1.0
+paddle w/1.5 -/1.0
+echo "kill @e[tag=wnm]" > "$FIFO"; sleep 1.5
 echo "gamerule entity_drops true" > "$FIFO"
 # The world border (its shape, rounded out to whole blocks, collides within a few blocks: isInsideCloseToBorder): 20
 # wide around x 50, z 65.5 (its east side at x 60, its south side at z 75.5), walked into, jumped at, walked along, and

@@ -10,6 +10,7 @@ import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.Horse;
 import dev.whynotac.physics.HorseState;
+import dev.whynotac.physics.ItemSteering;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ClientboundPacket;
@@ -147,7 +148,8 @@ public class MovementTruth {
                 && ((Number) tracker.get("ridingNothing")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("vehicleOnFoot"))
                 && Long.valueOf(0).equals(tracker.get("rideTruthMissing"))
                 && ((Number) tracker.get("horseExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("horseUnexplained"))
-                && Long.valueOf(0).equals(tracker.get("horseTruthMissing"));
+                && Long.valueOf(0).equals(tracker.get("horseTruthMissing")) && ((Number) tracker.get("pigTruthCompared")).longValue() > 0
+                && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -180,7 +182,8 @@ public class MovementTruth {
         }
         int[] boatIndex = {0};
         long[] rides = new long[2]; // explained ride ticks compared, the client's boat not a state
-        long[] horses = new long[2]; // explained horse ticks compared, the client's horse not a state
+        // explained horse ticks compared, the client's horse not a state, the pig's among them, and those boosting
+        long[] horses = new long[4];
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -248,6 +251,12 @@ public class MovementTruth {
                 }
                 if (tick.horse() && tick.outcome() == MovementTracker.Outcome.EXPLAINED && post != null && "horsePost".equals(post.get("hook"))) {
                     horses[0]++;
+                    if (String.valueOf(post.get("type")).endsWith("pig")) {
+                        horses[2]++;
+                        if (Boolean.TRUE.equals(post.get("boosting"))) {
+                            horses[3]++;
+                        }
+                    }
                     HorseState truth = horseState(post);
                     boolean found = false;
                     List<String> nearest = null;
@@ -319,6 +328,8 @@ public class MovementTruth {
         out.put("rideExplained", tracker.rideExplained());
         out.put("rideUnexplained", tracker.rideUnexplained());
         out.put("vehicleOnFoot", tracker.vehicleOnFoot());
+        out.put("vehicleUncontrolled", tracker.vehicleUncontrolled());
+        out.put("ridingUncontrolled", tracker.ridingUncontrolled());
         out.put("ridingNothing", tracker.ridingNothing());
         out.put("rideNoClaim", tracker.rideNoClaim());
         out.put("rideTruthCompared", rides[0]);
@@ -327,6 +338,8 @@ public class MovementTruth {
         out.put("horseUnexplained", tracker.horseUnexplained());
         out.put("horseNoClaim", tracker.horseNoClaim());
         out.put("horseTruthCompared", horses[0]);
+        out.put("pigTruthCompared", horses[2]);
+        out.put("pigBoostedTruthCompared", horses[3]);
         out.put("horseTruthMissing", horses[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
@@ -581,7 +594,7 @@ public class MovementTruth {
         /** Boat ticks were compared, all equal, in water, under it, on land, in the air, and landing on water from the air. */
         /** Every horse tick in scope matched, with a released jump and a tick in water among them. */
         boolean horsesClean() {
-            return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0;
+            return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0 && pigTicks > 0 && pigBoosted > 0;
         }
 
         boolean boatsClean() {
@@ -792,6 +805,9 @@ public class MovementTruth {
         }
 
         long horseTicks;
+        /** The pig's ticks among the horse's ({@code Pig}, recorded in the horse's form), and those boosting. */
+        long pigTicks;
+        long pigBoosted;
         long horseMatched;
         long horseMismatched;
         long horseJumps;
@@ -860,10 +876,20 @@ public class MovementTruth {
                 return;
             }
             String type = String.valueOf(pre.get("type")).replace("entity.minecraft.", "minecraft:");
-            float height = type.equals("minecraft:donkey") ? 1.5F : 1.6F;
-            Horse.Conditions conditions = new Horse.Conditions((float) f64(pre.get("movementSpeed")), f64(pre.get("jumpStrength")), f32(pre.get("maxUpStep")),
+            // a pig (Pig): 0.9 each way, its ridden speed the attribute times 0.225 and the factor of the boost it counts first
+            // (tickRidden: tickBoost, then getRiddenSpeed), ahead whatever its rider's keys
+            boolean pig = type.equals("minecraft:pig");
+            float height = pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+            float speed = (float) f64(pre.get("movementSpeed"));
+            ItemSteering steered = null;
+            if (pig) {
+                int total = ((Number) pre.get("boostTimeTotal")).intValue();
+                steered = new ItemSteering(Boolean.TRUE.equals(pre.get("boosting")), ((Number) pre.get("boostTime")).intValue()).tick(total);
+                speed = (float) (f64(pre.get("movementSpeed")) * 0.225 * steered.factor(total));
+            }
+            Horse.Conditions conditions = new Horse.Conditions(speed, f64(pre.get("jumpStrength")), f32(pre.get("maxUpStep")),
                     f64(pre.get("gravity")), new Horse.Effects(e.jumpBoost(), e.slowFalling(), e.levitation(), e.dolphinsGrace()),
-                    type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type), 1.3964844F, height,
+                    type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type), pig ? 0.9F : 1.3964844F, height,
                     border(player), List.of());
             if (e.slowFalling()) {
                 horseUnknown.merge("slow falling (the recorded gravity is the effective one)", 1L, Long::sum);
@@ -873,7 +899,14 @@ public class MovementTruth {
             if (interpolation != null) {
                 horseInterpolating++;
             }
-            Horse.Rider rider = new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")));
+            Horse.Rider rider = pig ? new Horse.Rider(0.0F, 1.0F, f32(pre.get("riderYRot")), f32(pre.get("riderXRot")))
+                    : new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")));
+            if (pig) {
+                pigTicks++;
+                if (steered.boosting()) {
+                    pigBoosted++;
+                }
+            }
             HorseState expected = horseState(post);
             horseTicks++;
             if (before.jumpPendingScale() > 0.0F && before.onGround()) {
@@ -888,6 +921,11 @@ public class MovementTruth {
                     horseInterpolations.put(id, predicted.interpolation());
                 }
                 List<String> d = horseDifferences(predicted, expected);
+                if (pig) { // the boost it counted and the speed it set (setSpeed(getRiddenSpeed))
+                    same(d, "boosting", steered.boosting(), Boolean.TRUE.equals(post.get("boosting")));
+                    same(d, "boostTime", steered.boostTime(), ((Number) post.get("boostTime")).intValue());
+                    bits(d, "speed", speed, f32(post.get("speed")));
+                }
                 if (d.isEmpty()) {
                     horseMatched++;
                 } else {
@@ -944,6 +982,8 @@ public class MovementTruth {
             horse.put("jumps", horseJumps);
             horse.put("inWater", horseInWater);
             horse.put("interpolating", horseInterpolating);
+            horse.put("pigTicks", pigTicks);
+            horse.put("pigBoosted", pigBoosted);
             horse.put("unknown", horseUnknown);
             horse.put("differingFields", horseDifferingFields);
             horse.put("examples", horseExamples);

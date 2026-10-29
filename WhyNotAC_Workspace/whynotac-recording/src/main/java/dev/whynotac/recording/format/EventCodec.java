@@ -157,13 +157,17 @@ public final class EventCodec {
             }
         }
 
-        /** A stack: flags (1 present, 2 attack range, 4 hashed, 8 range hash), item, count, the patch's added and removed types, the attack range, its hash. */
+        /**
+         * A stack: flags (1 present, 2 attack range, 4 hashed, 8 range hash, 16 spin attack), item, count, the patch's added
+         * and removed types, the attack range, its hash, the spin attack strength (absent in older recordings: not known).
+         */
         private void stack(Stack stack) {
             if (stack.isEmpty()) {
                 body.writeByte(0);
                 return;
             }
-            body.writeByte((stack.attackRange() != null ? 2 : 0) | (stack.hashed() ? 4 : 0) | (stack.rangeHash() != null ? 8 : 0) | 1);
+            body.writeByte((stack.attackRange() != null ? 2 : 0) | (stack.hashed() ? 4 : 0) | (stack.rangeHash() != null ? 8 : 0)
+                    | (stack.spinAttack() != null ? 16 : 0) | 1);
             string(stack.item());
             body.writeZigZag(stack.count());
             body.writeVarInt(stack.added().size());
@@ -181,6 +185,9 @@ public final class EventCodec {
             }
             if (stack.rangeHash() != null) {
                 body.writeInt(stack.rangeHash());
+            }
+            if (stack.spinAttack() != null) {
+                body.writeFloat(stack.spinAttack());
             }
         }
 
@@ -904,7 +911,8 @@ public final class EventCodec {
             Stack.AttackRange range = (flags & 2) == 0 ? null
                     : new Stack.AttackRange(in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat(), in.readFloat());
             Integer rangeHash = (flags & 8) == 0 ? null : in.readInt();
-            return new Stack(item, count, addedTypes, removedTypes, range, (flags & 4) != 0, rangeHash);
+            Float spinAttack = (flags & 16) == 0 ? null : in.readFloat();
+            return new Stack(item, count, addedTypes, removedTypes, range, (flags & 4) != 0, rangeHash, spinAttack);
         }
 
         private String string(ByteSource in) {

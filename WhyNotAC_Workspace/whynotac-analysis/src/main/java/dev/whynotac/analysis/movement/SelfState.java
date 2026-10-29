@@ -25,10 +25,13 @@ import java.util.TreeSet;
  * @param using           the item the client is using, or null ({@code LocalPlayer.isUsingItem}: the client's own, which
  *                        the server's living-entity flags start or stop when they differ)
  * @param border          the world border of the client's level ({@link ClientBorder})
+ * @param rainLevel       the rain level of the client's level ({@code ClientLevel.setRainLevel}, from the weather's game
+ *                        events: 0 a new level's, 0 at a start of rain, 1 at its end, then each change), NaN when not
+ *                        known; {@code isRaining} is above 0.2
  */
 public record SelfState(boolean ticking, boolean positionKnown, boolean firstTick, int food, float health, int gameMode, boolean flying, boolean mayFly,
         OnFoot.Effects effects, SpeedAttribute speed, Set<String> otherAttributes, boolean camera, int vehicle, boolean noGravity,
-        Using using, ClientBorder border) {
+        Using using, ClientBorder border, float rainLevel) {
 
     static final String MOVEMENT_SPEED = "minecraft:movement_speed";
     /** Attributes the on-foot step reads, with the client's default value (decompiled {@code Attributes}). */
@@ -48,12 +51,13 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
     }
 
     /** A new player's own state before any packet about it: the client's defaults. */
-    static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, ClientBorder border) {
-        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, null, border);
+    static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, ClientBorder border, float rainLevel) {
+        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, null, border,
+                rainLevel);
     }
 
     /** Before the login: nothing known about the session yet. */
-    static final SelfState INITIAL = fresh(-1, SpeedAttribute.DEFAULT, Set.of(), ClientBorder.fresh(null));
+    static final SelfState INITIAL = fresh(-1, SpeedAttribute.DEFAULT, Set.of(), ClientBorder.fresh(null), Float.NaN);
 
     /** Why the on-foot step cannot run now, or null. */
     String outOfScope() {
@@ -93,34 +97,34 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
 
     SelfState withTicking(boolean value) {
         return new SelfState(value, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border);
+                noGravity, using, border, rainLevel);
     }
 
     SelfState withPositionKnown() {
         return new SelfState(ticking, true, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border);
+                noGravity, using, border, rainLevel);
     }
 
     SelfState afterFirstTick() {
         return firstTick ? new SelfState(ticking, positionKnown, false, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border) : this;
+                vehicle, noGravity, using, border, rainLevel) : this;
     }
 
     SelfState withHealth(float newHealth, int newFood) {
         return new SelfState(ticking, positionKnown, firstTick, newFood, newHealth, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border);
+                vehicle, noGravity, using, border, rainLevel);
     }
 
     SelfState withAbilities(boolean newFlying, boolean newMayFly) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, newFlying, newMayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border);
+                vehicle, noGravity, using, border, rainLevel);
     }
 
     /** {@code MultiPlayerGameMode.setLocalMode}: the mode's abilities ({@code GameType.updatePlayerAbilities}). */
     SelfState withGameMode(int mode) {
         boolean creativeOrSpectator = mode == 1 || mode == 3;
         return new SelfState(ticking, positionKnown, firstTick, food, health, mode, mode == 3, creativeOrSpectator, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border);
+                vehicle, noGravity, using, border, rainLevel);
     }
 
     /**
@@ -145,7 +149,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             return this;
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, next, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border);
+                noGravity, using, border, rainLevel);
     }
 
     /** {@code handleUpdateAttributes}: each attribute's base and modifiers are replaced. */
@@ -166,38 +170,50 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             }
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, other, camera, vehicle,
-                noGravity, using, border);
+                noGravity, using, border, rainLevel);
     }
 
     SelfState withSpeed(SpeedAttribute newSpeed) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, otherAttributes, camera,
-                vehicle, noGravity, using, border);
+                vehicle, noGravity, using, border, rainLevel);
     }
 
     SelfState withCamera(boolean self) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, self, vehicle,
-                noGravity, using, border);
+                noGravity, using, border, rainLevel);
     }
 
     SelfState withVehicle(int value) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, value,
-                noGravity, using, border);
+                noGravity, using, border, rainLevel);
     }
 
     SelfState withNoGravity(boolean value) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                value, using, border);
+                value, using, border, rainLevel);
     }
 
     /** The item in use: {@code startUsingItem}, {@code stopUsingItem}, or the use going on with the hand's stack. */
     SelfState withUsing(Using newUsing) {
         return java.util.Objects.equals(newUsing, using) ? this
                 : new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                        vehicle, noGravity, newUsing, border);
+                        vehicle, noGravity, newUsing, border, rainLevel);
     }
 
     SelfState withBorder(ClientBorder newBorder) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, newBorder);
+                noGravity, using, newBorder, rainLevel);
+    }
+
+    /** {@code ClientLevel.setRainLevel}: the value clamped to 0..1 (NaN: not known). */
+    SelfState withRainLevel(float value) {
+        float level = Float.isNaN(value) ? value : Math.max(0.0F, Math.min(1.0F, value));
+        return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
+                noGravity, using, border, level);
+    }
+
+    /** {@code Level.isRaining}: the rain level above 0.2 (true), not (false), or null when not known. */
+    Boolean raining() {
+        return Float.isNaN(rainLevel) ? null : rainLevel > 0.2F;
     }
 }

@@ -65,6 +65,11 @@ public final class Recorder {
     private static Method horseIsStanding, maxUpStep, getEffectiveGravity, getAttributeValue, entityControllingPassenger, entityInterpolation;
     private static Object movementSpeed, jumpStrength;
     private static Object tickingHorse; // the horse whose tick() is running, if it is recorded
+    private static Object tickingPig; // the pig whose Mob.tick() is running, if it is recorded
+    // a pig the player steers: its ItemBasedSteering (the boost it counts itself)
+    private static Field pigSteering, steeringBoosting, steeringBoostTime;
+    private static Method steeringBoostTimeTotal;
+    private static Class<?> pigClass;
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -160,6 +165,42 @@ public final class Recorder {
         }
     }
 
+    /** At the start of {@code Mob.tick()}: a pig the local player rides and controls is recorded as a horse is. */
+    public static void mobPre(Object mob) {
+        synchronized (LOCK) {
+            if (closing || failed || out == null || !pigClass.isInstance(mob)) {
+                return; // a horse's own tick runs this too, inside its AbstractHorse.tick()
+            }
+            tickingPig = null;
+            try {
+                Object rider = entityControllingPassenger.invoke(mob);
+                if (localPlayerClass.isInstance(rider)) {
+                    tickingPig = mob;
+                    writeHorse("horsePre", mob, rider);
+                }
+            } catch (Throwable e) {
+                failed = true;
+                System.err.println("[whynotac-truth] recording stopped: " + e);
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void mobPost() {
+        synchronized (LOCK) {
+            if (tickingPig != null && !failed) {
+                try {
+                    writeHorse("horsePost", tickingPig, entityControllingPassenger.invoke(tickingPig));
+                } catch (Throwable e) {
+                    failed = true;
+                    System.err.println("[whynotac-truth] recording stopped: " + e);
+                    e.printStackTrace();
+                }
+            }
+            tickingPig = null;
+        }
+    }
+
     private static void writeHorse(String hook, Object horse, Object rider) throws Throwable {
         StringBuilder line = new StringBuilder(640).append("{\"hook\":\"").append(hook).append("\",\"n\":").append(calls++)
                 .append(",\"nanoTime\":").append(System.nanoTime())
@@ -194,13 +235,25 @@ public final class Recorder {
         }
         line.append(",\"noJumpDelay\":").append(noJumpDelay.getInt(horse));
         bool(line, "jumping", livingJumping.getBoolean(horse));
-        f32(line, "jumpPendingScale", horseJumpPendingScale.getFloat(horse));
-        bool(line, "allowStandSliding", horseAllowStandSliding.getBoolean(horse));
-        bool(line, "standing", (Boolean) horseIsStanding.invoke(horse));
-        line.append(",\"standCounter\":").append(horseStandCounter.getInt(horse));
+        boolean pig = pigClass.isInstance(horse);
+        if (pig) { // no jump nor rearing; the boost its steering counts, and the boost time the client holds
+            f32(line, "jumpPendingScale", 0.0F);
+            bool(line, "allowStandSliding", false);
+            bool(line, "standing", false);
+            line.append(",\"standCounter\":0");
+            Object steering = pigSteering.get(horse);
+            bool(line, "boosting", steeringBoosting.getBoolean(steering));
+            line.append(",\"boostTime\":").append(steeringBoostTime.getInt(steering));
+            line.append(",\"boostTimeTotal\":").append((Integer) steeringBoostTimeTotal.invoke(steering));
+        } else {
+            f32(line, "jumpPendingScale", horseJumpPendingScale.getFloat(horse));
+            bool(line, "allowStandSliding", horseAllowStandSliding.getBoolean(horse));
+            bool(line, "standing", (Boolean) horseIsStanding.invoke(horse));
+            line.append(",\"standCounter\":").append(horseStandCounter.getInt(horse));
+        }
         f32(line, "speed", speed.getFloat(horse));
         f64(line, "movementSpeed", (Double) getAttributeValue.invoke(horse, movementSpeed));
-        f64(line, "jumpStrength", (Double) getAttributeValue.invoke(horse, jumpStrength));
+        f64(line, "jumpStrength", pig ? 0.0 : (Double) getAttributeValue.invoke(horse, jumpStrength));
         f32(line, "maxUpStep", (Float) maxUpStep.invoke(horse));
         f64(line, "gravity", (Double) getEffectiveGravity.invoke(horse));
         effects(line, (java.util.Map<?, ?>) activeEffects.get(horse));
@@ -494,6 +547,12 @@ public final class Recorder {
         horseAllowStandSliding = field(loader, horse, "allowStandSliding");
         horseStandCounter = field(loader, horse, "standCounter");
         horseIsStanding = method(loader, horse, "isStanding()");
+        pigClass = Class.forName(mappings.get(TruthAgent.PIG).obf(), false, loader);
+        pigSteering = field(loader, TruthAgent.PIG, "steering");
+        String steering = "net.minecraft.world.entity.ItemBasedSteering";
+        steeringBoosting = field(loader, steering, "boosting");
+        steeringBoostTime = field(loader, steering, "boostTime");
+        steeringBoostTimeTotal = method(loader, steering, "boostTimeTotal()");
         entityControllingPassenger = method(loader, "net.minecraft.world.entity.Entity", "getControllingPassenger()"); // virtual: any vehicle
         entityInterpolation = method(loader, "net.minecraft.world.entity.Entity", "getInterpolation()");
         livingXxa = field(loader, living, "xxa");
