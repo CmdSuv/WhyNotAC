@@ -111,8 +111,8 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "fill 60 -61 29 65 -61 31 minecraft:powder_snow" "fill 68 -62 29 70 -61 31 minecraft:powder_snow" \
   "forceload add 32 -48 127 -17" "forceload add -120 -72 -40 -56" "forceload add -95 -106 -63 -74" "fill 40 -62 -40 70 -61 -28 minecraft:water" "fill 60 -63 -37 66 -63 -31 minecraft:water" \
-  "forceload add -152 -72 -116 -56" "fill -141 -61 -67 -130 -61 -62 minecraft:lava" "fill -122 -61 -67 -119 -61 -62 minecraft:air" \
-  "fill -122 -61 -67 -122 -61 -62 minecraft:lava" \
+  "forceload add -158 -72 -121 -56" "fill -147 -61 -67 -136 -61 -62 minecraft:lava" "fill -129 -61 -67 -126 -61 -62 minecraft:air" \
+  "fill -129 -61 -67 -129 -61 -62 minecraft:lava" \
   "fill 76 -61 -40 87 -61 -28 minecraft:ice" "fill 88 -61 -40 100 -61 -28 minecraft:blue_ice" "fill 101 -60 -40 101 -59 -28 minecraft:stone" \
   "fill 76 -61 -26 84 -61 -24 minecraft:slime_block" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
@@ -489,8 +489,9 @@ echo "item replace entity $NAME weapon.offhand with minecraft:air" > "$FIFO"; sl
 pig -89.5; paddle -/0.5 Button3/0.2 -/7.0; unpig
 pig -89.5; paddle -/6.0; unpig
 pig -69.5; paddle Button3/0.2 -/4.0; unpig
-# Striders, west of the horses (x -152..-116, z -72..-56, built at the start): a lava pool one deep in the ground (x -141..-130,
-# sources) and a channel (x -122..-119) its sources flood three blocks east (flowing lava has no stable shape), ridden along
+# Striders, west of the horses (x -158..-121, z -72..-56, built at the start; the horses' grass begins at x -120): a lava pool
+# one deep in the ground (x -147..-136, sources) and a channel (x -129..-126) its sources flood three blocks east (flowing
+# lava has no stable shape), ridden along
 # z -64.5. Each leg summons a saddled strider, NoAI until just before the player is put on it: its AI must be on when the
 # client handles the mount (the server sends its data at the end of its tick, the mount at once), for the client to set its
 # suffocation itself in every ridden tick; the player is handed a warped fungus on a stick at the mount (it tempts a strider
@@ -504,8 +505,8 @@ strider() { echo "kill @e[tag=wns]" > "$FIFO"; echo "tp $NAME $(($1 - 1)).5 -60 
   echo "item replace entity $NAME weapon.mainhand with minecraft:warped_fungus_on_a_stick" > "$FIFO"
   echo "ride $NAME mount @e[tag=wns,limit=1]" > "$FIFO"; sleep 1.0; }
 unstrider() { echo "kill @e[tag=wns]" > "$FIFO"; sleep 2.0; }
-strider -145; paddle -/6.0; unstrider
-strider -124; paddle Button3/0.2 -/4.0; unstrider
+strider -151; paddle -/6.0; unstrider
+strider -131; paddle Button3/0.2 -/4.0; unstrider
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"
 echo "item replace entity $NAME weapon.offhand with minecraft:shield" > "$FIFO"; sleep 0.5
 # A minecart, on the grass lane: no player controls one (getControllingPassenger null), so the client, ridden and walked
