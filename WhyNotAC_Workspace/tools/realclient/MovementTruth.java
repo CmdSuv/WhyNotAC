@@ -149,6 +149,7 @@ public class MovementTruth {
                 && Long.valueOf(0).equals(tracker.get("rideTruthMissing"))
                 && ((Number) tracker.get("horseExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("horseUnexplained"))
                 && Long.valueOf(0).equals(tracker.get("horseTruthMissing")) && ((Number) tracker.get("pigTruthCompared")).longValue() > 0
+                && ((Number) tracker.get("striderTruthCompared")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
@@ -182,8 +183,8 @@ public class MovementTruth {
         }
         int[] boatIndex = {0};
         long[] rides = new long[2]; // explained ride ticks compared, the client's boat not a state
-        // explained horse ticks compared, the client's horse not a state, the pig's among them, and those boosting
-        long[] horses = new long[4];
+        // explained horse ticks compared, the client's horse not a state, the pig's among them, those boosting, the strider's
+        long[] horses = new long[5];
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -256,6 +257,8 @@ public class MovementTruth {
                         if (Boolean.TRUE.equals(post.get("boosting"))) {
                             horses[3]++;
                         }
+                    } else if (String.valueOf(post.get("type")).endsWith("strider")) {
+                        horses[4]++;
                     }
                     HorseState truth = horseState(post);
                     boolean found = false;
@@ -340,6 +343,7 @@ public class MovementTruth {
         out.put("horseTruthCompared", horses[0]);
         out.put("pigTruthCompared", horses[2]);
         out.put("pigBoostedTruthCompared", horses[3]);
+        out.put("striderTruthCompared", horses[4]);
         out.put("horseTruthMissing", horses[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
@@ -594,7 +598,8 @@ public class MovementTruth {
         /** Boat ticks were compared, all equal, in water, under it, on land, in the air, and landing on water from the air. */
         /** Every horse tick in scope matched, with a released jump and a tick in water among them. */
         boolean horsesClean() {
-            return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0 && pigTicks > 0 && pigBoosted > 0;
+            return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0 && pigTicks > 0 && pigBoosted > 0
+                    && striderBoosted > 0 && striderSuffocating > 0 && striderOnLava > 0 && striderInLava > 0;
         }
 
         boolean boatsClean() {
@@ -808,6 +813,12 @@ public class MovementTruth {
         /** The pig's ticks among the horse's ({@code Pig}, recorded in the horse's form), and those boosting. */
         long pigTicks;
         long pigBoosted;
+        /** The strider's ({@code Strider}): boosting, suffocating, standing on lava, and in it otherwise (floated up). */
+        long striderTicks;
+        long striderBoosted;
+        long striderSuffocating;
+        long striderOnLava;
+        long striderInLava;
         long horseMatched;
         long horseMismatched;
         long horseJumps;
@@ -860,7 +871,8 @@ public class MovementTruth {
             HorseState t = horseState(pre);
             HorseState before = new HorseState(t.x(), t.y(), t.z(), t.deltaMovement(), t.yRot(), t.xRot(), t.onGround(), t.horizontalCollision(),
                     t.verticalCollision(), t.verticalCollisionBelow(), t.fallDistance(), t.support(), t.onGroundNoBlocks(), t.stuckSpeedMultiplier(),
-                    t.inPowderSnow(), t.noJumpDelay(), t.jumpPendingScale(), t.allowStandSliding(), t.standing(), t.standCounter(), interpolation);
+                    t.inPowderSnow(), t.noJumpDelay(), t.jumpPendingScale(), t.allowStandSliding(), t.standing(), t.standCounter(), interpolation,
+                    t.lavaHeight(), t.suffocating());
             double reach = interpolation == null ? 0.0 : Math.abs(interpolation.target().x() - t.x()) + Math.abs(interpolation.target().y() - t.y())
                     + Math.abs(interpolation.target().z() - t.z());
             if (entities != null && entities.mayHaveVehicleColliderNear(selfId, id, before.x() - 3.0 - reach, before.y() - 3.0 - reach,
@@ -877,20 +889,32 @@ public class MovementTruth {
             }
             String type = String.valueOf(pre.get("type")).replace("entity.minecraft.", "minecraft:");
             // a pig (Pig): 0.9 each way, its ridden speed the attribute times 0.225 and the factor of the boost it counts first
-            // (tickRidden: tickBoost, then getRiddenSpeed), ahead whatever its rider's keys
-            boolean pig = type.equals("minecraft:pig");
-            float height = pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+            // (tickRidden: tickBoost, then getRiddenSpeed), ahead whatever its rider's keys; a strider (Strider) likewise, 0.9 by
+            // 1.7, at the attribute times 0.55, or 0.35 suffocating, and the factor: the attribute as its tick left it (post: its
+            // suffocating modifier as the tick set it), its suffocation the engine's own
+            boolean strider = type.equals("minecraft:strider");
+            boolean pig = type.equals("minecraft:pig") || strider;
+            float height = strider ? 1.7F : pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
             float speed = (float) f64(pre.get("movementSpeed"));
             ItemSteering steered = null;
+            Horse.Strider striding = null;
             if (pig) {
                 int total = ((Number) pre.get("boostTimeTotal")).intValue();
                 steered = new ItemSteering(Boolean.TRUE.equals(pre.get("boosting")), ((Number) pre.get("boostTime")).intValue()).tick(total);
-                speed = (float) (f64(pre.get("movementSpeed")) * 0.225 * steered.factor(total));
+                if (strider) {
+                    double attribute = f64(post.get("movementSpeed"));
+                    float factor = steered.factor(total);
+                    striding = new Horse.Strider((float) (attribute * 0.55F * factor), (float) (attribute * 0.35F * factor),
+                            Boolean.TRUE.equals(pre.get("noAi")) ? null : java.util.Set.of("minecraft:lava"));
+                    speed = (float) (attribute * (Boolean.TRUE.equals(post.get("suffocating")) ? 0.35F : 0.55F) * factor);
+                } else {
+                    speed = (float) (f64(pre.get("movementSpeed")) * 0.225 * steered.factor(total));
+                }
             }
             Horse.Conditions conditions = new Horse.Conditions(speed, f64(pre.get("jumpStrength")), f32(pre.get("maxUpStep")),
                     f64(pre.get("gravity")), new Horse.Effects(e.jumpBoost(), e.slowFalling(), e.levitation(), e.dolphinsGrace()),
                     type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type), pig ? 0.9F : 1.3964844F, height,
-                    border(player), List.of());
+                    border(player), List.of(), striding);
             if (e.slowFalling()) {
                 horseUnknown.merge("slow falling (the recorded gravity is the effective one)", 1L, Long::sum);
                 horsesSkipped.add(id);
@@ -901,7 +925,22 @@ public class MovementTruth {
             }
             Horse.Rider rider = pig ? new Horse.Rider(0.0F, 1.0F, f32(pre.get("riderYRot")), f32(pre.get("riderXRot")))
                     : new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")));
-            if (pig) {
+            if (strider) {
+                striderTicks++;
+                if (steered.boosting()) {
+                    striderBoosted++;
+                }
+                if (Boolean.TRUE.equals(post.get("suffocating"))) {
+                    striderSuffocating++;
+                }
+                if (f64(post.get("lavaHeight")) > 0.0) {
+                    if (f64(post.get("lavaHeight")) < 0.5 && Boolean.TRUE.equals(post.get("onGround"))) {
+                        striderOnLava++;
+                    } else {
+                        striderInLava++;
+                    }
+                }
+            } else if (pig) {
                 pigTicks++;
                 if (steered.boosting()) {
                     pigBoosted++;
@@ -984,6 +1023,11 @@ public class MovementTruth {
             horse.put("interpolating", horseInterpolating);
             horse.put("pigTicks", pigTicks);
             horse.put("pigBoosted", pigBoosted);
+            horse.put("striderTicks", striderTicks);
+            horse.put("striderBoosted", striderBoosted);
+            horse.put("striderSuffocating", striderSuffocating);
+            horse.put("striderOnLava", striderOnLava);
+            horse.put("striderInLava", striderInLava);
             horse.put("unknown", horseUnknown);
             horse.put("differingFields", horseDifferingFields);
             horse.put("examples", horseExamples);
@@ -1055,7 +1099,8 @@ public class MovementTruth {
                         ((Number) support.get(2)).intValue()),
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), (Boolean) r.get("inPowderSnow"),
                 ((Number) r.get("noJumpDelay")).intValue(), f32(r.get("jumpPendingScale")), (Boolean) r.get("allowStandSliding"),
-                (Boolean) r.get("standing"), ((Number) r.get("standCounter")).intValue(), null);
+                (Boolean) r.get("standing"), ((Number) r.get("standCounter")).intValue(), null, f64(r.get("lavaHeight")),
+                Boolean.TRUE.equals(r.get("suffocating")));
     }
 
     private static List<String> horseDifferences(HorseState p, HorseState e) {
@@ -1084,6 +1129,8 @@ public class MovementTruth {
         same(d, "allowStandSliding", p.allowStandSliding(), e.allowStandSliding());
         same(d, "standing", p.standing(), e.standing());
         same(d, "standCounter", p.standCounter(), e.standCounter());
+        bits(d, "lavaHeight", p.lavaHeight(), e.lavaHeight());
+        same(d, "suffocating", p.suffocating(), e.suffocating());
         return d;
     }
 

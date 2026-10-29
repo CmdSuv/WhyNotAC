@@ -471,6 +471,29 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   açıklanır, hızlanmanın verdiğinden ileri `MoveVehicle` bulgu, havuçlu oltasız sürüşte iddia yok; `tickBoost` adımı
   çıkarılınca ilk test kırılır. Replika: `ClientEntitiesTest` senkronla başlayan, başka oyuncunun sürmüş olabileceği ve
   hiç başlamamış hızlanmayı sınar.
+- **Sürülen strider (`HorseRide`, strider olarak):** eyerli strider'ın ilk yolcusu çarpık mantarlı olta tutarken
+  (`Strider.getControllingPassenger`) client onu domuz gibi sürer (hep ileri, dönüş binicininki, adım en az 1, zıplama
+  yok, hızlanmayı kendisi sayar), boyutu 0.9 × 1.7. Farkları `Horse` motorunda (`Horse.Strider`): lavın üstünde durur
+  (`canStandOnFluid`: kaynak lav bloğu, üstünde lav yoksa ve strider'ın tabanı yarım bloğun üstündeyse
+  `LiquidBlock.SHAPE_STABLE` ile çarpışır; `Colliders.Context.standsOnLava`), bulunduğu yerin sıvısı lavken
+  `travelInFluid` değil karada gibi yürür, lavın içindeyse tik sonunda yüzer (`floatStrider`: yüzeyin üstünde ve üstü
+  lav değilse yerde sayılır, değilse hızı yarıya iner ve 0.05 yükselir), lavda düşüşü sayılmaz (`checkFallDamage`). Tikin
+  başında client boğulmasını kendisi belirler (`Strider.tick`, NoAI değilse): bulunduğu ya da altındaki blok
+  `strider_warm_blocks`'ta (vanilla: lav) değilse ve son tikinde lav bulmadıysa boğulur; hız özniteliğindeki boğulma
+  değiştiricisini (−0.34, `ADD_MULTIPLIED_BASE`) kendisi ekler ya da çıkarır ve hızı öznitelik × 0.35 (boğulurken) ya da
+  × 0.55 × hızlanma çarpanıdır. Replika hız özniteliğini sunucunun gönderdiği değiştiricilerle, boğulmanınki hariç ve
+  dahil iki değer olarak tutar (`ClientEntities.striderSpeeds`; sıra önemliyse bilinmiyor). `EngineTags`
+  `strider_warm_blocks`'u da vanilla'ya bağlar. **İddia yok:** elde çarpık mantarlı olta kesin değilse ya da yoksa, NoAI
+  strider (boğulmasını sunucu belirler), hızlanma bilinmiyorsa, eyersiz/yavru/ölçekli strider; atınkilerin geri kalanı da
+  (binişte gezdiği yerde lav varsa da: binilmeden önceki tiklerinde lav onu yüzdürür). Strider'la binek zıplaması
+  kanıttır. **Doğrulama:** gerçek client parkurunda iki strider ayağı (çimden lav havuzuna, karşı kıyıya ve akan lav
+  kanalına; biri kullanım tuşuyla hızlanarak); CI kapısı motorun strider tiklerinin client'la bit bit aynı olmasını
+  (boğulurken, lavda dururken ve lavda yüzerken tikler dahil) ve takipçinin strider tiklerini açıklamasını ister. `StriderTest`: lavın sabit şekli (kaynak, üstü lav değil, yarım bloğun
+  üstünden; oyuncu için hiç), lavda duran strider ve batan at, lavda yüzüp yüzeye çıkış, karada boğulup yavaşlama, son
+  tikin lavıyla bir tik daha ısınma, NoAI; mutasyonlar (yarım blok yerine bir blok, `floatStrider`'ın yarıya indirmesi,
+  son tikin lavı, lavda yürüme, lavda düşüş) testleri kırar. `MovementCheckTest`: taştan lava sürülen 70 tik açıklanır;
+  karada lavdaki kadar hızlı giden strider bulgu; oltasız ve NoAI strider'da iddia yok. `ClientEntitiesTest`: hızlanma ve
+  iki hız değeri.
 - **Araçsızken araç paketi:** yürürken bir `MoveVehicle`, `PaddleBoat` ya da binek zıplaması yaya iddiasını bitirirdi;
   hile her tike bir tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken
   gönderir (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin

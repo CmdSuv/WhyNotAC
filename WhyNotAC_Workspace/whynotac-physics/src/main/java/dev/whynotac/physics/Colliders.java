@@ -38,12 +38,18 @@ public final class Colliders {
      * was made ({@code getY()}) and whether the player descends ({@code isDescending}: the shift key). Null: not known.
      * For the world border ({@code isInsideCloseToBorder(entity, box)}): where the player is ({@code getX()},
      * {@code getZ()}) and the client's border; a null border is far. For powder snow ({@code PowderSnowBlock}, which reads
-     * the entity itself): its fall distance (NaN: not known) and whether it wears leather boots (null: not known).
+     * the entity itself): its fall distance (NaN: not known) and whether it wears leather boots (null: not known). For a
+     * liquid ({@code LiquidBlock}): whether the entity stands on lava ({@code canStandOnFluid}: a strider), never a player.
      */
     public record Context(double entityBottom, boolean descending, double entityX, double entityZ, Border border, double fallDistance,
-            Boolean leatherBoots) {
+            Boolean leatherBoots, boolean standsOnLava) {
         public Context(double entityBottom, boolean descending) {
             this(entityBottom, descending, 0.0, 0.0, null, Double.NaN, null);
+        }
+
+        public Context(double entityBottom, boolean descending, double entityX, double entityZ, Border border, double fallDistance,
+                Boolean leatherBoots) {
+            this(entityBottom, descending, entityX, entityZ, border, fallDistance, leatherBoots, false);
         }
 
         /** {@code borderCollision(player, box)}: the border's shape when the player is close to it, else null. */
@@ -175,7 +181,8 @@ public final class Colliders {
                     if (states.block(state).equals(POWDER_SNOW) && !box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0)) {
                         continue; // each shape it may have (the full block, the falling slab, none) is within its cell: whatever decides it
                     }
-                    shape = playerShape(states, state, shape, context, x, y, z);
+                    shape = context != null && context.standsOnLava() && states.block(state).equals(LAVA) ? standingOnLava(world, states, state, context, x, y, z)
+                            : playerShape(states, state, shape, context, x, y, z);
                     if (shape.isEmpty()) {
                         continue;
                     }
@@ -250,6 +257,26 @@ public final class Colliders {
             return unstableBottom(states);
         }
         return Shape.EMPTY;
+    }
+
+    static final String LAVA = "minecraft:lava";
+    /** {@code LiquidBlock.SHAPE_STABLE}: {@code Block.column(16, 0, 8)}. */
+    static final Shape LAVA_STABLE = VoxelCollisions.create(new Box(0.0, 0.0, 0.0, 1.0, 0.5, 1.0)).shape();
+
+    /**
+     * {@code LiquidBlock.getCollisionShape} for an entity that stands on lava: above the stable shape
+     * ({@code isAbove(SHAPE_STABLE, pos, true)}), a source ({@code LEVEL} 0) with no lava above it
+     * ({@code EntityCollisionContext.canStandOnFluid}: the fluid above not the same), the stable shape; else nothing.
+     */
+    private static Shape standingOnLava(World world, BlockStates states, int state, Context context, int x, int y, int z) throws Unknown {
+        if (!(context.entityBottom() > y + 0.5 - 1.0E-5F) || !Terrain.property(states, state, "level").equals("0")) {
+            return Shape.EMPTY;
+        }
+        int above = world.blockState(x, y + 1, z);
+        if (above == ClientWorld.UNKNOWN) {
+            throw new Unknown("unknown block over lava at " + x + " " + (y + 1) + " " + z);
+        }
+        return states.fluidKind(above) == BlockStates.FLUID_LAVA ? Shape.EMPTY : LAVA_STABLE;
     }
 
     static final String POWDER_SNOW = "minecraft:powder_snow";

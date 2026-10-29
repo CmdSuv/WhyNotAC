@@ -38,7 +38,8 @@ final class VanillaTagsPacket {
         return new ClientboundPacket.UpdateTags(List.of(
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:block", List.of(tag("minecraft:climbable", climbable),
                         tag("minecraft:can_glide_through", canGlideThrough), tag("minecraft:fall_damage_resetting", fallDamageResetting),
-                        tag("minecraft:fences", fences), tag("minecraft:walls", walls))),
+                        tag("minecraft:fences", fences), tag("minecraft:walls", walls),
+                        tag("minecraft:strider_warm_blocks", List.of(states.blockId(states.firstStateOf("minecraft:lava")))))),
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:entity_type", List.of(tag("minecraft:powder_snow_walkable_mobs", List.of()))),
                 new ClientboundPacket.UpdateTags.RegistryTags("minecraft:fluid", List.of(
                         tag("minecraft:water", List.of(EngineTags.WATER, EngineTags.FLOWING_WATER)),

@@ -84,10 +84,14 @@ final class HorseRide {
     String type;
     /** A pig ({@code Pig}): it goes where its rider looks, at the speed its boost gives, and never jumps. */
     boolean pig;
+    /** A strider ({@code Strider}): steered as a pig is; it stands on lava, and suffocates out of the warm ({@link Horse.Strider}). */
+    boolean strider;
     /** The movement speed attribute's value ({@code getAttributeValue}, a double: a pig's ridden speed is computed from it). */
     double speedAttribute;
+    /** A strider's, with its suffocating modifier ({@link ClientEntities#SUFFOCATING_SPEED}). */
+    double suffocatingSpeedAttribute;
     float speed;
-    /** A pig's boost ({@code ItemBasedSteering}) after its last tick, and the boost time the client holds. */
+    /** A pig's or strider's boost ({@code ItemBasedSteering}) after its last tick, and the boost time the client holds. */
     ItemSteering steering = ItemSteering.NONE;
     int boostTotal;
     double jumpStrength;
@@ -127,14 +131,16 @@ final class HorseRide {
 
     /** The default of an attribute the server did not send ({@code DefaultAttributes} of the type). */
     static double defaultAttribute(String type, String attribute) {
-        boolean pig = type.equals(ClientEntities.PIG); // Pig.createAttributes: the animal's, a speed of 0.25
+        // Pig.createAttributes, Strider.createAttributes: the animal's, a speed of 0.25 and 0.175F
+        boolean pig = type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER);
         return switch (attribute) {
             case MOVEMENT_SPEED -> switch (type) {
-                case "minecraft:donkey", "minecraft:mule" -> 0.175F; // createBaseChestedHorseAttributes
+                case "minecraft:donkey", "minecraft:mule", ClientEntities.STRIDER -> 0.175F; // createBaseChestedHorseAttributes
                 case "minecraft:skeleton_horse" -> 0.2F;
                 case ClientEntities.PIG -> 0.25;
                 default -> 0.225F; // createBaseHorseAttributes
             };
+            case ClientEntities.SUFFOCATING_SPEED -> 0.175F + 0.175F * (double) -0.34F; // calculateValue: the base, plus the base times the amount
             case JUMP_STRENGTH -> pig ? 0.0 : type.equals("minecraft:donkey") || type.equals("minecraft:mule") ? 0.5 : 0.7;
             case STEP_HEIGHT -> pig ? 0.6 : 1.0;
             case GRAVITY -> 0.08;
@@ -142,22 +148,31 @@ final class HorseRide {
         };
     }
 
-    /** {@code EntityType.Builder.sized}: every horse is 1.3964844 wide, a donkey 1.5 tall and the others 1.6; a pig 0.9 each way. */
+    /**
+     * {@code EntityType.Builder.sized}: every horse is 1.3964844 wide, a donkey 1.5 tall and the others 1.6; a pig 0.9 each
+     * way; a strider 0.9 wide and 1.7 tall.
+     */
     static float height(String type) {
-        return type.equals(ClientEntities.PIG) ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+        return type.equals(ClientEntities.PIG) ? 0.9F : type.equals(ClientEntities.STRIDER) ? 1.7F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
     }
 
     static float width(String type) {
-        return type.equals(ClientEntities.PIG) ? 0.9F : 1.3964844F;
+        return type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER) ? 0.9F : 1.3964844F;
     }
+
+    /** {@code BlockTags.STRIDER_WARM_BLOCKS} (vanilla; {@link EngineTags} holds the client to it). */
+    static final Set<String> STRIDER_WARM_BLOCKS = Set.of("minecraft:lava");
 
     Horse.Conditions conditions(dev.whynotac.physics.Border border, List<Box> entities) {
         // maxUpStep: the step height, at least 1 under a player; getGravity: 0 with no gravity; a pig's getRiddenSpeed:
         // the attribute times 0.225 and its boost's factor
+        // the attribute times 0.225 and its boost's factor; a strider's times 0.55, or 0.35 suffocating (with its modifier)
         float ridden = pig ? (float) (speedAttribute * 0.225 * steering.factor(boostTotal)) : speed;
+        Horse.Strider s = !strider ? null : new Horse.Strider((float) (speedAttribute * 0.55F * steering.factor(boostTotal)),
+                (float) (suffocatingSpeedAttribute * 0.35F * steering.factor(boostTotal)), STRIDER_WARM_BLOCKS);
         return new Horse.Conditions(ridden, jumpStrength, Math.max(stepHeight, 1.0F), noGravity ? 0.0 : gravityAttribute,
                 new Horse.Effects(jumpBoost, false, 0, false), type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F,
-                Horse.FLOATS_WHILE_RIDDEN.contains(type), width(type), height(type), border, entities);
+                Horse.FLOATS_WHILE_RIDDEN.contains(type), width(type), height(type), border, entities, s);
     }
 
     /**
@@ -176,28 +191,38 @@ final class HorseRide {
         if (!m.everTicked()) {
             return unclaimed(vehicle, since, "the horse's first tick");
         }
+        boolean strider = m.type().equals(ClientEntities.STRIDER);
         boolean pig = m.type().equals(ClientEntities.PIG);
-        if (m.saddle() != 1 || !pig && (m.flags() & FLAG_TAME) == 0 || m.baby() || Double.compare(m.scale(), 1.0) != 0) {
-            return unclaimed(vehicle, since, pig ? "a pig not saddled, a baby or scaled" : "a horse not saddled and tame, a baby or scaled");
+        boolean steered = pig || strider; // by an item on a stick: neither tame nor read their rider's keys
+        if (m.saddle() != 1 || !steered && (m.flags() & FLAG_TAME) == 0 || m.baby() || Double.compare(m.scale(), 1.0) != 0) {
+            return unclaimed(vehicle, since, steered ? "a " + (pig ? "pig" : "strider") + " not saddled, a baby or scaled"
+                    : "a horse not saddled and tame, a baby or scaled");
+        }
+        if (strider && (m.mobFlags() & MOB_FLAG_NO_AI) != 0) {
+            return unclaimed(vehicle, since, "a NoAI strider (its suffocation is the server's)");
         }
         if (m.motion() == null) {
             return unclaimed(vehicle, since, "the horse's motion at the mount not known (the player may have pushed it)");
         }
-        // a pig reads none of its rider's input (Pig.getRiddenInput: always ahead)
-        if (!pig && (keys == null || keys.forward() != keys.backward() || keys.left() != keys.right())) {
+        // a pig or strider reads none of its rider's input (getRiddenInput: always ahead)
+        if (!steered && (keys == null || keys.forward() != keys.backward() || keys.left() != keys.right())) {
             return unclaimed(vehicle, since, "the rider's keys moved it on foot before the mount");
         }
-        if (pig && m.boost() < 0) {
-            return unclaimed(vehicle, since, "the pig's boost not known (a player may have steered it)");
+        if (steered && m.boost() < 0) {
+            return unclaimed(vehicle, since, "the " + (pig ? "pig" : "strider") + "'s boost not known (a player may have steered it)");
         }
         HorseRide ride = new HorseRide(vehicle, since);
         ride.type = m.type();
         ride.pig = pig;
+        ride.strider = strider;
         ride.steering = m.boost() == 1 ? ItemSteering.synced() : ItemSteering.NONE;
         ride.boostTotal = m.boostTotal();
         try {
             ride.speedAttribute = ride.attribute(m.attributes(), MOVEMENT_SPEED);
             ride.speed = (float) ride.speedAttribute;
+            if (strider) {
+                ride.suffocatingSpeedAttribute = ride.attribute(m.attributes(), ClientEntities.SUFFOCATING_SPEED);
+            }
             ride.jumpStrength = ride.attribute(m.attributes(), JUMP_STRENGTH);
             ride.stepHeight = (float) ride.attribute(m.attributes(), STEP_HEIGHT);
             ride.gravityAttribute = ride.attribute(m.attributes(), GRAVITY);
@@ -260,7 +285,7 @@ final class HorseRide {
         BoatState.Interpolation interpolation = m.steps() == 0 ? null : new BoatState.Interpolation(m.steps(), m.target(), m.targetYRot(),
                 m.targetXRot(), m.previousPosition(), m.previousYRot(), m.previousXRot());
         ride.states = List.of(new HorseState(at.x(), at.y(), at.z(), m.motion(), m.yRot(), m.xRot(), onGround, false, false, false, 0.0, support, false,
-                Vec3d.ZERO, false, 0, 0.0F, false, (m.flags() & FLAG_STANDING) != 0, 0, interpolation));
+                Vec3d.ZERO, false, 0, 0.0F, false, (m.flags() & FLAG_STANDING) != 0, 0, interpolation, 0.0, false)); // no lava where it has been
         ride.keys = keys;
         return ride;
     }
@@ -294,10 +319,10 @@ final class HorseRide {
                 for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
                     if (e.index() == 5 && e.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) { // DATA_NO_GRAVITY
                         noGravity = e.value() != 0;
-                    } else if (pig && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.INT) { // Pig.DATA_BOOST_TIME
+                    } else if ((pig || strider) && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.INT) { // DATA_BOOST_TIME
                         steering = ItemSteering.synced(); // onSynced: whatever the value
                         boostTotal = (int) e.value();
-                    } else if (!pig && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_ID_FLAGS
+                    } else if (!pig && !strider && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_ID_FLAGS
                         boolean standing = (e.value() & FLAG_STANDING) != 0;
                         if ((e.value() & FLAG_TAME) == 0) {
                             unclaim("the horse no longer tame");
@@ -306,6 +331,10 @@ final class HorseRide {
                         states = states.stream().map(s -> with(s, s.deltaMovement(), standing)).toList();
                     } else if (e.index() == 15 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_MOB_FLAGS_ID
                         noAi = (e.value() & MOB_FLAG_NO_AI) != 0;
+                        if (strider && noAi) {
+                            unclaim("the strider made NoAI (its suffocation is the server's)");
+                            return;
+                        }
                     } else if (e.index() == 16) { // DATA_BABY_ID
                         unclaim("the horse's age changed");
                         return;
@@ -322,6 +351,16 @@ final class HorseRide {
                         continue;
                     }
                     if (!ClientEntities.HORSE_ATTRIBUTES.contains(a.key())) {
+                        continue;
+                    }
+                    if (strider && a.key().equals(MOVEMENT_SPEED)) {
+                        double[] speeds = ClientEntities.striderSpeeds(a);
+                        if (Double.isNaN(speeds[0]) || Double.isNaN(speeds[1])) {
+                            unclaim("the strider's movement speed not known exactly");
+                            return;
+                        }
+                        speedAttribute = speeds[0];
+                        suffocatingSpeedAttribute = speeds[1];
                         continue;
                     }
                     double value = ClientEntities.horseAttributeValue(a);
@@ -367,7 +406,7 @@ final class HorseRide {
     private static HorseState with(HorseState s, Vec3d motion, boolean standing) {
         return new HorseState(s.x(), s.y(), s.z(), motion, s.yRot(), s.xRot(), s.onGround(), s.horizontalCollision(), s.verticalCollision(),
                 s.verticalCollisionBelow(), s.fallDistance(), s.support(), s.onGroundNoBlocks(), s.stuckSpeedMultiplier(), s.inPowderSnow(),
-                s.noJumpDelay(), s.jumpPendingScale(), s.allowStandSliding(), standing, s.standCounter(), s.interpolation());
+                s.noJumpDelay(), s.jumpPendingScale(), s.allowStandSliding(), standing, s.standCounter(), s.interpolation(), s.lavaHeight(), s.suffocating());
     }
 
     /** The outcome of one ride tick: explained, or why not (with the prediction closest to what was sent). */
@@ -384,8 +423,9 @@ final class HorseRide {
         if (unclaimed != null) {
             return null;
         }
-        if (pig && !Boolean.TRUE.equals(carrot)) { // Pig.getControllingPassenger: a player holding a carrot on a stick
-            unclaim(carrot == null ? "whether the rider holds a carrot on a stick not known" : "the rider holds no carrot on a stick");
+        if ((pig || strider) && !Boolean.TRUE.equals(carrot)) { // getControllingPassenger: a player holding its item on a stick
+            String item = pig ? "carrot on a stick" : "warped fungus on a stick";
+            unclaim(carrot == null ? "whether the rider holds a " + item + " not known" : "the rider holds no " + item);
             return null;
         }
         if (moves.size() != 1 || rot == null || !rot.hasRotation() || rot.hasPosition()) {
@@ -417,10 +457,11 @@ final class HorseRide {
             unclaim(e.getMessage());
             return null;
         }
-        float[] input = pig ? new float[] {0.0F, 1.0F} : Horse.riderInput(keys); // Pig.getRiddenInput: ahead, whatever the keys
+        boolean steered = pig || strider;
+        float[] input = steered ? new float[] {0.0F, 1.0F} : Horse.riderInput(keys); // getRiddenInput: ahead, whatever the keys
         Horse.Rider rider = new Horse.Rider(input[0], input[1], rot.yaw(), rot.pitch());
-        if (pig) {
-            steering = steering.tick(boostTotal); // Pig.tickRidden: tickBoost, before getRiddenSpeed
+        if (steered) {
+            steering = steering.tick(boostTotal); // tickRidden: tickBoost, before getRiddenSpeed
         }
         Horse.Conditions conditions = conditions(collision, List.of());
         Set<HorseState> next = new LinkedHashSet<>();
@@ -455,13 +496,13 @@ final class HorseRide {
         if (next.isEmpty()) {
             keys = now;
             unclaim("unexplained horse movement");
-            return new Step(false, pig ? "no vanilla client rides a pig so" : "no vanilla client rides a horse so", closest);
+            return new Step(false, "no vanilla client rides a " + (pig ? "pig" : strider ? "strider" : "horse") + " so", closest);
         }
-        if (pig) { // not PlayerRideableJumping: the rider's jump key does nothing (LocalPlayer.jumpableVehicle)
+        if (steered) { // not PlayerRideableJumping: the rider's jump key does nothing (LocalPlayer.jumpableVehicle)
             keys = now;
             if (!jumps.isEmpty()) {
                 unclaim("unexplained riding jump");
-                return new Step(false, "sent a riding jump from a pig, which has none", null);
+                return new Step(false, "sent a riding jump from a " + (pig ? "pig" : "strider") + ", which has none", null);
             }
             ticked = List.copyOf(next);
             if (next.size() > MAX_STATES) {

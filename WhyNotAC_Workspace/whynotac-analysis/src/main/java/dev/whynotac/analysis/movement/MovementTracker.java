@@ -181,8 +181,9 @@ public final class MovementTracker {
     /** This tick's {@link #handItems}, by hand. */
     private final Map<Hand, List<HandItem>> handsNow = new java.util.EnumMap<>(Hand.class);
     static final String LEATHER_BOOTS = "minecraft:leather_boots";
-    /** What a pig's rider holds to steer it ({@code Pig.getControllingPassenger}). */
+    /** What a pig's rider holds to steer it ({@code Pig.getControllingPassenger}), and a strider's ({@code Strider}'s). */
     static final String CARROT_ON_A_STICK = "minecraft:carrot_on_a_stick";
+    static final String WARPED_FUNGUS_ON_A_STICK = "minecraft:warped_fungus_on_a_stick";
     /** This tick's feet: leather boots in every state the inventory replica holds, in none, or null (not known). */
     private Boolean leatherBoots;
 
@@ -916,7 +917,7 @@ public final class MovementTracker {
             horseRide.unclaim("a stop of a riding jump, which the client never sends");
         }
         HorseRide.Step step = horseRide.tick(in.vehicleMoves, in.move, in.ridingJumps, baseSent.input(), view, entities, selfId, base.border(),
-                horseRide.pig ? holding(CARROT_ON_A_STICK) : Boolean.TRUE);
+                horseRide.pig ? holding(CARROT_ON_A_STICK) : horseRide.strider ? holding(WARPED_FUNGUS_ON_A_STICK) : Boolean.TRUE);
         ServerboundPacket.MoveVehicle sentVehicle = in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast();
         if (step == null) {
             horseNoClaim.merge(horseRide.unclaimed, 1L, Long::sum);
@@ -951,10 +952,11 @@ public final class MovementTracker {
                     horseRide = null;
                 }
                 String type = entities.type(set.vehicleId());
-                boolean horse = type != null && (ClientEntities.HORSE_TYPES.contains(type) || type.equals(ClientEntities.PIG));
+                boolean horse = type != null && (ClientEntities.HORSE_TYPES.contains(type) || type.equals(ClientEntities.PIG)
+                        || type.equals(ClientEntities.STRIDER));
                 if (controls && ride == null && horseRide == null && horse) {
                     // a horse the player rides first: it steers it once saddled (HorseRide.start rules out the others); a pig
-                    // while the player holds a carrot on a stick too
+                    // while the player holds a carrot on a stick too, a strider a warped fungus on a stick
                     horseRide = p.ambiguous ? HorseRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
                             : HorseRide.start(set.vehicleId(), p.sequence, entities.horseMounted(set.vehicleId()), view, world, keysBefore);
                 } else if (controls && ride == null && horseRide == null) {

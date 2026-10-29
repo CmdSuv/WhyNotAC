@@ -79,7 +79,7 @@ public final class ClientEntities {
     private static final int RIDER_SELF = 1;
     private static final int RIDER_PLAYER = 2;
     private static final int RIDER_OTHER = 3;
-    /** {@code Pig.DATA_BOOST_TIME}: at the same place as a horse's flags (an int). */
+    /** {@code Pig.DATA_BOOST_TIME} and {@code Strider.DATA_BOOST_TIME}: at the same place as a horse's flags (an int). */
     private static final int DATA_PIG_BOOST = 17;
     /** {@code Mob.DATA_MOB_FLAGS_ID}: bit 1 is NoAI ({@code isNoAi}). */
     private static final int DATA_MOB_FLAGS = 15;
@@ -87,6 +87,16 @@ public final class ClientEntities {
     public static final Set<String> HORSE_TYPES = ClientMotion.HORSES;
     /** The pig ({@code Pig}): its player steers it with a carrot on a stick, its state kept for the mount as a horse's. */
     public static final String PIG = ClientMotion.PIG;
+    /** The strider ({@code Strider}): its player steers it with a warped fungus on a stick, kept as the pig is. */
+    public static final String STRIDER = ClientMotion.STRIDER;
+    /**
+     * Not an attribute: a strider's movement speed with the suffocating modifier ({@code Strider.SUFFOCATING_MODIFIER},
+     * which its client adds and removes itself each tick); {@link #HORSE_ATTRIBUTES}' movement speed is its value without.
+     */
+    public static final String SUFFOCATING_SPEED = "whynotac:suffocating_movement_speed";
+    /** {@code Strider.SUFFOCATING_MODIFIER}: {@code -0.34F}, {@code ADD_MULTIPLIED_BASE}. */
+    private static final ClientboundPacket.UpdateAttributes.Modifier SUFFOCATING_MODIFIER = new ClientboundPacket.UpdateAttributes.Modifier(
+            "minecraft:suffocating", -0.34F, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_BASE);
     /**
      * The types besides boats and rafts whose controlling passenger may be a player ({@code getControllingPassenger},
      * decompiled 1.21.11: {@code AbstractHorse}, {@code AbstractNautilus}, {@code Pig}, {@code Strider} and
@@ -535,7 +545,7 @@ public final class ClientEntities {
         int mobFlags = NONE;
         int pigBoost = UNSET;
         boolean horse = head.type != null && ClientMotion.HORSES.contains(head.type);
-        boolean pig = PIG.equals(head.type);
+        boolean pig = PIG.equals(head.type) || STRIDER.equals(head.type); // steered by an item on a stick (ItemBasedSteering)
         EntitySizes.Entry size = sizes.entry(head.type);
         int babyIndex = size == null ? -1 : size.babyIndex();
         List<EntitySizes.DataField> fields = size == null ? List.of() : size.data();
@@ -602,6 +612,10 @@ public final class ClientEntities {
         for (ClientboundPacket.UpdateAttributes.Attribute attribute : packet.attributes()) {
             if (attribute.key().equals(SCALE_ATTRIBUTE)) {
                 enqueue(seq, head.id, new Op.Scale(seq, attributeValue(attribute)));
+            } else if (horse && STRIDER.equals(head.type) && attribute.key().equals("minecraft:movement_speed")) {
+                double[] speeds = striderSpeeds(attribute);
+                enqueue(seq, head.id, new Op.HorseAttribute(seq, attribute.key(), speeds[0]));
+                enqueue(seq, head.id, new Op.HorseAttribute(seq, SUFFOCATING_SPEED, speeds[1]));
             } else if (horse && HORSE_ATTRIBUTES.contains(attribute.key())) {
                 enqueue(seq, head.id, new Op.HorseAttribute(seq, attribute.key(), horseAttributeValue(attribute)));
             }
@@ -623,6 +637,23 @@ public final class ClientEntities {
         };
         double[] range = AttributeValues.range(attribute, bounds[0], bounds[1]);
         return range[0] == range[1] ? range[0] : Double.NaN;
+    }
+
+    /**
+     * A strider's movement speed as its client computes it in a tick ({@link #horseAttributeValue}): {without, with} the
+     * suffocating modifier, whichever the server sent (its {@code setSuffocating} each tick adds or removes it by id).
+     */
+    public static double[] striderSpeeds(ClientboundPacket.UpdateAttributes.Attribute attribute) {
+        List<ClientboundPacket.UpdateAttributes.Modifier> others = new ArrayList<>();
+        for (ClientboundPacket.UpdateAttributes.Modifier m : attribute.modifiers()) {
+            if (!m.id().equals(SUFFOCATING_MODIFIER.id())) {
+                others.add(m);
+            }
+        }
+        List<ClientboundPacket.UpdateAttributes.Modifier> with = new ArrayList<>(others);
+        with.add(SUFFOCATING_MODIFIER);
+        return new double[] {horseAttributeValue(new ClientboundPacket.UpdateAttributes.Attribute(attribute.key(), attribute.base(), others)),
+                horseAttributeValue(new ClientboundPacket.UpdateAttributes.Attribute(attribute.key(), attribute.base(), with))};
     }
 
     /** A horse's saddle slot: 1 a saddle as the registry makes it, 0 empty or an item that cannot be one, -1 not known. */
@@ -747,7 +778,7 @@ public final class ClientEntities {
                 enqueue(seq, id, new Op.Vehicle(seq, vehicle.id));
             }
         }
-        if (PIG.equals(vehicle.type)) { // after its Control: the mount's state is the one before the player's ticks
+        if (PIG.equals(vehicle.type) || STRIDER.equals(vehicle.type)) { // after its Control: the mount's state is the one before the player's ticks
             Head first = vehicle.passengers.isEmpty() ? null : head(vehicle.passengers.getFirst());
             int rider = first == null ? RIDER_NONE : first == self ? RIDER_SELF
                     : first.type == null || EntityTypes.PLAYER.equals(first.type) ? RIDER_PLAYER : RIDER_OTHER; // a type not known may be a player

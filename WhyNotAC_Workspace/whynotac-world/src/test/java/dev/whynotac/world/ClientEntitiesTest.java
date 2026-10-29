@@ -279,6 +279,35 @@ class ClientEntitiesTest {
     }
 
     @Test
+    void aStridersBoostAndItsSpeedWithAndWithoutItsSuffocatingModifierAreKept() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:strider", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(saddle(5));
+        out(data(5, 17, ClientboundPacket.SetEntityData.Kind.INT, 250)); // Strider.DATA_BOOST_TIME: onSynced
+        // the server's setSuffocating left its modifier on: the client adds and removes it itself each tick
+        out(new ClientboundPacket.UpdateAttributes(5, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 0.175F,
+                List.of(new ClientboundPacket.UpdateAttributes.Modifier("minecraft:suffocating", -0.34F,
+                        ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_BASE))))));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        ClientEntities.HorseMounted m = entities.horseMounted(5).getFirst();
+        assertEquals(1, m.saddle());
+        assertEquals(1, m.boost());
+        assertEquals(250, m.boostTotal());
+        double base = 0.175F;
+        assertEquals(java.util.Map.of("minecraft:movement_speed", base, ClientEntities.SUFFOCATING_SPEED, base + base * (double) -0.34F), m.attributes());
+    }
+
+    @Test
+    void aStridersOtherSpeedModifiersInAnOrderThatMattersAreNotKnown() {
+        ClientboundPacket.UpdateAttributes.Attribute speed = new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 0.175F,
+                List.of(new ClientboundPacket.UpdateAttributes.Modifier("minecraft:a", 0.1, ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_BASE)));
+        double[] speeds = ClientEntities.striderSpeeds(speed);
+        double base = 0.175F;
+        assertEquals(base + base * 0.1, speeds[0], "one modifier: the client's own arithmetic");
+        assertTrue(Double.isNaN(speeds[1]), "two of a kind with the suffocating one: their order matters");
+    }
+
+    @Test
     void aHorsesAttributesAreClampedToTheirRangesAsTheClientDoes() {
         out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
         out(new ClientboundPacket.UpdateAttributes(5, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 2000.0, List.of()),

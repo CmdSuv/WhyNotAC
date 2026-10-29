@@ -736,7 +736,7 @@ class MovementCheckTest {
         sync();
         villagers.removeIf(v -> v.length > 3); // a vehicle pushes nothing (isPushable), its rider least of all
         horse = new HorseState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, 64.0, z, GROUND,
-                HORSE_CONDITIONS), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null);
+                HORSE_CONDITIONS), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null, 0.0, false);
         riderKeys = NONE;
         released = -1;
     }
@@ -799,7 +799,7 @@ class MovementCheckTest {
         out(new ClientboundPacket.SetPassengers(PIG, new int[] {SELF}));
         sync();
         horse = new HorseState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, 64.0, z, GROUND,
-                pigConditions(0.05625F)), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null);
+                pigConditions(0.05625F)), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null, 0.0, false);
         pigSteering = ItemSteering.NONE;
     }
 
@@ -819,6 +819,66 @@ class MovementCheckTest {
         horse = Horse.tick(horse, new Horse.Rider(0.0F, 1.0F, 30.0F, 0.0F), GROUND, pigConditions(speed));
         in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
         in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+    }
+
+    // --- a strider the player steers ---
+
+    private static final int STRIDER = 43;
+    private static final java.util.Set<String> WARM = java.util.Set.of("minecraft:lava");
+
+    /** A lava pool (sources) in the stone's top layer, x -4 to 8 and z 8 to 20, beside where the strider is put. */
+    private void lavaPool() {
+        int lava = STATES.firstStateOf("minecraft:lava"); // level=0: a source
+        for (int x = -4; x <= 8; x++) {
+            for (int z = 8; z <= 20; z++) {
+                place(x, 63, z, lava);
+            }
+        }
+    }
+
+    /** A saddled strider put on the stone at (x, 64, z), the player holding {@code held}; the player ticks a few times on foot. */
+    private void striderOnGround(double x, double z, String held, boolean noAi) throws Colliders.Unknown {
+        hold(held, null);
+        out(ClientboundPacket.AddEntity.received(STRIDER, new UUID(7, 7), "minecraft:strider", x, 64.0, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.SetEquipment(STRIDER, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                new Stack("minecraft:saddle", 1, List.of(), List.of(), null, false)))));
+        if (noAi) {
+            out(new ClientboundPacket.SetEntityData(STRIDER, List.of(new ClientboundPacket.SetEntityData.DataEntry(15,
+                    ClientboundPacket.SetEntityData.Kind.BYTE, 1)), 0));
+        }
+        out(new ClientboundPacket.EntityPositionSync(STRIDER, new Vec3d(x, 64.0, z), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** A strider's ridden tick: the default speed (0.175) times 0.55, or with its suffocating modifier times 0.35, and the boost's factor. */
+    private Horse.Conditions striderConditions(java.util.Set<String> warm) {
+        float factor = pigSteering.factor(pigBoostTotal);
+        double suffocating = 0.175F + 0.175F * (double) -0.34F;
+        return new Horse.Conditions(0.0F, 0.0, 1.0F, 0.08, Horse.Effects.NONE, 0.8F, false, 0.9F, 1.7F, null, List.of(),
+                new Horse.Strider((float) ((double) 0.175F * 0.55F * factor), (float) (suffocating * 0.35F * factor), warm));
+    }
+
+    /** The server puts the player on the strider; the client handles it before its next tick, the strider then as it held it. */
+    private void mountStrider(double x, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(STRIDER, new int[] {SELF}));
+        sync();
+        pigSteering = ItemSteering.NONE;
+        horse = new HorseState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, 64.0, z, GROUND,
+                striderConditions(WARM)), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null, 0.0, false);
+    }
+
+    /**
+     * One ride tick: the strider's (its boost counted, its suffocation set from where it is, ahead where the rider looks),
+     * then the rider's rotation and its move; {@code warm}: the blocks the client takes to keep it from suffocating.
+     */
+    private void striderRideTick(java.util.Set<String> warm) throws Colliders.Unknown {
+        pigSteering = pigSteering.tick(pigBoostTotal);
+        horse = Horse.tick(horse, new Horse.Rider(0.0F, 1.0F, 30.0F, 0.0F), GROUND, striderConditions(warm));
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()), horse.yRot(), horse.xRot(), horse.onGround()));
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
     }
@@ -1036,6 +1096,64 @@ class MovementCheckTest {
     }
 
     @Test
+    void aStriderSteeredFromStoneOntoLavaByAVanillaClientIsExplained() throws Exception {
+        lavaPool();
+        ticks(5, NONE, 30.0F);
+        striderOnGround(6.5, 6.5, "minecraft:warped_fungus_on_a_stick", false);
+        mountStrider(6.5, 6.5);
+        boolean suffocated = false;
+        boolean onLava = false;
+        for (int i = 0; i < 70; i++) {
+            striderRideTick(WARM);
+            suffocated |= horse.suffocating();
+            onLava |= horse.y() == 63.5 && horse.onGround() && !horse.suffocating();
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(70, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(suffocated && onLava, "it went from the stone, suffocating, onto the lava: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aStriderAsFastOnStoneAsOnLavaIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        striderOnGround(6.5, 6.5, "minecraft:warped_fungus_on_a_stick", false);
+        mountStrider(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            striderRideTick(i < 4 ? WARM : java.util.Set.of("minecraft:lava", "minecraft:stone")); // strider speed: never slowed out of the warm
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a strider as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void noStriderClaimWithoutAWarpedFungusOnAStick() throws Exception {
+        ticks(5, NONE, 30.0F);
+        striderOnGround(6.5, 6.5, "minecraft:carrot_on_a_stick", false);
+        mountStrider(6.5, 6.5);
+        for (int i = 0; i < 5; i++) {
+            striderRideTick(WARM);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: the rider holds no warped fungus on a stick".equals(t.reason())),
+                String.valueOf(horseTicks()));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void noClaimForANoAiStrider() throws Exception {
+        ticks(5, NONE, 30.0F);
+        striderOnGround(6.5, 6.5, "minecraft:warped_fungus_on_a_stick", true);
+        mountStrider(6.5, 6.5);
+        for (int i = 0; i < 5; i++) {
+            striderRideTick(java.util.Set.of("minecraft:stone"));
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: a NoAI strider (its suffocation is the server's)".equals(t.reason())),
+                String.valueOf(horseTicks()));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
     void noPigClaimWithoutACarrotOnAStick() throws Exception {
         ticks(5, NONE, 30.0F);
         pigOnGround(6.5, 6.5, null);
@@ -1078,7 +1196,8 @@ class MovementCheckTest {
                 horse.horizontalCollision(), horse.verticalCollision(), horse.verticalCollisionBelow(), horse.fallDistance(), horse.support(),
                 horse.onGroundNoBlocks(), horse.stuckSpeedMultiplier(), horse.inPowderSnow(), horse.noJumpDelay(), horse.jumpPendingScale(),
                 horse.allowStandSliding(), horse.standing(), horse.standCounter(),
-                new BoatState.Interpolation(3, new Vec3d(6.5, 64.0, 6.6), 0.0F, 0.0F, new Vec3d(6.5, 64.0, 6.5), 0.0F, 0.0F));
+                new BoatState.Interpolation(3, new Vec3d(6.5, 64.0, 6.6), 0.0F, 0.0F, new Vec3d(6.5, 64.0, 6.5), 0.0F, 0.0F), horse.lavaHeight(),
+                horse.suffocating());
         for (int i = 0; i < 10; i++) {
             horseRideTick(FORWARD, Vec3d.ZERO, -1);
         }

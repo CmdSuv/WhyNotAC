@@ -21,6 +21,7 @@ import java.util.List;
  *   <li>The fluid tags {@code minecraft:water} and {@code minecraft:lava} ({@code updateFluidHeightAndDoFluidPushing},
  *       {@code isEyeInFluid}): water and flowing water, lava and flowing lava.
  *   <li>{@code minecraft:powder_snow_walkable_mobs} ({@code PowderSnowBlock.canEntityWalkOnPowderSnow}): not the player.
+ *   <li>{@code minecraft:strider_warm_blocks} ({@code Strider.tick}'s suffocation): exactly lava.
  * </ul>
  */
 public final class EngineTags {
@@ -38,11 +39,13 @@ public final class EngineTags {
     private final int[] fallDamageResetting;
     private final int[] fences;
     private final int[] walls;
+    private final int[] striderWarmBlocks;
 
     public EngineTags(BlockStates states) {
         climbable = ids(states, OnFoot.CLIMBABLE);
         canGlideThrough = ids(states, OnFoot.CAN_GLIDE_THROUGH);
         fallDamageResetting = ids(states, OnFoot.FALL_DAMAGE_RESETTING);
+        striderWarmBlocks = ids(states, HorseRide.STRIDER_WARM_BLOCKS);
         List<Integer> f = new ArrayList<>();
         List<Integer> w = new ArrayList<>();
         for (int id = 0; id < states.blockCount(); id++) {
@@ -86,6 +89,9 @@ public final class EngineTags {
         }
         if (!Boolean.FALSE.equals(tags.holds(ClientTags.ENTITY_TYPE, "minecraft:powder_snow_walkable_mobs", PLAYER))) {
             return "minecraft:powder_snow_walkable_mobs";
+        }
+        if (!tags.certainlyExactly(ClientTags.BLOCK, "minecraft:strider_warm_blocks", striderWarmBlocks)) {
+            return "minecraft:strider_warm_blocks";
         }
         return null;
     }

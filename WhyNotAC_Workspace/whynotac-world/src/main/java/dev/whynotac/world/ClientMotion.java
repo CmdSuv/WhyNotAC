@@ -60,11 +60,17 @@ final class ClientMotion {
     /** The pig, which its player steers with a carrot on a stick ({@code Pig.getControllingPassenger}), kept as a horse is. */
     static final String PIG = "minecraft:pig";
 
-    /** The living vehicles the replica keeps for their player's mount ({@link ClientEntities#horseMounted}): the horses and the pig. */
-    static final Set<String> RIDDEN = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
-            "minecraft:zombie_horse", PIG);
+    /** The strider, which its player steers with a warped fungus on a stick ({@code Strider.getControllingPassenger}), kept as a pig is. */
+    static final String STRIDER = "minecraft:strider";
 
-    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse or a pig. */
+    /**
+     * The living vehicles the replica keeps for their player's mount ({@link ClientEntities#horseMounted}): the horses, the
+     * pig and the strider.
+     */
+    static final Set<String> RIDDEN = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
+            "minecraft:zombie_horse", PIG, STRIDER);
+
+    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse, a pig or a strider. */
     static boolean keptAtMount(String type) {
         return type != null && (interpolatesOnly(type) || RIDDEN.contains(type));
     }

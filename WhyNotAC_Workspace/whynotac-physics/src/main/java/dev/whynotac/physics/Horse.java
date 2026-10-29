@@ -9,7 +9,8 @@ import java.util.List;
 /**
  * One {@code AbstractHorse.tick()} of a horse (donkey, mule, skeleton or zombie horse) the local player rides and
  * controls (saddled, the player its first passenger: {@code getControllingPassenger}), bit for bit as the 1.21.11 client
- * runs it. The tick runs before its rider's: {@code Entity.baseTick} (fluid currents, a fall in lava halved), then
+ * runs it; a pig's ({@code Mob.tick}) and a strider's ({@code Strider.tick}, {@link Strider}) alike. The tick runs
+ * before its rider's: {@code Entity.baseTick} (fluid currents, a fall in lava halved), then
  * {@code LivingEntity.aiStep}: the interpolation's step toward where the server last put it, the motion's small parts
  * zeroed (a non-player's: each horizontal axis below 0.003), and {@code travelRidden}: the rider's input
  * ({@code getRiddenInput}: half its strafe, a quarter of a backward walk, nothing while rearing on the ground),
@@ -55,13 +56,32 @@ public final class Horse {
      * @param width             its box, as its type and age size it
      * @param border            the client's world border at the move ({@link Border}); null when it is far
      * @param entities          the boxes of the entities it collides with ({@code canCollideWith}), as the client holds them
+     * @param strider           a strider's own tick ({@link Strider}), or null
      */
     public record Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
-            boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities) {
+            boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider) {
         public Conditions {
             entities = List.copyOf(entities);
         }
+
+        public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
+                boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities) {
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, null);
+        }
     }
+
+    /**
+     * A strider ({@code Strider}): it stands on lava ({@code canStandOnFluid}: lava's stable shape holds it, and on lava it
+     * travels as on land), and its tick ({@code Strider.tick}) sets its suffocation first and floats it in lava last
+     * ({@code floatStrider}). Its ridden speed ({@code getRiddenSpeed}) is the movement speed attribute times 0.55, or
+     * times 0.35 with the attribute's suffocating modifier, and its boost's factor.
+     *
+     * @param speed            {@code getRiddenSpeed} not suffocating
+     * @param suffocatingSpeed {@code getRiddenSpeed} suffocating
+     * @param warmBlocks       {@code BlockTags.STRIDER_WARM_BLOCKS}: a strider at or above one, or in lava its last tick, is
+     *                         not suffocating; null for a NoAI strider, whose client never sets it (the state's flag stands)
+     */
+    public record Strider(float speed, float suffocatingSpeed, java.util.Set<String> warmBlocks) {}
 
     private final Colliders.World world;
     private final BlockStates states;
@@ -92,6 +112,9 @@ public final class Horse {
     private boolean wasTouchingWater;
     private double waterHeight;
     private double lavaHeight;
+    private boolean suffocating;
+    /** {@code getSpeed()}: what {@code travelRidden} set ({@code getRiddenSpeed}). */
+    private float speed;
     /** {@code oldPosition()}: where the tick started ({@code setOldPosAndRot}). */
     private final Vec3d oldPosition;
     /** {@code movementThisTick}. */
@@ -122,6 +145,9 @@ public final class Horse {
         standing = pre.standing();
         standCounter = pre.standCounter();
         interpolation = pre.interpolation();
+        lavaHeight = pre.lavaHeight();
+        suffocating = pre.suffocating();
+        speed = conditions.speed();
         oldPosition = new Vec3d(x, y, z);
     }
 
@@ -171,7 +197,7 @@ public final class Horse {
         }
         return new HorseState(s.x(), s.y(), s.z(), s.deltaMovement(), s.yRot(), s.xRot(), s.onGround(), s.horizontalCollision(), s.verticalCollision(),
                 s.verticalCollisionBelow(), s.fallDistance(), s.support(), s.onGroundNoBlocks(), s.stuckSpeedMultiplier(), s.inPowderSnow(),
-                s.noJumpDelay(), jumpPendingScale(power), slide, standing, standCounter, s.interpolation());
+                s.noJumpDelay(), jumpPendingScale(power), slide, standing, standCounter, s.interpolation(), s.lavaHeight(), s.suffocating());
     }
 
     /**
@@ -181,18 +207,30 @@ public final class Horse {
     public static BlockPos supportingBlock(double x, double y, double z, Colliders.World world, Conditions conditions) throws Colliders.Unknown {
         Box box = HorseState.box(x, y, z, conditions.width(), conditions.height());
         Box below = Box.of(box.minX(), box.minY() - 1.0E-6, box.minZ(), box.maxX(), box.minY(), box.maxZ());
-        return Colliders.supportingBlock(world, new Colliders.Context(y, false, x, z, conditions.border(), 0.0, Boolean.FALSE), below, x, y, z);
+        return Colliders.supportingBlock(world, new Colliders.Context(y, false, x, z, conditions.border(), 0.0, Boolean.FALSE, conditions.strider() != null),
+                below, x, y, z);
     }
 
     private HorseState state() {
         return new HorseState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, verticalCollision, verticalCollisionBelow, fallDistance, support,
-                onGroundNoBlocks, stuck, inPowderSnow, noJumpDelay, jumpPendingScale, allowStandSliding, standing, standCounter, interpolation);
+                onGroundNoBlocks, stuck, inPowderSnow, noJumpDelay, jumpPendingScale, allowStandSliding, standing, standCounter, interpolation,
+                lavaHeight, suffocating);
     }
 
     private void run(Rider rider) throws Colliders.Unknown {
-        // --- Entity.baseTick: powder snow's flags, water's current (in water the fall is forgotten), then lava's ---
         Box start = box();
         requireInScope(start, start, "at the start of the tick");
+        Strider strider = conditions.strider();
+        if (strider != null) {
+            // --- Strider.tick: not NoAI, the client sets its suffocation from the blocks at and under it (getBlockStateOnLegacy)
+            // and the lava its last baseTick found; its speed modifier follows ---
+            if (strider.warmBlocks() != null) {
+                suffocating = !(strider.warmBlocks().contains(states.block(state(BlockPos.containing(x, y, z))))
+                        || strider.warmBlocks().contains(states.block(state(onPos(0.2F)))) || lavaHeight > 0.0);
+            }
+            speed = suffocating ? strider.suffocatingSpeed() : strider.speed();
+        }
+        // --- Entity.baseTick: powder snow's flags, water's current (in water the fall is forgotten), then lava's ---
         wasInPowderSnow = inPowderSnow;
         inPowderSnow = false;
         waterHeight = 0.0; // fluidHeight.clear()
@@ -235,7 +273,9 @@ public final class Horse {
             }
             jumpPendingScale = 0.0F;
         }
-        if (wasTouchingWater || lavaHeight > 0.0) { // shouldTravelInFluid (no horse stands on a fluid)
+        // shouldTravelInFluid: in water or lava, unless it stands on the fluid where it is (a strider on lava)
+        boolean standsOnFluid = strider != null && states.fluidKind(state(BlockPos.containing(x, y, z))) == BlockStates.FLUID_LAVA;
+        if ((wasTouchingWater || lavaHeight > 0.0) && !standsOnFluid) {
             travelInFluid(input);
         } else {
             travelInAir(input);
@@ -248,6 +288,16 @@ public final class Horse {
         }
         if (!standing) {
             allowStandSliding = false;
+        }
+        if (strider != null && lavaHeight > 0.0) {
+            // --- Strider.floatStrider (isInLava): above lava's stable shape with no lava over it, on the ground; else lifted ---
+            BlockPos at = BlockPos.containing(x, y, z);
+            if (y > at.y() + 0.5 - 1.0E-5F && states.fluidKind(state(at.above())) != BlockStates.FLUID_LAVA) {
+                onGround = true; // setOnGround: checkSupportingBlock(true, null)
+                checkSupportingBlock(null);
+            } else {
+                delta = delta.scale(0.5).add(0.0, 0.05, 0.0);
+            }
         }
     }
 
@@ -278,26 +328,26 @@ public final class Horse {
         BlockPos below = onPos(0.500001F);
         float friction = onGround ? states.friction(state(below)) : 1.0F;
         float drag = friction * 0.91F;
-        float speed = onGround ? conditions.speed() * (0.21600002F / (friction * friction * friction)) : conditions.speed() * 0.1F; // getFlyingSpeed
-        delta = delta.add(Vec3d.inputVector(input, speed, yRot));
+        float flyingSpeed = onGround ? speed * (0.21600002F / (friction * friction * friction)) : speed * 0.1F; // getFlyingSpeed
+        delta = delta.add(Vec3d.inputVector(input, flyingSpeed, yRot));
         delta = handleOnClimbable(delta);
         Box before = box();
         move(delta);
         requireInScope(before, box(), "along the move");
-        Vec3d moved = delta;
+        Vec3d after = delta;
         if (horizontalCollision && onClimbable()) { // its own jumping is never set; it walks on no powder snow
-            moved = new Vec3d(moved.x(), 0.2, moved.z());
+            after = new Vec3d(after.x(), 0.2, after.z());
         }
-        double vy = moved.y();
+        double vy = after.y();
         int levitation = conditions.effects().levitation();
         if (levitation > 0) {
-            vy += (0.05 * levitation - moved.y()) * 0.2;
+            vy += (0.05 * levitation - after.y()) * 0.2;
         } else if (world.isLoaded(below.x() >> 4, below.z() >> 4)) {
             vy -= effectiveGravity(delta.y() <= 0.0); // the motion the move left, not the climb's 0.2
         } else {
             throw new Colliders.Unknown("movement in an unloaded chunk");
         }
-        delta = new Vec3d(moved.x() * drag, vy * 0.98F, moved.z() * drag);
+        delta = new Vec3d(after.x() * drag, vy * 0.98F, after.z() * drag);
     }
 
     /** {@code getEffectiveGravity}: slow falling holds a fall to 0.01. */
@@ -462,15 +512,20 @@ public final class Horse {
         onGround = verticalCollisionBelow;
         checkSupportingBlock(collided);
         int legacyState = state(onPos(0.2F)); // getOnPosLegacy
-        // checkFallDamage: LivingEntity's looks for water again when not in it (and pushes), then Entity's counts the fall
-        if (!wasTouchingWater) {
-            updateInWaterStateAndDoWaterCurrentPushing();
-        }
-        if (!wasTouchingWater && collided.y() < 0.0) {
-            fallDistance -= (float) collided.y();
-        }
-        if (onGround) {
+        // checkFallDamage: LivingEntity's looks for water again when not in it (and pushes), then Entity's counts the fall; a
+        // strider's in lava only forgets the fall
+        if (conditions.strider() != null && lavaHeight > 0.0) {
             fallDistance = 0.0;
+        } else {
+            if (!wasTouchingWater) {
+                updateInWaterStateAndDoWaterCurrentPushing();
+            }
+            if (!wasTouchingWater && collided.y() < 0.0) {
+                fallDistance -= (float) collided.y();
+            }
+            if (onGround) {
+                fallDistance = 0.0;
+            }
         }
         if (horizontalCollision) {
             delta = new Vec3d(xHit ? 0.0 : delta.x(), delta.y(), zHit ? 0.0 : delta.z());
@@ -498,7 +553,7 @@ public final class Horse {
         }
     }
 
-    /** {@code Entity.checkSupportingBlock(onGround, movement)}, after the position moved. */
+    /** {@code Entity.checkSupportingBlock(onGround, movement)}, after the position moved; a null movement searches no further. */
     private void checkSupportingBlock(Vec3d movement) throws Colliders.Unknown {
         if (onGround) {
             Box box = box();
@@ -506,7 +561,7 @@ public final class Horse {
             BlockPos found = Colliders.supportingBlock(world, context(), below, x, y, z);
             if (found != null || onGroundNoBlocks) {
                 support = found;
-            } else {
+            } else if (movement != null) {
                 found = Colliders.supportingBlock(world, context(), below.move(-movement.x(), 0.0, -movement.z()), x, y, z);
                 support = found;
             }
@@ -698,9 +753,9 @@ public final class Horse {
         return out;
     }
 
-    /** A horse neither sneaks (no scaffolding descends under it) nor wears leather boots (powder snow holds it). */
+    /** A horse neither sneaks (no scaffolding descends under it) nor wears leather boots (powder snow holds it); a strider stands on lava. */
     private Colliders.Context context() {
-        return new Colliders.Context(y, false, x, z, conditions.border(), fallDistance, Boolean.FALSE);
+        return new Colliders.Context(y, false, x, z, conditions.border(), fallDistance, Boolean.FALSE, conditions.strider() != null);
     }
 
     private Box box() {

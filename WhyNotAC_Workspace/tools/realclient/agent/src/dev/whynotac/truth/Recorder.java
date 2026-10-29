@@ -70,6 +70,10 @@ public final class Recorder {
     private static Field pigSteering, steeringBoosting, steeringBoostTime;
     private static Method steeringBoostTimeTotal;
     private static Class<?> pigClass;
+    // a strider the player steers: its steering likewise, its suffocation, and whether its client runs its AI
+    private static Field striderSteering;
+    private static Method striderIsSuffocating, mobIsNoAi;
+    private static Class<?> striderClass;
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -235,13 +239,25 @@ public final class Recorder {
         }
         line.append(",\"noJumpDelay\":").append(noJumpDelay.getInt(horse));
         bool(line, "jumping", livingJumping.getBoolean(horse));
-        boolean pig = pigClass.isInstance(horse);
+        double lava = 0.0;
+        for (java.util.Map.Entry<?, ?> e : ((java.util.Map<?, ?>) fluidHeight.get(horse)).entrySet()) {
+            if (String.valueOf(e.getKey()).contains(" / minecraft:lava]")) {
+                lava = ((Number) e.getValue()).doubleValue();
+            }
+        }
+        f64(line, "lavaHeight", lava);
+        boolean strider = striderClass.isInstance(horse);
+        boolean pig = pigClass.isInstance(horse) || strider;
+        if (strider) {
+            bool(line, "suffocating", (Boolean) striderIsSuffocating.invoke(horse));
+            bool(line, "noAi", (Boolean) mobIsNoAi.invoke(horse));
+        }
         if (pig) { // no jump nor rearing; the boost its steering counts, and the boost time the client holds
             f32(line, "jumpPendingScale", 0.0F);
             bool(line, "allowStandSliding", false);
             bool(line, "standing", false);
             line.append(",\"standCounter\":0");
-            Object steering = pigSteering.get(horse);
+            Object steering = (strider ? striderSteering : pigSteering).get(horse);
             bool(line, "boosting", steeringBoosting.getBoolean(steering));
             line.append(",\"boostTime\":").append(steeringBoostTime.getInt(steering));
             line.append(",\"boostTimeTotal\":").append((Integer) steeringBoostTimeTotal.invoke(steering));
@@ -549,6 +565,10 @@ public final class Recorder {
         horseIsStanding = method(loader, horse, "isStanding()");
         pigClass = Class.forName(mappings.get(TruthAgent.PIG).obf(), false, loader);
         pigSteering = field(loader, TruthAgent.PIG, "steering");
+        striderClass = Class.forName(mappings.get(TruthAgent.STRIDER).obf(), false, loader);
+        striderSteering = field(loader, TruthAgent.STRIDER, "steering");
+        striderIsSuffocating = method(loader, TruthAgent.STRIDER, "isSuffocating()");
+        mobIsNoAi = method(loader, TruthAgent.MOB, "isNoAi()");
         String steering = "net.minecraft.world.entity.ItemBasedSteering";
         steeringBoosting = field(loader, steering, "boosting");
         steeringBoostTime = field(loader, steering, "boostTime");

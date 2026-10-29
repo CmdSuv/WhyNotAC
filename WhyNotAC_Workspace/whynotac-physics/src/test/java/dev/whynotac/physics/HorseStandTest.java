@@ -41,7 +41,7 @@ class HorseStandTest {
 
     private static HorseState onTheGround(boolean allowStandSliding, boolean standing, int standCounter) {
         return new HorseState(0.5, 0.0, 0.5, new Vec3d(0.0, -0.0784000015258789, 0.0), 0.0F, 0.0F, true, false, true, true, 0.0, new BlockPos(0, -1, 0),
-                false, Vec3d.ZERO, false, 0, 0.0F, allowStandSliding, standing, standCounter, null);
+                false, Vec3d.ZERO, false, 0, 0.0F, allowStandSliding, standing, standCounter, null, 0.0, false);
     }
 
     @Test
