@@ -511,8 +511,15 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   strider, happy ghast; `Entity`'ninki null, `Mob`'unki yalnızca bir mob). Client'ın oyuncuyu üstünde tutabileceği her
   araç (kesin işlenenler ve bu tikte işlemiş olabilecekleri) böyle olmayan bir türdense (vagon, başka bir oyuncu, binilmeyen
   bir mob) bu paketlerden biri kanıttır ("sent what only a vehicle's controller sends while riding one no player
-  controls"); türü bilinmeyen araçta iddia yok. Gerçek client oturumunda kural vagonda 71 tik devredeydi, 0 bulgu.
-  `MovementCheckTest`: vagondaki yolcunun tikleri açıklanamayan değil, vagonda gönderilen `MoveVehicle` bulgu.
+  controls"); türü bilinmeyen araçta iddia yok. Türü oyuncuya kontrol veren araç da ancak eyerliyse kontrol edilir
+  (`isSaddled`: `AbstractHorse`, `AbstractNautilus`, domuz, strider; happy ghast koşum ister: `isWearingBodyArmor`):
+  replika bu türlerin eyer (happy ghast'ın gövde) yuvasını aday aday izler (doğuşta boş, `SetEquipment` ile; kayıp ya
+  da bilinmeyen eşya "olabilir"), ve client'ın tutabileceği hiçbir durumda eyeri yoksa araç kontrol edilemeyendir
+  ("... on a minecraft:horse with no saddle"). Gerçek client oturumunda kural vagonda 71 tik devredeydi, 0 bulgu; eyersiz
+  evcil atla bir ayak da eklendi (kapı: `ridingUnsaddled`). `MovementCheckTest`: vagondaki yolcunun tikleri
+  açıklanamayan değil, vagonda ve eyersiz atta gönderilen `MoveVehicle` bulgu, eyerli lamada değil. `ClientEntitiesTest`:
+  dokuz türün doğuştaki, eyer ve koşum takılınca ve eyer çıkarılınca durumu; mutasyonlar (eyer yok sayılmaz, eyer
+  uygulanmaz, koşum okunmaz) testleri kırar.
 - **Uçamazken yetenek paketi:** aynı şekilde `PlayerAbilities` de iddiayı bitirirdi. `LocalPlayer.aiStep` onu yalnızca
   `mayfly` (izleyicinin uçmaya başlaması, çift zıplamayla uçma) ya da uçarken yere inince gönderir; client ikisini de
   kendisi açamaz (yalnızca sunucunun yetenek paketi, oyun modu, giriş ve yeniden doğma). Uçabilen ya da uçan bir durum

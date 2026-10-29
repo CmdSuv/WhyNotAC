@@ -241,6 +241,7 @@ public final class MovementTracker {
     private long vehicleOnFoot;
     private long vehicleUncontrolled;
     private long ridingUncontrolled;
+    private long ridingUnsaddled;
     private long ridingNothing;
 
     /**
@@ -315,6 +316,11 @@ public final class MovementTracker {
     /** Ticks over which the client rode only vehicles no player controls: those {@link #VEHICLE_UNCONTROLLED} is claimed over. */
     public long ridingUncontrolled() {
         return ridingUncontrolled;
+    }
+
+    /** Those of {@link #ridingUncontrolled} on a vehicle of a type a player controls, without the saddle (or harness) it needs. */
+    public long ridingUnsaddled() {
+        return ridingUnsaddled;
     }
 
     /** Ticks over which the client certainly rode nothing: those {@link #VEHICLE_ON_FOOT} is claimed over. */
@@ -852,19 +858,25 @@ public final class MovementTracker {
         }
         // LocalPlayer.tick sends MoveVehicle only for a root vehicle it controls (isLocalInstanceAuthoritative), the boat its
         // PaddleBoat, the player a riding jump only on a vehicle it controls (jumpableVehicle): a player controls only a
-        // vehicle whose first passenger it is, so never one of a type no player controls, nor what that one rides
+        // vehicle whose first passenger it is, so never one of a type no player controls, nor one without the saddle (or
+        // harness) its type needs, nor what that one rides
         if (mayHaveRidden && mayBeOn != null && !mayBeOn.isEmpty()) {
             String type = null;
+            boolean unsaddled = false;
             for (int id : mayBeOn) {
                 String t = entities.type(id);
-                if (ClientEntities.playerMayControl(t)) {
+                if (entities.mayBePlayerControlled(id)) {
                     type = null;
                     break;
                 }
-                type = t;
+                type = ClientEntities.playerMayControl(t) ? t + " with no " + ClientEntities.controlItem(t) : t;
+                unsaddled |= ClientEntities.playerMayControl(t);
             }
             if (type != null) {
                 ridingUncontrolled++;
+                if (unsaddled) {
+                    ridingUnsaddled++;
+                }
             }
             if (type != null && (!in.vehicleMoves.isEmpty() || !in.paddles.isEmpty() || !in.ridingJumps.isEmpty())) {
                 vehicleUncontrolled++;

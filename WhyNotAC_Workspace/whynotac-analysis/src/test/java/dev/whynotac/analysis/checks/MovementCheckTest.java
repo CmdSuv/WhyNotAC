@@ -1033,8 +1033,17 @@ class MovementCheckTest {
 
     /** The player in a minecart ({@code getControllingPassenger} null: the server moves it); a passenger's ticks, {@code move} adding a MoveVehicle. */
     private void minecartRide(boolean move) throws Colliders.Unknown {
+        vehicleRide("minecraft:minecart", false, move);
+    }
+
+    /** The player put on a {@code type} (saddled or not) and ridden ten ticks, sending a vehicle move in the last seven when {@code move}. */
+    private void vehicleRide(String type, boolean saddled, boolean move) throws Colliders.Unknown {
         ticks(5, NONE, 30.0F);
-        out(ClientboundPacket.AddEntity.received(43, new UUID(7, 7), "minecraft:minecart", 6.5, 64.0, 6.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(ClientboundPacket.AddEntity.received(43, new UUID(7, 7), type, 6.5, 64.0, 6.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        if (saddled) {
+            out(new ClientboundPacket.SetEquipment(43, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                    new Stack("minecraft:saddle", 1, List.of(), List.of(), null, false)))));
+        }
         sync();
         ticks(2, NONE, 30.0F);
         out(new ClientboundPacket.SetPassengers(43, new int[] {SELF}));
@@ -1047,6 +1056,21 @@ class MovementCheckTest {
             in(new ServerboundPacket.ClientTickEnd());
             now += SECOND / 20;
         }
+    }
+
+    @Test
+    void aVehicleMoveForAHorseWithNoSaddleIsAFindingAndForASaddledOneNot() throws Exception {
+        vehicleRide("minecraft:horse", false, true);
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+        assertTrue(evidence.getFirst().summary().startsWith(MovementTracker.VEHICLE_UNCONTROLLED + " (MoveVehicle on a minecraft:horse with no saddle)"),
+                evidence.getFirst().summary());
+        evidence.clear();
+        out(new ClientboundPacket.SetPassengers(43, new int[] {}));
+        out(new ClientboundPacket.RemoveEntities(new int[] {43}));
+        sync();
+        now += 2 * SECOND;
+        vehicleRide("minecraft:llama", true, true);
+        assertEquals(List.of(), evidence, "a saddled llama may be its rider's to control");
     }
 
     @Test

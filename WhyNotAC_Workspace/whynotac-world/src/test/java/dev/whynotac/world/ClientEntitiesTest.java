@@ -1,6 +1,7 @@
 package dev.whynotac.world;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -276,6 +277,34 @@ class ClientEntitiesTest {
         out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
         sync();
         assertNull(entities.horseMounted(5), "ridden by the player before: its position not followed since");
+    }
+
+    @Test
+    void aVehicleWithoutTheSaddleOrHarnessItsTypeNeedsIsNoPlayersToControl() {
+        String[] types = {"minecraft:horse", "minecraft:llama", "minecraft:camel", "minecraft:pig", "minecraft:strider", "minecraft:nautilus",
+                "minecraft:happy_ghast", "minecraft:minecart", "minecraft:oak_boat"};
+        for (int i = 0; i < types.length; i++) {
+            out(ClientboundPacket.AddEntity.received(10 + i, new UUID(1, i), types[i], 0.5 + 4 * i, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0,
+                    0));
+        }
+        sync();
+        for (int i = 0; i < types.length; i++) {
+            assertEquals(types[i].equals("minecraft:oak_boat"), entities.mayBePlayerControlled(10 + i), types[i] + ": nothing worn at its spawn");
+        }
+        out(saddle(10));
+        out(saddle(11));
+        out(new ClientboundPacket.SetEquipment(16, List.of(new ClientboundPacket.SetEquipment.Slot("body",
+                new dev.whynotac.protocol.packet.Stack("minecraft:white_harness", 1, List.of(), List.of(), null, false)))));
+        out(saddle(17)); // a minecart wears nothing a player controls it by
+        sync();
+        assertTrue(entities.mayBePlayerControlled(10));
+        assertTrue(entities.mayBePlayerControlled(11), "a llama the server saddled: the saddle's own tag decides, not known here");
+        assertTrue(entities.mayBePlayerControlled(16), "a harness");
+        assertFalse(entities.mayBePlayerControlled(17));
+        out(new ClientboundPacket.SetEquipment(10, List.of(new ClientboundPacket.SetEquipment.Slot("saddle", null))));
+        sync();
+        assertFalse(entities.mayBePlayerControlled(10), "its saddle taken off");
+        assertTrue(entities.mayBePlayerControlled(99), "an entity not known");
     }
 
     @Test

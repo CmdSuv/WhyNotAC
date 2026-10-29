@@ -42,7 +42,8 @@ import java.util.TreeMap;
  * sends (a vehicle move, a paddle packet, a riding jump, the vehicle's inventory) while the client rode nothing is one
  * too: on foot it would otherwise only end the claim; so is what only a vehicle's controller sends (a vehicle move, a
  * paddle packet, a riding jump) while it rode only vehicles of types no player controls (a minecart, another player, a
- * mob but the rideable ones); so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
+ * mob but the rideable ones) or without the saddle (a happy ghast's harness) their type needs; so are flight abilities
+ * from a client that could not fly ({@code LocalPlayer.aiStep}
  * sends them only with {@code mayfly} or while flying).
  *
  * <p>A modified client is proven, not a cheat: a client mod that moves the player differently (or even
@@ -52,7 +53,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 8;
+    public static final int VERSION = 9;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 

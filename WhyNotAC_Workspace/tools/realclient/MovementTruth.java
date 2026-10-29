@@ -150,7 +150,8 @@ public class MovementTruth {
                 && ((Number) tracker.get("horseExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("horseUnexplained"))
                 && Long.valueOf(0).equals(tracker.get("horseTruthMissing")) && ((Number) tracker.get("pigTruthCompared")).longValue() > 0
                 && ((Number) tracker.get("striderTruthCompared")).longValue() > 0
-                && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0;
+                && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0
+                && ((Number) tracker.get("ridingUnsaddled")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -333,6 +334,7 @@ public class MovementTruth {
         out.put("vehicleOnFoot", tracker.vehicleOnFoot());
         out.put("vehicleUncontrolled", tracker.vehicleUncontrolled());
         out.put("ridingUncontrolled", tracker.ridingUncontrolled());
+        out.put("ridingUnsaddled", tracker.ridingUnsaddled());
         out.put("ridingNothing", tracker.ridingNothing());
         out.put("rideNoClaim", tracker.rideNoClaim());
         out.put("rideTruthCompared", rides[0]);

@@ -516,6 +516,13 @@ echo "summon minecraft:minecart -77.5 -60 -69.5 {Tags:[\"wnm\"],Invulnerable:1b}
 echo "ride $NAME mount @e[tag=wnm,limit=1]" > "$FIFO"; sleep 1.0
 paddle w/1.5 -/1.0
 echo "kill @e[tag=wnm]" > "$FIFO"; sleep 1.5
+# A tame horse with no saddle, on the grass lane: no player controls it (AbstractHorse.getControllingPassenger needs a
+# saddle), so the client, ridden and walked with W, sends no vehicle move (VEHICLE_UNCONTROLLED's saddle rule is in force).
+echo "tp $NAME -79.5 -60 -69.5 -90 0" > "$FIFO"; sleep 1.0
+echo "summon minecraft:horse -77.5 -60 -69.5 {Tags:[\"wnu\"],Tame:1b,NoAI:1b,Invulnerable:1b}" > "$FIFO"; sleep 1.0
+echo "ride $NAME mount @e[tag=wnu,limit=1]" > "$FIFO"; sleep 1.0
+paddle w/1.5 -/1.0
+echo "kill @e[tag=wnu]" > "$FIFO"; sleep 2.0
 echo "gamerule entity_drops true" > "$FIFO"
 # The world border (its shape, rounded out to whole blocks, collides within a few blocks: isInsideCloseToBorder): 20
 # wide around x 50, z 65.5 (its east side at x 60, its south side at z 75.5), walked into, jumped at, walked along, and

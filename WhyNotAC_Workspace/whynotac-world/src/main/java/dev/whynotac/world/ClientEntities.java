@@ -113,6 +113,20 @@ public final class ClientEntities {
     public static boolean playerMayControl(String type) {
         return type == null || ClientMotion.interpolatesOnly(type) || PLAYER_CONTROLLED.contains(type);
     }
+
+    /**
+     * The types whose controlling passenger must be saddled ({@code isSaddled}: {@code AbstractHorse}, {@code AbstractNautilus},
+     * {@code Pig}, {@code Strider}), and the one whose must wear a harness ({@code HappyGhast}: {@code isWearingBodyArmor}).
+     */
+    private static final Set<String> SADDLED = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
+            "minecraft:zombie_horse", "minecraft:camel", "minecraft:camel_husk", "minecraft:llama", "minecraft:trader_llama", "minecraft:nautilus",
+            "minecraft:zombie_nautilus", PIG, STRIDER);
+    public static final String HAPPY_GHAST = "minecraft:happy_ghast";
+
+    /** What a player's vehicle of {@code type} must wear for the player to control it: "saddle", "harness", or null for nothing. */
+    public static String controlItem(String type) {
+        return SADDLED.contains(type) ? "saddle" : HAPPY_GHAST.equals(type) ? "harness" : null;
+    }
     /** The attributes a ridden horse's tick reads: {@code getRiddenSpeed}, {@code getJumpPower}, {@code maxUpStep}, {@code getGravity}. */
     public static final Set<String> HORSE_ATTRIBUTES = Set.of("minecraft:movement_speed", "minecraft:jump_strength", "minecraft:step_height",
             "minecraft:gravity");
@@ -393,10 +407,13 @@ public final class ClientEntities {
             }
             case ClientboundPacket.SetEquipment equipment -> {
                 Head head = heads.get(equipment.entityId());
-                if (head != null && head.type != null && ClientMotion.RIDDEN.contains(head.type)) {
+                String needs = head == null || head.type == null ? null : controlItem(head.type);
+                if (needs != null) {
                     for (ClientboundPacket.SetEquipment.Slot slot : equipment.slots()) {
-                        if (slot.slot().equals("saddle")) {
+                        if (needs.equals("saddle") && slot.slot().equals("saddle")) {
                             enqueue(seq, head.id, new Op.Saddle(seq, saddle(slot.item())));
+                        } else if (needs.equals("harness") && slot.slot().equals("body")) {
+                            enqueue(seq, head.id, new Op.Saddle(seq, harness(slot.item())));
                         }
                     }
                 }
@@ -665,6 +682,14 @@ public final class ClientEntities {
             return NONE; // its equippable component is not the item's own
         }
         return item.item().equals("minecraft:saddle") ? 1 : 0; // the only item whose own equippable slot is the saddle's
+    }
+
+    /**
+     * A happy ghast's body slot as {@code isWearingBodyArmor} reads it: 0 empty, else 1 (whichever item: the harnesses' own
+     * equippable component names it, but what else may be valid there is the server's tags').
+     */
+    private static int harness(dev.whynotac.protocol.packet.Stack item) {
+        return item == null || item.item() == null || item.count() <= 0 ? 0 : 1;
     }
 
     /** {@code handleUpdateMobEffect} and {@code handleRemoveMobEffect} for a horse ({@code amplifier} -1: removed). */
@@ -1223,8 +1248,11 @@ public final class ClientEntities {
                 out.add(s);
             }
             case Op.Saddle saddle -> {
-                if (s.present && !s.lostAll && s.horse != null) {
-                    s.horse = s.horse.withSaddle(saddle.saddle());
+                if (s.present && !s.lostAll) {
+                    s.controlItem = saddle.saddle();
+                    if (s.horse != null) {
+                        s.horse = s.horse.withSaddle(saddle.saddle());
+                    }
                 }
                 out.add(s);
             }
@@ -2032,6 +2060,32 @@ public final class ClientEntities {
     }
 
     /**
+     * Whether a player may control the vehicle {@code entityId} now ({@code getControllingPassenger}): its type may be one
+     * a player controls ({@link #playerMayControl}), and one that must wear a saddle or a harness for it
+     * ({@link #controlItem}) may wear it in some state the client may hold (each candidate, after any prefix of the window
+     * since its last tick; not known, lost or absent counts as may).
+     */
+    public boolean mayBePlayerControlled(int entityId) {
+        String type = type(entityId);
+        if (!playerMayControl(type)) {
+            return false;
+        }
+        Track track = tracks.get(entityId);
+        if (type == null || controlItem(type) == null || track == null) {
+            return true;
+        }
+        int applicable = applicable(track, windowEnd());
+        for (State state : track.candidates) {
+            for (State s : prefixes(track, state, applicable)) {
+                if (!s.present || s.lostAll || s.controlItem != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether the client may hold an entity of {@code type} whose position is within {@code radius} of the
      * point on every axis now: one there in some possible state, one of the type whose position is not known,
      * an entity whose type is not known, or entities WhyNotAC lost track of; or, for a type in
@@ -2777,6 +2831,11 @@ public final class ClientEntities {
         int attached = NONE;
         /** {@code Entity.DATA_NO_GRAVITY}. */
         boolean noGravity;
+        /**
+         * What a vehicle must wear for a player to control it ({@link #controlItem}): its saddle, a happy ghast's harness;
+         * 1 worn, 0 none (none at its spawn), -1 not known.
+         */
+        int controlItem;
         // A boat the client does not control (ClientMotion.interpolatesOnly), for the movement check at its player's mount:
         /** Its motion from a {@code SetEntityMotion} since its last tick, or null (its tick set it to zero). */
         Vec3d motion;
@@ -2966,6 +3025,7 @@ public final class ClientEntities {
             c.tickedKnown = tickedKnown;
             c.attached = attached;
             c.noGravity = noGravity;
+            c.controlItem = controlItem;
             c.motion = motion;
             c.everTicked = everTicked;
             c.hasTickStart = hasTickStart;
@@ -3008,7 +3068,7 @@ public final class ClientEntities {
                     || vehicle != o.vehicle || pose != o.pose || flags != o.flags || baby != o.baby || Double.compare(scale, o.scale) != 0
                     || Double.compare(scaleLow, o.scaleLow) != 0 || Double.compare(scaleHigh, o.scaleHigh) != 0
                     || data0 != o.data0 || data1 != o.data1 || anim != o.anim || animO != o.animO || spectator != o.spectator
-                    || attached != o.attached || noGravity != o.noGravity || !java.util.Objects.equals(mounted, o.mounted)
+                    || attached != o.attached || noGravity != o.noGravity || controlItem != o.controlItem || !java.util.Objects.equals(mounted, o.mounted)
                     || !java.util.Objects.equals(horse, o.horse) || !java.util.Objects.equals(horseMounted, o.horseMounted)) {
                 return false;
             }
