@@ -154,6 +154,8 @@ public final class RecordingFormat {
     public static final int CB_UPDATE_TAGS = 61;
     /** An entity's equipment: the entity, then each slot's name and stack. */
     public static final int CB_SET_EQUIPMENT = 62;
+    /** The level's time: game time, day time, whether the day time runs. */
+    public static final int CB_SET_TIME = 63;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

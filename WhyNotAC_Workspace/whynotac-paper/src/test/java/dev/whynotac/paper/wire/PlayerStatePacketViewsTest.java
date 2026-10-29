@@ -12,12 +12,13 @@ import net.minecraft.network.protocol.game.ClientboundSetBorderCenterPacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderLerpSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetHealthPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Health, food and the world border translate from the bytes the client receives, in the 774 layout, to
+ * Health, food, the level's time and the world border translate from the bytes the client receives, in the 774 layout, to
  * the same records as from the game's objects.
  */
 class PlayerStatePacketViewsTest {
@@ -43,6 +44,17 @@ class PlayerStatePacketViewsTest {
         ClientboundSetHealthPacket packet = ClientboundSetHealthPacket.STREAM_CODEC.decode(buf);
         assertEquals(new ClientboundPacket.SetHealth(13.5F, 6, 0.25F), translator.outbound(packet, true));
         assertEquals(translator.outbound(new ClientboundSetHealthPacket(13.5F, 6, 0.25F), true), translator.outbound(packet, true));
+    }
+
+    @Test
+    void timeKeepsTheGameTimeTheDayTimeAndWhetherTheDayRuns() {
+        FriendlyByteBuf buf = bytes();
+        buf.writeLong(123_456_789_012L);
+        buf.writeLong(-6000L);
+        buf.writeBoolean(false);
+        ClientboundSetTimePacket packet = ClientboundSetTimePacket.STREAM_CODEC.decode(buf);
+        assertEquals(new ClientboundPacket.SetTime(123_456_789_012L, -6000L, false), translator.outbound(packet, true));
+        assertEquals(translator.outbound(new ClientboundSetTimePacket(123_456_789_012L, -6000L, false), true), translator.outbound(packet, true));
     }
 
     @Test

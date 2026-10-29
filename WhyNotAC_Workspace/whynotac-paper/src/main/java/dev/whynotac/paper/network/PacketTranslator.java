@@ -81,6 +81,7 @@ import net.minecraft.network.protocol.game.ClientboundSetBorderCenterPacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderLerpSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetHealthPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
@@ -242,7 +243,7 @@ public final class PacketTranslator {
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
             "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
             "mount_screen_open", "container_close", "entity_event", "set_camera", "set_health", "initialize_border", "set_border_center",
-            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags", "set_equipment");
+            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags", "set_equipment", "set_time");
 
     /**
      * Packets about other entities that come by the hundred per tick, or whose stacks Paper may rewrite on the
@@ -279,7 +280,7 @@ public final class PacketTranslator {
             ClientboundOpenScreenPacket.class, ClientboundMountScreenOpenPacket.class,
             ClientboundUpdateTagsPacket.class,
             ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class, ClientboundSetCameraPacket.class,
-            ClientboundSetHealthPacket.class, ClientboundInitializeBorderPacket.class, ClientboundSetBorderCenterPacket.class,
+            ClientboundSetHealthPacket.class, ClientboundSetTimePacket.class, ClientboundInitializeBorderPacket.class, ClientboundSetBorderCenterPacket.class,
             ClientboundSetBorderLerpSizePacket.class, ClientboundSetBorderSizePacket.class, ClientboundSetPlayerTeamPacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
@@ -648,6 +649,7 @@ public final class PacketTranslator {
             case ClientboundEntityEventPacket event -> new ClientboundPacket.EntityEvent((int) ENTITY_EVENT_ID.get(event), event.getEventId());
             case ClientboundSetCameraPacket camera -> new ClientboundPacket.SetCamera((int) SET_CAMERA_ID.get(camera));
             case ClientboundSetHealthPacket health -> new ClientboundPacket.SetHealth(health.getHealth(), health.getFood(), health.getSaturation());
+            case ClientboundSetTimePacket time -> new ClientboundPacket.SetTime(time.gameTime(), time.dayTime(), time.tickDayTime());
             case ClientboundInitializeBorderPacket border -> new ClientboundPacket.InitializeBorder(border.getNewCenterX(), border.getNewCenterZ(),
                     border.getOldSize(), border.getNewSize(), border.getLerpTime(), border.getNewAbsoluteMaxSize());
             case ClientboundSetBorderCenterPacket border -> new ClientboundPacket.SetBorderCenter(border.getNewCenterX(), border.getNewCenterZ());

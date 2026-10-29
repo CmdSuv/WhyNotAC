@@ -457,6 +457,13 @@ public sealed interface ClientboundPacket {
     record SetHealth(float health, int food, float saturation) implements ClientboundPacket {}
 
     /**
+     * {@code ClientboundSetTimePacket}: the level's game time and day time ({@code ClientLevel.setTimeFromServer}),
+     * which the client then counts on by its own ticks; a camel reads the game time for its pose's change
+     * ({@code Camel.getPoseTime}).
+     */
+    record SetTime(long gameTime, long dayTime, boolean tickDayTime) implements ClientboundPacket {}
+
+    /**
      * {@code ClientboundSetPlayerTeamPacket}: a scoreboard team added, removed or changed, or entries joining or
      * leaving it ({@code ClientPacketListener.handleSetPlayerTeamPacket}). {@code collisionRule}: the parameters'
      * {@code Team.CollisionRule} by constant name ({@code ALWAYS}, {@code NEVER}, {@code PUSH_OTHER_TEAMS},

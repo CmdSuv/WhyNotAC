@@ -657,6 +657,12 @@ public final class EventCodec {
                     body.writeZigZag(h.food());
                     body.writeFloat(h.saturation());
                 }
+                case ClientboundPacket.SetTime t -> {
+                    body.writeVarInt(CB_SET_TIME);
+                    body.writeLong(t.gameTime());
+                    body.writeLong(t.dayTime());
+                    body.writeByte(t.tickDayTime() ? 1 : 0);
+                }
                 case ClientboundPacket.SetPlayerTeam t -> {
                     body.writeVarInt(CB_SET_PLAYER_TEAM);
                     string(t.team());
@@ -1265,6 +1271,7 @@ public final class EventCodec {
                 }
                 case CB_SET_CAMERA -> new ClientboundPacket.SetCamera(zint(in));
                 case CB_SET_HEALTH -> new ClientboundPacket.SetHealth(in.readFloat(), zint(in), in.readFloat());
+                case CB_SET_TIME -> new ClientboundPacket.SetTime(in.readLong(), in.readLong(), in.readUnsignedByte() != 0);
                 case CB_SET_PLAYER_TEAM -> {
                     String team = string(in);
                     int method = zint(in);
