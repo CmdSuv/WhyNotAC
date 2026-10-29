@@ -165,6 +165,94 @@ class ClientEntitiesTest {
         assertEquals(mounted, entities.mounted(5), "kept after its tick");
     }
 
+    /** The client's own player sends where it is (a MovePlayer with a position, in a tick of its own). */
+    private void selfAt(double x, double y, double z) {
+        entities.onEvent(new TimelineEvent.Inbound(sequence++, sequence, 0, new ServerboundPacket.MovePlayer(x, y, z, 0.0F, 0.0F, true, false, true, false)));
+    }
+
+    private static ClientboundPacket.SetEquipment saddle(int id) {
+        return new ClientboundPacket.SetEquipment(id, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                new dev.whynotac.protocol.packet.Stack("minecraft:saddle", 1, List.of(), List.of(), null, false))));
+    }
+
+    /** One horse tick on a client that does not control it: the motion slowed by 0.98, each part below 0.003 zeroed. */
+    private static Vec3d slowed(Vec3d m) {
+        Vec3d s = m.scale(0.98);
+        return new Vec3d(Math.abs(s.x()) < 0.003 ? 0.0 : s.x(), Math.abs(s.y()) < 0.003 ? 0.0 : s.y(), Math.abs(s.z()) < 0.003 ? 0.0 : s.z());
+    }
+
+    @Test
+    void aHorsesClientStateIsKeptWhenItsPlayerMountsIt() {
+        selfAt(10.5, 64.0, 10.5);
+        tick();
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, new Vec3d(0.1, -0.0784, 0.0031), (byte) 0,
+                (byte) 0, (byte) 0, 0));
+        out(saddle(5));
+        out(data(5, 17, ClientboundPacket.SetEntityData.Kind.BYTE, 2 | 32)); // tame, standing
+        out(new ClientboundPacket.UpdateAttributes(5, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 0.3, List.of()),
+                new ClientboundPacket.UpdateAttributes.Attribute("minecraft:jump_strength", 0.8, List.of()))));
+        sync();
+        selfAt(10.5, 64.0, 10.5);
+        tick();
+        selfAt(10.5, 64.0, 10.5);
+        tick();
+        Vec3d motion = slowed(slowed(new Vec3d(0.1, -0.0784, 0.0031)));
+        out(new ClientboundPacket.MobEffect(5, "minecraft:jump_boost", 1, 200, 0)); // sendActiveEffects, before the passengers
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        List<ClientEntities.HorseMounted> mounted = entities.horseMounted(5);
+        assertNotNull(mounted);
+        assertEquals(1, mounted.size());
+        ClientEntities.HorseMounted m = mounted.getFirst();
+        assertTrue(m.exact());
+        assertEquals(motion, m.motion(), "slowed twice, its z part zeroed in the second");
+        assertEquals(0.0, m.motion().z());
+        assertEquals(new Vec3d(0.5, 64.0, 0.5), m.position());
+        assertTrue(m.everTicked());
+        assertEquals(1, m.saddle());
+        assertEquals(2 | 32, m.flags());
+        assertEquals(java.util.Map.of("minecraft:movement_speed", 0.3, "minecraft:jump_strength", 0.8), m.attributes());
+        assertEquals(java.util.Map.of("minecraft:jump_boost", 1), m.effects());
+        assertEquals(new Vec3d(0.5, 64.0, 0.5), m.sweptMin(), "it stood still since it was added");
+        assertNull(entities.horseMounted(6));
+        assertNull(entities.mounted(5), "not a boat");
+    }
+
+    @Test
+    void aHorseThePlayerStoodInMayHaveBeenPushed() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        selfAt(1.0, 64.0, 0.5); // inside its box: its pushEntities pushes the player, and itself
+        tick();
+        selfAt(1.0, 64.0, 0.5);
+        tick();
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        assertNull(entities.horseMounted(5).getFirst().motion(), "its motion is not known");
+    }
+
+    @Test
+    void aHorsesMotionIsSetAgainByTheServerAndKeptWhileItInterpolates() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        tick(); // no position sent yet: the player may be anywhere
+        selfAt(10.5, 64.0, 10.5);
+        tick(); // one: where it was during the tick also needs the one before
+        out(ClientboundPacket.SetEntityMotion.received(5, new Vec3d(0.2, 0.0, 0.0)));
+        out(move(5, 0.5, 1.3)); // three steps toward it, which keep the motion as it is
+        selfAt(10.5, 64.0, 10.5);
+        sync();
+        tick();
+        selfAt(10.5, 64.0, 10.5);
+        tick();
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        ClientEntities.HorseMounted m = entities.horseMounted(5).getFirst();
+        assertEquals(new Vec3d(0.2, 0.0, 0.0), m.motion(), "set again after the tick that did not know where the player was");
+        assertEquals(1, m.steps(), "two of the three steps taken");
+        assertTrue(m.sweptMax().x() > 0.5, "it moved toward the target since");
+    }
+
     @Test
     void aBoatAnotherPassengerControlsStaysFollowed() {
         out(add(5, "minecraft:oak_boat", 0.5, 64.0, 0.5));

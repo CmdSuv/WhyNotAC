@@ -48,4 +48,17 @@ final class ClientMotion {
     static boolean interpolatesOnly(String type) {
         return type.endsWith("_boat") || type.endsWith("_raft");
     }
+
+    /**
+     * The horses the client's own player steers with a saddle ({@code AbstractHorse} but the llamas and the camels):
+     * like any living entity they move by interpolation alone until then, and the replica keeps what their first ride
+     * tick reads ({@link ClientEntities#horseMounted}).
+     */
+    static final Set<String> HORSES = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
+            "minecraft:zombie_horse");
+
+    /** A vehicle whose client state the replica keeps for its player's mount: a boat or a horse. */
+    static boolean keptAtMount(String type) {
+        return type != null && (interpolatesOnly(type) || HORSES.contains(type));
+    }
 }

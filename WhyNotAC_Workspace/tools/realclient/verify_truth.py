@@ -61,12 +61,13 @@ def client_sent(records):
 
 
 def client_vehicle_moves(records):
-    """The MoveVehicle packets the client sent: each steered boat's state after its tick, sent by its passenger's tick after it
-    (ServerboundMoveVehiclePacket.fromEntity: while the boat still interpolates, the interpolation's target and rotations)."""
+    """The MoveVehicle packets the client sent: each steered boat's or ridden horse's state after its tick, sent by its
+    passenger's tick after it (ServerboundMoveVehiclePacket.fromEntity: while it still interpolates, the interpolation's
+    target and rotations)."""
     moves = []
     boat = None
     for r in records:
-        if r["hook"] == "boatPost":
+        if r["hook"] in ("boatPost", "horsePost"):
             boat = r
         elif r["hook"] == "post":
             if boat is not None and r["passenger"]:

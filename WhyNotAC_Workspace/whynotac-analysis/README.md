@@ -411,6 +411,33 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   değiştirmesi, binişte interpolasyonu yok saymak, binişte durumu "havada" saymak. `MovementCheckTest`: sentetik bir
   client'ın durarak, ileri ve sola sürdüğü 40 tik açıklanır; yarım blok yukarıdaki `MoveVehicle` kanıttır; oyuncunun
   itmiş olabileceği teknede iddia yoktur.
+- **Sürülen at (`HorseRide`):** oyuncu eyerli bir atın (eşek, katır, iskelet ve zombi at) ilk yolcusu olunca client atı
+  kendi fiziğiyle hareket ettirir: her tikte önce `AbstractHorse.tick` (`Horse`, gerçek client'la bit bit), sonra binicinin
+  tiki dönüşünü (`MovePlayer.Rot`), bıraktığı binek zıplamasını (`START_RIDING_JUMP`, gücüyle) ve `MoveVehicle`'ı
+  gönderir. Atın tiki binicinin son tikinin bıraktığı girdiyi (`xxa`, `zza`: o tikin tuşlarından, yolcuyken eşya ve
+  çömelme yavaşlatmaz), binicinin şimdiki dönüşünü (bu tikin `Rot`'u: tikler arasında yalnızca kareler döndürür) ve
+  son tikinde bıraktığı zıplamayı (`onPlayerJump`: kayma izni, şaha kalkma `standCounter` 20, bekleyen zıplama) okur.
+  Zıplamanın gücü tuştan çıkar (`LocalPlayer.aiStep`: tuşun basılı kaldığı tikler `jumpRidingScale`'i yapar, bırakış
+  `floor(scale * 100)` gönderir): bırakılmayan tuşla gönderilen zıplama, gönderilmeyen bırakış ya da başka güç (biniş
+  sonrası ilk basıştan itibaren) kanıttır. **Binişteki durum:** varlık replikası yolcusuz atı client gibi izler:
+  `AddEntity`/`SetEntityMotion`/ışınlamanın hızı, interpolasyonsuz her tikte ×0.98 ve eksen başına 0.003 altı sıfır
+  (`LivingEntity.aiStep`); eyer (`SetEquipment`), at ve mob bayrakları (evcil, şaha kalkma, NoAI), sunucunun gönderdiği
+  öznitelikler (hız, zıplama gücü, adım, yerçekimi; gelmeyen türün varsayılanı) ve binişten hemen önce gelen efektler
+  (`sendActiveEffects`). Client'ta `pushEntities` yalnızca yerel oyuncuyu iter (`EntitySelector.pushableBy`): replika
+  oyuncunun gönderdiği konumlardan kutusunu çıkarır ve atınkine değmiş olabildiği her tikte hızı "bilinmiyor" sayar;
+  hızın kurulduğundan beri atın gezdiği kutu da saklanır (su ve lav iter: binişte orada sıvı olmamalı, bloklar
+  değişmemiş olmalı). **İddia yok:** binişin bir tik önce işlenmiş olabilmesi, izlenmeyen at (kayıp, daha önce
+  sürülmüş), ilk tiki, bilinmeyen hız (oyuncu itmiş olabilir), gezdiği yerde sıvı ya da blok değişikliği, süren
+  interpolasyon (atlar için henüz gerçek client'la doğrulanmadı), eyersiz/evcil olmayan/yavru/ölçekli at, tam
+  bilinmeyen öznitelik, zıplama güçlendirmesi dışında efekt, binişten önceki tikte yürüme tuşu, yakında
+  çarpışabileceği varlık, kesin bilinmeyen dünya sınırı, sunucunun atı ya da oyuncuyu taşıması, belirsiz ya da
+  okunamayan paket. **Doğrulama:** son gerçek client oturumunun kaydı yeni takipçiden geçirildiğinde 5 binişten 4'ü
+  baştan sona iddia edildi: 613 tik açıklandı, 0 açıklanamayan, 613/613 tikte client'ın kendi atı (`horsePost`) kümede
+  (suda 103 tik, ruh kumu, üç zıplama dahil); kalan biniş binişte interpolasyondaydı (181 tik, iddia yok).
+  `MovementCheckTest`: sentetik client'ın durup ileri, zıplayarak ve sola sürdüğü 50 tik açıklanır; yarım blok
+  yukarıdaki `MoveVehicle` ve tuşun tuttuğundan güçlü zıplama (100, 30 değil) kanıttır; oyuncunun itmiş olabileceği
+  atta iddia yoktur. Replika: `ClientEntitiesTest` hızın yavaşlamasını, itmeyi ve interpolasyon sırasında korunmasını
+  sınar; mutasyonlar (itme kontrolü yok, güç karşılaştırması yok) testleri kırar.
 - **Araçsızken araç paketi:** yürürken bir `MoveVehicle`, `PaddleBoat` ya da binek zıplaması yaya iddiasını bitirirdi;
   hile her tike bir tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken
   gönderir (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin

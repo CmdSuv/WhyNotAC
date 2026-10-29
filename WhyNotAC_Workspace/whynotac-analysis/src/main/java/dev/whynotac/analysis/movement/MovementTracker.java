@@ -4,6 +4,7 @@ import dev.whynotac.math.vanilla.PlatformCos;
 import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.BoatState;
+import dev.whynotac.physics.HorseState;
 import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
@@ -85,10 +86,12 @@ public final class MovementTracker {
      * @param closest   for an unexplained tick: the hypothesis' prediction closest to what was sent, else null
      * @param sent      for an unexplained tick: the movement packet, or null when none was sent
      * @param closestBoat for an unexplained tick of a boat the player steers: the prediction closest to what was sent
-     * @param sentVehicle for a tick of a boat the player steers: its {@code MoveVehicle}
+     * @param sentVehicle for a tick of a boat or a horse the player steers: its {@code MoveVehicle}
+     * @param closestHorse for an unexplained tick of a horse the player rides: the prediction closest to what was sent
      */
     public record Tick(long number, long sequence, long nanoTime, Outcome outcome, String reason, int hypotheses, long since, PlayerState closest,
-            ServerboundPacket.MovePlayer sent, BoatState closestBoat, ServerboundPacket.MoveVehicle sentVehicle) {
+            ServerboundPacket.MovePlayer sent, BoatState closestBoat, ServerboundPacket.MoveVehicle sentVehicle, HorseState closestHorse,
+            boolean horse) {
 
         /** A tick on foot (or of nothing). */
         public Tick(long number, long sequence, long nanoTime, Outcome outcome, String reason, int hypotheses, long since, PlayerState closest,
@@ -96,9 +99,15 @@ public final class MovementTracker {
             this(number, sequence, nanoTime, outcome, reason, hypotheses, since, closest, sent, null, null);
         }
 
-        /** A tick of the boat the player steers ({@link BoatRide}). */
+        /** A tick on foot or of a boat the player steers. */
+        public Tick(long number, long sequence, long nanoTime, Outcome outcome, String reason, int hypotheses, long since, PlayerState closest,
+                ServerboundPacket.MovePlayer sent, BoatState closestBoat, ServerboundPacket.MoveVehicle sentVehicle) {
+            this(number, sequence, nanoTime, outcome, reason, hypotheses, since, closest, sent, closestBoat, sentVehicle, null, false);
+        }
+
+        /** A tick of the boat ({@link BoatRide}) or the horse ({@link HorseRide}) the player steers. */
         public boolean riding() {
-            return closestBoat != null || sentVehicle != null;
+            return closestBoat != null || sentVehicle != null || horse;
         }
     }
 
@@ -205,6 +214,11 @@ public final class MovementTracker {
     private long rideExplained;
     private long rideUnexplained;
     private final Map<String, Long> rideNoClaim = new java.util.TreeMap<>();
+    // --- the horse the player rides (HorseRide) ----------------------------------------------------------------------
+    private HorseRide horseRide;
+    private long horseExplained;
+    private long horseUnexplained;
+    private final Map<String, Long> horseNoClaim = new java.util.TreeMap<>();
     /** The positions the client sent (replies to teleports too): {client tick, x, y, z}, the last few. */
     private final ArrayDeque<double[]> sentPositions = new ArrayDeque<>();
     private static final int MAX_SENT_POSITIONS = 8;
@@ -295,6 +309,24 @@ public final class MovementTracker {
 
     public Map<String, Long> rideNoClaim() {
         return java.util.Collections.unmodifiableMap(rideNoClaim);
+    }
+
+    /** Ticks of a horse the player rides that some state explained, that none did, and those not claimed by reason (diagnostics). */
+    public long horseExplained() {
+        return horseExplained;
+    }
+
+    public long horseUnexplained() {
+        return horseUnexplained;
+    }
+
+    public Map<String, Long> horseNoClaim() {
+        return java.util.Collections.unmodifiableMap(horseNoClaim);
+    }
+
+    /** The states the horse the player rides may be in as its last tick left them (empty when none is followed), for audits. */
+    public List<HorseState> horseStates() {
+        return horseRide == null ? List.of() : horseRide.ticked;
     }
 
     /** The states the boat the player steers may be in now (empty when none is followed), for audits. */
@@ -430,6 +462,10 @@ public final class MovementTracker {
             case ClientboundPacket.SetEntityMotion m -> m.entityId() == serverVehicle;
             case ClientboundPacket.SetEntityData d -> d.entityId() == serverVehicle;
             case ClientboundPacket.TeleportEntity t -> t.entityId() == serverVehicle;
+            case ClientboundPacket.UpdateAttributes a -> a.entityId() == serverVehicle;
+            case ClientboundPacket.MobEffect e -> e.entityId() == serverVehicle;
+            case ClientboundPacket.RemoveMobEffect e -> e.entityId() == serverVehicle;
+            case ClientboundPacket.SetEquipment e -> e.entityId() == serverVehicle;
             default -> false;
         };
         if (!queue) {
@@ -441,6 +477,9 @@ public final class MovementTracker {
             clientVehicles = null; // until a new player
             if (ride != null) {
                 ride.unclaim("too many packets waiting for the client");
+            }
+            if (horseRide != null) {
+                horseRide.unclaim("too many packets waiting for the client");
             }
         }
     }
@@ -599,6 +638,8 @@ public final class MovementTracker {
         int abilities;
         /** Riding jumps and vehicle inventories ({@link #VEHICLE_ON_FOOT}). */
         final List<ServerboundPacket.PlayerCommand.Action> passengerCommands = new ArrayList<>(1);
+        /** {@code START_RIDING_JUMP}s ({@link HorseRide}), their power. */
+        final List<ServerboundPacket.PlayerCommand> ridingJumps = new ArrayList<>(1);
         String unmodelled;
         /** The boat's {@code PaddleBoat} and the passenger's {@code MoveVehicle} ({@link BoatRide}). */
         final List<ServerboundPacket.PaddleBoat> paddles = new ArrayList<>(1);
@@ -657,6 +698,11 @@ public final class MovementTracker {
                         case START_RIDING_JUMP, STOP_RIDING_JUMP -> {
                             t.unmodelled = "player command " + command.action();
                             t.passengerCommands.add(command.action());
+                            if (command.action() == ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP) {
+                                t.ridingJumps.add(command);
+                            } else {
+                                t.ridingJumps.add(null); // never sent by the client: no tick explains it
+                            }
                         }
                         default -> t.unmodelled = "player command " + command.action();
                     }
@@ -715,8 +761,9 @@ public final class MovementTracker {
             hypotheses = List.of(fresh); // a new player: the client's defaults, from the packet that made it
             since = pendingAt(fresh.applied() - 1).sequence();
         }
+        PlayerState.Keys keysBefore = baseSent.input(); // the rider's keys in its last tick, for a horse it mounts now
         observeBase(in); // the anchor below starts from what the client sent in this very tick
-        Tick riding = rideTick(number, end, in, w, world, entities);
+        Tick riding = rideTick(number, end, in, w, world, entities, keysBefore);
         Tick result;
         if (hypotheses != null) {
             result = tracked(number, end, in, w, world, entities);
@@ -724,7 +771,7 @@ public final class MovementTracker {
             result = untracked(number, end, in, w, world, entities);
         }
         if (riding != null) {
-            result = riding; // the player rides: its own tick has no claim, the boat's may
+            result = riding; // the player rides: its own tick has no claim, the boat's or the horse's may
         }
         settleBookkeeping(number, end, in);
         base = base.withBorder(base.border().ticked(entities.lastTickRanNormally()));
@@ -738,7 +785,8 @@ public final class MovementTracker {
      * The ride's part of a tick ({@link BoatRide}): the ride packets the client processed before it, in order, then the
      * boat's tick. Null when the player steers no boat.
      */
-    private Tick rideTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+    private Tick rideTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities,
+            PlayerState.Keys keysBefore) {
         long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
         View view = new View(world, entities, selfId);
         // the client rode nothing since the last tick when it rode nothing after the packets it certainly processed by
@@ -747,7 +795,7 @@ public final class MovementTracker {
         while (!ridePending.isEmpty() && ridePending.peekFirst().sequence < certain) {
             RidePacket p = ridePending.pollFirst();
             mayHaveRidden |= p.mayMount;
-            rideApply(p, number, view, world, entities);
+            rideApply(p, number, view, world, entities, keysBefore);
         }
         boolean ambiguous = false;
         for (RidePacket p : ridePending) {
@@ -775,6 +823,9 @@ public final class MovementTracker {
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, VEHICLE_ON_FOOT + " (" + String.join(", ", what) + ")", 0,
                     onNoVehicleSince, null, null, null, in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast());
         }
+        if (horseRide != null) {
+            return horseTick(number, end, in, w, ambiguous, view, entities);
+        }
         if (ride == null) {
             return null;
         }
@@ -798,8 +849,33 @@ public final class MovementTracker {
                 sentVehicle);
     }
 
+    /** The horse's part of a tick ({@link HorseRide}). */
+    private Tick horseTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, boolean ambiguous, View view, ClientEntities entities) {
+        if (ambiguous || w[0] != w[1]) {
+            horseRide.unclaim("packets the client may or may not have processed");
+        }
+        if (in.ridingJumps.contains(null)) {
+            horseRide.unclaim("a stop of a riding jump, which the client never sends");
+        }
+        HorseRide.Step step = horseRide.tick(in.vehicleMoves, in.move, in.ridingJumps, baseSent.input(), view, entities, selfId, base.border());
+        ServerboundPacket.MoveVehicle sentVehicle = in.vehicleMoves.isEmpty() ? null : in.vehicleMoves.getLast();
+        if (step == null) {
+            horseNoClaim.merge(horseRide.unclaimed, 1L, Long::sum);
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.NO_CLAIM, "riding: " + horseRide.unclaimed, 0, horseRide.since, null, null,
+                    null, sentVehicle, null, true);
+        }
+        if (step.explained()) {
+            horseExplained++;
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, horseRide.states.size(), horseRide.since, null, null, null,
+                    sentVehicle, null, true);
+        }
+        horseUnexplained++;
+        return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNEXPLAINED, step.reason(), 0, horseRide.since, null, null, null, sentVehicle,
+                step.closest(), true);
+    }
+
     /** A ride packet the client processed before the tick {@code number}. */
-    private void rideApply(RidePacket p, long number, View view, ClientWorld world, ClientEntities entities) {
+    private void rideApply(RidePacket p, long number, View view, ClientWorld world, ClientEntities entities, PlayerState.Keys keysBefore) {
         followVehicles(p);
         switch (p.packet) {
             case ClientboundPacket.SetPassengers set -> {
@@ -812,7 +888,16 @@ public final class MovementTracker {
                 if (ride != null && (set.vehicleId() == ride.vehicle ? !controls : on)) {
                     ride = null; // off it, or put on another vehicle
                 }
-                if (controls && ride == null) {
+                if (horseRide != null && (set.vehicleId() == horseRide.vehicle ? !controls : on)) {
+                    horseRide = null;
+                }
+                String type = entities.type(set.vehicleId());
+                boolean horse = type != null && ClientEntities.HORSE_TYPES.contains(type);
+                if (controls && ride == null && horseRide == null && horse) {
+                    // a horse the player rides first: it steers it once saddled (HorseRide.start rules out the others)
+                    horseRide = p.ambiguous ? HorseRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
+                            : HorseRide.start(set.vehicleId(), p.sequence, entities.horseMounted(set.vehicleId()), view, world, keysBefore);
+                } else if (controls && ride == null && horseRide == null) {
                     ride = p.ambiguous ? BoatRide.unclaimed(set.vehicleId(), p.sequence, "the mount may have been processed a tick earlier")
                             : BoatRide.start(set.vehicleId(), p.sequence, entities.mounted(set.vehicleId()), view, world, positionsDuring(number - 1));
                 }
@@ -825,36 +910,69 @@ public final class MovementTracker {
                     if (ride != null && (id == ride.vehicle || id == selfId)) {
                         ride = null;
                     }
+                    if (horseRide != null && (id == horseRide.vehicle || id == selfId)) {
+                        horseRide = null;
+                    }
                 }
             }
-            case ClientboundPacket.Login ignored -> ride = null;
-            case ClientboundPacket.Respawn ignored -> ride = null;
+            case ClientboundPacket.Login ignored -> {
+                ride = null;
+                horseRide = null;
+            }
+            case ClientboundPacket.Respawn ignored -> {
+                ride = null;
+                horseRide = null;
+            }
             case ClientboundPacket.PlayerPosition ignored -> {
                 if (ride != null) {
                     ride.unclaim("the player teleported while riding");
+                }
+                if (horseRide != null) {
+                    horseRide.unclaim("the player teleported while riding");
                 }
             }
             case ClientboundPacket.MoveVehicle ignored -> {
                 if (ride != null) {
                     ride.unclaim("the server moved the vehicle"); // handleMoveVehicle snaps it and answers outside the tick
                 }
+                if (horseRide != null) {
+                    horseRide.unclaim("the server moved the vehicle");
+                }
             }
             case ClientboundPacket.TeleportEntity teleport -> {
                 if (ride != null && teleport.entityId() == ride.vehicle) {
                     ride.unclaim("the server moved the vehicle");
+                }
+                if (horseRide != null && teleport.entityId() == horseRide.vehicle) {
+                    horseRide.unclaim("the server moved the vehicle");
                 }
             }
             case ClientboundPacket.Untranslatable untranslatable -> {
                 if (ride != null) {
                     ride.unclaim("a packet WhyNotAC cannot read: " + untranslatable.type());
                 }
+                if (horseRide != null) {
+                    horseRide.unclaim("a packet WhyNotAC cannot read: " + untranslatable.type());
+                }
             }
             case ClientboundPacket.SetEntityMotion motion -> {
                 if (ride != null && motion.entityId() == ride.vehicle) {
                     ride.setMotion(motion.clientMotion());
                 }
+                if (horseRide != null && motion.entityId() == horseRide.vehicle) {
+                    horseRide.apply(motion);
+                }
             }
+            case ClientboundPacket.UpdateAttributes attributes when horseRide != null && attributes.entityId() == horseRide.vehicle ->
+                    horseRide.apply(attributes);
+            case ClientboundPacket.MobEffect effect when horseRide != null && effect.entityId() == horseRide.vehicle -> horseRide.apply(effect);
+            case ClientboundPacket.RemoveMobEffect effect when horseRide != null && effect.entityId() == horseRide.vehicle -> horseRide.apply(effect);
+            case ClientboundPacket.SetEquipment equipment when horseRide != null && equipment.entityId() == horseRide.vehicle ->
+                    horseRide.apply(equipment);
             case ClientboundPacket.SetEntityData data -> {
+                if (horseRide != null && data.entityId() == horseRide.vehicle) {
+                    horseRide.apply(data);
+                }
                 if (ride != null && data.entityId() == ride.vehicle) {
                     for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
                         if (e.index() == 5 && e.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) { // DATA_NO_GRAVITY

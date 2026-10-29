@@ -494,32 +494,46 @@ public final class OnFoot {
 
     /** {@code KeyboardInput.tick}: the strafe and forward impulses, normalised ({@code Vec2.normalized}). */
     private void moveVector(PlayerState.Keys k) {
+        float[] v = impulses(k);
+        moveX = v[0];
+        moveY = v[1];
+    }
+
+    /** {@code KeyboardInput.tick}'s move vector for {@code k}: {strafe, forward}, normalised ({@code Vec2.normalized}). */
+    static float[] impulses(PlayerState.Keys k) {
         float forward = k.forward() == k.backward() ? 0.0F : k.forward() ? 1.0F : -1.0F;
         float strafe = k.left() == k.right() ? 0.0F : k.left() ? 1.0F : -1.0F;
         float length = (float) Math.sqrt(strafe * strafe + forward * forward);
         if (length < 1.0E-4F) {
-            moveX = 0.0F;
-            moveY = 0.0F;
-        } else {
-            moveX = strafe / length;
-            moveY = forward / length;
+            return new float[] {0.0F, 0.0F};
         }
+        return new float[] {strafe / length, forward / length};
     }
 
     /** {@code LocalPlayer.applyInput} / {@code modifyInput}: all in floats. */
     private void applyInput(boolean movingSlowly) {
-        float vx = moveX;
-        float vy = moveY;
+        float[] v = modifyInput(moveX, moveY, conditions.use(), movingSlowly, SNEAKING_SPEED);
+        xxa = v[0];
+        zza = v[1];
+        jumping = keys.jump();
+    }
+
+    /**
+     * {@code LocalPlayer.modifyInput} of the move vector {@code (vx, vy)}: scaled by 0.98, then by the item in use's
+     * multiplier ({@code use}, null for none) and the sneaking speed while moving slowly, then onto the square
+     * ({@code modifyInputSpeedForSquareMovement}); all in floats. Returns {xxa, zza}.
+     */
+    static float[] modifyInput(float vx, float vy, ItemUse use, boolean movingSlowly, float sneakingSpeed) {
         if (vx * vx + vy * vy != 0.0F) {
             vx *= 0.98F;
             vy *= 0.98F;
-            if (conditions.use() != null) {
-                vx *= conditions.use().speedMultiplier();
-                vy *= conditions.use().speedMultiplier();
+            if (use != null) {
+                vx *= use.speedMultiplier();
+                vy *= use.speedMultiplier();
             }
             if (movingSlowly) {
-                vx *= SNEAKING_SPEED;
-                vy *= SNEAKING_SPEED;
+                vx *= sneakingSpeed;
+                vy *= sneakingSpeed;
             }
             // modifyInputSpeedForSquareMovement
             float length = (float) Math.sqrt(vx * vx + vy * vy);
@@ -536,9 +550,7 @@ public final class OnFoot {
                 vy = uy * scale;
             }
         }
-        xxa = vx;
-        zza = vy;
-        jumping = keys.jump();
+        return new float[] {vx, vy};
     }
 
     /** {@code LivingEntity.jumpFromGround}. */

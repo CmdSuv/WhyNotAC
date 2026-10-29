@@ -8,6 +8,7 @@ import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.analysis.movement.EngineTags;
 import dev.whynotac.analysis.movement.MovementTracker;
 import dev.whynotac.physics.BoatState;
+import dev.whynotac.physics.HorseState;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -33,7 +34,9 @@ import java.util.TreeMap;
  *
  * <p>A boat the player steers is followed the same way from its mount ({@code BoatRide}): the client's own state for it
  * then (the entity replica's), each tick of its physics from every state it may be in, and the vehicle move and paddle
- * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). What only a passenger
+ * packets it must send; a tick no state sends is a finding (boat fly and boat speed cheats). A horse the player rides
+ * likewise ({@code HorseRide}): its tick from every state under the rider's input, rotation and riding jump, whose
+ * power its jump key decides (horse speed, horse fly and jump power cheats). What only a passenger
  * sends (a vehicle move, a paddle packet, a riding jump, the vehicle's inventory) while the client rode nothing is one
  * too: on foot it would otherwise only end the claim; so are flight abilities from a client that could not fly ({@code LocalPlayer.aiStep}
  * sends them only with {@code mayfly} or while flying).
@@ -45,7 +48,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 5;
+    public static final int VERSION = 6;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
@@ -114,6 +117,25 @@ public final class MovementCheck implements TimelineListener {
             }
             sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
                     tick.nanoTime(), tick.reason() + " (tick " + tick.number() + ")", details, admissibility));
+            state.lastReportNanos = tick.nanoTime();
+            state.unexplainedSinceReport = 0;
+            return;
+        }
+        if (tick.riding() && tick.horse()) {
+            ServerboundPacket.MoveVehicle vehicle = tick.sentVehicle();
+            details.put("sent", vehicle == null ? "nothing" : "MoveVehicle " + format(vehicle.position().x()) + "," + format(vehicle.position().y()) + ","
+                    + format(vehicle.position().z()) + " rot " + vehicle.yaw() + "," + vehicle.pitch() + " onGround=" + vehicle.onGround());
+            HorseState horse = tick.closestHorse();
+            if (horse != null) {
+                details.put("predicted", format(horse.x()) + "," + format(horse.y()) + "," + format(horse.z()) + " rot " + horse.yRot() + ","
+                        + horse.xRot() + " onGround=" + horse.onGround());
+                if (vehicle != null) {
+                    details.put("offset", format(vehicle.position().x() - horse.x()) + "," + format(vehicle.position().y() - horse.y()) + ","
+                            + format(vehicle.position().z() - horse.z()));
+                }
+            }
+            sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
+                    tick.nanoTime(), "rode a horse as no vanilla client could (tick " + tick.number() + ")", details, admissibility));
             state.lastReportNanos = tick.nanoTime();
             state.unexplainedSinceReport = 0;
             return;

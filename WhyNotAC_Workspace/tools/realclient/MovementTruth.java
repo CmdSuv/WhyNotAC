@@ -8,6 +8,8 @@ import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
+import dev.whynotac.physics.Horse;
+import dev.whynotac.physics.HorseState;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ClientboundPacket;
@@ -128,14 +130,16 @@ public class MovementTruth {
         System.out.println(Json.write(result));
         boolean clean = Long.valueOf(0).equals(result.get("mismatched")) && ((Number) result.get("matched")).longValue() > 0
                 && ((Number) result.get("gliding")).longValue() > 0 && ((Number) result.get("nearBorder")).longValue() > 0
-                && ((Number) result.get("inPowderSnow")).longValue() > 0 && comparison.boatsClean()
+                && ((Number) result.get("inPowderSnow")).longValue() > 0 && comparison.boatsClean() && comparison.horsesClean()
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0
                 && ((Number) tracker.get("mounts")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("mountsDiffering"))
                 && ((Number) tracker.get("rideExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rideUnexplained"))
                 && ((Number) tracker.get("ridingNothing")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("vehicleOnFoot"))
-                && Long.valueOf(0).equals(tracker.get("rideTruthMissing"));
+                && Long.valueOf(0).equals(tracker.get("rideTruthMissing"))
+                && ((Number) tracker.get("horseExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("horseUnexplained"))
+                && Long.valueOf(0).equals(tracker.get("horseTruthMissing"));
         System.exit(clean ? 0 : 1);
     }
 
@@ -160,14 +164,15 @@ public class MovementTruth {
         List<String> mountExamples = new ArrayList<>();
         // Each vehicle move the client sent is its boat's state after a tick (verify_truth): at an explained ride tick, that
         // state must be one of the ride's.
-        List<Map<String, Object>> boatPosts = new ArrayList<>();
+        List<Map<String, Object>> boatPosts = new ArrayList<>(); // every vehicle's, in order: a horse's too
         for (Map<String, Object> r : truthRecords) {
-            if ("boatPost".equals(r.get("hook"))) {
+            if ("boatPost".equals(r.get("hook")) || "horsePost".equals(r.get("hook"))) {
                 boatPosts.add(r);
             }
         }
         int[] boatIndex = {0};
         long[] rides = new long[2]; // explained ride ticks compared, the client's boat not a state
+        long[] horses = new long[2]; // explained horse ticks compared, the client's horse not a state
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -213,7 +218,7 @@ public class MovementTruth {
             if (tick.sentVehicle() != null) {
                 Map<String, Object> post = boatIndex[0] < boatPosts.size() ? boatPosts.get(boatIndex[0]) : null;
                 boatIndex[0]++;
-                if (tick.outcome() == MovementTracker.Outcome.EXPLAINED && post != null) {
+                if (tick.outcome() == MovementTracker.Outcome.EXPLAINED && post != null && "boatPost".equals(post.get("hook"))) {
                     rides[0]++;
                     BoatState truth = boatState(post);
                     boolean found = false;
@@ -233,9 +238,30 @@ public class MovementTruth {
                         }
                     }
                 }
+                if (tick.horse() && tick.outcome() == MovementTracker.Outcome.EXPLAINED && post != null && "horsePost".equals(post.get("hook"))) {
+                    horses[0]++;
+                    HorseState truth = horseState(post);
+                    boolean found = false;
+                    List<String> nearest = null;
+                    for (HorseState h : tracker.horseStates()) {
+                        List<String> d = horseDifferences(h, truth);
+                        found |= d.isEmpty();
+                        if (nearest == null || d.size() < nearest.size()) {
+                            nearest = d;
+                        }
+                    }
+                    if (!found) {
+                        horses[1]++;
+                        if (examples.size() < 12) {
+                            examples.add("horse tick " + tick.number() + ": the client's horse is no state of " + tracker.horseStates().size()
+                                    + "; nearest differs in " + nearest);
+                        }
+                    }
+                }
             }
             if (tick.outcome() == MovementTracker.Outcome.UNEXPLAINED && tick.riding() && examples.size() < 12) {
-                examples.add("unexplained ride tick " + tick.number() + ": sent " + tick.sentVehicle() + ", e.g. predicted " + tick.closestBoat());
+                examples.add("unexplained ride tick " + tick.number() + ": " + tick.reason() + ", sent " + tick.sentVehicle() + ", e.g. predicted "
+                        + (tick.horse() ? tick.closestHorse() : tick.closestBoat()));
             }
             if (tick.outcome() == MovementTracker.Outcome.NO_CLAIM && examples.size() < 40) {
                 examples.add("no claim at tick " + tick.number() + ": " + tick.reason());
@@ -289,6 +315,11 @@ public class MovementTruth {
         out.put("rideNoClaim", tracker.rideNoClaim());
         out.put("rideTruthCompared", rides[0]);
         out.put("rideTruthMissing", rides[1]);
+        out.put("horseExplained", tracker.horseExplained());
+        out.put("horseUnexplained", tracker.horseUnexplained());
+        out.put("horseNoClaim", tracker.horseNoClaim());
+        out.put("horseTruthCompared", horses[0]);
+        out.put("horseTruthMissing", horses[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
         out.put("mountExamples", mountExamples);
@@ -517,6 +548,10 @@ public class MovementTruth {
                         && pre.get("id").equals(post.get("id"))) {
                     steered.add(new Map[] {pre, post});
                 }
+                if ("horsePre".equals(pre.get("hook")) && "horsePost".equals(post.get("hook")) && pre.get("tickCount").equals(post.get("tickCount"))
+                        && pre.get("id").equals(post.get("id"))) {
+                    steered.add(new Map[] {pre, post}); // a horse's tick runs before its rider's too
+                }
                 if ("pre".equals(pre.get("hook")) && "post".equals(post.get("hook")) && pre.get("tickCount").equals(post.get("tickCount"))
                         && (Boolean) pre.get("loaded")) {
                     ticks.add(new Map[] {pre, post});
@@ -536,6 +571,11 @@ public class MovementTruth {
         }
 
         /** Boat ticks were compared, all equal, in water, under it, on land, in the air, and landing on water from the air. */
+        /** Every horse tick in scope matched, with a released jump and a tick in water among them. */
+        boolean horsesClean() {
+            return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0;
+        }
+
         boolean boatsClean() {
             return boatMatched > 0 && boatMismatched == 0 && boatLandings > 0
                     && java.util.stream.Stream.of("IN_WATER", "UNDER_WATER", "ON_LAND", "IN_AIR").allMatch(st -> boatStatuses.getOrDefault(st, 0L) > 0);
@@ -565,7 +605,11 @@ public class MovementTruth {
                 next++;
                 Colliders.World world = sentHere ? sending : before;
                 for (Map<String, Object>[] boat : boats.get(next - 1)) {
-                    compareBoat(boat[0], boat[1], tick[0], world);
+                    if ("horsePre".equals(boat[0].get("hook"))) {
+                        compareHorse(boat[0], boat[1], tick[0], world);
+                    } else {
+                        compareBoat(boat[0], boat[1], tick[0], world);
+                    }
                 }
                 if (riding.get(next - 1)) {
                     ridingTicks++;
@@ -739,6 +783,81 @@ public class MovementTruth {
             }
         }
 
+        long horseTicks;
+        long horseMatched;
+        long horseMismatched;
+        long horseJumps;
+        long horseInWater;
+        final Map<String, Long> horseUnknown = new TreeMap<>();
+        final Map<String, Long> horseDifferingFields = new TreeMap<>();
+        final List<String> horseExamples = new ArrayList<>();
+        private final java.util.Set<Integer> horsesSkipped = new java.util.HashSet<>();
+
+        /**
+         * The horse's tick from {@code pre} to {@code post} ({@code Horse.tick}), under its rider as {@code pre} records it,
+         * with the attributes and effects the client held for it then.
+         */
+        @SuppressWarnings("unchecked")
+        private void compareHorse(Map<String, Object> pre, Map<String, Object> post, Map<String, Object> player, Colliders.World world) {
+            int id = ((Number) pre.get("id")).intValue();
+            if (Boolean.TRUE.equals(pre.get("interpolating"))) {
+                horseUnknown.merge("interpolating toward a position the server sent (not followed for a horse yet)", 1L, Long::sum);
+                horsesSkipped.add(id);
+                return;
+            }
+            if (Boolean.TRUE.equals(pre.get("firstTick"))) {
+                horseUnknown.merge("the horse's first tick", 1L, Long::sum);
+                return;
+            }
+            HorseState before = horseState(pre);
+            if (entities != null && entities.mayHaveVehicleColliderNear(selfId, id, before.x() - 3.0, before.y() - 3.0, before.z() - 3.0, before.x() + 3.0,
+                    before.y() + 4.6, before.z() + 3.0, 64.0)) {
+                horseUnknown.merge("an entity the horse may meet is near", 1L, Long::sum);
+                return;
+            }
+            OnFoot.Effects e = effects(pre);
+            if (e == null) {
+                horseUnknown.merge("an effect not recorded by name", 1L, Long::sum);
+                return;
+            }
+            String type = String.valueOf(pre.get("type")).replace("entity.minecraft.", "minecraft:");
+            float height = type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+            Horse.Conditions conditions = new Horse.Conditions((float) f64(pre.get("movementSpeed")), f64(pre.get("jumpStrength")), f32(pre.get("maxUpStep")),
+                    f64(pre.get("gravity")), new Horse.Effects(e.jumpBoost(), e.slowFalling(), e.levitation(), e.dolphinsGrace()),
+                    type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type), 1.3964844F, height,
+                    border(player), List.of());
+            if (e.slowFalling()) {
+                horseUnknown.merge("slow falling (the recorded gravity is the effective one)", 1L, Long::sum);
+                return;
+            }
+            Horse.Rider rider = new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")));
+            HorseState expected = horseState(post);
+            horseTicks++;
+            if (before.jumpPendingScale() > 0.0F && before.onGround()) {
+                horseJumps++;
+            }
+            if (Boolean.TRUE.equals(pre.get("wasTouchingWater"))) {
+                horseInWater++;
+            }
+            try {
+                HorseState predicted = Horse.tick(before, rider, world, conditions);
+                List<String> d = horseDifferences(predicted, expected);
+                if (d.isEmpty()) {
+                    horseMatched++;
+                } else {
+                    horseMismatched++;
+                    for (String f : d) {
+                        horseDifferingFields.merge(f.substring(0, f.indexOf(':')), 1L, Long::sum);
+                    }
+                    if (horseExamples.size() < 12) {
+                        horseExamples.add("horse tick " + pre.get("tickCount") + " rider " + rider + ": " + String.join("; ", d));
+                    }
+                }
+            } catch (Colliders.Unknown x) {
+                horseUnknown.merge(x.getMessage().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]", ""), 1L, Long::sum);
+            }
+        }
+
         /**
          * Whether an entity the boat collides with ({@code canVehicleCollide}, which {@link Boat} is not given here) may be
          * where its tick could take it: its box widened by how far the motion, an interpolation and a margin reach.
@@ -771,6 +890,16 @@ public class MovementTruth {
             out.put("differingFields", differingFields);
             out.put("examples", examples);
             out.put("riding", ridingTicks);
+            Map<String, Object> horse = new LinkedHashMap<>();
+            horse.put("ticks", horseTicks);
+            horse.put("matched", horseMatched);
+            horse.put("mismatched", horseMismatched);
+            horse.put("jumps", horseJumps);
+            horse.put("inWater", horseInWater);
+            horse.put("unknown", horseUnknown);
+            horse.put("differingFields", horseDifferingFields);
+            horse.put("examples", horseExamples);
+            out.put("horse", horse);
             Map<String, Object> boat = new LinkedHashMap<>();
             boat.put("ticks", boatTicks);
             boat.put("matched", boatMatched);
@@ -825,6 +954,49 @@ public class MovementTruth {
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static HorseState horseState(Map<String, Object> r) {
+        List<Object> pos = (List<Object>) r.get("pos");
+        List<Object> support = (List<Object>) r.get("support");
+        return new HorseState(f64(pos.get(0)), f64(pos.get(1)), f64(pos.get(2)), vec(r.get("deltaMovement")), f32(r.get("yRot")), f32(r.get("xRot")),
+                (Boolean) r.get("onGround"), (Boolean) r.get("horizontalCollision"), (Boolean) r.get("verticalCollision"),
+                (Boolean) r.get("verticalCollisionBelow"), f64(r.get("fallDistance")),
+                support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
+                        ((Number) support.get(2)).intValue()),
+                (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), (Boolean) r.get("inPowderSnow"),
+                ((Number) r.get("noJumpDelay")).intValue(), f32(r.get("jumpPendingScale")), (Boolean) r.get("allowStandSliding"),
+                (Boolean) r.get("standing"), ((Number) r.get("standCounter")).intValue(), null);
+    }
+
+    private static List<String> horseDifferences(HorseState p, HorseState e) {
+        List<String> d = new ArrayList<>();
+        bits(d, "x", p.x(), e.x());
+        bits(d, "y", p.y(), e.y());
+        bits(d, "z", p.z(), e.z());
+        bits(d, "dx", p.deltaMovement().x(), e.deltaMovement().x());
+        bits(d, "dy", p.deltaMovement().y(), e.deltaMovement().y());
+        bits(d, "dz", p.deltaMovement().z(), e.deltaMovement().z());
+        bits(d, "yRot", p.yRot(), e.yRot());
+        bits(d, "xRot", p.xRot(), e.xRot());
+        bits(d, "fallDistance", p.fallDistance(), e.fallDistance());
+        same(d, "onGround", p.onGround(), e.onGround());
+        same(d, "horizontalCollision", p.horizontalCollision(), e.horizontalCollision());
+        same(d, "verticalCollision", p.verticalCollision(), e.verticalCollision());
+        same(d, "verticalCollisionBelow", p.verticalCollisionBelow(), e.verticalCollisionBelow());
+        same(d, "support", p.support(), e.support());
+        same(d, "onGroundNoBlocks", p.onGroundNoBlocks(), e.onGroundNoBlocks());
+        bits(d, "stuckX", p.stuckSpeedMultiplier().x(), e.stuckSpeedMultiplier().x());
+        bits(d, "stuckY", p.stuckSpeedMultiplier().y(), e.stuckSpeedMultiplier().y());
+        bits(d, "stuckZ", p.stuckSpeedMultiplier().z(), e.stuckSpeedMultiplier().z());
+        same(d, "inPowderSnow", p.inPowderSnow(), e.inPowderSnow());
+        same(d, "noJumpDelay", p.noJumpDelay(), e.noJumpDelay());
+        bits(d, "jumpPendingScale", p.jumpPendingScale(), e.jumpPendingScale());
+        same(d, "allowStandSliding", p.allowStandSliding(), e.allowStandSliding());
+        same(d, "standing", p.standing(), e.standing());
+        same(d, "standCounter", p.standCounter(), e.standCounter());
+        return d;
     }
 
     private static List<String> differences(PlayerState p, PlayerState e) {

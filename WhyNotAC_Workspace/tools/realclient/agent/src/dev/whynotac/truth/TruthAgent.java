@@ -15,7 +15,8 @@ import jdk.internal.org.objectweb.asm.Opcodes;
  * Ground truth from inside the official, unmodified Minecraft client: a java agent that adds two calls
  * to {@code LocalPlayer.tick()} (at its start and before every return) which record the player's exact
  * physics state (position, velocity, rotation, collision flags, input) once per client tick, and two to
- * {@code AbstractBoat.tick()}, which record a boat the player steers (its tick runs before the player's).
+ * {@code AbstractBoat.tick()}, which record a boat the player steers (its tick runs before the player's), and two to
+ * {@code AbstractHorse.tick()}, which record a horse (donkey, mule, ...) the player rides, likewise.
  *
  * <p>Nothing else in the client changes, and the recorder only reads. Obfuscated names come from Mojang's
  * own mappings file for the same version. Uses the JDK's internal copy of ASM, so the agent has no
@@ -27,7 +28,9 @@ public final class TruthAgent {
 
     static final String LOCAL_PLAYER = "net.minecraft.client.player.LocalPlayer";
     static final String ABSTRACT_BOAT = "net.minecraft.world.entity.vehicle.boat.AbstractBoat";
-    static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, ABSTRACT_BOAT, "net.minecraft.world.entity.InterpolationHandler", "net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity",
+    static final String ABSTRACT_HORSE = "net.minecraft.world.entity.animal.equine.AbstractHorse";
+    static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, ABSTRACT_BOAT, ABSTRACT_HORSE, "net.minecraft.world.entity.ai.attributes.Attributes",
+            "net.minecraft.core.Holder", "net.minecraft.world.entity.InterpolationHandler", "net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity",
             "net.minecraft.client.player.ClientInput", "net.minecraft.world.entity.player.Input", "net.minecraft.world.phys.Vec3",
             "net.minecraft.client.multiplayer.ClientPacketListener", "net.minecraft.core.Vec3i", "net.minecraft.world.phys.Vec2",
             "net.minecraft.world.effect.MobEffectInstance", "net.minecraft.world.entity.player.Player", "net.minecraft.world.entity.EquipmentSlot",
@@ -43,6 +46,8 @@ public final class TruthAgent {
         String tick = mappings.method(LOCAL_PLAYER, "tick()");
         String boat = mappings.get(ABSTRACT_BOAT).obf().replace('.', '/');
         String boatTick = mappings.method(ABSTRACT_BOAT, "tick()");
+        String horse = mappings.get(ABSTRACT_HORSE).obf().replace('.', '/');
+        String horseTick = mappings.method(ABSTRACT_HORSE, "tick()");
         instrumentation.addTransformer(new ClassFileTransformer() {
             @Override
             public byte[] transform(ClassLoader loader, String className, Class<?> redefined, ProtectionDomain domain, byte[] bytes) {
@@ -53,6 +58,9 @@ public final class TruthAgent {
                     if (boat.equals(className)) {
                         return instrument(bytes, boatTick, "boatPre", "boatPost");
                     }
+                    if (horse.equals(className)) {
+                        return instrument(bytes, horseTick, "horsePre", "horsePost");
+                    }
                     return null;
                 } catch (RuntimeException e) {
                     System.err.println("[whynotac-truth] could not instrument " + className + ": " + e);
@@ -61,7 +69,7 @@ public final class TruthAgent {
             }
         });
         System.err.println("[whynotac-truth] recording " + LOCAL_PLAYER + " (" + target + ")." + tick + "() and " + ABSTRACT_BOAT + " (" + boat + ")."
-                + boatTick + "() to " + parts[1]);
+                + boatTick + "(), " + ABSTRACT_HORSE + " (" + horse + ")." + horseTick + "() to " + parts[1]);
     }
 
     static byte[] instrument(byte[] bytes, String tickName, String pre, String post) {

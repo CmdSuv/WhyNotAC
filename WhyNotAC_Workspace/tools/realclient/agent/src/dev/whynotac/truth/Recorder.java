@@ -60,6 +60,11 @@ public final class Recorder {
             boatInputUp, boatInputDown, entityId, firstTick;
     private static Method getControllingPassenger, isNoGravity, getInterpolation, hasActiveInterpolation, getType, getPassengers;
     private static Method interpolationPosition, interpolationYRot, interpolationXRot;
+    // a horse the player rides: AbstractHorse's jump and rearing state, the attributes its tick reads, its rider's input
+    private static Field horseJumpPendingScale, horseAllowStandSliding, horseStandCounter, livingXxa, livingZza, livingJumping;
+    private static Method horseIsStanding, maxUpStep, getEffectiveGravity, getAttributeValue, entityControllingPassenger, entityInterpolation;
+    private static Object movementSpeed, jumpStrength;
+    private static Object tickingHorse; // the horse whose tick() is running, if it is recorded
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -117,6 +122,96 @@ public final class Recorder {
                 e.printStackTrace();
             }
         }
+    }
+
+    /** At the start of {@code AbstractHorse.tick()}: recorded when the local player rides and controls it. */
+    public static void horsePre(Object horse) {
+        synchronized (LOCK) {
+            tickingHorse = null;
+            if (closing || failed || out == null) {
+                return;
+            }
+            try {
+                Object rider = entityControllingPassenger.invoke(horse);
+                if (localPlayerClass.isInstance(rider)) {
+                    tickingHorse = horse;
+                    writeHorse("horsePre", horse, rider);
+                }
+            } catch (Throwable e) {
+                failed = true;
+                System.err.println("[whynotac-truth] recording stopped: " + e);
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void horsePost() {
+        synchronized (LOCK) {
+            if (tickingHorse != null && !failed) {
+                try {
+                    writeHorse("horsePost", tickingHorse, entityControllingPassenger.invoke(tickingHorse));
+                } catch (Throwable e) {
+                    failed = true;
+                    System.err.println("[whynotac-truth] recording stopped: " + e);
+                    e.printStackTrace();
+                }
+            }
+            tickingHorse = null;
+        }
+    }
+
+    private static void writeHorse(String hook, Object horse, Object rider) throws Throwable {
+        StringBuilder line = new StringBuilder(640).append("{\"hook\":\"").append(hook).append("\",\"n\":").append(calls++)
+                .append(",\"nanoTime\":").append(System.nanoTime())
+                .append(",\"tickCount\":").append(tickCount.getInt(horse))
+                .append(",\"id\":").append(entityId.getInt(horse));
+        line.append(",\"type\":\"").append(String.valueOf(getType.invoke(horse)).replaceAll("[^A-Za-z0-9_.:-]", "_")).append('"');
+        vec(line, "pos", position.get(horse));
+        vec(line, "deltaMovement", deltaMovement.get(horse));
+        vec(line, "stuckSpeedMultiplier", stuckSpeedMultiplier.get(horse));
+        f32(line, "yRot", yRot.getFloat(horse));
+        f32(line, "xRot", xRot.getFloat(horse));
+        f64(line, "fallDistance", fallDistance.getDouble(horse));
+        bool(line, "onGround", onGround.getBoolean(horse));
+        bool(line, "horizontalCollision", horizontalCollision.getBoolean(horse));
+        bool(line, "verticalCollision", verticalCollision.getBoolean(horse));
+        bool(line, "verticalCollisionBelow", verticalCollisionBelow.getBoolean(horse));
+        java.util.Optional<?> support = (java.util.Optional<?>) mainSupportingBlockPos.get(horse);
+        line.append(",\"support\":").append(support.isEmpty() ? "null" : "[" + posX.getInt(support.get()) + "," + posY.getInt(support.get()) + ","
+                + posZ.getInt(support.get()) + "]");
+        bool(line, "onGroundNoBlocks", onGroundNoBlocks.getBoolean(horse));
+        bool(line, "wasTouchingWater", wasTouchingWater.getBoolean(horse));
+        bool(line, "inPowderSnow", isInPowderSnow.getBoolean(horse));
+        bool(line, "noGravity", (Boolean) isNoGravity.invoke(horse));
+        bool(line, "firstTick", firstTick.getBoolean(horse));
+        Object interpolation = entityInterpolation.invoke(horse);
+        boolean interpolating = interpolation != null && (Boolean) hasActiveInterpolation.invoke(interpolation);
+        bool(line, "interpolating", interpolating);
+        if (interpolating) { // ServerboundMoveVehiclePacket.fromEntity sends these while the entity interpolates
+            vec(line, "interpolationPos", interpolationPosition.invoke(interpolation));
+            f32(line, "interpolationYRot", (Float) interpolationYRot.invoke(interpolation));
+            f32(line, "interpolationXRot", (Float) interpolationXRot.invoke(interpolation));
+        }
+        line.append(",\"noJumpDelay\":").append(noJumpDelay.getInt(horse));
+        bool(line, "jumping", livingJumping.getBoolean(horse));
+        f32(line, "jumpPendingScale", horseJumpPendingScale.getFloat(horse));
+        bool(line, "allowStandSliding", horseAllowStandSliding.getBoolean(horse));
+        bool(line, "standing", (Boolean) horseIsStanding.invoke(horse));
+        line.append(",\"standCounter\":").append(horseStandCounter.getInt(horse));
+        f32(line, "speed", speed.getFloat(horse));
+        f64(line, "movementSpeed", (Double) getAttributeValue.invoke(horse, movementSpeed));
+        f64(line, "jumpStrength", (Double) getAttributeValue.invoke(horse, jumpStrength));
+        f32(line, "maxUpStep", (Float) maxUpStep.invoke(horse));
+        f64(line, "gravity", (Double) getEffectiveGravity.invoke(horse));
+        effects(line, (java.util.Map<?, ?>) activeEffects.get(horse));
+        line.append(",\"passengers\":").append(((java.util.List<?>) getPassengers.invoke(horse)).size());
+        if (rider != null) { // what its tick reads of its rider (LivingEntity.travelRidden, AbstractHorse.tickRidden)
+            f32(line, "riderXxa", livingXxa.getFloat(rider));
+            f32(line, "riderZza", livingZza.getFloat(rider));
+            f32(line, "riderYRot", yRot.getFloat(rider));
+            f32(line, "riderXRot", xRot.getFloat(rider));
+        }
+        out.append(line).append("}\n");
     }
 
     public static void boatPost() {
@@ -394,9 +489,29 @@ public final class Recorder {
         interpolationPosition = method(loader, "net.minecraft.world.entity.InterpolationHandler", "position()");
         interpolationYRot = method(loader, "net.minecraft.world.entity.InterpolationHandler", "yRot()");
         interpolationXRot = method(loader, "net.minecraft.world.entity.InterpolationHandler", "xRot()");
+        String horse = "net.minecraft.world.entity.animal.equine.AbstractHorse";
+        horseJumpPendingScale = field(loader, horse, "playerJumpPendingScale");
+        horseAllowStandSliding = field(loader, horse, "allowStandSliding");
+        horseStandCounter = field(loader, horse, "standCounter");
+        horseIsStanding = method(loader, horse, "isStanding()");
+        entityControllingPassenger = method(loader, "net.minecraft.world.entity.Entity", "getControllingPassenger()"); // virtual: any vehicle
+        entityInterpolation = method(loader, "net.minecraft.world.entity.Entity", "getInterpolation()");
+        livingXxa = field(loader, living, "xxa");
+        livingZza = field(loader, living, "zza");
+        livingJumping = field(loader, living, "jumping");
+        maxUpStep = method(loader, living, "maxUpStep()");
+        getEffectiveGravity = method(loader, living, "getEffectiveGravity()");
+        Class<?> holder = Class.forName(mappings.get("net.minecraft.core.Holder").obf(), false, loader);
+        getAttributeValue = method(loader, living, "getAttributeValue(net.minecraft.core.Holder)", holder);
+        movementSpeed = staticField(loader, "net.minecraft.world.entity.ai.attributes.Attributes", "MOVEMENT_SPEED");
+        jumpStrength = staticField(loader, "net.minecraft.world.entity.ai.attributes.Attributes", "JUMP_STRENGTH");
         getType = method(loader, entity, "getType()");
         getPassengers = method(loader, entity, "getPassengers()");
         localPlayerClass = Class.forName(mappings.get(local).obf(), false, loader);
+    }
+
+    private static Object staticField(ClassLoader loader, String mojangClass, String name) throws ReflectiveOperationException {
+        return field(loader, mojangClass, name).get(null);
     }
 
     private static Field field(ClassLoader loader, String mojangClass, String name) throws ReflectiveOperationException {

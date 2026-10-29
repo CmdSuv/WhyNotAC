@@ -17,6 +17,8 @@ import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Border;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
+import dev.whynotac.physics.Horse;
+import dev.whynotac.physics.HorseState;
 import dev.whynotac.physics.OnFoot;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.BlockFace;
@@ -127,7 +129,10 @@ class MovementCheckTest {
     private PlatformCos platform = PlatformCos.X86_64;
     /** The item the synthetic client uses (null: none), and what it sends from its keybinds at the start of the next tick. */
     private OnFoot.ItemUse use;
-    /** Villagers without AI (they stay where they were added; added after the player, they tick after it): {x, y, z}. */
+    /**
+     * Villagers without AI (they stay where they were added; added after the player, they tick after it): {x, y, z}, or
+     * {x, y, z, width, height} for another living entity that stands still so (a horse before its mount).
+     */
     private final List<double[]> villagers = new ArrayList<>();
     /** Firework rockets attached to the player, as the client holds them (added after it: they tick after it). */
     private int rockets;
@@ -471,8 +476,8 @@ class MovementCheckTest {
             return;
         }
         for (double[] v : villagers) {
-            float half = 0.6F / 2.0F;
-            float height = 1.95F;
+            float half = (v.length > 3 ? (float) v[3] : 0.6F) / 2.0F;
+            float height = v.length > 3 ? (float) v[4] : 1.95F;
             Box b = player.box();
             if (!(b.minX() < v[0] + half && b.maxX() > v[0] - half && b.minY() < v[1] + height && b.maxY() > v[1] && b.minZ() < v[2] + half
                     && b.maxZ() > v[2] - half)) {
@@ -698,6 +703,78 @@ class MovementCheckTest {
         boatInput = new Boat.Input(keys.left(), keys.right(), keys.forward(), keys.backward()); // LocalPlayer.rideTick
     }
 
+    // --- a horse the player rides ---
+
+    private static final int HORSE = 41;
+    private static final Horse.Conditions HORSE_CONDITIONS = new Horse.Conditions(0.3F, 0.8, 1.0F, 0.08, Horse.Effects.NONE, 0.8F, true, 1.3964844F,
+            1.6F, null, List.of());
+    /** The synthetic client's horse, the keys its rider's last tick had, and a riding jump released in that tick (its power, or -1). */
+    private HorseState horse;
+    private PlayerState.Keys riderKeys = NONE;
+    private int released = -1;
+
+    /** A tame, saddled horse (speed 0.3, jump strength 0.8) put on the stone at (x, 64, z); the player ticks a few times on foot. */
+    private void horseOnGround(double x, double z) throws Colliders.Unknown {
+        out(ClientboundPacket.AddEntity.received(HORSE, new UUID(5, 5), "minecraft:horse", x, 64.0, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.SetEntityData(HORSE, List.of(new ClientboundPacket.SetEntityData.DataEntry(17,
+                ClientboundPacket.SetEntityData.Kind.BYTE, 2)), 0)); // tame
+        out(new ClientboundPacket.SetEquipment(HORSE, List.of(new ClientboundPacket.SetEquipment.Slot("saddle",
+                new Stack("minecraft:saddle", 1, List.of(), List.of(), null, false)))));
+        out(new ClientboundPacket.UpdateAttributes(HORSE, List.of(
+                new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 0.3F, List.of()),
+                new ClientboundPacket.UpdateAttributes.Attribute("minecraft:jump_strength", 0.8, List.of()))));
+        out(new ClientboundPacket.EntityPositionSync(HORSE, new Vec3d(x, 64.0, z), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        villagers.add(new double[] {x, 64.0, z, 1.3964844F, 1.6F}); // its pushEntities pushes the player where they meet
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** The server puts the player on the horse; the client handles it before its next tick, the horse then as it held it. */
+    private void mountHorse(double x, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(HORSE, new int[] {SELF}));
+        sync();
+        villagers.removeIf(v -> v.length > 3); // a vehicle pushes nothing (isPushable), its rider least of all
+        horse = new HorseState(x, 64.0, z, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, false, 0.0, Horse.supportingBlock(x, 64.0, z, GROUND,
+                HORSE_CONDITIONS), false, Vec3d.ZERO, false, 0, 0.0F, false, false, 0, null);
+        riderKeys = NONE;
+        released = -1;
+    }
+
+    /**
+     * One ride tick: the horse's (the input its rider's last tick left, the rotation this tick sends, the jump released
+     * then), then the passenger's: its riding jump when the jump key was let go ({@code power}: the one sent, -1 for
+     * the key's), its input, its rotation and the horse's move moved by {@code cheat}.
+     */
+    private void horseRideTick(PlayerState.Keys keys, Vec3d cheat, int power) throws Colliders.Unknown {
+        if (released >= 0) {
+            horse = Horse.onPlayerJump(horse, released, true);
+        }
+        float[] input = Horse.riderInput(riderKeys);
+        horse = Horse.tick(horse, new Horse.Rider(input[0], input[1], 30.0F, 0.0F), GROUND, HORSE_CONDITIONS);
+        released = -1;
+        if (riderKeys.jump() && !keys.jump()) {
+            released = power >= 0 ? power : heldJumpPower;
+            in(new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP, released));
+        }
+        heldJumpPower = !keys.jump() ? 0 : !riderKeys.jump() ? 0 : Math.min(heldJumpPower + 10, 90); // held 1 to 9 ticks: 10 a tick
+        if (!keys.equals(sentInput)) {
+            in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
+            sentInput = keys;
+        }
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+        riderKeys = keys;
+    }
+
+    /** The power of the jump key held so far (jumpRidingScale * 100 for up to 9 ticks held). */
+    private int heldJumpPower;
+
+    private List<MovementTracker.Tick> horseTicks() {
+        return ticks.stream().filter(MovementTracker.Tick::horse).toList();
+    }
+
     private List<MovementTracker.Tick> rideTicks() {
         return ticks.stream().filter(t -> t.sentVehicle() != null || t.reason() != null && t.reason().startsWith("riding")).toList();
     }
@@ -789,6 +866,69 @@ class MovementCheckTest {
             rideTick(FORWARD, new Vec3d(0.0, i == 4 ? 0.5 : 0.0, 0.0));
         }
         List<MovementTracker.Tick> rides = rideTicks();
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM && t.reason().contains("pushed")), String.valueOf(rides));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aHorseRiddenByAVanillaClientIsExplainedFromItsMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        horseOnGround(6.5, 6.5);
+        mountHorse(6.5, 6.5);
+        PlayerState.Keys left = new PlayerState.Keys(true, false, true, false, false, false, false);
+        PlayerState.Keys forwardJump = new PlayerState.Keys(true, false, false, false, true, false, false);
+        for (int i = 0; i < 50; i++) {
+            horseRideTick(i < 3 ? NONE : i < 20 ? FORWARD : i < 25 ? forwardJump : i < 40 ? FORWARD : left, Vec3d.ZERO, -1);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(50, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(horse.x() > 7.5 || horse.z() > 7.5 || horse.x() < 5.5 || horse.z() < 5.5, "it moved: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aHorseMovedHalfABlockUpIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        horseOnGround(6.5, 6.5);
+        mountHorse(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            horseRideTick(FORWARD, Vec3d.ZERO, -1);
+        }
+        horseRideTick(FORWARD, new Vec3d(0.0, 0.5, 0.0), -1);
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        Evidence e = evidence.get(0);
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertTrue(e.summary().startsWith("rode a horse as no vanilla client could"), e.summary());
+        assertTrue(e.details().get("offset").startsWith("0.000000,0.500000,0.000000"), e.details().toString());
+    }
+
+    @Test
+    void aRidingJumpOfMorePowerThanItsKeyHeldIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        horseOnGround(6.5, 6.5);
+        mountHorse(6.5, 6.5);
+        PlayerState.Keys jump = new PlayerState.Keys(false, false, false, false, true, false, false);
+        horseRideTick(NONE, Vec3d.ZERO, -1);
+        for (int i = 0; i < 4; i++) {
+            horseRideTick(jump, Vec3d.ZERO, -1); // pressed, then held three ticks: 30
+        }
+        horseRideTick(NONE, Vec3d.ZERO, 100); // a full jump instead
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.get(0).details().get("reason").contains("another power than its jump key held (100, not 30)"),
+                evidence.get(0).details().toString());
+    }
+
+    @Test
+    void noHorseClaimWhereThePlayerMayHavePushedItBeforeTheMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        horseOnGround(1.0, 0.5); // its box (0.30 to 1.70 across) meets the player's (0.2 to 0.8)
+        mountHorse(1.0, 0.5);
+        for (int i = 0; i < 5; i++) {
+            horseRideTick(FORWARD, new Vec3d(0.0, i == 4 ? 0.5 : 0.0, 0.0), -1);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(5, rides.size());
         assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM && t.reason().contains("pushed")), String.valueOf(rides));
         assertEquals(List.of(), evidence);
     }
