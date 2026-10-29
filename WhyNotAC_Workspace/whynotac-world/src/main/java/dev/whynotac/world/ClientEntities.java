@@ -121,7 +121,9 @@ public final class ClientEntities {
     private static final Set<String> SADDLED = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
             "minecraft:zombie_horse", "minecraft:camel", "minecraft:camel_husk", "minecraft:llama", "minecraft:trader_llama", "minecraft:nautilus",
             "minecraft:zombie_nautilus", PIG, STRIDER);
-    public static final String HAPPY_GHAST = "minecraft:happy_ghast";
+    public static final String HAPPY_GHAST = ClientMotion.HAPPY_GHAST;
+    /** {@code HappyGhast.STAYS_STILL}: while set its client does not let the player control it ({@code isOnStillTimeout}). */
+    private static final int DATA_GHAST_STAYS_STILL = 18;
 
     /** What a player's vehicle of {@code type} must wear for the player to control it: "saddle", "harness", or null for nothing. */
     public static String controlItem(String type) {
@@ -129,7 +131,7 @@ public final class ClientEntities {
     }
     /** The attributes a ridden horse's tick reads: {@code getRiddenSpeed}, {@code getJumpPower}, {@code maxUpStep}, {@code getGravity}. */
     public static final Set<String> HORSE_ATTRIBUTES = Set.of("minecraft:movement_speed", "minecraft:jump_strength", "minecraft:step_height",
-            "minecraft:gravity");
+            "minecraft:gravity", "minecraft:flying_speed");
     /** {@code LocalPlayer.sendPosition}'s threshold: the client is within this of the position it last sent. */
     private static final double UNSENT = 2.0E-4;
     /**
@@ -577,6 +579,9 @@ public final class ClientEntities {
                 noGravity = entry.value() != 0 ? 1 : 0;
             } else if (horse && entry.index() == DATA_HORSE_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
                 horseFlags = (int) entry.value() & 0xFF;
+            } else if (HAPPY_GHAST.equals(head.type) && entry.index() == DATA_GHAST_STAYS_STILL
+                    && entry.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN) {
+                horseFlags = entry.value() != 0 ? 1 : 0; // kept where a horse's flags are
             } else if ((horse || pig) && entry.index() == DATA_MOB_FLAGS && entry.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) {
                 mobFlags = (int) entry.value() & 0xFF;
             } else if (pig && entry.index() == DATA_PIG_BOOST && entry.kind() == ClientboundPacket.SetEntityData.Kind.INT) {
@@ -642,7 +647,7 @@ public final class ClientEntities {
     /**
      * One of {@link #HORSE_ATTRIBUTES} as the client computes it: {@code AttributeInstance.calculateValue}, then the
      * attribute's range ({@code RangedAttribute.sanitizeValue}: movement speed 0 to 1024, jump strength 0 to 32, step height
-     * 0 to 10, gravity -1 to 1); NaN when the client's order of modifiers matters.
+     * 0 to 10, gravity -1 to 1, flying speed 0 to 1024); NaN when the client's order of modifiers matters.
      */
     public static double horseAttributeValue(ClientboundPacket.UpdateAttributes.Attribute attribute) {
         double[] bounds = switch (attribute.key()) {
@@ -650,6 +655,7 @@ public final class ClientEntities {
             case "minecraft:jump_strength" -> new double[] {0.0, 32.0};
             case "minecraft:step_height" -> new double[] {0.0, 10.0};
             case "minecraft:gravity" -> new double[] {-1.0, 1.0};
+            case "minecraft:flying_speed" -> new double[] {0.0, 1024.0};
             default -> throw new IllegalArgumentException(attribute.key());
         };
         double[] range = AttributeValues.range(attribute, bounds[0], bounds[1]);
@@ -1922,8 +1928,8 @@ public final class ClientEntities {
      * slowed its motion each tick; from then on its own physics moves it. As {@link Mounted} for a boat, and:
      * {@code motion} its motion (null: not known, the client's own player may have pushed it or a teleport set it
      * relative to one not followed), set at {@code motionSeq}; {@code sweptMin} and {@code sweptMax} bound where it has
-     * been since (the fluids there push it in its ticks); {@code saddle} 1, 0 or -1 (not known); {@code flags} its
-     * {@code DATA_ID_FLAGS}, {@code mobFlags} its {@code DATA_MOB_FLAGS_ID}; {@code attributes} the values the server sent
+     * been since (the fluids there push it in its ticks); {@code saddle} 1, 0 or -1 (not known; a happy ghast's harness);
+     * {@code flags} its {@code DATA_ID_FLAGS} (a happy ghast's {@code STAYS_STILL}: 1), {@code mobFlags} its {@code DATA_MOB_FLAGS_ID}; {@code attributes} the values the server sent
      * of {@link #HORSE_ATTRIBUTES} (NaN: not known exactly; absent: the type's default); {@code effects} by key and amplifier;
      * a pig's {@code boost} (0 none, 1 started by the server's boost time and not counted since, -1 not known) and
      * {@code boostTotal} (its {@code DATA_BOOST_TIME}).

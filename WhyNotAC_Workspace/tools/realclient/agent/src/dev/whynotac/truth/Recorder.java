@@ -74,6 +74,10 @@ public final class Recorder {
     private static Field striderSteering;
     private static Method striderIsSuffocating, mobIsNoAi;
     private static Class<?> striderClass;
+    // a happy ghast the player steers: whether it stays still, its flying speed
+    private static Method ghastStaysStill;
+    private static Object flyingSpeed;
+    private static Class<?> ghastClass;
     private static Class<?> localPlayerClass;
     private static Object tickingBoat; // the boat whose tick() is running, if it is recorded (set by boatPre, read by boatPost)
     private static Object feetSlot;
@@ -247,12 +251,20 @@ public final class Recorder {
         }
         f64(line, "lavaHeight", lava);
         boolean strider = striderClass.isInstance(horse);
+        boolean ghast = ghastClass.isInstance(horse);
         boolean pig = pigClass.isInstance(horse) || strider;
         if (strider) {
             bool(line, "suffocating", (Boolean) striderIsSuffocating.invoke(horse));
             bool(line, "noAi", (Boolean) mobIsNoAi.invoke(horse));
         }
-        if (pig) { // no jump nor rearing; the boost its steering counts, and the boost time the client holds
+        if (ghast) { // no jump nor rearing; whether it stays still, its flying speed
+            f32(line, "jumpPendingScale", 0.0F);
+            bool(line, "allowStandSliding", false);
+            bool(line, "standing", false);
+            line.append(",\"standCounter\":0");
+            bool(line, "staysStill", (Boolean) ghastStaysStill.invoke(horse));
+            f64(line, "flyingSpeed", (Double) getAttributeValue.invoke(horse, flyingSpeed));
+        } else if (pig) { // no jump nor rearing; the boost its steering counts, and the boost time the client holds
             f32(line, "jumpPendingScale", 0.0F);
             bool(line, "allowStandSliding", false);
             bool(line, "standing", false);
@@ -269,7 +281,7 @@ public final class Recorder {
         }
         f32(line, "speed", speed.getFloat(horse));
         f64(line, "movementSpeed", (Double) getAttributeValue.invoke(horse, movementSpeed));
-        f64(line, "jumpStrength", pig ? 0.0 : (Double) getAttributeValue.invoke(horse, jumpStrength));
+        f64(line, "jumpStrength", pig || ghast ? 0.0 : (Double) getAttributeValue.invoke(horse, jumpStrength));
         f32(line, "maxUpStep", (Float) maxUpStep.invoke(horse));
         f64(line, "gravity", (Double) getEffectiveGravity.invoke(horse));
         effects(line, (java.util.Map<?, ?>) activeEffects.get(horse));
@@ -279,6 +291,7 @@ public final class Recorder {
             f32(line, "riderZza", livingZza.getFloat(rider));
             f32(line, "riderYRot", yRot.getFloat(rider));
             f32(line, "riderXRot", xRot.getFloat(rider));
+            bool(line, "riderJumping", livingJumping.getBoolean(rider));
         }
         out.append(line).append("}\n");
     }
@@ -569,6 +582,8 @@ public final class Recorder {
         striderSteering = field(loader, TruthAgent.STRIDER, "steering");
         striderIsSuffocating = method(loader, TruthAgent.STRIDER, "isSuffocating()");
         mobIsNoAi = method(loader, TruthAgent.MOB, "isNoAi()");
+        ghastClass = Class.forName(mappings.get(TruthAgent.HAPPY_GHAST).obf(), false, loader);
+        ghastStaysStill = method(loader, TruthAgent.HAPPY_GHAST, "staysStill()");
         String steering = "net.minecraft.world.entity.ItemBasedSteering";
         steeringBoosting = field(loader, steering, "boosting");
         steeringBoostTime = field(loader, steering, "boostTime");
@@ -584,6 +599,7 @@ public final class Recorder {
         getAttributeValue = method(loader, living, "getAttributeValue(net.minecraft.core.Holder)", holder);
         movementSpeed = staticField(loader, "net.minecraft.world.entity.ai.attributes.Attributes", "MOVEMENT_SPEED");
         jumpStrength = staticField(loader, "net.minecraft.world.entity.ai.attributes.Attributes", "JUMP_STRENGTH");
+        flyingSpeed = staticField(loader, "net.minecraft.world.entity.ai.attributes.Attributes", "FLYING_SPEED");
         getType = method(loader, entity, "getType()");
         getPassengers = method(loader, entity, "getPassengers()");
         localPlayerClass = Class.forName(mappings.get(local).obf(), false, loader);

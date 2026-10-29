@@ -149,7 +149,7 @@ public class MovementTruth {
                 && Long.valueOf(0).equals(tracker.get("rideTruthMissing"))
                 && ((Number) tracker.get("horseExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("horseUnexplained"))
                 && Long.valueOf(0).equals(tracker.get("horseTruthMissing")) && ((Number) tracker.get("pigTruthCompared")).longValue() > 0
-                && ((Number) tracker.get("striderTruthCompared")).longValue() > 0
+                && ((Number) tracker.get("striderTruthCompared")).longValue() > 0 && ((Number) tracker.get("ghastTruthCompared")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0
                 && ((Number) tracker.get("ridingUnsaddled")).longValue() > 0;
         System.exit(clean ? 0 : 1);
@@ -184,8 +184,9 @@ public class MovementTruth {
         }
         int[] boatIndex = {0};
         long[] rides = new long[2]; // explained ride ticks compared, the client's boat not a state
-        // explained horse ticks compared, the client's horse not a state, the pig's among them, those boosting, the strider's
-        long[] horses = new long[5];
+        // explained horse ticks compared, the client's horse not a state, the pig's among them, those boosting, the strider's,
+        // the happy ghast's
+        long[] horses = new long[6];
         MovementTracker tracker = new MovementTracker();
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
@@ -260,6 +261,8 @@ public class MovementTruth {
                         }
                     } else if (String.valueOf(post.get("type")).endsWith("strider")) {
                         horses[4]++;
+                    } else if (String.valueOf(post.get("type")).endsWith("happy_ghast")) {
+                        horses[5]++;
                     }
                     HorseState truth = horseState(post);
                     boolean found = false;
@@ -346,6 +349,7 @@ public class MovementTruth {
         out.put("pigTruthCompared", horses[2]);
         out.put("pigBoostedTruthCompared", horses[3]);
         out.put("striderTruthCompared", horses[4]);
+        out.put("ghastTruthCompared", horses[5]);
         out.put("horseTruthMissing", horses[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
@@ -601,7 +605,7 @@ public class MovementTruth {
         /** Every horse tick in scope matched, with a released jump and a tick in water among them. */
         boolean horsesClean() {
             return horseMatched > 0 && horseMismatched == 0 && horseJumps > 0 && horseInWater > 0 && pigTicks > 0 && pigBoosted > 0
-                    && striderBoosted > 0 && striderSuffocating > 0 && striderOnLava > 0 && striderInLava > 0;
+                    && striderBoosted > 0 && striderSuffocating > 0 && striderOnLava > 0 && striderInLava > 0 && ghastRising > 0 && ghastPitched > 0;
         }
 
         boolean boatsClean() {
@@ -821,6 +825,10 @@ public class MovementTruth {
         long striderSuffocating;
         long striderOnLava;
         long striderInLava;
+        /** The happy ghast's ({@code HappyGhast}): rising on its rider's jump key, and steered along a pitch. */
+        long ghastTicks;
+        long ghastRising;
+        long ghastPitched;
         long horseMatched;
         long horseMismatched;
         long horseJumps;
@@ -896,7 +904,9 @@ public class MovementTruth {
             // suffocating modifier as the tick set it), its suffocation the engine's own
             boolean strider = type.equals("minecraft:strider");
             boolean pig = type.equals("minecraft:pig") || strider;
-            float height = strider ? 1.7F : pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+            // a happy ghast (HappyGhast): 4 each way, flying where its rider steers and looks, up while the rider jumps
+            boolean ghast = type.equals("minecraft:happy_ghast");
+            float height = ghast ? 4.0F : strider ? 1.7F : pig ? 0.9F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
             float speed = (float) f64(pre.get("movementSpeed"));
             ItemSteering steered = null;
             Horse.Strider striding = null;
@@ -915,8 +925,9 @@ public class MovementTruth {
             }
             Horse.Conditions conditions = new Horse.Conditions(speed, f64(pre.get("jumpStrength")), f32(pre.get("maxUpStep")),
                     f64(pre.get("gravity")), new Horse.Effects(e.jumpBoost(), e.slowFalling(), e.levitation(), e.dolphinsGrace()),
-                    type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type), pig ? 0.9F : 1.3964844F, height,
-                    border(player), List.of(), striding);
+                    type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F, Horse.FLOATS_WHILE_RIDDEN.contains(type),
+                    ghast ? 4.0F : pig ? 0.9F : 1.3964844F, height, border(player), List.of(), striding,
+                    ghast ? Horse.Flying.of(f64(pre.get("flyingSpeed"))) : null);
             if (e.slowFalling()) {
                 horseUnknown.merge("slow falling (the recorded gravity is the effective one)", 1L, Long::sum);
                 horsesSkipped.add(id);
@@ -926,7 +937,17 @@ public class MovementTruth {
                 horseInterpolating++;
             }
             Horse.Rider rider = pig ? new Horse.Rider(0.0F, 1.0F, f32(pre.get("riderYRot")), f32(pre.get("riderXRot")))
-                    : new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")));
+                    : new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")),
+                            ghast && Boolean.TRUE.equals(pre.get("riderJumping")));
+            if (ghast) {
+                ghastTicks++;
+                if (Boolean.TRUE.equals(pre.get("riderJumping"))) {
+                    ghastRising++;
+                }
+                if (f32(pre.get("riderXRot")) != 0.0F && f32(pre.get("riderZza")) != 0.0F) {
+                    ghastPitched++;
+                }
+            }
             if (strider) {
                 striderTicks++;
                 if (steered.boosting()) {
@@ -1030,6 +1051,9 @@ public class MovementTruth {
             horse.put("striderSuffocating", striderSuffocating);
             horse.put("striderOnLava", striderOnLava);
             horse.put("striderInLava", striderInLava);
+            horse.put("ghastTicks", ghastTicks);
+            horse.put("ghastRising", ghastRising);
+            horse.put("ghastPitched", ghastPitched);
             horse.put("unknown", horseUnknown);
             horse.put("differingFields", horseDifferingFields);
             horse.put("examples", horseExamples);

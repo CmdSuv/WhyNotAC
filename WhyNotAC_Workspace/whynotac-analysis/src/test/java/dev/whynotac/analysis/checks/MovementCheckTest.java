@@ -883,6 +883,56 @@ class MovementCheckTest {
         now += SECOND / 20;
     }
 
+    // --- a happy ghast the player steers ---
+
+    private static final int GHAST = 44;
+    private static final Horse.Conditions GHAST_CONDITIONS = new Horse.Conditions(0.0F, 0.0, 1.0F, 0.08, Horse.Effects.NONE, 0.8F, false, 4.0F,
+            4.0F, null, List.of(), null, Horse.Flying.of(0.05));
+
+    /** A happy ghast (in a harness, or not) put in the air at (x, 70, z), staying still or not; the player ticks a few times on foot. */
+    private void ghastInTheAir(double x, double z, boolean harness, boolean staysStill) throws Colliders.Unknown {
+        out(ClientboundPacket.AddEntity.received(GHAST, new UUID(8, 8), "minecraft:happy_ghast", x, 70.0, z, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0,
+                0));
+        if (harness) {
+            out(new ClientboundPacket.SetEquipment(GHAST, List.of(new ClientboundPacket.SetEquipment.Slot("body",
+                    new Stack("minecraft:white_harness", 1, List.of(), List.of(), null, false)))));
+        }
+        if (staysStill) {
+            out(new ClientboundPacket.SetEntityData(GHAST, List.of(new ClientboundPacket.SetEntityData.DataEntry(18,
+                    ClientboundPacket.SetEntityData.Kind.BOOLEAN, 1)), 0));
+        }
+        out(new ClientboundPacket.EntityPositionSync(GHAST, new Vec3d(x, 70.0, z), Vec3d.ZERO, 0.0F, 0.0F, false));
+        sync();
+        ticks(4, NONE, 30.0F);
+    }
+
+    /** The server puts the player on the ghast; the client handles it before its next tick, the ghast then as it held it. */
+    private void mountGhast(double x, double z) throws Colliders.Unknown {
+        out(new ClientboundPacket.SetPassengers(GHAST, new int[] {SELF}));
+        sync();
+        horse = new HorseState(x, 70.0, z, Vec3d.ZERO, 0.0F, 0.0F, false, false, false, false, 0.0, null, false, Vec3d.ZERO, false, 0, 0.0F, false,
+                false, 0, null, 0.0, false);
+        riderKeys = NONE;
+    }
+
+    /**
+     * One ride tick: the ghast's (the input and jump key its rider's last tick left, the rotation this tick sends), then
+     * the rider's input, its rotation and the ghast's move moved by {@code cheat}.
+     */
+    private void ghastRideTick(PlayerState.Keys keys, float pitch, Vec3d cheat) throws Colliders.Unknown {
+        float[] input = Horse.riderInput(riderKeys);
+        horse = Horse.tick(horse, new Horse.Rider(input[0], input[1], 30.0F, pitch, riderKeys.jump()), GROUND, GHAST_CONDITIONS);
+        if (!keys.equals(sentInput)) {
+            in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), keys.sprint()));
+            sentInput = keys;
+        }
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, pitch, false, true, false, false));
+        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        in(new ServerboundPacket.ClientTickEnd());
+        now += SECOND / 20;
+        riderKeys = keys;
+    }
+
     /** The power of the jump key held so far (jumpRidingScale * 100 for up to 9 ticks held). */
     private int heldJumpPower;
 
@@ -1173,6 +1223,59 @@ class MovementCheckTest {
             striderRideTick(java.util.Set.of("minecraft:stone"));
         }
         assertTrue(horseTicks().stream().allMatch(t -> "riding: a NoAI strider (its suffocation is the server's)".equals(t.reason())),
+                String.valueOf(horseTicks()));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aHappyGhastSteeredByAVanillaClientIsExplainedFromItsMount() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ghastInTheAir(6.5, 6.5, true, false);
+        mountGhast(6.5, 6.5);
+        for (int i = 0; i < 45; i++) {
+            ghastRideTick(i < 15 ? FORWARD : i < 30 ? JUMP : i < 40 ? FORWARD : NONE, i < 10 ? 0.0F : -20.0F, Vec3d.ZERO);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(45, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
+        assertTrue(horse.y() > 70.5 && horse.z() > 7.0, "it flew ahead and up: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aHappyGhastFasterThanItFliesIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ghastInTheAir(6.5, 6.5, true, false);
+        mountGhast(6.5, 6.5);
+        for (int i = 0; i < 20; i++) {
+            ghastRideTick(FORWARD, 0.0F, i == 12 ? new Vec3d(-0.03, 0.0, 0.05) : Vec3d.ZERO); // ghast speed
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith("rode a happy ghast as no vanilla client could"), evidence.getFirst().summary());
+    }
+
+    @Test
+    void aVehicleMoveOnAHappyGhastWithNoHarnessIsAFinding() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ghastInTheAir(6.5, 6.5, false, false);
+        mountGhast(6.5, 6.5);
+        for (int i = 0; i < 5; i++) {
+            ghastRideTick(FORWARD, 0.0F, Vec3d.ZERO);
+        }
+        assertEquals(1, evidence.size(), String.valueOf(horseTicks()));
+        assertTrue(evidence.getFirst().summary().startsWith(MovementTracker.VEHICLE_UNCONTROLLED + " (MoveVehicle on a minecraft:happy_ghast with no harness)"),
+                evidence.getFirst().summary());
+    }
+
+    @Test
+    void noClaimForAHappyGhastStayingStill() throws Exception {
+        ticks(5, NONE, 30.0F);
+        ghastInTheAir(6.5, 6.5, true, true);
+        mountGhast(6.5, 6.5);
+        for (int i = 0; i < 5; i++) {
+            ghastRideTick(FORWARD, 0.0F, Vec3d.ZERO);
+        }
+        assertTrue(horseTicks().stream().allMatch(t -> "riding: a happy ghast staying still (its rider does not steer it)".equals(t.reason())),
                 String.valueOf(horseTicks()));
         assertEquals(List.of(), evidence);
     }

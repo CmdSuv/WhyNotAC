@@ -9,7 +9,8 @@ import java.util.List;
 /**
  * One {@code AbstractHorse.tick()} of a horse (donkey, mule, skeleton or zombie horse) the local player rides and
  * controls (saddled, the player its first passenger: {@code getControllingPassenger}), bit for bit as the 1.21.11 client
- * runs it; a pig's ({@code Mob.tick}) and a strider's ({@code Strider.tick}, {@link Strider}) alike. The tick runs
+ * runs it; a pig's ({@code Mob.tick}), a strider's ({@code Strider.tick}, {@link Strider}) and a happy ghast's
+ * ({@code HappyGhast.tick}, {@link Flying}) alike. The tick runs
  * before its rider's: {@code Entity.baseTick} (fluid currents, a fall in lava halved), then
  * {@code LivingEntity.aiStep}: the interpolation's step toward where the server last put it, the motion's small parts
  * zeroed (a non-player's: each horizontal axis below 0.003), and {@code travelRidden}: the rider's input
@@ -36,8 +37,15 @@ public final class Horse {
     /** Blocks whose {@code entityInside} changes a horse's motion on the client ({@link OnFoot#MOVING_INSIDE}). */
     static final java.util.Set<String> MOVING_INSIDE = OnFoot.MOVING_INSIDE;
 
-    /** What its tick reads of its rider: {@code xxa} and {@code zza} (as its last tick left them), its rotation now. */
-    public record Rider(float xxa, float zza, float yRot, float xRot) {}
+    /**
+     * What its tick reads of its rider: {@code xxa}, {@code zza} and {@code jumping} (as its last tick left them), its
+     * rotation now.
+     */
+    public record Rider(float xxa, float zza, float yRot, float xRot, boolean jumping) {
+        public Rider(float xxa, float zza, float yRot, float xRot) {
+            this(xxa, zza, yRot, xRot, false);
+        }
+    }
 
     /** The effects on the horse the tick reads: jump boost's level (0: none), slow falling, levitation's level, dolphin's grace. */
     public record Effects(int jumpBoost, boolean slowFalling, int levitation, boolean dolphinsGrace) {
@@ -57,16 +65,38 @@ public final class Horse {
      * @param border            the client's world border at the move ({@link Border}); null when it is far
      * @param entities          the boxes of the entities it collides with ({@code canCollideWith}), as the client holds them
      * @param strider           a strider's own tick ({@link Strider}), or null
+     * @param flying            a happy ghast's ({@link Flying}), or null
      */
     public record Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
-            boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider) {
+            boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider, Flying flying) {
         public Conditions {
             entities = List.copyOf(entities);
         }
 
         public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
+                boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities, Strider strider) {
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, strider, null);
+        }
+
+        public Conditions(float speed, double jumpStrength, float stepHeight, double gravity, Effects effects, float waterSlowDown,
                 boolean floatsWhileRidden, float width, float height, Border border, List<Box> entities) {
-            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, null);
+            this(speed, jumpStrength, stepHeight, gravity, effects, waterSlowDown, floatsWhileRidden, width, height, border, entities, null, null);
+        }
+    }
+
+    /**
+     * A happy ghast ({@code HappyGhast}): it flies where its rider steers ({@code getRiddenInput}: the rider's strafe, ahead
+     * along the rider's pitch, backward half as fast, 0.5 up while it jumps, all times 3.9 times the flying speed attribute),
+     * turns 8% of the way to its rider's yaw each tick ({@code tickRidden}), and moves with no gravity
+     * ({@code travelFlying}: the same speed in water, lava and air, then 0.8, 0.5 or 0.91 of its motion); its fall is never
+     * counted ({@code checkFallDamage} does nothing).
+     *
+     * @param speed      {@code (float) flying speed * 5 / 3}
+     * @param inputScale {@code 3.9F * flying speed}
+     */
+    public record Flying(float speed, double inputScale) {
+        public static Flying of(double flyingSpeed) {
+            return new Flying((float) flyingSpeed * 5.0F / 3.0F, 3.9F * flyingSpeed);
         }
     }
 
@@ -254,6 +284,31 @@ public final class Horse {
         if (conditions.effects().slowFalling() || conditions.effects().levitation() > 0) {
             fallDistance = 0.0; // resetFallDistance
         }
+        Flying flying = conditions.flying();
+        if (flying != null) {
+            // travelRidden: HappyGhast.getRiddenInput, tickRidden, then travel (travelFlying)
+            float up = 0.0F;
+            float ahead = 0.0F;
+            if (rider.zza() != 0.0F) {
+                float cos = VanillaMath.cos(rider.xRot() * VanillaMath.DEG_TO_RAD);
+                float sin = -VanillaMath.sin(rider.xRot() * VanillaMath.DEG_TO_RAD);
+                if (rider.zza() < 0.0F) {
+                    cos *= -0.5F;
+                    sin *= -0.5F;
+                }
+                up = sin;
+                ahead = cos;
+            }
+            if (rider.jumping()) {
+                up += 0.5F;
+            }
+            Vec3d steered = new Vec3d(rider.xxa(), up, ahead).scale(flying.inputScale());
+            float turned = yRot + VanillaMath.wrapDegrees(rider.yRot() - yRot) * 0.08F;
+            setRot(turned, rider.xRot() * 0.5F);
+            travelFlying(steered, flying.speed());
+            applyEffectsFromBlocks();
+            return;
+        }
         // travelRidden: getRiddenInput, tickRidden, then travel at the ridden speed
         Vec3d input;
         if (onGround && jumpPendingScale == 0.0F && standing && !allowStandSliding) {
@@ -348,6 +403,21 @@ public final class Horse {
             throw new Colliders.Unknown("movement in an unloaded chunk");
         }
         delta = new Vec3d(after.x() * drag, vy * 0.98F, after.z() * drag);
+    }
+
+    /** {@code LivingEntity.travelFlying(input, speed, speed, speed)}: no gravity; in water, lava or air its own drag. */
+    private void travelFlying(Vec3d input, float speed) throws Colliders.Unknown {
+        Box before = box();
+        delta = delta.add(Vec3d.inputVector(input, speed, yRot)); // moveRelative
+        move(delta);
+        requireInScope(before, box(), "along the move");
+        if (wasTouchingWater) {
+            delta = delta.scale(0.8F);
+        } else if (lavaHeight > 0.0) { // isInLava
+            delta = delta.scale(0.5);
+        } else {
+            delta = delta.scale(0.91F);
+        }
     }
 
     /** {@code getEffectiveGravity}: slow falling holds a fall to 0.01. */
@@ -514,7 +584,9 @@ public final class Horse {
         int legacyState = state(onPos(0.2F)); // getOnPosLegacy
         // checkFallDamage: LivingEntity's looks for water again when not in it (and pushes), then Entity's counts the fall; a
         // strider's in lava only forgets the fall
-        if (conditions.strider() != null && lavaHeight > 0.0) {
+        if (conditions.flying() != null) {
+            // HappyGhast.checkFallDamage: nothing
+        } else if (conditions.strider() != null && lavaHeight > 0.0) {
             fallDistance = 0.0;
         } else {
             if (!wasTouchingWater) {

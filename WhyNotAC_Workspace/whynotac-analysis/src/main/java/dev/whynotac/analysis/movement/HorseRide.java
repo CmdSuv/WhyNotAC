@@ -21,8 +21,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The horse (donkey, mule, skeleton or zombie horse) the client's own player rides and steers, tick by tick (decompiled
- * 1.21.11): every state it may be in ({@link HorseState}), what its next tick reads of its rider, and what it is. While
+ * The horse (donkey, mule, skeleton or zombie horse), pig, strider or happy ghast the client's own player rides and steers,
+ * tick by tick (decompiled 1.21.11): every state it may be in ({@link HorseState}), what its next tick reads of its rider, and what it is. While
  * the player is its controlling passenger ({@code AbstractHorse.getControllingPassenger}: saddled, the player its first
  * passenger) the client moves it with its own physics: each client tick it runs {@code AbstractHorse.tick}
  * ({@link Horse}) before its rider's tick, which then sends the rider's rotation ({@code MovePlayer.Rot}), a riding
@@ -72,6 +72,7 @@ final class HorseRide {
     static final String STEP_HEIGHT = "minecraft:step_height";
     static final String GRAVITY = "minecraft:gravity";
     static final String JUMP_BOOST = "minecraft:jump_boost";
+    static final String FLYING_SPEED = "minecraft:flying_speed";
 
     final int vehicle;
     /** The mount's sequence: where the claim's state starts. */
@@ -86,6 +87,10 @@ final class HorseRide {
     boolean pig;
     /** A strider ({@code Strider}): steered as a pig is; it stands on lava, and suffocates out of the warm ({@link Horse.Strider}). */
     boolean strider;
+    /** A happy ghast ({@code HappyGhast}): it flies where its rider steers and looks ({@link Horse.Flying}), and never jumps. */
+    boolean ghast;
+    /** Its flying speed attribute's value. */
+    double flyingSpeed;
     /** The movement speed attribute's value ({@code getAttributeValue}, a double: a pig's ridden speed is computed from it). */
     double speedAttribute;
     /** A strider's, with its suffocating modifier ({@link ClientEntities#SUFFOCATING_SPEED}). */
@@ -131,33 +136,38 @@ final class HorseRide {
 
     /** The default of an attribute the server did not send ({@code DefaultAttributes} of the type). */
     static double defaultAttribute(String type, String attribute) {
-        // Pig.createAttributes, Strider.createAttributes: the animal's, a speed of 0.25 and 0.175F
-        boolean pig = type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER);
+        // Pig.createAttributes, Strider.createAttributes, HappyGhast.createAttributes: the animal's, a speed of 0.25, 0.175F
+        // and 0.05 (a flying speed of 0.05)
+        boolean pig = type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER) || type.equals(ClientEntities.HAPPY_GHAST);
         return switch (attribute) {
             case MOVEMENT_SPEED -> switch (type) {
                 case "minecraft:donkey", "minecraft:mule", ClientEntities.STRIDER -> 0.175F; // createBaseChestedHorseAttributes
                 case "minecraft:skeleton_horse" -> 0.2F;
                 case ClientEntities.PIG -> 0.25;
+                case ClientEntities.HAPPY_GHAST -> 0.05;
                 default -> 0.225F; // createBaseHorseAttributes
             };
             case ClientEntities.SUFFOCATING_SPEED -> 0.175F + 0.175F * (double) -0.34F; // calculateValue: the base, plus the base times the amount
             case JUMP_STRENGTH -> pig ? 0.0 : type.equals("minecraft:donkey") || type.equals("minecraft:mule") ? 0.5 : 0.7;
             case STEP_HEIGHT -> pig ? 0.6 : 1.0;
             case GRAVITY -> 0.08;
+            case FLYING_SPEED -> type.equals(ClientEntities.HAPPY_GHAST) ? 0.05 : 0.4;
             default -> throw new IllegalArgumentException(attribute);
         };
     }
 
     /**
      * {@code EntityType.Builder.sized}: every horse is 1.3964844 wide, a donkey 1.5 tall and the others 1.6; a pig 0.9 each
-     * way; a strider 0.9 wide and 1.7 tall.
+     * way; a strider 0.9 wide and 1.7 tall; a happy ghast 4 each way.
      */
     static float height(String type) {
-        return type.equals(ClientEntities.PIG) ? 0.9F : type.equals(ClientEntities.STRIDER) ? 1.7F : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
+        return type.equals(ClientEntities.HAPPY_GHAST) ? 4.0F : type.equals(ClientEntities.PIG) ? 0.9F : type.equals(ClientEntities.STRIDER) ? 1.7F
+                : type.equals("minecraft:donkey") ? 1.5F : 1.6F;
     }
 
     static float width(String type) {
-        return type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER) ? 0.9F : 1.3964844F;
+        return type.equals(ClientEntities.HAPPY_GHAST) ? 4.0F : type.equals(ClientEntities.PIG) || type.equals(ClientEntities.STRIDER) ? 0.9F
+                : 1.3964844F;
     }
 
     /** {@code BlockTags.STRIDER_WARM_BLOCKS} (vanilla; {@link EngineTags} holds the client to it). */
@@ -172,7 +182,7 @@ final class HorseRide {
                 (float) (suffocatingSpeedAttribute * 0.35F * steering.factor(boostTotal)), STRIDER_WARM_BLOCKS);
         return new Horse.Conditions(ridden, jumpStrength, Math.max(stepHeight, 1.0F), noGravity ? 0.0 : gravityAttribute,
                 new Horse.Effects(jumpBoost, false, 0, false), type.equals("minecraft:skeleton_horse") ? 0.96F : 0.8F,
-                Horse.FLOATS_WHILE_RIDDEN.contains(type), width(type), height(type), border, entities, s);
+                Horse.FLOATS_WHILE_RIDDEN.contains(type), width(type), height(type), border, entities, s, ghast ? Horse.Flying.of(flyingSpeed) : null);
     }
 
     /**
@@ -193,8 +203,15 @@ final class HorseRide {
         }
         boolean strider = m.type().equals(ClientEntities.STRIDER);
         boolean pig = m.type().equals(ClientEntities.PIG);
+        boolean ghast = m.type().equals(ClientEntities.HAPPY_GHAST);
         boolean steered = pig || strider; // by an item on a stick: neither tame nor read their rider's keys
-        if (m.saddle() != 1 || !steered && (m.flags() & FLAG_TAME) == 0 || m.baby() || Double.compare(m.scale(), 1.0) != 0) {
+        if (ghast && (m.saddle() != 1 || m.baby() || Double.compare(m.scale(), 1.0) != 0)) {
+            return unclaimed(vehicle, since, "a happy ghast with no harness, a baby or scaled");
+        }
+        if (ghast && (m.flags() & 1) != 0) { // isOnStillTimeout: getControllingPassenger is null
+            return unclaimed(vehicle, since, "a happy ghast staying still (its rider does not steer it)");
+        }
+        if (!ghast && (m.saddle() != 1 || !steered && (m.flags() & FLAG_TAME) == 0 || m.baby() || Double.compare(m.scale(), 1.0) != 0)) {
             return unclaimed(vehicle, since, steered ? "a " + (pig ? "pig" : "strider") + " not saddled, a baby or scaled"
                     : "a horse not saddled and tame, a baby or scaled");
         }
@@ -215,6 +232,7 @@ final class HorseRide {
         ride.type = m.type();
         ride.pig = pig;
         ride.strider = strider;
+        ride.ghast = ghast;
         ride.steering = m.boost() == 1 ? ItemSteering.synced() : ItemSteering.NONE;
         ride.boostTotal = m.boostTotal();
         try {
@@ -223,6 +241,7 @@ final class HorseRide {
             if (strider) {
                 ride.suffocatingSpeedAttribute = ride.attribute(m.attributes(), ClientEntities.SUFFOCATING_SPEED);
             }
+            ride.flyingSpeed = ride.attribute(m.attributes(), FLYING_SPEED);
             ride.jumpStrength = ride.attribute(m.attributes(), JUMP_STRENGTH);
             ride.stepHeight = (float) ride.attribute(m.attributes(), STEP_HEIGHT);
             ride.gravityAttribute = ride.attribute(m.attributes(), GRAVITY);
@@ -322,7 +341,10 @@ final class HorseRide {
                     } else if ((pig || strider) && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.INT) { // DATA_BOOST_TIME
                         steering = ItemSteering.synced(); // onSynced: whatever the value
                         boostTotal = (int) e.value();
-                    } else if (!pig && !strider && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_ID_FLAGS
+                    } else if (ghast && e.index() == 18 && e.kind() == ClientboundPacket.SetEntityData.Kind.BOOLEAN && e.value() != 0) { // STAYS_STILL
+                        unclaim("the happy ghast stays still (its rider no longer steers it)");
+                        return;
+                    } else if (!pig && !strider && !ghast && e.index() == 17 && e.kind() == ClientboundPacket.SetEntityData.Kind.BYTE) { // DATA_ID_FLAGS
                         boolean standing = (e.value() & FLAG_STANDING) != 0;
                         if ((e.value() & FLAG_TAME) == 0) {
                             unclaim("the horse no longer tame");
@@ -375,6 +397,7 @@ final class HorseRide {
                         }
                         case JUMP_STRENGTH -> jumpStrength = value;
                         case STEP_HEIGHT -> stepHeight = (float) value;
+                        case FLYING_SPEED -> flyingSpeed = value;
                         default -> gravityAttribute = value;
                     }
                 }
@@ -393,8 +416,8 @@ final class HorseRide {
             }
             case ClientboundPacket.SetEquipment equipment -> {
                 for (ClientboundPacket.SetEquipment.Slot slot : equipment.slots()) {
-                    if (slot.slot().equals("saddle")) {
-                        unclaim("the horse's saddle changed");
+                    if (slot.slot().equals(ghast ? "body" : "saddle")) {
+                        unclaim(ghast ? "the happy ghast's harness changed" : "the horse's saddle changed");
                         return;
                     }
                 }
@@ -459,7 +482,8 @@ final class HorseRide {
         }
         boolean steered = pig || strider;
         float[] input = steered ? new float[] {0.0F, 1.0F} : Horse.riderInput(keys); // getRiddenInput: ahead, whatever the keys
-        Horse.Rider rider = new Horse.Rider(input[0], input[1], rot.yaw(), rot.pitch());
+        // a happy ghast reads its rider's jump key too (applyInput: jumping)
+        Horse.Rider rider = new Horse.Rider(input[0], input[1], rot.yaw(), rot.pitch(), ghast && keys.jump());
         if (steered) {
             steering = steering.tick(boostTotal); // tickRidden: tickBoost, before getRiddenSpeed
         }
@@ -496,13 +520,13 @@ final class HorseRide {
         if (next.isEmpty()) {
             keys = now;
             unclaim("unexplained horse movement");
-            return new Step(false, "no vanilla client rides a " + (pig ? "pig" : strider ? "strider" : "horse") + " so", closest);
+            return new Step(false, "no vanilla client rides a " + (pig ? "pig" : strider ? "strider" : ghast ? "happy ghast" : "horse") + " so", closest);
         }
-        if (steered) { // not PlayerRideableJumping: the rider's jump key does nothing (LocalPlayer.jumpableVehicle)
+        if (steered || ghast) { // not PlayerRideableJumping: no riding jump (LocalPlayer.jumpableVehicle)
             keys = now;
             if (!jumps.isEmpty()) {
                 unclaim("unexplained riding jump");
-                return new Step(false, "sent a riding jump from a " + (pig ? "pig" : "strider") + ", which has none", null);
+                return new Step(false, "sent a riding jump from a " + (pig ? "pig" : strider ? "strider" : "happy ghast") + ", which has none", null);
             }
             ticked = List.copyOf(next);
             if (next.size() > MAX_STATES) {

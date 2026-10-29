@@ -497,6 +497,23 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   son tikin lavı, lavda yürüme, lavda düşüş) testleri kırar. `MovementCheckTest`: taştan lava sürülen 70 tik açıklanır;
   karada lavdaki kadar hızlı giden strider bulgu; oltasız ve NoAI strider'da iddia yok. `ClientEntitiesTest`: hızlanma ve
   iki hız değeri.
+- **Sürülen happy ghast (`HorseRide`, happy ghast olarak):** koşumlu (gövde yuvasında: `isWearingBodyArmor`) happy
+  ghast'ın ilk yolcusu oyuncuysa ve ghast yerinde durmuyorsa (`isOnStillTimeout`: istemcide `STAYS_STILL` verisi) client
+  onu kendi fiziğiyle uçurur (`Horse.Flying`): girdi binicinin son tikindeki yan adımı ve ileri/geri tuşu (`xxa`, `zza`),
+  ileri binicinin bakışı boyunca (`cos`/`-sin` eğim; geri yarı hızla), zıplama tuşu basılıyken 0.5 yukarı, hepsi uçuş hızı
+  özniteliğinin 3.9 katıyla; dönüşü her tik binicinin yönüne yolun %8'i (`tickRidden`, eğimi binicininkinin yarısı);
+  yer çekimi yok (`travelFlying`: suda, lavda ve havada aynı hız, sonra hızın 0.8, 0.5 ya da 0.91'i), düşüşü hiç
+  sayılmaz (`checkFallDamage` boş), boyutu 4 × 4. Replika koşumu, `STAYS_STILL`'i ve uçuş hızını binişe kadar tutar.
+  **İddia yok:** koşumsuz, yavru ya da ölçekli ghast, binişte ya da sürüşte yerinde duran ghast (biri üstüne çıkınca
+  sunucu bunu açar: client artık sürmez), koşumu değişen; atınkilerin geri kalanı da. Ghast'la binek zıplaması kanıttır;
+  koşumsuz ghast'ta `MoveVehicle` eyer kuralıyla kanıttır. **Doğrulama:** gerçek client parkurunda iki ghast ayağı (yukarı bakarak ileri, zıplama
+  tuşuyla yukarı, geri ve yana; aşağı bakarak çime iniş; eğim binişten önce verilir); CI kapısı motorun ghast tiklerinin
+  client'la bit bit aynı olmasını (yükselirken ve eğimle sürülürken tikler dahil) ve takipçinin onları açıklamasını
+  ister. `HappyGhastTest`: bakış
+  boyunca ileri ve yer çekimsiz, aşağı bakınca aşağı, geri yarı hızla, zıplama tuşuyla yukarı, kısa yoldan %8 dönüş, suda
+  0.8, düşüş sayılmaz; `MovementCheckTest`: 45 tik ileri, yukarı ve eğimli sürüş açıklanır, hızından ileri `MoveVehicle`
+  bulgu, koşumsuz ghast'ta `MoveVehicle` bulgu, yerinde duran ghast'ta iddia yok; mutasyonlar (zıplama tuşu, uçuş hızı,
+  yerinde durma, `wrapDegrees`, 0.91F, geri çarpanı, düşüş) testleri kırar.
 - **Araçsızken araç paketi:** yürürken bir `MoveVehicle`, `PaddleBoat` ya da binek zıplaması yaya iddiasını bitirirdi;
   hile her tike bir tane ekleyerek kontrolü susturabilirdi. Vanilla client bunları yalnızca bir aracın yolcusuyken
   gönderir (`LocalPlayer.tick`, kök aracı için `handleMoveVehicle` ve `handleTeleportEntity`, sürdüğü teknenin

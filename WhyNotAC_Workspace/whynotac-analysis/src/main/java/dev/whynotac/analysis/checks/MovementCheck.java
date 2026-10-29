@@ -38,7 +38,8 @@ import java.util.TreeMap;
  * likewise ({@code HorseRide}): its tick from every state under the rider's input, rotation and riding jump, whose
  * power its jump key decides (horse speed, horse fly and jump power cheats), and a pig the player steers with a carrot
  * on a stick, ahead at the speed its boost gives and with no jump (pig speed and pig fly cheats), and a strider with a
- * warped fungus on a stick, standing on lava and slowed out of the warm (strider speed and strider fly cheats). What only a passenger
+ * warped fungus on a stick, standing on lava and slowed out of the warm (strider speed and strider fly cheats), and a
+ * happy ghast in a harness, flying where its rider looks with no gravity (ghast speed cheats). What only a passenger
  * sends (a vehicle move, a paddle packet, a riding jump, the vehicle's inventory) while the client rode nothing is one
  * too: on foot it would otherwise only end the claim; so is what only a vehicle's controller sends (a vehicle move, a
  * paddle packet, a riding jump) while it rode only vehicles of types no player controls (a minecart, another player, a
@@ -142,7 +143,8 @@ public final class MovementCheck implements TimelineListener {
             }
             sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, tick.since(), tick.sequence(), tick.nanoTime(),
                     tick.nanoTime(), (tick.reason() == null ? "rode a horse" : tick.reason().contains("pig") ? "rode a pig"
-                            : tick.reason().contains("strider") ? "rode a strider" : "rode a horse")
+                            : tick.reason().contains("strider") ? "rode a strider" : tick.reason().contains("happy ghast") ? "rode a happy ghast"
+                            : "rode a horse")
                     + " as no vanilla client could (tick " + tick.number() + ")", details, admissibility));
             state.lastReportNanos = tick.nanoTime();
             state.unexplainedSinceReport = 0;

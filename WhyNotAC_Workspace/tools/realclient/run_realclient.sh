@@ -111,7 +111,7 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "fill 60 -61 29 65 -61 31 minecraft:powder_snow" "fill 68 -62 29 70 -61 31 minecraft:powder_snow" \
   "forceload add 32 -48 127 -17" "forceload add -120 -72 -40 -56" "forceload add -95 -106 -63 -74" "fill 40 -62 -40 70 -61 -28 minecraft:water" "fill 60 -63 -37 66 -63 -31 minecraft:water" \
-  "forceload add -158 -72 -121 -56" "fill -147 -61 -67 -136 -61 -62 minecraft:lava" "fill -129 -61 -67 -126 -61 -62 minecraft:air" \
+  "forceload add -158 -72 -121 -56" "forceload add -158 -100 -121 -73" "fill -147 -61 -67 -136 -61 -62 minecraft:lava" "fill -129 -61 -67 -126 -61 -62 minecraft:air" \
   "fill -129 -61 -67 -129 -61 -62 minecraft:lava" \
   "fill 76 -61 -40 87 -61 -28 minecraft:ice" "fill 88 -61 -40 100 -61 -28 minecraft:blue_ice" "fill 101 -60 -40 101 -59 -28 minecraft:stone" \
   "fill 76 -61 -26 84 -61 -24 minecraft:slime_block" \
@@ -508,6 +508,17 @@ unstrider() { echo "kill @e[tag=wns]" > "$FIFO"; sleep 2.0; }
 strider -151; paddle -/6.0; unstrider
 strider -131; paddle Button3/0.2 -/4.0; unstrider
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"
+# A happy ghast in a harness, over the grass at x -158..-121, z -100..-73 (forceloaded at the start): NoAI (it floats where
+# it is put), the player put on it from beside it (not above it: that would hold it still) with a pitch the leg sets, the
+# course having no mouse motion. It flies where the rider looks: ahead and up looking up, up on the jump key, back half as
+# fast, and ahead and down looking down onto the grass. The truth agent records its tick (HappyGhast.tick).
+ghast() { echo "kill @e[tag=wng]" > "$FIFO"; echo "tp $NAME -144.5 -60 -85.5 -90 $1" > "$FIFO"; sleep 1.5
+  echo "summon minecraft:happy_ghast -140.5 -57 -85.5 {Tags:[\"wng\"],NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Rotation:[-90f,0f],equipment:{body:{id:\"minecraft:white_harness\",count:1}}}" > "$FIFO"; sleep 1.5
+  echo "ride $NAME mount @e[tag=wng,limit=1]" > "$FIFO"; sleep 1.0; }
+# taken off it onto the grass first (a fall from its back would hurt)
+unghast() { echo "tp $NAME -144.5 -60 -85.5 -90 0" > "$FIFO"; sleep 0.5; echo "kill @e[tag=wng]" > "$FIFO"; sleep 2.0; }
+ghast -20; paddle w/2.0 space/1.0 w,space/1.0 s/1.0 a/0.6 -/1.0; unghast
+ghast 30; paddle w/2.5 -/1.0; unghast
 echo "item replace entity $NAME weapon.offhand with minecraft:shield" > "$FIFO"; sleep 0.5
 # A minecart, on the grass lane: no player controls one (getControllingPassenger null), so the client, ridden and walked
 # with W, sends no vehicle move (the movement check's VEHICLE_UNCONTROLLED is in force over these ticks).

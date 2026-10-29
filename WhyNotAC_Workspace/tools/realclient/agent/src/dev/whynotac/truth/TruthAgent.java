@@ -18,7 +18,7 @@ import jdk.internal.org.objectweb.asm.Opcodes;
  * {@code AbstractBoat.tick()}, which record a boat the player steers (its tick runs before the player's), and two to
  * {@code AbstractHorse.tick()}, which record a horse (donkey, mule, ...) the player rides, likewise, and two to
  * {@code Mob.tick()}, which record a pig the player steers (a pig has no tick of its own) in the horse's form, and two to
- * {@code Strider.tick()}, which record a strider the player steers likewise.
+ * {@code Strider.tick()} and {@code HappyGhast.tick()}, which record a strider and a happy ghast the player steers likewise.
  *
  * <p>Nothing else in the client changes, and the recorder only reads. Obfuscated names come from Mojang's
  * own mappings file for the same version. Uses the JDK's internal copy of ASM, so the agent has no
@@ -34,7 +34,8 @@ public final class TruthAgent {
     static final String MOB = "net.minecraft.world.entity.Mob";
     static final String PIG = "net.minecraft.world.entity.animal.pig.Pig";
     static final String STRIDER = "net.minecraft.world.entity.monster.Strider";
-    static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, ABSTRACT_BOAT, ABSTRACT_HORSE, MOB, PIG, STRIDER, "net.minecraft.world.entity.ItemBasedSteering", "net.minecraft.world.entity.ai.attributes.Attributes",
+    static final String HAPPY_GHAST = "net.minecraft.world.entity.animal.happyghast.HappyGhast";
+    static final Set<String> CLASSES = Set.of(LOCAL_PLAYER, ABSTRACT_BOAT, ABSTRACT_HORSE, MOB, PIG, STRIDER, HAPPY_GHAST, "net.minecraft.world.entity.ItemBasedSteering", "net.minecraft.world.entity.ai.attributes.Attributes",
             "net.minecraft.core.Holder", "net.minecraft.world.entity.InterpolationHandler", "net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity",
             "net.minecraft.client.player.ClientInput", "net.minecraft.world.entity.player.Input", "net.minecraft.world.phys.Vec3",
             "net.minecraft.client.multiplayer.ClientPacketListener", "net.minecraft.core.Vec3i", "net.minecraft.world.phys.Vec2",
@@ -57,6 +58,8 @@ public final class TruthAgent {
         String mobTick = mappings.method(MOB, "tick()");
         String strider = mappings.get(STRIDER).obf().replace('.', '/');
         String striderTick = mappings.method(STRIDER, "tick()");
+        String ghast = mappings.get(HAPPY_GHAST).obf().replace('.', '/');
+        String ghastTick = mappings.method(HAPPY_GHAST, "tick()");
         instrumentation.addTransformer(new ClassFileTransformer() {
             @Override
             public byte[] transform(ClassLoader loader, String className, Class<?> redefined, ProtectionDomain domain, byte[] bytes) {
@@ -76,6 +79,9 @@ public final class TruthAgent {
                     if (strider.equals(className)) { // its own tick: its suffocation first, floatStrider after Mob.tick
                         return instrument(bytes, striderTick, "horsePre", "horsePost");
                     }
+                    if (ghast.equals(className)) {
+                        return instrument(bytes, ghastTick, "horsePre", "horsePost");
+                    }
                     return null;
                 } catch (RuntimeException e) {
                     System.err.println("[whynotac-truth] could not instrument " + className + ": " + e);
@@ -85,7 +91,7 @@ public final class TruthAgent {
         });
         System.err.println("[whynotac-truth] recording " + LOCAL_PLAYER + " (" + target + ")." + tick + "() and " + ABSTRACT_BOAT + " (" + boat + ")."
                 + boatTick + "(), " + ABSTRACT_HORSE + " (" + horse + ")." + horseTick + "(), " + MOB + " (" + mob + ")." + mobTick + "(), " + STRIDER
-                + " (" + strider + ")." + striderTick + "() to " + parts[1]);
+                + " (" + strider + ")." + striderTick + "(), " + HAPPY_GHAST + " (" + ghast + ")." + ghastTick + "() to " + parts[1]);
     }
 
     static byte[] instrument(byte[] bytes, String tickName, String pre, String post) {
