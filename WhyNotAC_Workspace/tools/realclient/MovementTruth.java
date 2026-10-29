@@ -113,6 +113,14 @@ public class MovementTruth {
             }
             for (java.util.Iterator<Integer> it = mounting.iterator(); it.hasNext(); ) {
                 int id = it.next();
+                List<ClientEntities.HorseMounted> horse = replicas.entities().entities(session).horseMounted(id);
+                if (horse != null) {
+                    it.remove();
+                    if (horse.size() == 1 && horse.getFirst().exact()) {
+                        comparison.horseMounted.put(id, horse.getFirst());
+                    }
+                    continue;
+                }
                 List<ClientEntities.Mounted> mounted = replicas.entities().entities(session).mounted(id);
                 if (mounted != null) {
                     it.remove();
@@ -792,6 +800,11 @@ public class MovementTruth {
         final Map<String, Long> horseDifferingFields = new TreeMap<>();
         final List<String> horseExamples = new ArrayList<>();
         private final java.util.Set<Integer> horsesSkipped = new java.util.HashSet<>();
+        /** The replica's horse at each mount, the interpolation each horse's last compared tick left, and the horses seen. */
+        final Map<Integer, ClientEntities.HorseMounted> horseMounted = new HashMap<>();
+        private final Map<Integer, BoatState.Interpolation> horseInterpolations = new HashMap<>();
+        private final java.util.Set<Integer> horsesSeen = new java.util.HashSet<>();
+        long horseInterpolating;
 
         /**
          * The horse's tick from {@code pre} to {@code post} ({@code Horse.tick}), under its rider as {@code pre} records it,
@@ -800,24 +813,50 @@ public class MovementTruth {
         @SuppressWarnings("unchecked")
         private void compareHorse(Map<String, Object> pre, Map<String, Object> post, Map<String, Object> player, Colliders.World world) {
             int id = ((Number) pre.get("id")).intValue();
-            if (Boolean.TRUE.equals(pre.get("interpolating"))) {
-                horseUnknown.merge("interpolating toward a position the server sent (not followed for a horse yet)", 1L, Long::sum);
-                horsesSkipped.add(id);
+            boolean interpolating = Boolean.TRUE.equals(pre.get("interpolating"));
+            // the interpolation it runs toward where the server put it: the replica's at the mount, then what each tick leaves
+            boolean first = horsesSeen.add(id);
+            BoatState.Interpolation interpolation = horseInterpolations.remove(id);
+            if (first) {
+                ClientEntities.HorseMounted m = horseMounted.get(id);
+                interpolation = m == null || m.steps() == 0 ? null : new BoatState.Interpolation(m.steps(), m.target(), m.targetYRot(),
+                        m.targetXRot(), m.previousPosition(), m.previousYRot(), m.previousXRot());
+                if (m == null && interpolating) {
+                    horseUnknown.merge("interpolating toward a position the server sent, the replica's state at the mount not known", 1L, Long::sum);
+                    horsesSkipped.add(id);
+                    return;
+                }
+            }
+            if (horsesSkipped.contains(id) && interpolating) {
+                horseUnknown.merge("interpolating after a tick that was not compared", 1L, Long::sum);
                 return;
+            }
+            horsesSkipped.remove(id);
+            if (interpolating != (interpolation != null)) {
+                throw new IllegalStateException("the horse's interpolation at tick " + pre.get("tickCount") + " is not the client's: " + interpolating
+                        + " vs " + interpolation);
             }
             if (Boolean.TRUE.equals(pre.get("firstTick"))) {
                 horseUnknown.merge("the horse's first tick", 1L, Long::sum);
+                horsesSkipped.add(id);
                 return;
             }
-            HorseState before = horseState(pre);
-            if (entities != null && entities.mayHaveVehicleColliderNear(selfId, id, before.x() - 3.0, before.y() - 3.0, before.z() - 3.0, before.x() + 3.0,
-                    before.y() + 4.6, before.z() + 3.0, 64.0)) {
+            HorseState t = horseState(pre);
+            HorseState before = new HorseState(t.x(), t.y(), t.z(), t.deltaMovement(), t.yRot(), t.xRot(), t.onGround(), t.horizontalCollision(),
+                    t.verticalCollision(), t.verticalCollisionBelow(), t.fallDistance(), t.support(), t.onGroundNoBlocks(), t.stuckSpeedMultiplier(),
+                    t.inPowderSnow(), t.noJumpDelay(), t.jumpPendingScale(), t.allowStandSliding(), t.standing(), t.standCounter(), interpolation);
+            double reach = interpolation == null ? 0.0 : Math.abs(interpolation.target().x() - t.x()) + Math.abs(interpolation.target().y() - t.y())
+                    + Math.abs(interpolation.target().z() - t.z());
+            if (entities != null && entities.mayHaveVehicleColliderNear(selfId, id, before.x() - 3.0 - reach, before.y() - 3.0 - reach,
+                    before.z() - 3.0 - reach, before.x() + 3.0 + reach, before.y() + 4.6 + reach, before.z() + 3.0 + reach, 64.0)) {
                 horseUnknown.merge("an entity the horse may meet is near", 1L, Long::sum);
+                horsesSkipped.add(id);
                 return;
             }
             OnFoot.Effects e = effects(pre);
             if (e == null) {
                 horseUnknown.merge("an effect not recorded by name", 1L, Long::sum);
+                horsesSkipped.add(id);
                 return;
             }
             String type = String.valueOf(pre.get("type")).replace("entity.minecraft.", "minecraft:");
@@ -828,7 +867,11 @@ public class MovementTruth {
                     border(player), List.of());
             if (e.slowFalling()) {
                 horseUnknown.merge("slow falling (the recorded gravity is the effective one)", 1L, Long::sum);
+                horsesSkipped.add(id);
                 return;
+            }
+            if (interpolation != null) {
+                horseInterpolating++;
             }
             Horse.Rider rider = new Horse.Rider(f32(pre.get("riderXxa")), f32(pre.get("riderZza")), f32(pre.get("riderYRot")), f32(pre.get("riderXRot")));
             HorseState expected = horseState(post);
@@ -841,6 +884,9 @@ public class MovementTruth {
             }
             try {
                 HorseState predicted = Horse.tick(before, rider, world, conditions);
+                if (predicted.interpolation() != null) {
+                    horseInterpolations.put(id, predicted.interpolation());
+                }
                 List<String> d = horseDifferences(predicted, expected);
                 if (d.isEmpty()) {
                     horseMatched++;
@@ -855,6 +901,7 @@ public class MovementTruth {
                 }
             } catch (Colliders.Unknown x) {
                 horseUnknown.merge(x.getMessage().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]", ""), 1L, Long::sum);
+                horsesSkipped.add(id);
             }
         }
 
@@ -896,6 +943,7 @@ public class MovementTruth {
             horse.put("mismatched", horseMismatched);
             horse.put("jumps", horseJumps);
             horse.put("inWater", horseInWater);
+            horse.put("interpolating", horseInterpolating);
             horse.put("unknown", horseUnknown);
             horse.put("differingFields", horseDifferingFields);
             horse.put("examples", horseExamples);

@@ -762,7 +762,9 @@ class MovementCheckTest {
             sentInput = keys;
         }
         in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 30.0F, 0.0F, false, true, false, false));
-        in(new ServerboundPacket.MoveVehicle(new Vec3d(horse.x(), horse.y(), horse.z()).add(cheat), horse.yRot(), horse.xRot(), horse.onGround()));
+        BoatState.Interpolation left = horse.interpolation(); // ServerboundMoveVehiclePacket.fromEntity: its target while it interpolates
+        in(new ServerboundPacket.MoveVehicle((left != null ? left.target() : new Vec3d(horse.x(), horse.y(), horse.z())).add(cheat),
+                left != null ? left.targetYRot() : horse.yRot(), left != null ? left.targetXRot() : horse.xRot(), horse.onGround()));
         in(new ServerboundPacket.ClientTickEnd());
         now += SECOND / 20;
         riderKeys = keys;
@@ -884,6 +886,28 @@ class MovementCheckTest {
         assertEquals(50, rides.size(), String.valueOf(rides));
         assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
         assertTrue(horse.x() > 7.5 || horse.z() > 7.5 || horse.x() < 5.5 || horse.z() < 5.5, "it moved: " + horse);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aHorseMountedWhileItInterpolatesIsExplained() throws Exception {
+        ticks(5, NONE, 30.0F);
+        horseOnGround(6.5, 6.5);
+        // the server moves it a little: the client's horse eases toward there over 3 ticks (LivingEntity's InterpolationHandler)
+        out(new ClientboundPacket.EntityPositionSync(HORSE, new Vec3d(6.5, 64.0, 6.6), Vec3d.ZERO, 0.0F, 0.0F, true));
+        sync();
+        mountHorse(6.5, 6.5);
+        horse = new HorseState(horse.x(), horse.y(), horse.z(), horse.deltaMovement(), horse.yRot(), horse.xRot(), horse.onGround(),
+                horse.horizontalCollision(), horse.verticalCollision(), horse.verticalCollisionBelow(), horse.fallDistance(), horse.support(),
+                horse.onGroundNoBlocks(), horse.stuckSpeedMultiplier(), horse.inPowderSnow(), horse.noJumpDelay(), horse.jumpPendingScale(),
+                horse.allowStandSliding(), horse.standing(), horse.standCounter(),
+                new BoatState.Interpolation(3, new Vec3d(6.5, 64.0, 6.6), 0.0F, 0.0F, new Vec3d(6.5, 64.0, 6.5), 0.0F, 0.0F));
+        for (int i = 0; i < 10; i++) {
+            horseRideTick(FORWARD, Vec3d.ZERO, -1);
+        }
+        List<MovementTracker.Tick> rides = horseTicks();
+        assertEquals(10, rides.size(), String.valueOf(rides));
+        assertTrue(rides.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(rides));
         assertEquals(List.of(), evidence);
     }
 

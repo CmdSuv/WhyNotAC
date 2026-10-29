@@ -574,14 +574,25 @@ public final class ClientEntities {
             if (attribute.key().equals(SCALE_ATTRIBUTE)) {
                 enqueue(seq, head.id, new Op.Scale(seq, attributeValue(attribute)));
             } else if (horse && HORSE_ATTRIBUTES.contains(attribute.key())) {
-                enqueue(seq, head.id, new Op.HorseAttribute(seq, attribute.key(), exactValue(attribute)));
+                enqueue(seq, head.id, new Op.HorseAttribute(seq, attribute.key(), horseAttributeValue(attribute)));
             }
         }
     }
 
-    /** {@code AttributeInstance.calculateValue} without a range; NaN when the client's order of modifiers matters. */
-    static double exactValue(ClientboundPacket.UpdateAttributes.Attribute attribute) {
-        double[] range = AttributeValues.range(attribute, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+    /**
+     * One of {@link #HORSE_ATTRIBUTES} as the client computes it: {@code AttributeInstance.calculateValue}, then the
+     * attribute's range ({@code RangedAttribute.sanitizeValue}: movement speed 0 to 1024, jump strength 0 to 32, step height
+     * 0 to 10, gravity -1 to 1); NaN when the client's order of modifiers matters.
+     */
+    public static double horseAttributeValue(ClientboundPacket.UpdateAttributes.Attribute attribute) {
+        double[] bounds = switch (attribute.key()) {
+            case "minecraft:movement_speed" -> new double[] {0.0, 1024.0};
+            case "minecraft:jump_strength" -> new double[] {0.0, 32.0};
+            case "minecraft:step_height" -> new double[] {0.0, 10.0};
+            case "minecraft:gravity" -> new double[] {-1.0, 1.0};
+            default -> throw new IllegalArgumentException(attribute.key());
+        };
+        double[] range = AttributeValues.range(attribute, bounds[0], bounds[1]);
         return range[0] == range[1] ? range[0] : Double.NaN;
     }
 
@@ -1820,17 +1831,17 @@ public final class ClientEntities {
                                Vec3d sweptMin, Vec3d sweptMax, long motionSeq, int saddle, int flags, int mobFlags, boolean baby, double scale,
                                Map<String, Double> attributes, Map<String, Integer> effects) {}
 
-    /**
-     * The client's state for the horse {@code entityId} at its player's mount, one per candidate (equal ones once); null
-     * when not known for some candidate: the mount not processed in it, the horse not followed before (lost, or ridden
-     * by the player before), or not a horse.
-     */
     /** The type of the entity {@code entityId} once the client has processed everything sent so far (server order), or null. */
     public String type(int entityId) {
         Head head = heads.get(entityId);
         return head == null ? null : head.type;
     }
 
+    /**
+     * The client's state for the horse {@code entityId} at its player's mount, one per candidate (equal ones once); null
+     * when not known for some candidate: the mount not processed in it, the horse not followed before (lost, or ridden
+     * by the player before), or not a horse.
+     */
     public List<HorseMounted> horseMounted(int entityId) {
         Track track = tracks.get(entityId);
         if (track == null) {

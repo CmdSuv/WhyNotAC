@@ -219,6 +219,17 @@ class ClientEntitiesTest {
     }
 
     @Test
+    void aHorsesAttributesAreClampedToTheirRangesAsTheClientDoes() {
+        out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        out(new ClientboundPacket.UpdateAttributes(5, List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:movement_speed", 2000.0, List.of()),
+                new ClientboundPacket.UpdateAttributes.Attribute("minecraft:gravity", -3.0, List.of()))));
+        out(new ClientboundPacket.SetPassengers(5, new int[] {SELF}));
+        sync();
+        // RangedAttribute.sanitizeValue: movement speed at most 1024, gravity at least -1
+        assertEquals(java.util.Map.of("minecraft:movement_speed", 1024.0, "minecraft:gravity", -1.0), entities.horseMounted(5).getFirst().attributes());
+    }
+
+    @Test
     void aHorseThePlayerStoodInMayHaveBeenPushed() {
         out(ClientboundPacket.AddEntity.received(5, new UUID(0, 5), "minecraft:horse", 0.5, 64.0, 0.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
         sync();

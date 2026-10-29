@@ -110,7 +110,7 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "setblock 133 -56 26 minecraft:scaffolding[distance=1,bottom=true]" "setblock 134 -56 26 minecraft:scaffolding[distance=2,bottom=true]" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "fill 60 -61 29 65 -61 31 minecraft:powder_snow" "fill 68 -62 29 70 -61 31 minecraft:powder_snow" \
-  "forceload add 32 -48 127 -17" "forceload add -120 -72 -40 -56" "fill 40 -62 -40 70 -61 -28 minecraft:water" "fill 60 -63 -37 66 -63 -31 minecraft:water" \
+  "forceload add 32 -48 127 -17" "forceload add -120 -72 -40 -56" "forceload add -95 -106 -63 -74" "fill 40 -62 -40 70 -61 -28 minecraft:water" "fill 60 -63 -37 66 -63 -31 minecraft:water" \
   "fill 76 -61 -40 87 -61 -28 minecraft:ice" "fill 88 -61 -40 100 -61 -28 minecraft:blue_ice" "fill 101 -60 -40 101 -59 -28 minecraft:stone" \
   "fill 76 -61 -26 84 -61 -24 minecraft:slime_block" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
@@ -439,29 +439,39 @@ boat 74.5 -34.5 82.5 -55 -34.5 -90 ",NoGravity:1b"; paddle -/0.3; fall; paddle -
 boat 74.5 -22.5 80.5 -55 -25.0 -90 ",NoGravity:1b"; paddle -/0.3; fall; paddle -/2.5 w/0.8 -/0.3; unboat
 boat 44.5 -44.5 45.5 -60 -42.5 -90 ""; paddle w/1.5 a/0.5 -/0.5; unboat
 # Horses, west of everything (x -120..-40, z -71..-57, forceloaded with the rest at the start): four lanes, each ridden
-# from x -78.5, the course on both sides of it (a rider's yaw may turn between the mount and its first tick, mouse
-# input the leg does not send: it then goes west). Grass (z -70); a stone step one block high (x -70, x -88) and a wall
-# two high (x -60, x -98) to jump (z -66); a pool one deep (x -75..-65, -93..-83; z -62); soul sand (x -75..-71,
-# -87..-83) then blue ice (x -68..-60, -98..-90; z -58). Each leg summons a tame, saddled horse with a fixed speed (0.3) and
+# from x -78.5, the course on both sides of it (the rider's yaw may turn between the mount and its first tick, a mouse
+# motion through the X server the leg does not send: it then rides another way). Grass (z -70); a stone step one block
+# high (x -70, x -88) and a wall two high (x -60, x -98) to jump (z -66), and an arena of its own (centre -79, -90) where
+# the step is a ring four blocks out and the wall a ring nine out, met whichever way the horse goes; a pool one deep
+# around the start (x -92..-65,
+# z -64..-60: in water whichever way it goes); soul sand (x -75..-71, -87..-83) then blue ice (x -68..-60, -98..-90;
+# z -58). Each leg summons a tame, saddled horse with a fixed speed (0.3) and
 # jump strength (0.8), invulnerable (a hurt horse may rear: its standing then comes from the server), mounts the player
 # on it and rides it with the keys (W, S, A and D; the jump key held charges a jump, released it jumps). The truth agent
 # records the horse's tick (AbstractHorse.tick), which runs before its rider's.
 echo "fill -120 -61 -72 -40 -55 -56 minecraft:air" > "$FIFO"; echo "fill -120 -61 -72 -40 -61 -56 minecraft:grass_block" > "$FIFO"
 echo "fill -70 -60 -67 -70 -60 -65 minecraft:stone" > "$FIFO"; echo "fill -60 -60 -67 -60 -59 -65 minecraft:stone" > "$FIFO"
 echo "fill -88 -60 -67 -88 -60 -65 minecraft:stone" > "$FIFO"; echo "fill -98 -60 -67 -98 -59 -65 minecraft:stone" > "$FIFO"
-echo "fill -75 -61 -63 -65 -61 -61 minecraft:water" > "$FIFO"; echo "fill -93 -61 -63 -83 -61 -61 minecraft:water" > "$FIFO"
+echo "fill -92 -61 -64 -65 -61 -60 minecraft:water" > "$FIFO"
+echo "fill -95 -61 -106 -63 -55 -74 minecraft:air" > "$FIFO"; echo "fill -95 -61 -106 -63 -61 -74 minecraft:grass_block" > "$FIFO"
+for side in "-83 -60 -94 -75 -60 -94" "-83 -60 -86 -75 -60 -86" "-83 -60 -94 -83 -60 -86" "-75 -60 -94 -75 -60 -86" \
+    "-88 -60 -99 -70 -59 -99" "-88 -60 -81 -70 -59 -81" "-88 -60 -99 -88 -59 -81" "-70 -60 -99 -70 -59 -81"; do
+  echo "fill $side minecraft:stone" > "$FIFO"
+done
 echo "fill -75 -61 -59 -71 -61 -57 minecraft:soul_sand" > "$FIFO"; echo "fill -68 -61 -59 -60 -61 -57 minecraft:blue_ice" > "$FIFO"
 echo "fill -87 -61 -59 -83 -61 -57 minecraft:soul_sand" > "$FIFO"; echo "fill -98 -61 -59 -90 -61 -57 minecraft:blue_ice" > "$FIFO"
 horse() { echo "kill @e[tag=wnh]" > "$FIFO"; echo "tp $NAME -79.5 -60 $1 -90 0" > "$FIFO"; sleep 1.5
   echo "summon minecraft:horse -78.5 -60 $1 {Tags:[\"wnh\"],Tame:1b,Invulnerable:1b,PersistenceRequired:1b,Rotation:[-90f,0f],equipment:{saddle:{id:\"minecraft:saddle\",count:1}},attributes:[{id:\"minecraft:movement_speed\",base:0.3d},{id:\"minecraft:jump_strength\",base:0.8d}]}" > "$FIFO"; sleep 1.5
+  # mounted while it interpolates half a block on (relative to the horse: the console's own ~ is the world spawn)
+  if [ "${2:-}" = nudge ]; then echo "execute as @e[tag=wnh,limit=1] at @s run tp @s ~0.5 ~ ~" > "$FIFO"; fi
   echo "ride $NAME mount @e[tag=wnh,limit=1]" > "$FIFO"; sleep 1.0; }
 # A killed horse keeps its rider through its death (20 ticks): the next leg's teleport waits until it is gone.
 unhorse() { echo "kill @e[tag=wnh]" > "$FIFO"; sleep 2.0; }
 horse -69.5; paddle w/2.0 w,a/1.0 w,d/1.0 s/1.0 -/0.8 a/0.6 -/0.5; unhorse
 horse -69.5; paddle space/0.4 -/1.5 w/0.8 w,space/1.0 w/1.5 -/1.0; unhorse
-horse -65.5; paddle w/2.5 w,space/0.7 w/2.0 -/0.5; unhorse
+horse -89.5; paddle w/2.5 w,space/0.7 w/2.0 -/0.5; unhorse
 horse -61.5; paddle w/3.0 -/0.5 s/1.0 -/0.5; unhorse
-horse -57.5; paddle w/4.0 -/1.5; unhorse
+horse -57.5 nudge; paddle w/4.0 -/1.5; unhorse
 echo "gamerule entity_drops true" > "$FIFO"
 # The world border (its shape, rounded out to whole blocks, collides within a few blocks: isInsideCloseToBorder): 20
 # wide around x 50, z 65.5 (its east side at x 60, its south side at z 75.5), walked into, jumped at, walked along, and

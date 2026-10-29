@@ -2,6 +2,7 @@ package dev.whynotac.analysis.movement;
 
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.physics.BlockPos;
+import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.Box;
 import dev.whynotac.physics.Colliders;
 import dev.whynotac.physics.Horse;
@@ -42,15 +43,16 @@ import java.util.Set;
  * attributes the server sent (the type's defaults else) and the effects. Not followed, so no claim until the ride ends:
  * a mount the client may have processed a tick earlier, a horse the replica did not follow (lost, ridden by the player
  * before), its first tick, its motion not known (the player may have pushed it), a fluid where it has been since that
- * motion was set or a block there changed since, an interpolation still running (not checked against the real client
- * yet), a horse not saddled, not tame, a baby or scaled, an attribute not known exactly, an effect besides jump boost,
+ * motion was set or a block there changed since, a horse not saddled, not tame, a baby or scaled, an attribute not known exactly, an effect besides jump boost,
  * and the rider's keys moving it in its last tick on foot (that input was the on-foot player's).
  *
  * <h2>The ride</h2>
  * Packets about the horse: {@code SetEntityMotion} sets its motion; its no-gravity and rearing flags follow its data,
  * its attributes and effects their packets. Anything else that moves it or the player ends the claim: the server's
  * {@code MoveVehicle}, a teleport of it or of the player, a packet WhyNotAC cannot read. No claim either while an entity
- * it may collide with may be near, near a world border not known exactly, or once it interpolates.
+ * it may collide with may be near, near a world border not known exactly. While the horse still runs the interpolation
+ * toward where the server last put it (the steps it had left at the mount), {@code MoveVehicle} carries the
+ * interpolation's target and rotations ({@code ServerboundMoveVehiclePacket.fromEntity}), as a boat's.
  */
 final class HorseRide {
 
@@ -164,9 +166,6 @@ final class HorseRide {
         if (m.motion() == null) {
             return unclaimed(vehicle, since, "the horse's motion at the mount not known (the player may have pushed it)");
         }
-        if (m.steps() > 0) {
-            return unclaimed(vehicle, since, "the horse still interpolates (not followed for a horse yet)");
-        }
         if (keys == null || keys.forward() != keys.backward() || keys.left() != keys.right()) {
             return unclaimed(vehicle, since, "the rider's keys moved it on foot before the mount");
         }
@@ -233,8 +232,10 @@ final class HorseRide {
             }
         }
         Vec3d at = m.position();
+        BoatState.Interpolation interpolation = m.steps() == 0 ? null : new BoatState.Interpolation(m.steps(), m.target(), m.targetYRot(),
+                m.targetXRot(), m.previousPosition(), m.previousYRot(), m.previousXRot());
         ride.states = List.of(new HorseState(at.x(), at.y(), at.z(), m.motion(), m.yRot(), m.xRot(), onGround, false, false, false, 0.0, support, false,
-                Vec3d.ZERO, false, 0, 0.0F, false, (m.flags() & FLAG_STANDING) != 0, 0, null));
+                Vec3d.ZERO, false, 0, 0.0F, false, (m.flags() & FLAG_STANDING) != 0, 0, interpolation));
         ride.keys = keys;
         return ride;
     }
@@ -285,10 +286,9 @@ final class HorseRide {
             }
             case ClientboundPacket.UpdateAttributes update -> {
                 for (ClientboundPacket.UpdateAttributes.Attribute a : update.attributes()) {
-                    double[] range = dev.whynotac.world.AttributeValues.range(a, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                    double value = range[0] == range[1] ? range[0] : Double.NaN;
                     if (a.key().equals("minecraft:scale")) {
-                        if (Double.compare(value, 1.0) != 0) {
+                        double[] range = dev.whynotac.world.AttributeValues.range(a, 0.0625, 16.0); // Attributes.SCALE
+                        if (range[0] != 1.0 || range[1] != 1.0) {
                             unclaim("the horse scaled");
                         }
                         continue;
@@ -296,6 +296,7 @@ final class HorseRide {
                     if (!ClientEntities.HORSE_ATTRIBUTES.contains(a.key())) {
                         continue;
                     }
+                    double value = ClientEntities.horseAttributeValue(a);
                     if (Double.isNaN(value)) {
                         unclaim("the horse's " + a.key() + " not known exactly");
                         return;
@@ -363,6 +364,10 @@ final class HorseRide {
                 Box box = HorseState.box(s.x(), s.y(), s.z(), 1.3964844F, height(type));
                 Vec3d d = s.deltaMovement();
                 double reach = Math.abs(d.x()) + Math.abs(d.y()) + Math.abs(d.z()) + 2.0; // and a jump, a step up
+                if (s.interpolation() != null) {
+                    Vec3d t = s.interpolation().target();
+                    reach += Math.abs(t.x() - s.x()) + Math.abs(t.y() - s.y()) + Math.abs(t.z() - s.z());
+                }
                 if (!border.known() && !border.farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN + reach)) {
                     throw new MovementTracker.Lose("near a world border not known exactly");
                 }
@@ -391,18 +396,18 @@ final class HorseRide {
                 unclaim(e.getMessage());
                 return null;
             }
-            if (after.interpolation() != null) {
-                unclaim("the horse interpolates (not followed for a horse yet)");
-                return null;
-            }
             Vec3d p = move.position();
-            boolean same = Double.compare(after.x(), p.x()) == 0 && Double.compare(after.y(), p.y()) == 0 && Double.compare(after.z(), p.z()) == 0
-                    && Float.compare(after.yRot(), move.yaw()) == 0 && Float.compare(after.xRot(), move.pitch()) == 0
-                    && after.onGround() == move.onGround();
+            // ServerboundMoveVehiclePacket.fromEntity: while the horse still interpolates, the interpolation's target and rotations
+            BoatState.Interpolation left = after.interpolation();
+            Vec3d at = left != null ? left.target() : new Vec3d(after.x(), after.y(), after.z());
+            float yaw = left != null ? left.targetYRot() : after.yRot();
+            float pitch = left != null ? left.targetXRot() : after.xRot();
+            boolean same = Double.compare(at.x(), p.x()) == 0 && Double.compare(at.y(), p.y()) == 0 && Double.compare(at.z(), p.z()) == 0
+                    && Float.compare(yaw, move.yaw()) == 0 && Float.compare(pitch, move.pitch()) == 0 && after.onGround() == move.onGround();
             if (same) {
                 next.add(after);
             } else {
-                double distance = Math.abs(after.x() - p.x()) + Math.abs(after.y() - p.y()) + Math.abs(after.z() - p.z());
+                double distance = Math.abs(at.x() - p.x()) + Math.abs(at.y() - p.y()) + Math.abs(at.z() - p.z());
                 if (distance < closestDistance) {
                     closestDistance = distance;
                     closest = after;
