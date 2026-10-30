@@ -163,11 +163,25 @@ edilebilirlik izleyicisi); burada bunlar botların blok arkasından vuruşlarıd
 
 ## Sonuç ve sıradaki adımlar (görev #27)
 
-- Doğruluk: bütün kontroller gerçek arazide 100 dürüst botla 0 vaka (bot yapıntıları ayrı), 0 kayıp, 0 sapma.
-- Performans: oyuncu başına 3,3 ms/s; hedefin 3 katı. Yukarıdaki dört kesinti analiz thread'ini tekrar oynatmada
-  üçte bir hafifletti. Canlı payı bir sonraki yük testi gösterecek. Kalan kazanç profile göre şu sırayla aranacak:
-  1. Netty: kenar tap'lerinde yalnızca replikaların ve kontrollerin okuduğu paketleri çözmek, ping'i tick'in kendi
-     flush'ına bindirmek.
-  2. Kayıt: chunk ve büyük paketleri içerik adresli saklamak ya da sıkıştırmak.
-  3. Varlık replikasında giden paketlerin işlenmesi (`ClientEntities.onOutbound`, `onAcknowledged`) ve paketten gelen
-     bir bölümün ilk blok değişikliği.
+- Doğruluk: bütün kontroller gerçek arazide 100 ve 40 dürüst botla 0 vaka (bot yapıntıları ayrı), 0 kayıp, 0 sapma,
+  0 dinleyici hatası.
+- Performans (40 bot, cluster yerleşimi, gerçek arazi; ham değerlerin yarısı; Netty'nin WhyNotAC payı JFR
+  örneklerinden; oyuncu başına ms/s):
+
+| Derleme | Analiz | Kayıt | Netty (WhyNotAC payı) | Toplam |
+|---|---|---|---|---|
+| 3bfd554 (1) | 2,23 | 0,21 | 1,09 | 3,54 |
+| 3bfd554 (2) | 2,27 | 0,38 | 1,35 | 3,99 |
+| 4c1e2fc | 1,88 | 0,28 | 1,03 | 3,19 |
+
+  Kesintiler %10-20 kazandırdı ve sunucu thread'inin kilit beklemelerini kaldırdı. Hedef (< 1 ms/s) hâlâ 3 kat uzakta.
+  Kalan maliyet tek tük sıcak noktalarda değil, tasarımda:
+  1. Varlık replikası (analizin %24'ü): her varlık paketi bir işlem olarak sıraya girer. Cevaplanan her ping'te o
+     işlemler aday durumların her birine uygulanır (`onAcknowledged`, `applyUpTo`); her tik her etkin iz bir adım
+     atar (`onTick`). Kalabalıkta oyuncu başına olay sayısı gördüğü varlık sayısıyla büyür.
+  2. Ağ kenarı (oyuncu başına yaklaşık 1 ms/s): her paket kenarda bayt düzeyinde bir kez daha çözülür ve oyunun
+     gönderdiğiyle uzlaştırılır (`WireObserver`, `Reconciler`). Bu, başka bir eklentinin paketi değiştirmesine karşı
+     replikaların doğruluğunun güvencesidir; kapsamını daraltmak kanıt gücünü azaltır.
+  3. Kayıt kodlaması (analizin %11'i).
+  4. Ping defterleri: yaklaşık on dinleyici (replikalar, hareket takipçisi, üç kontrolün `MoveReplies`'i) her ping'in
+     sırasını ayrı ayrı tutar. Oturum başına tek bir defter paylaşılabilir.

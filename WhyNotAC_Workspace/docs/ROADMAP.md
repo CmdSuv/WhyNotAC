@@ -130,7 +130,8 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
     eklenebildiğinde açılacak.
   - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`).
 - **Gözlemlenebilirlik:** metrikler ve sağlık modeli (`OBS-01`). Performans hedefi gerçek arazide
-  oyuncu başına < 1 ms/s (görev #27).
+  oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 3,2 ms/s (analiz 1,9, ağ kenarı 1,0, kayıt 0,3).
+  Kalanın yapısal nedenleri [ölçümde](benchmarks/2026-10-30-world/README.md) yazılı.
 - **Ağ:** çevrilmiş client'lar için ikinci kenar katmanı (`NET-01`), Velocity eşlik eklentisi
   (`NET-22`), ağ çapında profiller yalnızca doğrulanmış kimliklerle.
 
