@@ -33,6 +33,12 @@ public final class PlayerSession {
     private final boolean replay;
     private final SerialMailbox mailbox;
     private final TransactionTracker transactions = new TransactionTracker();
+    /**
+     * Guards {@link #transactions} alone (taken inside this session's lock, never around it), so the server thread
+     * allocating a tick's ping waits for no packet handling: a network thread holding this session while the server's
+     * cores are saturated held the server thread up to 18 ms.
+     */
+    private final Object transactionLock = new Object();
 
     // guarded by this
     private long sequence;
@@ -44,7 +50,7 @@ public final class PlayerSession {
     private long outboundUnmodeled;
     private long divergences;
     private long lastDeliveredSequence = -1;
-    private boolean closed;
+    private volatile boolean closed;
 
     private volatile Identity identity;
     private volatile long clientTicksPublished;
@@ -95,7 +101,9 @@ public final class PlayerSession {
         }
         outboundModeled++;
         if (packet instanceof ClientboundPacket.Ping ping) {
-            transactions.onSent(ping.id(), nanoTime); // ignored unless the id was allocated here
+            synchronized (transactionLock) {
+                transactions.onSent(ping.id(), nanoTime); // ignored unless the id was allocated here
+            }
         }
         emit(nanoTime, SerialMailbox.weight(packet), seq -> new TimelineEvent.Outbound(seq, nanoTime, packet));
     }
@@ -141,18 +149,29 @@ public final class PlayerSession {
     }
 
     /** Reserves a transaction id for a ping the platform is about to send. */
-    public synchronized OptionalInt allocateTransaction() {
+    public OptionalInt allocateTransaction() {
         requireLive();
         if (closed) {
             return OptionalInt.empty();
         }
-        boolean wasWithheld = transactions.isWithheld();
         long now = System.nanoTime();
-        OptionalInt id = transactions.allocate(now);
-        if (transactions.isWithheld() && !wasWithheld) {
-            long age = transactions.oldestPendingAgeNanos(now) / 1_000_000;
-            emit(now, seq -> new TimelineEvent.Anomaly(seq, now, TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD,
-                    TransactionTracker.MAX_PENDING + " unanswered, oldest " + age + " ms"));
+        OptionalInt id;
+        long withheldAge = -1;
+        synchronized (transactionLock) {
+            boolean wasWithheld = transactions.isWithheld();
+            id = transactions.allocate(now);
+            if (transactions.isWithheld() && !wasWithheld) {
+                withheldAge = transactions.oldestPendingAgeNanos(now) / 1_000_000;
+            }
+        }
+        if (withheldAge >= 0) {
+            long age = withheldAge;
+            synchronized (this) {
+                if (!closed) {
+                    emit(now, seq -> new TimelineEvent.Anomaly(seq, now, TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD,
+                            TransactionTracker.MAX_PENDING + " unanswered, oldest " + age + " ms"));
+                }
+            }
         }
         return id;
     }
@@ -221,7 +240,11 @@ public final class PlayerSession {
     }
 
     private void onTransactionPong(int id, long nanoTime) {
-        switch (transactions.onPong(id, nanoTime)) {
+        TransactionTracker.PongResult result;
+        synchronized (transactionLock) {
+            result = transactions.onPong(id, nanoTime);
+        }
+        switch (result) {
             case TransactionTracker.PongResult.Matched matched -> {
                 emit(nanoTime, seq -> new TimelineEvent.Acknowledged(seq, nanoTime, matched.id(), matched.sentNanoTime(), matched.skipped()));
                 if (matched.skipped() > 0) {
@@ -282,8 +305,10 @@ public final class PlayerSession {
         return clientTicksPublished;
     }
 
-    public synchronized LatencySnapshot latency(long nowNanoTime) {
-        return transactions.snapshot(nowNanoTime);
+    public LatencySnapshot latency(long nowNanoTime) {
+        synchronized (transactionLock) {
+            return transactions.snapshot(nowNanoTime);
+        }
     }
 
     public synchronized Counters counters() {

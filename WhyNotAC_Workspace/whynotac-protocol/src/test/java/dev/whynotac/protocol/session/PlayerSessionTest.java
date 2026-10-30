@@ -66,6 +66,34 @@ class PlayerSessionTest {
     }
 
     @Test
+    void aTransactionIsAllocatedWhileAnotherThreadHoldsTheSession() throws Exception {
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
+        PlayerSession session = registry.open("127.0.0.1");
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread network = new Thread(() -> {
+            synchronized (session) { // a network thread handling a packet of this session
+                held.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        });
+        network.start();
+        assertTrue(held.await(5, TimeUnit.SECONDS));
+        ExecutorService server = Executors.newSingleThreadExecutor();
+        try {
+            assertTrue(server.submit(session::allocateTransaction).get(5, TimeUnit.SECONDS).isPresent());
+        } finally {
+            release.countDown();
+            network.join();
+            server.shutdownNow();
+        }
+    }
+
+    @Test
     void entityMotionReachesOnlyTheListenersThatReadIt() {
         SessionRegistry registry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
         List<String> seen = new ArrayList<>();
