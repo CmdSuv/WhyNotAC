@@ -69,7 +69,9 @@ import java.util.TreeMap;
  * than none, and so must the spear lunges (the server's motion for the player, more than a block a tick on the level) one
  * of the five ticks after it explained with the client's own state ({@code lungesFollowed}), and the rotations the
  * server set ({@code rotationsFollowed}, likewise; the client's reply to each kept out of its ticks), none of them left
- * unanswered as the tracker sees it ({@code rotationsUnanswered}: a reply it would not take for the client's).
+ * unanswered as the tracker sees it ({@code rotationsUnanswered}: a reply it would not take for the client's), and the
+ * random walks' ticks explained with the client's own state ({@code walkTruthFound}: the walks run under the session's
+ * first fire resistance, from its effect to its removal; later legs have their own).
  *
  * <p>usage: java -cp WhyNotAC.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on any difference
  */
@@ -181,7 +183,8 @@ public class MovementTruth {
                 && ((Number) result.get("spinAttackPose")).longValue() > 0 && ((Number) tracker.get("riptidesExplained")).longValue() > 0
                 && ((Number) tracker.get("spinAttackExplained")).longValue() > 0
                 && ((Number) tracker.get("lungesFollowed")).longValue() > 0
-                && ((Number) tracker.get("rotationsFollowed")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rotationsUnanswered"));
+                && ((Number) tracker.get("rotationsFollowed")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rotationsUnanswered"))
+                && ((Number) tracker.get("walkTruthFound")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -228,6 +231,9 @@ public class MovementTruth {
         int[] lungeWindow = {0};
         long[] rotations = new long[2]; // set by the server, followed
         int[] rotationWindow = {0};
+        long[] walks = new long[2]; // the random walks' explained sent ticks, their truth found
+        Map<String, Long> walkOutcomes = new TreeMap<>(); // the walks' ticks, by outcome and reason
+        boolean[] walking = {false, false}; // in the walks, the walks over
         int[] self = {-1};
         List<String> examples = new ArrayList<>();
         int[] sentIndex = {0};
@@ -244,6 +250,15 @@ public class MovementTruth {
                     && Math.hypot(m.clientMotion().x(), m.clientMotion().z()) > 1.0) {
                 lunges[0]++;
                 lungeWindow[0] = 5;
+            }
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.MobEffect e && e.entityId() == self[0]
+                    && e.effectKey().equals("minecraft:fire_resistance") && !walking[1]) {
+                walking[0] = true;
+            }
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.RemoveMobEffect e && e.entityId() == self[0]
+                    && e.effectKey().equals("minecraft:fire_resistance") && walking[0]) {
+                walking[0] = false;
+                walking[1] = true;
             }
             if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.PlayerRotation) {
                 rotations[0]++;
@@ -275,6 +290,10 @@ public class MovementTruth {
                 }
             }
             outcomes.merge(tick.outcome().name(), 1L, Long::sum);
+            if (walking[0]) {
+                walkOutcomes.merge(tick.outcome().name() + (tick.reason() == null ? "" : ": " + tick.reason().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]|-?\\d+\\.\\d+", "")),
+                        1L, Long::sum);
+            }
             if (tick.sentVehicle() != null) {
                 Map<String, Object> post = boatIndex[0] < boatPosts.size() ? boatPosts.get(boatIndex[0]) : null;
                 boatIndex[0]++;
@@ -364,6 +383,10 @@ public class MovementTruth {
                         }
                     }
                     counts[found ? 1 : 2]++;
+                    if (walking[0]) {
+                        walks[0]++;
+                        walks[1] += found ? 1 : 0;
+                    }
                     if (found && lungeWindow[0] > 0 && Math.hypot(truth.deltaMovement().x(), truth.deltaMovement().z()) > 0.5) {
                         lunges[1]++; // the client lunging, its state a hypothesis
                         lungeWindow[0] = 0;
@@ -392,6 +415,9 @@ public class MovementTruth {
         out.put("truthFound", counts[1]);
         out.put("lunges", lunges[0]);
         out.put("lungesFollowed", lunges[1]);
+        out.put("walkOutcomes", walkOutcomes);
+        out.put("walkExplainedSentTicks", walks[0]);
+        out.put("walkTruthFound", walks[1]);
         out.put("rotations", rotations[0]);
         out.put("rotationsFollowed", rotations[1]);
         out.put("rotationsUnanswered", reasons.getOrDefault("a rotation set by the server the client did not answer", 0L));

@@ -430,7 +430,9 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 - **Doğrulama:** `tools/realclient/MovementTruth.java` takipçiyi gerçek client oturumunun kaydı üzerinde
   çalıştırır: açıklanamayan tick 0 olmalı, açıklanan ve hareket paketi gönderen her tick'te client'ın kendi
   durumu hipotezlerden biri olmalı (gönderdiği andaki haliyle, ondan sonra tick'leyenlerin itmesinden önce), ve en
-  az bir canlı itmesi ve bir roket itmesi izlenmiş olmalı. Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
+  az bir canlı itmesi ve bir roket itmesi izlenmiş olmalı. Her oturumda parkur üzerinde, her koşuda yeni tohumdan üç
+  rastgele yürüyüş de vardır (`PHY-A10`, `fuzz.py`): ilk koşuda 632 tikinin hepsi açıklandı, hareket paketi gönderen 491
+  tikin hepsinde client'ın kendi durumu hipotezlerdendi (`walkTruthFound`). Son oturum (otomatik zıplama açık; efekt, eşya kullanımı, tırmanma, sekme ve
   köylülere yürüyen itme şeridiyle: biri, ikisi birden, içine konan biri, hiç çarpışmayan takımda biri; çit, duvar
   ve kapı üstü; havuz, akıntı, şelale, su altında yüzme ve sürünme; ağlar, çalılar, bal ve kabarcık sütunları;
   Overworld'de ve Nether'de lav havuzu ve akıntısı; iskele kulesi ve köprüsü; elytra ile altı süzülme, biri roketle,

@@ -53,7 +53,13 @@ Bilinmeyen her şeyi sınırlı bir küme olarak taşır; tek bir toplu tolerans
 
 **Faz 3 kapısı:** gerçek client'ın tick başına doğruluk kaydı (`PHY-A9`) var. Bir senaryo
 matrisinde, client'ın her tikteki durumu motorun kümesinin içinde olmalıdır. Sunucu içi oyuncu
-fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`).
+fiziğiyle diferansiyel fuzz testi de yapılmalıdır (`PHY-A10`). Yapıldı, iki katmanda; ikisi de resmi oyunun kendi koduna
+karşı ve her koşuda yeni tohumla. Çarpışma çekirdeği client'ın `VoxelShape`/`Shapes`/`Entity` koduyla rastgele 50.000
+durumda bit bit karşılaştırılır. Tüm hareket adımı için kahin gerçek client'ın kendi fiziğidir: parkur üzerinde
+üç rastgele yürüyüş (`fuzz.py`: başlangıç, bakış yönü, hareket, zıplama, eğilme ve koşma tuşları tohumdan) yapılır, her
+tiki motorla ve takipçiyle karşılaştırılır. İlk koşuda yürüyüşlerin 632 tikinin hepsi iddia edildi ve açıklandı; hareket
+paketi gönderen 491 tikin her birinde client'ın kendi durumu hipotezlerdendi (`walkTruthFound` kapısı). Sunucunun kendi
+oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpışma); bu yüzden kahin client'tır.
 
 ## Faz 3b — Savaş ve dünya etkileşimi (fizikle paralel)
 
