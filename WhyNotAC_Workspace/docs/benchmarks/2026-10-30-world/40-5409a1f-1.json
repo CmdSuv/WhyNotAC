@@ -1,0 +1,332 @@
+{
+ "variant": "whynotac",
+ "layout": "cluster",
+ "bots": 40,
+ "measureSeconds": 62.38,
+ "warmup": {
+  "seconds": 100,
+  "settled": true
+ },
+ "mspt": {
+  "avg": 53.8,
+  "min": 14.5,
+  "max": 3854.8,
+  "window": "1m"
+ },
+ "tps": 15.2,
+ "serverCpuCores": 1.7826,
+ "jfr": {
+  "samples": 2265,
+  "whynotacSamples": 450,
+  "whynotacShare": 0.1986754966887417,
+  "anywhereSamples": 662,
+  "truncatedStacks": 0,
+  "threads": {
+   "Netty Epoll IO ##": {
+    "samples": 404,
+    "whynotac": 137,
+    "anywhere": 349
+   },
+   "Paper Common Worker ##": {
+    "samples": 19,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "Server thread": {
+    "samples": 1511,
+    "whynotac": 6,
+    "anywhere": 6
+   },
+   "WhyNotAC Analysis ##": {
+    "samples": 315,
+    "whynotac": 302,
+    "anywhere": 302
+   },
+   "WhyNotAC Cases": {
+    "samples": 2,
+    "whynotac": 2,
+    "anywhere": 2
+   },
+   "WhyNotAC Recording I/O": {
+    "samples": 4,
+    "whynotac": 3,
+    "anywhere": 3
+   },
+   "mysql-cj-abandoned-connection-cleanup": {
+    "samples": 1,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "spark-async-sampler-worker-thread": {
+    "samples": 7,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "spark-monitoring-thread": {
+    "samples": 2,
+    "whynotac": 0,
+    "anywhere": 0
+   }
+  },
+  "threadCpuCores": {
+   "Async-profiler Timer": 0.0002,
+   "Attach Listener": 0.0289,
+   "C# CompilerThread#": 0.6376,
+   "Common-Cleaner": 0.0,
+   "Craft Async Scheduler Management Thread": 0.0009,
+   "DestroyJavaVM": 0.0082,
+   "JFR Periodic Tasks": 0.0048,
+   "JFR Recorder Thread": 0.001,
+   "JNA Cleaner": 0.0,
+   "Log#j#-AsyncAppenderEventDispatcher-#-Async": 0.0004,
+   "Monitor Deflation Thread": 0.0005,
+   "Netty Epoll IO ##": 0.3343,
+   "Paper Async Command Builder Thread Pool - #": 0.0004,
+   "Paper Async Task Handler Thread - #": 0.0009,
+   "Paper Common Worker ##": 0.0851,
+   "Paper I/O Worker ##": 0.003,
+   "Paper Watchdog Thread": 0.0166,
+   "PaperFilledProfileCache-cleanup-#": 0.0,
+   "Reference Handler": 0.0,
+   "Server console handler": 0.0,
+   "Server thread": 0.4174,
+   "Service Thread": 0.0011,
+   "WhyNotAC Analysis ##": 0.1769,
+   "WhyNotAC Cases": 0.001,
+   "WhyNotAC Recording I/O": 0.0273,
+   "Worker-Main-#": 0.0613,
+   "Yggdrasil Key Fetcher": 0.0019,
+   "mysql-cj-abandoned-connection-cleanup": 0.0004,
+   "spark-async-sampler-worker-thread": 0.008,
+   "spark-monitoring-thread": 0.0018
+  }
+ },
+ "heapAfterFullGcBytes": 522722112,
+ "whynotacHeapBytes": 1969616,
+ "whynotacTopClasses": [
+  {
+   "class": "dev.whynotac.world.ClientEntities$State",
+   "instances": 1348,
+   "bytes": 517632
+  },
+  {
+   "class": "dev.whynotac.world.Section",
+   "instances": 8797,
+   "bytes": 422256
+  },
+  {
+   "class": "dev.whynotac.world.SectionPool$Entry",
+   "instances": 8797,
+   "bytes": 211128
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Versioned",
+   "instances": 4358,
+   "bytes": 139456
+  },
+  {
+   "class": "dev.whynotac.world.ClientWorld$Column",
+   "instances": 4321,
+   "bytes": 138272
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Head",
+   "instances": 1383,
+   "bytes": 88512
+  },
+  {
+   "class": "dev.whynotac.world.ItemPrototypes$Prototype",
+   "instances": 1505,
+   "bytes": 72240
+  },
+  {
+   "class": "dev.whynotac.world.Shape",
+   "instances": 919,
+   "bytes": 36760
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Track",
+   "instances": 1346,
+   "bytes": 32304
+  },
+  {
+   "class": "dev.whynotac.world.EntitySizes$Entry",
+   "instances": 314,
+   "bytes": 22608
+  },
+  {
+   "class": "dev.whynotac.analysis.evidence.AdmissibilityTracker",
+   "instances": 333,
+   "bytes": 21312
+  },
+  {
+   "class": "dev.whynotac.paper.wire.WireObserver$Outgoing",
+   "instances": 841,
+   "bytes": 20184
+  }
+ ],
+ "whynotacStatsDuringLoad": {
+  "sessionsLive": 37,
+  "queuedEvents": 3,
+  "sessions": 40,
+  "ended": 3,
+  "inbound": 685412,
+  "outbound": 1558482,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 1,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 2862,
+   "meanWallMicros": 652.123,
+   "meanCpuMicros": 193.745,
+   "maxWallMicros": 51398.097
+  },
+  "cases": {
+   "opened": 61,
+   "stored": 61,
+   "dropped": 0,
+   "rejectedCandidates": 0
+  },
+  "world": {
+   "retainedBytes": 19760204,
+   "sharedSections": 8726,
+   "worlds": 40
+  },
+  "entities": {
+   "ticks": 123764,
+   "branches": 3488,
+   "merges": 3481,
+   "overflows": 0,
+   "losses": 0
+  }
+ },
+ "whynotacStatsAfterAllLeft": {
+  "sessionsLive": 0,
+  "queuedEvents": 0,
+  "sessions": 40,
+  "ended": 40,
+  "inbound": 701721,
+  "outbound": 1600839,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 0,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 2984,
+   "meanWallMicros": 636.918,
+   "meanCpuMicros": 190.253,
+   "maxWallMicros": 51398.097
+  },
+  "cases": {
+   "opened": 64,
+   "stored": 64,
+   "dropped": 0,
+   "rejectedCandidates": 0
+  },
+  "world": {
+   "retainedBytes": 0,
+   "sharedSections": 0,
+   "worlds": 40
+  },
+  "entities": {
+   "ticks": 126587,
+   "branches": 3537,
+   "merges": 3535,
+   "overflows": 0,
+   "losses": 0
+  }
+ },
+ "botSide": {
+  "processes": 4,
+  "joined": 40,
+  "still_connected": 37,
+  "pings_seen": 334022,
+  "pings_answered": 334022,
+  "errors": [],
+  "disconnects": [
+   {
+    "name": "Bot3",
+    "joined": true,
+    "ticks": 527,
+    "pings_answered": 294,
+    "pings_seen": 294,
+    "teleports": 18,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000",
+    "attacks": 0
+   },
+   {
+    "name": "Bot15",
+    "joined": true,
+    "ticks": 508,
+    "pings_answered": 242,
+    "pings_seen": 242,
+    "teleports": 32,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000",
+    "attacks": 0
+   },
+   {
+    "name": "Bot18",
+    "joined": true,
+    "ticks": 692,
+    "pings_answered": 512,
+    "pings_seen": 512,
+    "teleports": 23,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000",
+    "attacks": 0
+   }
+  ]
+ },
+ "serverMovementCorrections": 0,
+ "attackReach": {
+  "attacksAssessed": 2223,
+  "outcomes": {
+   "IN_REACH": 2223
+  },
+  "outOfReach": 0,
+  "smallestMarginInReach": 0.0612
+ },
+ "casesOpened": 0,
+ "caseSummaries": [],
+ "movementCases": 0,
+ "throughBlocksCases": [
+  "Bot31: attacked minecraft:cow 872 through blocks: its look stops at the block -119,70,57, at least 1.1631 blocks before it",
+  "Bot31: attacked minecraft:cow 872 through blocks: its look stops at the block -118,70,57, at least 0.0510 blocks before it",
+  "Bot34: attacked minecraft:cow 882 through blocks: its look stops at the block -99,75,35, at least 0.0834 blocks before it",
+  "Bot29: attacked minecraft:cow 901 through blocks: its look stops at the block -71,95,48, at least 0.0233 blocks before it",
+  "Bot34: attacked minecraft:cow 882 through blocks: its look stops at the block -99,76,37, at least 1.6104 blocks before it",
+  "Bot1: attacked minecraft:cow 879 through blocks: its look stops at the block 79,113,-21, at least 0.8937 blocks before it",
+  "Bot10: attacked minecraft:cow 871 through blocks: its look stops at the block 64,102,83, at least 1.0528 blocks before it",
+  "Bot22: attacked minecraft:cow 888 through blocks: its look stops at the block 131,122,18, at least 0.1436 blocks before it",
+  "Bot8: attacked minecraft:cow 895 through blocks: its look stops at the block 119,107,93, at least 0.0458 blocks before it",
+  "Bot23: attacked minecraft:cow 889 through blocks: its look stops at the block -35,117,116, at least 0.2646 blocks before it"
+ ]
+}

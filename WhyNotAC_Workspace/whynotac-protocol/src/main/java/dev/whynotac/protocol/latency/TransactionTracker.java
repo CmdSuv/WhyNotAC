@@ -1,5 +1,6 @@
 package dev.whynotac.protocol.latency;
 
+import java.nio.ByteBuffer;
 import java.security.SecureRandom;
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -43,6 +44,8 @@ public final class TransactionTracker {
     private static final int REMEMBERED = 512;
 
     private static final SecureRandom RANDOM = new SecureRandom();
+    /** Ids drawn from {@link #RANDOM} per call: its lock, which every network thread takes, once per this many ids. */
+    private static final int DRAWN = 64;
 
     private record Pending(int id, long sentNanoTime) {}
 
@@ -65,6 +68,9 @@ public final class TransactionTracker {
     private final ArrayDeque<Integer> rememberedOrder = new ArrayDeque<>();
     private final Set<Integer> remembered = new HashSet<>();
     private final LatencyEstimator estimator = new LatencyEstimator();
+    /** Random ids drawn ahead; never sent before {@link #allocate} hands them out, so no less unpredictable. */
+    private final int[] drawn = new int[DRAWN];
+    private int nextDrawn = DRAWN;
     private long sent;
     private long acknowledged;
     private long skipped;
@@ -93,10 +99,20 @@ public final class TransactionTracker {
         }
         int id;
         do {
-            id = RANDOM.nextInt();
+            id = nextRandom();
         } while (isReservedForOthers(id) || pendingById.containsKey(id) || allocatedUnsent.containsKey(id) || remembered.contains(id));
         allocatedUnsent.put(id, nanoTime);
         return OptionalInt.of(id);
+    }
+
+    private int nextRandom() {
+        if (nextDrawn == DRAWN) {
+            byte[] bytes = new byte[DRAWN * Integer.BYTES];
+            RANDOM.nextBytes(bytes);
+            ByteBuffer.wrap(bytes).asIntBuffer().get(drawn);
+            nextDrawn = 0;
+        }
+        return drawn[nextDrawn++];
     }
 
     private void expireUnsent(long nanoTime) {

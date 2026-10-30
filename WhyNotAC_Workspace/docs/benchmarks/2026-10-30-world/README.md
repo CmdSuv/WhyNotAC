@@ -109,6 +109,37 @@ tik döngüsünden çıkarılıyor, `ticked` gerektiğinde son tikin penceresind
 yalnız replikalarla ölçülen kazanç %0-7 arasında, gürültü düzeyinde kaldı. Varlık replikasının maliyeti tik döngüsünde
 değil, giden paketlerin işlenmesinde. Doğruluğa dokunan bir karmaşıklık bu kazanca değmedi.
 
+## Canlı doğrulama
+
+Tekrar oynatmadaki kazanç yük testinde aynı düzenekle denendi. 100 botla sunucu iki çekirdeğinin tavanındadır: thread
+CPU'su thread'ler arasında paylaşılır ve TPS'e bağlıdır. Aynı derleme (3bfd554) bir koşuda TPS 10,2, bir sonrakinde 6,7
+verdi. Bu yüzden toplam etki 100 botla ölçülemez. 40 botla ise eski (3bfd554) ve yeni (5409a1f, işlem kimliği
+kesintisinden önce) derleme sırayla ikişer kez koşuldu. Ham sonuçlar `40-3bfd554-*.json` ve `40-5409a1f-*.json`'dadır.
+Tablodaki değerler ham `threadCpuCores`'tur, 2 kat yüksektir; giden olay sayısı bütün koşu içindir:
+
+| Koşu | TPS | Analiz (ham) | Analiz örnekleri | Giden olay | Analiz / milyon giden olay |
+|---|---|---|---|---|---|
+| yeni 1 | 15,2 | 0,177 | 315 | 1,60 M | 0,110 |
+| eski 1 | 15,8 | 0,179 | 325 | 1,24 M | 0,144 |
+| yeni 2 | 16,1 | 0,140 | 190 | 1,37 M | 0,102 |
+| eski 2 | 14,5 | 0,182 | 338 | 1,46 M | 0,124 |
+
+Olay başına analiz maliyeti yeni derlemede %20 civarı daha düşük. Kaba bir ölçü bu: CPU 60 saniyelik pencerenin, olay
+sayısı bütün koşunun. Yönü tekrar oynatmayla aynı, büyüklüğü daha küçük. Bütün koşularda vaka 0, kayıp olay 0, sapma 0,
+dinleyici hatası 0 (bot yapıntıları ayrı). Canlı profil kesintileri bileşen düzeyinde doğruluyor: oturum ekleri %4,8 →
+%0,8; dağıtım döngüsünün kendi payı %3,4'ten ilk sıraların dışına düştü. Blok değişikliği ısınmadan sonra canlı profilde
+zaten görünmüyordu: o kazanç oyuncunun yeni araziye girdiği anlar içindir.
+
+Canlı profil iki yeni sıcak nokta gösterdi, ikisi de düzeltildi:
+
+- Hareket kontrolü (`MovementTracker.aboutSelf`, `ridePacket`: %6 + %3). Etraftaki her varlığın hareket paketi takım,
+  binek ve öz-oyuncu desen `switch`'lerini varsayılana kadar dolaşıyordu (Java 21 desen `switch`'inin türlerini tek tek
+  dener). Başka bir varlığa ait bu paketler artık `switch`'lerden önce, onların vereceği sonuçla ayrılır.
+- Netty'de işlem kimlikleri (`TransactionTracker.allocate`, WhyNotAC'ın Netty örneklerinin %10'u). Her ping paylaşılan
+  `SecureRandom`'dan bir kimlik çekiyordu, yani her ağ thread'i onun kilidini alıyordu. Kimlikler artık 64'lük
+  bloklarla çekilir; ikisi de aynı kriptografik kaynaktır ve kimlik gönderilmeden önce kimse onu görmez. Dört thread'de
+  işlem başına 2.917 ns'den 482 ns'ye (ayır, gönder, cevapla).
+
 ## Sonuç ve sıradaki adımlar (görev #27)
 
 - Doğruluk: bütün kontroller gerçek arazide 100 dürüst botla 0 vaka (bot yapıntıları ayrı), 0 kayıp, 0 sapma.
