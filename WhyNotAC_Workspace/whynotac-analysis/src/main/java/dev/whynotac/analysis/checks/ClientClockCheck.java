@@ -5,10 +5,13 @@ import dev.whynotac.analysis.evidence.AdmissibilityTracker;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.evidence.ServerClock;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -63,9 +66,16 @@ public final class ClientClockCheck implements TimelineListener {
     private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
+    private final ServerClock clock;
 
     public ClientClockCheck(EvidenceSink sink) {
+        this(sink, ServerClock.SERVER);
+    }
+
+    /** {@code clock}: whether the server's own clock may be relied on ({@code VAL-3}). */
+    public ClientClockCheck(EvidenceSink sink, ServerClock clock) {
         this.sink = sink;
+        this.clock = clock;
     }
 
     private static final class State {
@@ -104,6 +114,10 @@ public final class ClientClockCheck implements TimelineListener {
             }
             if (ticks - state.anchorTicks > allowed) {
                 Admissibility admissibility = state.admissibility.evaluate(state.anchorSequence);
+                if (admissibility.admissible() && !clock.trusted()) {
+                    admissibility = new Admissibility(false, List.of(String.format(Locale.ROOT,
+                            "the server's monotonic clock runs %.3f%% off its wall clock", clock.divergence() * 100)), admissibility.identity());
+                }
                 if (admissibility.admissible()) {
                     long spanMillis = (ack.nanoTime() - state.anchorSentNanos) / 1_000_000;
                     sink.accept(session, new Evidence(ID, VERSION, EvidenceClass.MODIFICATION_PROOF, state.anchorSequence, ack.sequence(),

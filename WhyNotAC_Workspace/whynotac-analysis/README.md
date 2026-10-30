@@ -35,6 +35,16 @@ dayanağı toplamın bit bit aynılığıdır. Bir tik erken bırakış hiçbir 
 olmayan kontroller (dilbilgisi, kesin geometri, hareketin hipotez kümesi) pay raporlamaz: onların sorusu evet ya da
 hayırdır.
 
+### Sunucunun saati (`VAL-3`)
+
+Kontroller zamanı sunucunun monoton saatiyle ölçer (`System.nanoTime`). `client-clock` client'ın saatine buna karşı %1
+tanır. Bu, normal bir kuvars hatasının 100 katıdır ve iki saatin farkını birlikte kapsar. Eklenti her saniye monoton saati
+duvar saatiyle karşılaştırır (`ServerClock`, son on dakika). Duvar saati zaman eşitlemesiyle gerçek zamana bağlıdır. Fark
+bütçenin yarısını, %0,5'i aşarsa `client-clock`'un bulguları kabul edilmez: aday, gerekçesiyle reddedilir. Duvar saati
+bir anda kurulursa (bir aralıkta 1 s'den fazla sıçrama) ölçüm baştan başlar. İlk dakikada saat bilinmez ve hiçbir
+iddiayı engellemez. Tekrar oynatmada ve testlerde saat beslenmez: davranış bugünkünün aynısıdır. Aynı makinenin iki
+saati birlikte yanlışsa bu görülmez. Değer `/whynotac stats`'ta `serverClock` altındadır.
+
 ### `action-grammar` (`ActionGrammarCheck`)
 
 - **Client'ın kuralı (1.21.11, decompile edilmiş client):** client'ın eylemleri tikin başında gelir. Saldırı ve

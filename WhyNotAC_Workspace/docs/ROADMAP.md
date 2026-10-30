@@ -104,7 +104,9 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
 - **Paylar** (`VAL-4`): her kanıt, dürüst trafiğin sınıra ne kadar yaklaştığını raporlar. Sınırı olan üç kontrol için
   yapıldı (`attack-reach`, `break-time`, `client-clock`). Paylar `/whynotac stats`'ta ve `ReplayCost`'ta raporlanır,
   tekrar oynatma kapısı negatif payı reddeder. Değerler [analiz README'sinde](../whynotac-analysis/README.md).
-- **Saat varsayımı** (`VAL-3`): sunucu saatinin kayması izlenir.
+- **Saat varsayımı** (`VAL-3`): sunucu saatinin kayması izlenir. Yapıldı: monoton saat, son on dakikada duvar saatiyle
+  karşılaştırılır (`ServerClock`). Fark %0,5'i aşınca `client-clock`'un bulguları reddedilir; değer `/whynotac stats`'ta
+  raporlanır. Aynı makinenin iki saatinin birlikte yanılması görülmez.
 - **Test teknikleri:** fuzz (`TEST-01`), özellik tabanlı testler (`TEST-02`), mutasyon (`TEST-03`),
   deterministik simülasyon (`TEST-04`).
 - **Hile verisi** (`DATA-02`): yalnızca sahibin onayıyla, izole bir sanal makinede, açık kaynak

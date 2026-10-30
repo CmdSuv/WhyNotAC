@@ -7,6 +7,7 @@ import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.evidence.ServerClock;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -27,6 +28,7 @@ class ClientClockCheckTest {
     private static final long MS = 1_000_000L;
     private final List<Evidence> evidence = new ArrayList<>();
     private final List<Admissibility> rejected = new ArrayList<>();
+    private final ServerClock clock = new ServerClock();
     private PlayerSession session;
     private long seq;
     private int pingId = 1;
@@ -44,7 +46,7 @@ class ClientClockCheckTest {
             public void rejected(PlayerSession s, String check, Admissibility a) {
                 rejected.add(a);
             }
-        }));
+        }, clock));
         session = registry.openReplay("test");
         session.deliver(new TimelineEvent.Observation(seq++, 0, Source.WIRE, Source.WIRE, 774, "edge decoding"));
         session.deliver(new ClientFact(seq++, 0, Fact.IDENTITY, "UNAUTHENTICATED", Trust.CLAIMED, "test"));
@@ -163,6 +165,16 @@ class ClientClockCheckTest {
     void aSmallTimerIsCaughtGivenTime() {
         play(50.0 / 1.05, 60, 30, false, 5); // 5% faster
         assertTrue(evidence.size() >= 1);
+    }
+
+    @Test
+    void nothingIsClaimedWhileTheServersClockRunsOffItsWallClock() {
+        for (long s = 0; s <= 120; s++) {
+            clock.sample(s * 1_000 * MS, s * 990); // VAL-3: the monotonic clock 1% faster than the wall clock
+        }
+        play(25.0, 2, 60, false, 3);
+        assertEquals(List.of(), evidence);
+        assertTrue(rejected.stream().anyMatch(a -> a.reasons().toString().contains("server's monotonic clock runs 1.0")), rejected.toString());
     }
 
     @Test

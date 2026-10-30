@@ -2,6 +2,7 @@ package dev.whynotac.paper;
 
 import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.verdict.ShadowVerdict;
+import dev.whynotac.analysis.evidence.ServerClock;
 import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
@@ -92,6 +93,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         int caseRetentionDays = Math.max(1, getConfig().getInt("cases.retention-days", 90));
         cases.retain(caseRetentionDays);
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> cases.retain(caseRetentionDays), 20L * 3600, 20L * 3600);
+        // VAL-3: the server's monotonic clock against its wall clock, which client-clock's claims rest on
+        Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> ServerClock.SERVER.sample(System.nanoTime(), System.currentTimeMillis()), 20L, 20L);
         alerts = new Alerts(this);
         verdict.addListener(cases);
         verdict.addListener(alerts);
@@ -207,7 +210,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
                         + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
                         + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
-                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},\"margins\":{%s},"
+                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},\"margins\":{%s},\"serverClock\":{\"divergence\":%s,\"trusted\":%b},"
                         + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d},"
                         + "\"entities\":{\"ticks\":%d,\"branches\":%d,\"merges\":%d,\"overflows\":%d,\"losses\":%d}}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
@@ -216,7 +219,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 recordings == null ? 0 : recordings.failedRecordings(), transactionLoop.runs(), transactionLoop.meanWallMicros(),
                 transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros(),
                 verdict.cases(), cases == null ? 0 : cases.storedCount(), cases == null ? 0 : cases.droppedCount(),
-                verdict.rejections().size(), margins, worldTracker == null ? 0 : worldTracker.retainedBytes(),
+                verdict.rejections().size(), margins,
+                Double.isNaN(ServerClock.SERVER.divergence()) ? "null" : String.format(Locale.ROOT, "%.6f", ServerClock.SERVER.divergence()),
+                ServerClock.SERVER.trusted(), worldTracker == null ? 0 : worldTracker.retainedBytes(),
                 worldTracker == null ? 0 : worldTracker.sharedSections(), worldTracker == null ? 0 : worldTracker.worldsCreated(),
                 entitiesTracker == null ? 0 : entitiesTracker.totals().ticks(), entitiesTracker == null ? 0 : entitiesTracker.totals().branches(),
                 entitiesTracker == null ? 0 : entitiesTracker.totals().merges(), entitiesTracker == null ? 0 : entitiesTracker.totals().overflows(),
