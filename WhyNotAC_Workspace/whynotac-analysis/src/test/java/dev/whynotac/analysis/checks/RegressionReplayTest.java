@@ -11,6 +11,7 @@ import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.protocol.session.TimelineEvent;
+import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.recording.read.RecordingReader;
 import dev.whynotac.world.Replicas;
 import java.io.IOException;
@@ -76,8 +77,40 @@ class RegressionReplayTest {
                 "the movement check finds the step: " + o.evidence().stream().map(Evidence::summary).toList());
     }
 
+    @ParameterizedTest
+    @MethodSource("corpus")
+    void listenersThatReadNoEntityMotionFindTheSameWithoutIt(Path recording) throws IOException {
+        long[] index = {0};
+        long total = replay(recording, UnaryOperator.identity()).moves();
+        UnaryOperator<TimelineEvent> cheat = event -> {
+            if (event instanceof TimelineEvent.Inbound in && in.packet() instanceof ServerboundPacket.MovePlayer m && m.hasPosition()) {
+                long i = index[0]++;
+                if (i > total / 3 && i < 2 * total / 3 && i % 50 == 0) {
+                    return new TimelineEvent.Inbound(in.sequence(), in.nanoTime(), in.clientTick(), new ServerboundPacket.MovePlayer(m.x(), m.y() + 0.5,
+                            m.z(), m.yaw(), m.pitch(), true, m.hasRotation(), m.onGround(), m.horizontalCollision()));
+                }
+            }
+            return event;
+        };
+        Outcome filtered = replay(recording, cheat, false);
+        index[0] = 0;
+        Outcome everything = replay(recording, cheat, true);
+        assertFalse(everything.evidence().isEmpty());
+        assertEquals(summaries(everything), summaries(filtered));
+        assertEquals(everything.rejected(), filtered.rejected());
+    }
+
+    private static List<String> summaries(Outcome o) {
+        return o.evidence().stream().map(e -> e.check() + " " + e.fromSequence() + ": " + e.summary()).toList();
+    }
+
     /** Replays {@code recording}, each event through {@code change}, into the replicas and every check (the plugin's order). */
     private static Outcome replay(Path recording, UnaryOperator<TimelineEvent> change) throws IOException {
+        return replay(recording, change, false);
+    }
+
+    /** {@code everything}: every listener receives every event, entity motion included, whether it reads it or not. */
+    private static Outcome replay(Path recording, UnaryOperator<TimelineEvent> change, boolean everything) throws IOException {
         List<Evidence> evidence = new ArrayList<>();
         List<String> rejected = new ArrayList<>();
         List<String> errors = new ArrayList<>();
@@ -94,8 +127,11 @@ class RegressionReplayTest {
         };
         SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (session, event, error) -> errors.add(event + ": " + error));
         Replicas replicas = Replicas.vanilla();
-        replicas.listeners().forEach(registry::addListener);
-        Checks.all(sink, replicas).forEach(registry::addListener);
+        List<TimelineListener> listeners = new ArrayList<>(replicas.listeners());
+        listeners.addAll(Checks.all(sink, replicas));
+        for (TimelineListener listener : listeners) {
+            registry.addListener(everything ? listener::onEvent : listener);
+        }
         long ticks = 0;
         long moves = 0;
         RecordingReader reader = RecordingReader.open(recording);

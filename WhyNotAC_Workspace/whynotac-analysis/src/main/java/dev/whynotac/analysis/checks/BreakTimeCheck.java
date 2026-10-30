@@ -122,6 +122,12 @@ public final class BreakTimeCheck implements TimelineListener {
     record Bound(float increment, String block, float hardness, String item, float toolSpeed, boolean correct, ClientSelf.MiningBounds mining,
             boolean offGround) {}
 
+    /** It reads no entity motion: the entity replica follows the entities. */
+    @Override
+    public boolean readsEntityMotion() {
+        return false;
+    }
+
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         State state = session.attachment(STATE, State::new);

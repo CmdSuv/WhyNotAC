@@ -38,6 +38,8 @@ public final class SessionRegistry {
     private final int mailboxCapacity;
     private final ErrorHandler errorHandler;
     private final List<TimelineListener> listeners = new CopyOnWriteArrayList<>();
+    /** The listeners that read entity motion, in the same order. */
+    private final List<TimelineListener> motionListeners = new CopyOnWriteArrayList<>();
     private final Map<Long, PlayerSession> sessions = new ConcurrentHashMap<>();
     private final Map<UUID, PlayerSession> byPlayer = new ConcurrentHashMap<>();
     private final AtomicLong connectionIds = new AtomicLong();
@@ -68,12 +70,16 @@ public final class SessionRegistry {
         return globalQueueCapacity;
     }
 
-    public void addListener(TimelineListener listener) {
+    public synchronized void addListener(TimelineListener listener) {
         listeners.add(listener);
+        if (listener.readsEntityMotion()) {
+            motionListeners.add(listener);
+        }
     }
 
-    public void removeListener(TimelineListener listener) {
+    public synchronized void removeListener(TimelineListener listener) {
         listeners.remove(listener);
+        motionListeners.remove(listener);
     }
 
     /** Creates a session for a newly accepted connection. */
@@ -111,7 +117,7 @@ public final class SessionRegistry {
         if (event instanceof TimelineEvent.Bound bound) {
             byPlayer.put(bound.playerId(), session);
         }
-        for (TimelineListener listener : listeners) {
+        for (TimelineListener listener : TimelineListener.entityMotion(event) ? motionListeners : listeners) {
             try {
                 listener.onEvent(session, event);
             } catch (RuntimeException | LinkageError | AssertionError error) {

@@ -12,6 +12,12 @@ public final class ClientTagsTracker implements TimelineListener {
 
     private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
+    /** It reads no entity motion: the entity replica follows the entities. */
+    @Override
+    public boolean readsEntityMotion() {
+        return false;
+    }
+
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         session.attachment(KEY, ClientTags::new).onEvent(event);

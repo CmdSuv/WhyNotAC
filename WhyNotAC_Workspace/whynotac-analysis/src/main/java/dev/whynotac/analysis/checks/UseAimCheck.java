@@ -103,6 +103,12 @@ public final class UseAimCheck implements TimelineListener {
         long clicksSinceReport;
     }
 
+    /** It reads no entity motion: the entity replica follows the entities. */
+    @Override
+    public boolean readsEntityMotion() {
+        return false;
+    }
+
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         State state = session.attachment(STATE, State::new);

@@ -76,9 +76,13 @@ oturumların tamamını kapsar. Isınma dakikalarındaki blok değişiklikleri d
 | Derleme | En iyi tur (ns/tik) | Ortalama (ns/tik) | Bulgu |
 |---|---|---|---|
 | 3bfd554 | 27.988 / 27.240 | 29.733 / 30.599 | 24 |
-| üç kesintiyle | 22.156 / 23.354 | 22.829 / 24.396 | 24 |
+| ilk üç kesintiyle (25fee6e) | 22.156 / 23.354 | 22.829 / 24.396 | 24 |
+| ilk üç kesintiyle (25fee6e), ikinci ölçüm | 22.313 / 20.995 | 25.125 / 23.344 | 24 |
+| dördüyle | 19.563 / 19.448 | 20.765 / 20.461 | 24 |
 
-Tabloda iki ayrı koşu var. Kesintiler maliyeti %17-22 düşürdü. Bulgular değişmedi: 24'ün hepsi `attack-aim`'dir, botun
+Her satırda iki ayrı koşu var; ilk iki satır ile son iki satır ayrı oturumlarda ölçüldü. İlk üç kesinti maliyeti
+%17-22, olay dağıtımı bir %9-15 daha düşürdü. 3bfd554 ile dördü aynı oturumda: 30.014'e karşı 19.628 ns/tik, %35 daha
+az. Bulgular değişmedi: 24'ün hepsi `attack-aim`'dir, botun
 blok arkasından vuruşudur. Yüz kaydın tamamında 115 bulgu çıkar, hepsi aynı yapıntıdır. Profil (JFR, aynı oynatma):
 
 - Blok değişikliği (`Section.with`, kapsayıcı %18,3 → %6,2). Her değişiklik bölümün 4096 bloğunu açıp yeniden
@@ -89,6 +93,16 @@ blok arkasından vuruşudur. Yüz kaydın tamamında 115 bulgu çıkar, hepsi ay
 - Oturum ekleri (`PlayerSession.attachment`, `HashMap` araması %7 civarı → dizi okuması). Anahtarlar
   `PlayerSession.AttachmentKey`'dir; her biri her oturumda bir yuvadır.
 - Chunk çözümü: bölüm verisi bayt bayt değil, big-endian `VarHandle` ile uzun uzun okunur.
+- Olay dağıtımı (`SessionRegistry.dispatch`'in kendi payı %14). Olayların %49'u varlık hareketidir: `MoveEntity`,
+  `RotateHead`, `SetEntityMotion`, `EntityPositionSync`. Bu dört paket her dinleyiciye gidiyordu. Artık yalnızca onları
+  okuyan dinleyicilere gider (`TimelineListener.readsEntityMotion`): varlık ve öz-oyuncu replikaları, hareket kontrolü,
+  kayıt ve tanılama. Dünya, envanter ve etiket replikaları ile sekiz kontrol okumadıklarını bildirir. Bu bildirim kodla
+  denetlendi: bu dinleyicilerin hiçbiri bu paketleri okumuyor, hiçbiri de her olayda iş yapmıyor (kabul edilebilirlik
+  izleyicisi yalnızca gözlem, olgu, boşluk ve çevrilemeyen paketleri okur). Tekrar oynatma kapısı bunu sınar
+  (`RegressionReplayTest`): her korpus oturumu, hilesi eklenmiş hâliyle, bir kez süzerek bir kez her dinleyiciye her
+  olayı vererek oynatılır, bulgular birebir aynı çıkar. Bir okuyucuyu yanlışlıkla okumuyor diye bildirmek kapıyı kırar
+  (hareket kontrolü ve varlık replikası için denendi). Öz-oyuncu replikasının hareket paketlerini okuması korpusta
+  sınanmıyor; o okumaya devam eder. Yüz kaydın tamamında bulgular aynı kaldı: 115 `attack-aim`.
 
 Denenip alınmayan: dinlenen varlık izleri. Tek adaylı, bekleyen işi olmayan ve tiki yalnızca `ticked`'i değiştiren bir iz
 tik döngüsünden çıkarılıyor, `ticked` gerektiğinde son tikin penceresinden çözülüyordu. İzlerin %60'ı dinlendi. Ancak
@@ -98,13 +112,10 @@ değil, giden paketlerin işlenmesinde. Doğruluğa dokunan bir karmaşıklık b
 ## Sonuç ve sıradaki adımlar (görev #27)
 
 - Doğruluk: bütün kontroller gerçek arazide 100 dürüst botla 0 vaka (bot yapıntıları ayrı), 0 kayıp, 0 sapma.
-- Performans: oyuncu başına 3,3 ms/s; hedefin 3 katı. Yukarıdaki üç kesinti analiz thread'ini tekrar oynatmada %17-22
-  hafifletti; canlı payı bir sonraki yük testi gösterecek. Kalan kazanç profile göre şu sırayla aranacak:
-  1. Olay dağıtımı: her olay her dinleyiciye gider (tekrar oynatmada `SessionRegistry.dispatch`'in kendi payı %14).
-     Dinleyicilerin hangi olayları okuduğunu bildirmesi ve yalnızca onları alması gerekir. Bir dinleyicinin okuduğu bir
-     olayı kaçırması replikayı bozar, bu yüzden her dinleyici için tam ve testle kanıtlanmış bir bildirim şarttır.
-  2. Netty: kenar tap'lerinde yalnızca replikaların ve kontrollerin okuduğu paketleri çözmek, ping'i tick'in kendi
+- Performans: oyuncu başına 3,3 ms/s; hedefin 3 katı. Yukarıdaki dört kesinti analiz thread'ini tekrar oynatmada
+  üçte bir hafifletti. Canlı payı bir sonraki yük testi gösterecek. Kalan kazanç profile göre şu sırayla aranacak:
+  1. Netty: kenar tap'lerinde yalnızca replikaların ve kontrollerin okuduğu paketleri çözmek, ping'i tick'in kendi
      flush'ına bindirmek.
-  3. Kayıt: chunk ve büyük paketleri içerik adresli saklamak ya da sıkıştırmak.
-  4. Varlık replikasında giden paketlerin işlenmesi (`ClientEntities.onOutbound`, `onAcknowledged`) ve paketten gelen
+  2. Kayıt: chunk ve büyük paketleri içerik adresli saklamak ya da sıkıştırmak.
+  3. Varlık replikasında giden paketlerin işlenmesi (`ClientEntities.onOutbound`, `onAcknowledged`) ve paketten gelen
      bir bölümün ilk blok değişikliği.

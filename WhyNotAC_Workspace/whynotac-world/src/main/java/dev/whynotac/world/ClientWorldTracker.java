@@ -50,6 +50,12 @@ public final class ClientWorldTracker implements TimelineListener {
         return worlds.sum();
     }
 
+    /** It reads no entity motion: the entity replica follows the entities. */
+    @Override
+    public boolean readsEntityMotion() {
+        return false;
+    }
+
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         ClientWorld world = session.attachment(KEY, factory);

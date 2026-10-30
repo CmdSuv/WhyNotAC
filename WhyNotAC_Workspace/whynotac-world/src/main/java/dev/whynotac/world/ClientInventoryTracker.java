@@ -27,6 +27,12 @@ public final class ClientInventoryTracker implements TimelineListener {
         this.factory = () -> new ClientInventory(prototypes, layouts, uses);
     }
 
+    /** It reads no entity motion: the entity replica follows the entities. */
+    @Override
+    public boolean readsEntityMotion() {
+        return false;
+    }
+
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         ClientInventory inventory = session.attachment(KEY, factory);

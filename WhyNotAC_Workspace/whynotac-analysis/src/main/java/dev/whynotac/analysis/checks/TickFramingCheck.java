@@ -74,6 +74,12 @@ public final class TickFramingCheck implements TimelineListener {
         boolean judged;      // this interval already produced evidence or a rejection
     }
 
+    /** It reads no entity motion: the entity replica follows the entities. */
+    @Override
+    public boolean readsEntityMotion() {
+        return false;
+    }
+
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         State state = session.attachment(STATE, State::new);

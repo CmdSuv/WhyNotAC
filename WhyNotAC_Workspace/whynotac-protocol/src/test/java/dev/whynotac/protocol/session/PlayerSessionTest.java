@@ -1,6 +1,7 @@
 package dev.whynotac.protocol.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,34 @@ class PlayerSessionTest {
         assertEquals(4, (int) two.attachment(first, made::incrementAndGet));
         assertEquals(1, (int) one.attachment(first, made::incrementAndGet));
         assertEquals(2, (int) one.attachment(later, made::incrementAndGet));
+    }
+
+    @Test
+    void entityMotionReachesOnlyTheListenersThatReadIt() {
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
+        List<String> seen = new ArrayList<>();
+        registry.addListener((session, event) -> seen.add("reader " + event.getClass().getSimpleName()));
+        registry.addListener(new TimelineListener() {
+            @Override
+            public void onEvent(PlayerSession session, TimelineEvent event) {
+                seen.add("other " + event.getClass().getSimpleName());
+            }
+
+            @Override
+            public boolean readsEntityMotion() {
+                return false;
+            }
+        });
+        PlayerSession session = registry.open("127.0.0.1");
+        session.onOutbound(new ClientboundPacket.MoveEntity(7, (short) 1, (short) 0, (short) 0, (byte) 0, (byte) 0, true, true, false), 100);
+        session.onOutbound(new ClientboundPacket.RotateHead(7, (byte) 3), 101);
+        session.onOutbound(new ClientboundPacket.Ping(5), 102);
+        session.onInbound(MOVE, 103);
+        assertEquals(List.of("reader Outbound", "reader Outbound", "reader Outbound", "other Outbound", "reader Inbound", "other Inbound"),
+                seen.subList(seen.size() - 6, seen.size()));
+        assertTrue(TimelineListener.entityMotion(new TimelineEvent.Outbound(0, 0,
+                new ClientboundPacket.SetEntityMotion(7, null, null))));
+        assertFalse(TimelineListener.entityMotion(new TimelineEvent.Outbound(0, 0, new ClientboundPacket.Ping(1))));
     }
 
     @Test
