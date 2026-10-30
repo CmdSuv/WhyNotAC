@@ -2024,6 +2024,42 @@ class MovementCheckTest {
         assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
     }
 
+    /**
+     * A spear's stab (MultiPlayerGameMode.piercingAttack: STAB, then the swing): its lunge runs only on the server
+     * (LivingEntity.lungeForwardMaybe), which pushes the player along its look (lunge III: 3 * 0.458 on the level) and
+     * sends it its motion; the client sets it and moves on with it.
+     */
+    private void stabWithALunge(boolean applied) throws Colliders.Unknown {
+        hold("minecraft:iron_spear", null);
+        ticks(10, FORWARD, 30.0F);
+        keybinds.add(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.STAB, new BlockPosition(0, 0, 0), BlockFace.DOWN, 0));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        float yaw = 30.0F * (float) (Math.PI / 180.0);
+        double lunge = 3 * 0.458F;
+        Vec3d motion = new Vec3d(-Math.sin(yaw) * lunge, -0.0784000015258789, Math.cos(yaw) * lunge);
+        out(ClientboundPacket.SetEntityMotion.received(SELF, motion));
+        sync();
+        if (applied) {
+            player = withDelta(player, ClientboundPacket.SetEntityMotion.received(SELF, motion).clientMotion());
+        }
+        ticks(20, FORWARD, 30.0F);
+    }
+
+    @Test
+    void aSpearsLungeTheServerSendsIsFollowed() throws Exception {
+        stabWithALunge(true);
+        assertTrue(player.z() > 3.0, "lunged: " + player);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
+    }
+
+    @Test
+    void aLungeTheClientDidNotApplyIsAFinding() throws Exception {
+        stabWithALunge(false);
+        assertEquals(1, evidence.size(), String.valueOf(ticks));
+    }
+
     @Test
     void knockbackTheClientDidNotApplyIsAFinding() throws Exception {
         ticks(10, FORWARD, 30.0F);

@@ -45,7 +45,9 @@ import org.junit.jupiter.api.Test;
  * shift and left to the side. {@code truth-powdersnow.jsonl.gz} holds powder snow one deep and two deep: sunk into without
  * boots and jumped in against its wall, fallen onto from five blocks (the falling shape, then in), walked and sprinted
  * across on top in leather boots, sunk into with shift and climbed out of at a wall in them, and the server's frost on
- * the speed while in it (the attribute the recorded speed shows: {@code RecordedSpeed}). Each tick, run from its start in the same world (rebuilt here from the commands that built
+ * the speed while in it (the attribute the recorded speed shows: {@code RecordedSpeed}). {@code truth-riptide.jsonl.gz}
+ * holds a trident with riptide III charged standing in a pool two deep and let go level and looking up (the lift, the
+ * push, the spin attack and its pose from the server's flag), and let go before 10 ticks. Each tick, run from its start in the same world (rebuilt here from the commands that built
  * the course), must end exactly as the client's did. The real-client CI job runs the same comparison
  * on every new session (MovementTruth), in the world WhyNotAC's replica holds.
  */
@@ -359,6 +361,13 @@ class OnFootTruthTest {
         // ticks in powder snow, held by it, on top of it in boots, climbing out of it in boots, landed on its falling shape, frozen
         assertTrue(counts[0] > 650 && counts[42] > 450 && counts[43] > 450 && counts[44] > 80 && counts[45] > 10 && counts[46] > 1
                 && counts[47] > 250, java.util.Arrays.toString(counts));
+    }
+
+    @Test
+    void riptideIsTheClientsOwn() throws Exception {
+        int[] counts = replay("truth-riptide.jsonl.gz", COURSE_WORLD);
+        // riptides let go (each compared from the tick before too), ticks in the spin attack's pose, ticks in a spin attack
+        assertTrue(counts[0] > 350 && counts[48] == 2 && counts[49] > 30 && counts[50] > 30, java.util.Arrays.toString(counts));
     }
 
     @Test

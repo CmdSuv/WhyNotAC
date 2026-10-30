@@ -503,7 +503,10 @@ camel 90; paddle space/0.4 -/3.2 w/0.3 w,space/0.4 w/0.6 -/0.8; uncamel
 # the client holds is near enough for the spin attack's sweep to meet it): a trident with riptide III charged standing on
 # the pool's floor and let go along the level look (the lift off the floor, the push, 20 ticks of spin attack, its pose
 # from the server's flag), looking up out of the water (it flies and falls back), and let go before 10 ticks (no riptide).
-riptide() { echo "tp $NAME 400.5 -62 0.5 -90 $1" > "$FIFO"; sleep 2.0; shift; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+# Each leg first puts the player on the grass beside the pool: its chunks arrive and the player, standing still, is anchored
+# there (in water it could not be); then into the pool, followed.
+riptide() { echo "tp $NAME 396.5 -60 0.5 -90 0" > "$FIFO"; sleep 4.5; echo "tp $NAME 400.5 -62 0.5 -90 $1" > "$FIFO"; sleep 1.0; shift
+  python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
 echo "item replace entity $NAME weapon.mainhand with minecraft:trident[enchantments={riptide:3}]" > "$FIFO"; sleep 0.5
 riptide 0 -/1.0 Button3/0.8 -/2.5
 riptide -30 -/1.0 Button3/0.8 -/3.0
