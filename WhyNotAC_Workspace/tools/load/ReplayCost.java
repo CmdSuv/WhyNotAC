@@ -2,6 +2,7 @@ import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.evidence.Margins;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
@@ -22,8 +23,9 @@ import java.util.stream.Stream;
  * The analysis cost of recorded sessions, without the network or the server: every recording of a directory (a load
  * test's, one per bot) is read into memory once, then replayed ROUNDS times into fresh replicas and every check, as the
  * plugin wires them, on one thread. Prints the thread's CPU time per client tick of the last rounds (the first warm the
- * JIT), and the evidence the checks gave (an honest session gives none). Deterministic enough to compare two builds of
- * the same code path on the same recordings, unlike a load test.
+ * JIT), the evidence the checks gave (an honest session gives none) and how close the rest came to each limit
+ * ({@code EvidenceSink.margin}). Deterministic enough to compare two builds of the same code path on the same
+ * recordings, unlike a load test.
  *
  * <p>usage: java -cp WhyNotAC.jar ReplayCost.java DIR [ROUNDS] [MAX_RECORDINGS] [replicas|all]
  */
@@ -53,8 +55,11 @@ public final class ReplayCost {
         ThreadMXBean bean = ManagementFactory.getThreadMXBean();
         long[] perRound = new long[rounds];
         List<Evidence> given = List.of();
+        Margins margins = new Margins();
         for (int round = 0; round < rounds; round++) {
             List<Evidence> found = new ArrayList<>();
+            Margins roundMargins = new Margins();
+            margins = roundMargins;
             EvidenceSink sink = new EvidenceSink() {
                 @Override
                 public void accept(PlayerSession session, Evidence e) {
@@ -63,6 +68,11 @@ public final class ReplayCost {
 
                 @Override
                 public void rejected(PlayerSession session, String check, Admissibility admissibility) {
+                }
+
+                @Override
+                public void margin(PlayerSession session, String check, double slack) {
+                    roundMargins.add(check, slack);
                 }
             };
             SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (session, event, error) -> {
@@ -102,7 +112,7 @@ public final class ReplayCost {
             byCheck.merge(e.check(), 1, Integer::sum);
         }
         System.out.printf("{\"recordings\":%d,\"clientTicks\":%d,\"rounds\":%d,\"checks\":%b,\"bestNsPerTick\":%.1f,\"meanNsPerTick\":%.1f,"
-                + "\"evidence\":%d,\"byCheck\":\"%s\"}%n", files.size(), ticks, rounds, checks, (double) best / ticks, (double) sum / counted / ticks,
-                given.size(), byCheck);
+                + "\"evidence\":%d,\"byCheck\":\"%s\",\"margins\":\"%s\"}%n", files.size(), ticks, rounds, checks, (double) best / ticks, (double) sum / counted / ticks,
+                given.size(), byCheck, margins.snapshot());
     }
 }

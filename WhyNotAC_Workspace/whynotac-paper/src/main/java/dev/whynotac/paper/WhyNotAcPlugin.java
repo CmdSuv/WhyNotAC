@@ -196,6 +196,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             pendingMax = Math.max(pendingMax, latency.pending());
             withheld += latency.withheld() ? 1 : 0;
         }
+        StringBuilder margins = new StringBuilder();
+        verdict.margins().forEach((check, m) -> margins.append(margins.isEmpty() ? "" : ",").append(String.format(Locale.ROOT,
+                "\"%s\":{\"observed\":%d,\"smallest\":%s}", check, m.observed(), Double.isFinite(m.smallest()) ? String.format(Locale.ROOT, "%.6f", m.smallest()) : "null")));
         StringBuilder anomalies = new StringBuilder();
         for (Map.Entry<?, Long> entry : totals.anomalies().entrySet()) {
             anomalies.append(anomalies.isEmpty() ? "" : ",").append('"').append(entry.getKey()).append("\":").append(entry.getValue());
@@ -204,7 +207,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
                         + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
                         + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
-                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},"
+                        + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},\"margins\":{%s},"
                         + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d},"
                         + "\"entities\":{\"ticks\":%d,\"branches\":%d,\"merges\":%d,\"overflows\":%d,\"losses\":%d}}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
@@ -213,7 +216,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 recordings == null ? 0 : recordings.failedRecordings(), transactionLoop.runs(), transactionLoop.meanWallMicros(),
                 transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros(),
                 verdict.cases(), cases == null ? 0 : cases.storedCount(), cases == null ? 0 : cases.droppedCount(),
-                verdict.rejections().size(), worldTracker == null ? 0 : worldTracker.retainedBytes(),
+                verdict.rejections().size(), margins, worldTracker == null ? 0 : worldTracker.retainedBytes(),
                 worldTracker == null ? 0 : worldTracker.sharedSections(), worldTracker == null ? 0 : worldTracker.worldsCreated(),
                 entitiesTracker == null ? 0 : entitiesTracker.totals().ticks(), entitiesTracker == null ? 0 : entitiesTracker.totals().branches(),
                 entitiesTracker == null ? 0 : entitiesTracker.totals().merges(), entitiesTracker == null ? 0 : entitiesTracker.totals().overflows(),

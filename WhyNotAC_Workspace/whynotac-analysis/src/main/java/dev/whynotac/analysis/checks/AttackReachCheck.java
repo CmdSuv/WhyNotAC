@@ -116,6 +116,9 @@ public final class AttackReachCheck implements TimelineListener {
         ClientSelf self = replicas.self().self(session);
         Assessment finding = assess(self, replicas.inventory().inventory(session), replicas.entities().entities(session),
                 replicas.world().world(session), interact.entityId());
+        if (finding.outcome() == Outcome.IN_REACH) {
+            sink.margin(session, ID, finding.allowed() - finding.distance()); // blocks
+        }
         if (finding.outcome() != Outcome.OUT_OF_REACH) {
             return;
         }

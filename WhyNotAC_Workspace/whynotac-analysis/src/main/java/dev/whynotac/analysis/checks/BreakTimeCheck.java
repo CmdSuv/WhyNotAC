@@ -164,6 +164,8 @@ public final class BreakTimeCheck implements TimelineListener {
                                 dig.offGroundTicks + (bound.offGround() ? 1 : 0), progress));
                         if (progress < 1.0F) {
                             report(session, state, dig, bound, progress, in);
+                        } else {
+                            sink.margin(session, ID, progress - 1.0F); // the share of a whole break
                         }
                     }
                     default -> { }

@@ -101,7 +101,9 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   adım konan oturumu hareket kontrolü bulur). Tekne interpolasyonu hatasının oturumu kümede: düzeltmesiz kapı kırılır.
 - **Meşru davranış kataloğu** (`E1`, `DATA-01`, `VAL-13`): vanilla seçenekleri, erişilebilirlik
   yolları, izinli makrolar. Gerçek client senaryo matrisi.
-- **Paylar** (`VAL-4`): her kanıt, dürüst trafiğin sınıra ne kadar yaklaştığını raporlar.
+- **Paylar** (`VAL-4`): her kanıt, dürüst trafiğin sınıra ne kadar yaklaştığını raporlar. Sınırı olan üç kontrol için
+  yapıldı (`attack-reach`, `break-time`, `client-clock`). Paylar `/whynotac stats`'ta ve `ReplayCost`'ta raporlanır,
+  tekrar oynatma kapısı negatif payı reddeder. Değerler [analiz README'sinde](../whynotac-analysis/README.md).
 - **Saat varsayımı** (`VAL-3`): sunucu saatinin kayması izlenir.
 - **Test teknikleri:** fuzz (`TEST-01`), özellik tabanlı testler (`TEST-02`), mutasyon (`TEST-03`),
   deterministik simülasyon (`TEST-04`).

@@ -3,6 +3,7 @@ package dev.whynotac.analysis.verdict;
 import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.evidence.Margins;
 import dev.whynotac.analysis.policy.ActionPolicy;
 import dev.whynotac.analysis.policy.ActionPolicy.Action;
 import dev.whynotac.analysis.policy.ActionPolicy.Lifecycle;
@@ -38,6 +39,7 @@ public final class ShadowVerdict implements EvidenceSink {
     private final List<CaseListener> listeners = new CopyOnWriteArrayList<>();
     private final LongAdder cases = new LongAdder();
     private final Map<String, LongAdder> rejectedByReason = new ConcurrentHashMap<>();
+    private final Margins margins = new Margins();
 
     public void addListener(CaseListener listener) {
         listeners.add(listener);
@@ -69,6 +71,16 @@ public final class ShadowVerdict implements EvidenceSink {
         for (String reason : admissibility.reasons()) {
             rejectedByReason.computeIfAbsent(check + ": " + reason, r -> new LongAdder()).increment();
         }
+    }
+
+    @Override
+    public void margin(PlayerSession session, String check, double slack) {
+        margins.add(check, slack);
+    }
+
+    /** How close what was no finding came to each check's limit. */
+    public Map<String, Margins.Margin> margins() {
+        return margins.snapshot();
     }
 
     public long cases() {

@@ -99,6 +99,9 @@ public final class ClientClockCheck implements TimelineListener {
         long ticks = state.tickEnds;
         if (state.bestAnchor != Double.POSITIVE_INFINITY) {
             double allowed = (ack.nanoTime() - state.anchorSentNanos) * TICKS_PER_NANO + SLACK_TICKS;
+            if (ticks - state.anchorTicks <= allowed) {
+                sink.margin(session, ID, allowed - (ticks - state.anchorTicks)); // client ticks
+            }
             if (ticks - state.anchorTicks > allowed) {
                 Admissibility admissibility = state.admissibility.evaluate(state.anchorSequence);
                 if (admissibility.admissible()) {

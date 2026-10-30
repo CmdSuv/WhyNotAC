@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.evidence.Margins;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
@@ -19,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -35,7 +37,8 @@ class RegressionReplayTest {
     private static final Path CORPUS = Path.of(System.getProperty("whynotac.regressionCorpus", "../regression"));
 
     /** What one replay came to. */
-    private record Outcome(List<Evidence> evidence, List<String> rejected, List<String> errors, long clientTicks, long moves) {}
+    private record Outcome(List<Evidence> evidence, List<String> rejected, List<String> errors, long clientTicks, long moves,
+            Map<String, Margins.Margin> margins) {}
 
     static Stream<Path> corpus() throws IOException {
         try (Stream<Path> files = Files.list(CORPUS)) {
@@ -56,6 +59,13 @@ class RegressionReplayTest {
         assertTrue(o.clientTicks() > 1000 && o.moves() > 1000, "a whole session: " + o.clientTicks() + " ticks, " + o.moves() + " moves");
         assertEquals(List.of(), o.evidence().stream().map(e -> e.check() + ": " + e.summary()).toList());
         assertEquals(List.of(), o.rejected());
+        // VAL-4: what was no finding stayed within each limit, and the clock check judged every answered ping
+        o.margins().forEach((check, m) -> assertTrue(m.smallest() >= 0, check + ": " + m));
+        assertTrue(o.margins().containsKey(ClientClockCheck.ID) && o.margins().get(ClientClockCheck.ID).observed() > 100,
+                "client-clock margins: " + o.margins());
+        // every corpus session is a real-client run with its attack and dig legs
+        assertTrue(o.margins().containsKey(AttackReachCheck.ID) && o.margins().containsKey(BreakTimeCheck.ID), "margins: " + o.margins());
+        System.out.println(recording.getFileName() + " margins " + o.margins());
     }
 
     @ParameterizedTest
@@ -114,6 +124,7 @@ class RegressionReplayTest {
         List<Evidence> evidence = new ArrayList<>();
         List<String> rejected = new ArrayList<>();
         List<String> errors = new ArrayList<>();
+        Margins margins = new Margins();
         EvidenceSink sink = new EvidenceSink() {
             @Override
             public void accept(PlayerSession session, Evidence e) {
@@ -123,6 +134,11 @@ class RegressionReplayTest {
             @Override
             public void rejected(PlayerSession session, String check, Admissibility admissibility) {
                 rejected.add(check + ": " + admissibility);
+            }
+
+            @Override
+            public void margin(PlayerSession session, String check, double slack) {
+                margins.add(check, slack);
             }
         };
         SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (session, event, error) -> errors.add(event + ": " + error));
@@ -150,6 +166,6 @@ class RegressionReplayTest {
             session.deliver(new TimelineEvent.Disconnected(last == null ? 0 : last.sequence() + 1, last == null ? 0 : last.nanoTime()));
         }
         assertTrue(reader.report().complete(), "the recording reads to its end: " + reader.report());
-        return new Outcome(evidence, rejected, errors, ticks, moves);
+        return new Outcome(evidence, rejected, errors, ticks, moves, margins.snapshot());
     }
 }

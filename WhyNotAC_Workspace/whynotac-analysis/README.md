@@ -17,6 +17,24 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
 
+### Paylar (`VAL-4`)
+
+Bir sınırı olan üç kontrol, bulgu olmayan her gözlemde sınıra kalan payı da raporlar (`EvidenceSink.margin`). Eklenti
+her kontrolün gözlem sayısını ve en küçük payını `/whynotac stats`'ta (`margins`) tutar, `tools/load/ReplayCost.java` de
+yazdırır. Tekrar oynatma kapısı (`RegressionReplayTest`) her korpus oturumunda hiçbir payın negatif olmadığını ister.
+
+| Kontrol | Pay | Gerçek client korpusu (en küçük) | 100 botlu yük testi (en küçük) |
+|---|---|---|---|
+| `attack-reach` | izin verilen en büyük uzaklık eksi en küçük uzaklık (blok) | 0,0202 (2 saldırı) | 0,0602 (6.290 saldırı) |
+| `break-time` | kırma bittiğinde ilerleme eksi 1 | 0 (4-5 kırma) | kırma yok |
+| `client-clock` | izin verilen tik sayısı eksi client'ın tikleri | 12,5 (27.000'i aşkın cevap; tolerans 22) | 18,9 (2,17 milyon cevap) |
+
+`break-time`'ın 0 payı modelin gereğidir: vanilla client ilerlemesinin 1'e ulaştığı ilk tikte bırakır ve sınır, her
+çarpanın client'ın tutabileceği en büyük değeriyle aynı float toplamını hesaplar. Bu kontrolün toleransı yoktur;
+dayanağı toplamın bit bit aynılığıdır. Bir tik erken bırakış hiçbir vanilla client'ın yapamayacağı bir şeydir. Sınırı
+olmayan kontroller (dilbilgisi, kesin geometri, hareketin hipotez kümesi) pay raporlamaz: onların sorusu evet ya da
+hayırdır.
+
 ### `action-grammar` (`ActionGrammarCheck`)
 
 - **Client'ın kuralı (1.21.11, decompile edilmiş client):** client'ın eylemleri tikin başında gelir. Saldırı ve
