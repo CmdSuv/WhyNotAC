@@ -75,8 +75,10 @@ until grep -q 'Done (' "$WORK_DIR/server.log" 2>/dev/null; do
 done
 echo "server up"
 # The movement course, east of everything else along z = -1..1 (the ground's top is y = -60). Built before the
-# client joins, so it arrives with the chunks: the physics check needs the world as the client had it.
-for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
+# client joins, so it arrives with the chunks: the physics check needs the world as the client had it. No natural
+# spawning (a flat world spawns none with its chunks): an animal the spawner puts on the grass wanders into the legs,
+# and next to a ridden vehicle it rightly puts the vehicle's ticks out of scope (a horse once took a nautilus's dash).
+for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" "gamerule spawn_mobs false" \
   "fill 44 -60 -1 44 -60 1 minecraft:smooth_stone_slab[type=bottom]" "fill 45 -60 -1 46 -60 1 minecraft:stone" \
   "fill 46 -59 -1 46 -59 1 minecraft:smooth_stone_slab[type=bottom]" \
   "fill 52 -61 -1 62 -61 1 minecraft:ice" "fill 70 -61 -1 74 -61 1 minecraft:soul_sand" "fill 82 -60 -2 82 -59 2 minecraft:stone" \

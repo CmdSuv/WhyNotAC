@@ -362,6 +362,16 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   (client'ın kendi durumu her birinde hipotezlerinden biri), ayağın 506 tiki açıklandı, 0 açıklanamayan; 82 tik
   motorun kapsamı dışında (düşerken bir tikte bir bloktan uzun hareket). Kapı (`MovementTruth`): riptide bırakışlarının ve
   dönme tiklerinin açıklanmış olması; ilk koşu, havuza doğrudan ışınlanan ayağın hiç izlenmediğini böyle yakaladı.
+- **Mızrak hamlesi:** `LivingEntity.lungeForwardMaybe` yalnızca sunucuda koşar (`EnchantmentHelper.doLungeEffects`
+  yalnızca `ServerLevel`'da; client'ın dürtmesi, `piercingAttack`: STAB ve sallama, hamleyi uygulamaz): oyuncu
+  binmiyorken, süzülmüyorken, suda değilken ve açlığı 6'nın üstündeyken bakışı boyunca itilir (hamle III: düzlemde
+  3 × 0.458) ve bu hız client'a `SetEntityMotion` (set) olarak gelir. Takipçi onu sunucunun gönderdiği her hız gibi
+  işler; client'ın onu işleyip işlemediği belirsizse iki hipotez. `MovementCheckTest`: sunucunun gönderdiği hamle
+  izlenir; client'ın uygulamadığı hamle bulgudur. Gerçek client (parkurun mızrak ayağı: doygunlukla dolu açlık, hamle
+  III'lü demir mızrak, biri dururken biri yürürken iki dürtme): sunucu iki hamle gönderdi, ikisinden sonra da takipçi
+  client'ın tikini hamlenin hızıyla açıkladı (client'ın kendi durumu hipotezlerinden biri), 0 açıklanamayan. Kapı
+  (`MovementTruth`): kendi oyuncusuna düzlemde 1'den büyük hız gönderildikten sonraki 5 gönderilmiş tikte, client'ın
+  düzlemde 0.5'ten uzun hareket ettiği açıklanmış bir tik.
 - **Kullanırken eylem yok:** `handleKeybinds` oyuncu bir eşya kullanırken yalnızca bırakır (kullanma tuşu
   kalkmışsa) ve saldırı ile kullanma tuşlarının tıklarını boşa harcar; saldırı, mızrak dürtmesi, varlıkla etkileşim
   ve yeni kullanım yalnızca kullanmayan bir durumun `startAttack`/`startUseItem`'ından gelir. Bunlardan birini içeren
