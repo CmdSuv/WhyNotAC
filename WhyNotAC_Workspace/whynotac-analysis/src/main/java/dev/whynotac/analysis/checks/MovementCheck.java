@@ -27,7 +27,9 @@ import java.util.TreeMap;
  * tick the transactions place it in or, where they cannot, in every tick it may be in. A tick is a finding
  * when no state the client may have been in sends what it sent: the position to the bit, the flags, the
  * sprint and input packets. Items in use slow it as their use effects say; while one is in use, {@code handleKeybinds}
- * neither attacks nor starts a use, so a tick that does is explained only by a state not using one. Whatever the step does not model (fluids, climbing, a use on a block,
+ * neither attacks nor starts a use, so a tick that does is explained only by a state not using one. A riptide trident
+ * let go pushes it along its look only when used 10 ticks in water or rain, its spin attack's pose from the server's
+ * flag (riptide-anywhere and riptide strength cheats). Whatever the step does not model (fluids, climbing, a use on a block,
  * vehicles, pushing entities, blocks still changing, the world border) ends the claim until the next anchor. Nor is
  * anything claimed over a span in which the client may have held other tags than the engine takes as vanilla
  * ({@link EngineTags}: what it climbs, stands on and swims in, from the server's {@code update_tags}).
@@ -56,7 +58,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 11;
+    public static final int VERSION = 12;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 

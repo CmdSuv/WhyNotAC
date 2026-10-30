@@ -153,6 +153,10 @@ class MovementCheckTest {
     private boolean pushedByVillagers = true;
     private boolean ignorePushes;
     private final List<ServerboundPacket> keybinds = new ArrayList<>();
+    /** A riptide the synthetic client's next tick releases ({@code TridentItem.releaseUsing}), its strength; null: none. */
+    private Float riptide;
+    /** The server's spin attack flag as the synthetic client holds it (its pose). */
+    private boolean spinAttack;
     // the server: its movement speed modifiers in its own order (an Object2ObjectArrayMap, insertion order), and
     // whether it sends them again when sprinting starts or stops (as it does: the modifier set changed)
     private final List<ClientboundPacket.UpdateAttributes.Modifier> serverModifiers = new ArrayList<>();
@@ -277,7 +281,7 @@ class MovementCheckTest {
                 player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(), player.sprintModifier(),
                 player.crouching(), player.pose(), player.keys(), player.noJumpDelay(), player.sprintTriggerTime(), player.autoJumpTime(), player.support(),
                 player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(), player.fallFlying(),
-                player.inPowderSnow());
+                player.inPowderSnow(), player.inWater(), player.spinAttackTicks());
         in(new ServerboundPacket.AcceptTeleportation(id));
         in(new ServerboundPacket.MovePlayer(x, y, z, yaw, pitch, true, true, false, false));
     }
@@ -288,7 +292,8 @@ class MovementCheckTest {
         keybinds.clear();
         PlayerState pre = rotate(player, yRot, xRot);
         OnFoot.Step step = OnFoot.step(pre, keys, GROUND, new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, effects, use,
-                elytra, platform, border, leatherBoots));
+                elytra, platform, border, leatherBoots).withRiptide(riptide).withSpinAttack(spinAttack));
+        riptide = null;
         PlayerState post = step.state();
         firstTick = false;
         if (step.startedGliding() && sendsGlideStart) {
@@ -574,28 +579,28 @@ class MovementCheckTest {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
+                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
     }
 
     private static PlayerState move(PlayerState p, Vec3d by) {
         return new PlayerState(p.x() + by.x(), p.y() + by.y(), p.z() + by.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(),
                 p.horizontalCollision(), p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(),
                 p.sprintModifier(), p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(),
-                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
+                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
     }
 
     private static PlayerState withDelta(PlayerState p, Vec3d delta) {
         return new PlayerState(p.x(), p.y(), p.z(), delta, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
+                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
     }
 
     private static PlayerState withSprintModifier(PlayerState p, boolean sprintModifier) {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), sprintModifier, p.crouching(), p.pose(), p.keys(),
                 p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(),
-                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
+                p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
     }
 
     /** The server sets a block; the client handles it before its next tick. */
@@ -2289,7 +2294,295 @@ class MovementCheckTest {
         sync();
         throwTrident();
         assertEquals(List.of(), evidence);
-        assertTrue(ticks.stream().anyMatch(t -> t.reason() != null && t.reason().startsWith("a trident released")), String.valueOf(ticks));
+        assertTrue(ticks.stream().anyMatch(t -> t.reason() != null && t.reason().startsWith("a riptide released where WhyNotAC cannot tell")),
+                String.valueOf(ticks));
+    }
+
+    /** Standing in a pool two blocks deep on the stone, the player touching its water. */
+    private void standInWater() throws Colliders.Unknown {
+        int water = STATES.firstStateOf("minecraft:water"); // level=0: a source
+        for (int x = -6; x <= 6; x++) {
+            for (int z = -6; z <= 6; z++) {
+                for (int y = 64; y <= 65; y++) {
+                    place(x, y, z, water);
+                }
+            }
+        }
+        ticks(5, NONE, 30.0F);
+    }
+
+    /**
+     * Using the trident in hand for {@code used} ticks (the server's flags echo the use) and letting it go: {@code push}
+     * is the riptide the vanilla client then releases (null: none), {@code cheat} what a modified one moves more.
+     */
+    private void chargeAndRelease(int used, Float push, Vec3d cheat) throws Colliders.Unknown {
+        chargeAndRelease(used, push, cheat, 0.0F);
+    }
+
+    private void chargeAndRelease(int used, Float push, Vec3d cheat, float pitch) throws Colliders.Unknown {
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(NONE, 30.0F, pitch, Vec3d.ZERO);
+        livingFlags(1);
+        for (int i = 1; i < used; i++) {
+            tick(NONE, 30.0F, pitch, Vec3d.ZERO);
+        }
+        keybinds.add(RELEASE);
+        use = null;
+        riptide = push;
+        tick(NONE, 30.0F, pitch, cheat);
+    }
+
+    /**
+     * The server's spin attack from its own release, until it runs down: its living flag 4 and the pose it gives the
+     * server's player (SPIN_ATTACK, then STANDING again), which the client takes at once ({@code refreshDimensions});
+     * its own pose follows the flag at the end of each tick ({@code Player.updatePlayerPose}).
+     */
+    private void spinAttack(int ticks) throws Colliders.Unknown {
+        serverPose(PlayerState.Pose.SPIN_ATTACK, ClientboundPacket.EntityPose.SPIN_ATTACK, 4);
+        spinAttack = true;
+        ticks(ticks, NONE, 30.0F);
+        serverPose(PlayerState.Pose.STANDING, ClientboundPacket.EntityPose.STANDING, 0);
+        spinAttack = false;
+    }
+
+    private void serverPose(PlayerState.Pose pose, ClientboundPacket.EntityPose sent, int livingFlags) {
+        out(new ClientboundPacket.SetEntityData(SELF, List.of(
+                new ClientboundPacket.SetEntityData.DataEntry(6, ClientboundPacket.SetEntityData.Kind.POSE, sent.ordinal()),
+                new ClientboundPacket.SetEntityData.DataEntry(8, ClientboundPacket.SetEntityData.Kind.BYTE, livingFlags)), 0));
+        sync();
+        PlayerState p = player;
+        player = new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(),
+                p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(),
+                p.crouching(), pose, p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(),
+                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
+    }
+
+    @Test
+    void aRiptideInWaterPushesThePlayerAlongItsLookAndIsFollowed() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        int from = ticks.size();
+        chargeAndRelease(10, 3.0F, Vec3d.ZERO); // TridentItem.releaseUsing: 10 ticks of use at least
+        assertTrue(player.deltaMovement().horizontalDistance() > 2.0 && player.spinAttackTicks() == 19, String.valueOf(player));
+        spinAttack(19);
+        ticks(10, NONE, 30.0F);
+        assertEquals(PlayerState.Pose.STANDING, player.pose());
+        assertTrue(player.z() > 8.0, "far along the look: " + player);
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void theSpinAttacksPoseIsTheServersFlagsAndFitsUnderACeilingTheStandingPlayerHits() throws Exception {
+        for (int x = -12; x <= 12; x++) {
+            for (int z = -12; z <= 12; z++) {
+                place(x, 69, z, STONE);
+            }
+        }
+        holdTrident(3.0F);
+        standInWater();
+        int from = ticks.size();
+        chargeAndRelease(10, 3.0F, Vec3d.ZERO, -30.0F); // up along the look: the lift and the push take it toward the ceiling
+        spinAttack(19);
+        ticks(10, NONE, 30.0F);
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void aRiptideLetGoOutOfTheWaterItsUseStartedInPushesNothing() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        int from = ticks.size();
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        for (int x = -6; x <= 6; x++) {
+            for (int z = -6; z <= 6; z++) {
+                for (int y = 64; y <= 65; y++) {
+                    place(x, y, z, AIR); // drained: the next tick touches no water
+                }
+            }
+        }
+        ticks(12, NONE, 30.0F);
+        keybinds.add(RELEASE);
+        use = null;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO); // TridentItem.releaseUsing: not in water or rain, no riptide
+        ticks(5, NONE, 30.0F);
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
+    }
+
+    @Test
+    void aTridentLetGoAsItsHandChangesEndsTheClaim() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        ticks(12, NONE, 30.0F);
+        keybinds.add(new ServerboundPacket.SetCarriedItem(1)); // the hotbar key first, then the release: an empty hand let go
+        keybinds.add(RELEASE);
+        use = null;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.stream().anyMatch(t -> "a trident released in a tick the client changed its hands in".equals(t.reason())),
+                String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void aTridentLetGoBeforeTenTicksPushesNothingSoARiptideThenIsAFinding() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        chargeAndRelease(9, null, Vec3d.ZERO);
+        ticks(5, NONE, 30.0F);
+        assertEquals(List.of(), evidence, String.valueOf(ticks));
+        chargeAndRelease(9, 3.0F, Vec3d.ZERO); // a modified client's riptide, exactly as a vanilla one would be at 10
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void aRiptidePushHarderThanItsStrengthIsAFinding() throws Exception {
+        holdTrident(1.5F); // riptide I
+        standInWater();
+        chargeAndRelease(12, 1.5F, new Vec3d(-0.75, 0.0, 1.3)); // riptide III's push from riptide I
+        assertEquals(1, evidence.size(), String.valueOf(ticks.subList(ticks.size() - 3, ticks.size())));
+    }
+
+    @Test
+    void aSpinAttackNearAnEntityEndsTheClaim() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        // on the riptide's way (along the look: -x, +z), far ahead of where its release tick takes it
+        out(new ClientboundPacket.AddEntity(9, new UUID(1, 9), "minecraft:villager", -5.0, 64.0, 10.0, Vec3d.ZERO, null, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        ticks(2, NONE, 30.0F);
+        int start = ticks.size();
+        chargeAndRelease(10, 3.0F, Vec3d.ZERO);
+        spinAttack(19);
+        assertEquals(List.of(), evidence);
+        assertEquals(MovementTracker.Outcome.EXPLAINED, ticks.get(start + 10).outcome(), "the release: " + ticks.get(start + 10));
+        assertTrue(ticks.subList(start + 11, ticks.size()).stream().anyMatch(t -> "an entity near a spin attack".equals(t.reason())),
+                String.valueOf(ticks.subList(start, ticks.size())));
+    }
+
+    /**
+     * In the rain, a riptide released that WhyNotAC cannot tell from none (the rain may not reach the player); then a
+     * position forced at each of these ticks after it, as a reminder 19 ticks after the last would be: each one after
+     * another a settle anchor's chance. The index of the release.
+     */
+    private int releaseThenPositionsAt(int... after) throws Colliders.Unknown {
+        holdTrident(3.0F);
+        out(new ClientboundPacket.GameEvent(1, 0.0F)); // START_RAINING
+        out(new ClientboundPacket.GameEvent(7, 1.0F)); // RAIN_LEVEL_CHANGE
+        sync();
+        ticks(15, NONE, 30.0F);
+        chargeAndRelease(10, null, Vec3d.ZERO); // under a roof: no riptide
+        int release = ticks.size() - 1;
+        assertEquals("a riptide released where WhyNotAC cannot tell water or rain", ticks.get(release).reason());
+        for (int k : after) {
+            while (ticks.size() - release < k) {
+                tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+            }
+            reminder = 19;
+            tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        }
+        assertEquals(List.of(), evidence);
+        return release;
+    }
+
+    @Test
+    void noStateIsAnchoredWhileASpinAttackMayRun() throws Exception {
+        // the spin attack runs in the release's tick and the 19 after it: a state after the 18th may still spin
+        int release = releaseThenPositionsAt(15, 18);
+        assertTrue(ticks.subList(release, ticks.size()).stream().noneMatch(t -> "anchored: standing still".equals(t.reason())),
+                String.valueOf(ticks.subList(release, ticks.size())));
+    }
+
+    @Test
+    void theStateAfterTheSpinAttacksLastTickIsAnchored() throws Exception {
+        int release = releaseThenPositionsAt(16, 19);
+        assertEquals("anchored: standing still", ticks.getLast().reason(), String.valueOf(ticks.subList(release, ticks.size())));
+    }
+
+    @Test
+    void aRiptideFromAUseTheAnchorFoundGoingOnEndsTheClaim() throws Exception {
+        holdTrident(3.0F);
+        out(new ClientboundPacket.GameEvent(1, 0.0F)); // START_RAINING
+        out(new ClientboundPacket.GameEvent(7, 1.0F)); // RAIN_LEVEL_CHANGE
+        sync();
+        ticks(5, NONE, 30.0F);
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new dev.whynotac.protocol.packet.BlockPosition(-40, 63, -40),
+                dev.whynotac.protocol.packet.BlockFace.UP, new Vec3d(-39.5, 64.0, -39.5), false, false, 1)); // not modelled: no claim
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        keybinds.add(useItem(Hand.MAIN_HAND)); // the trident used where no claim follows the player
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        ticks(45, NONE, 30.0F); // standing still: anchored, the use going on for how long WhyNotAC cannot tell
+        assertTrue(ticks.stream().anyMatch(t -> "anchored: standing still".equals(t.reason())), String.valueOf(ticks));
+        keybinds.add(RELEASE);
+        use = null;
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO); // under a roof: no riptide
+        assertEquals("a riptide released from a use whose ticks are not known", ticks.getLast().reason());
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aRiptideLiftsThePlayerIntoItsSweep() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        // above the player, out of reach of where it stands and of where the riptide's push (down along the look) takes
+        // it, but not of where its lift (1.2 up, on the ground) puts it first
+        out(new ClientboundPacket.AddEntity(9, new UUID(1, 9), "minecraft:villager", 0.5, 67.6, 0.5, Vec3d.ZERO, null, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        ticks(2, NONE, 30.0F);
+        int start = ticks.size();
+        chargeAndRelease(10, 3.0F, Vec3d.ZERO, 60.0F);
+        assertEquals(List.of(), evidence);
+        assertTrue(ticks.subList(start, start + 10).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(start, ticks.size())));
+        assertEquals("an entity near a spin attack", ticks.get(start + 10).reason(), String.valueOf(ticks.subList(start, ticks.size())));
+    }
+
+    @Test
+    void anEntityTheReleaseLeavesBehindEndsItsClaimToo() throws Exception {
+        holdTrident(3.0F);
+        standInWater();
+        out(new ClientboundPacket.AddEntity(9, new UUID(1, 9), "minecraft:villager", 1.5, 64.0, -1.5, Vec3d.ZERO, null, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        ticks(2, NONE, 30.0F);
+        int start = ticks.size();
+        chargeAndRelease(10, 3.0F, Vec3d.ZERO);
+        assertEquals(List.of(), evidence);
+        assertEquals("an entity near a spin attack", ticks.get(start + 10).reason(), String.valueOf(ticks.subList(start, ticks.size())));
+    }
+
+    @Test
+    void theSpinAttacksPoseTakesThePlayerThroughAHoleOneBlockHigh() throws Exception {
+        // a wall across the riptide's way (z 6), open only at y 65: the spin attack's box (0.6 high) passes, a standing one not
+        for (int x = -12; x <= 12; x++) {
+            place(x, 64, 6, STONE);
+            for (int y = 66; y <= 68; y++) {
+                place(x, y, 6, STONE);
+            }
+        }
+        holdTrident(3.0F);
+        standInWater();
+        int from = ticks.size();
+        chargeAndRelease(10, 3.0F, Vec3d.ZERO);
+        spinAttack(19);
+        ticks(5, NONE, 30.0F);
+        assertTrue(player.z() > 7.0, "through the hole: " + player);
+        assertEquals(List.of(), evidence, String.valueOf(ticks.subList(from, ticks.size())));
+        assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(from, ticks.size())));
     }
 
     @Test

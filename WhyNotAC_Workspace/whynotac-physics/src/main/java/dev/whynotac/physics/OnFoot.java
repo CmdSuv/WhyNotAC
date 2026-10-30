@@ -33,6 +33,10 @@ public final class OnFoot {
     static final double GRAVITY = 0.08;
     /** {@code options.sprintWindow()} default. */
     public static final int DEFAULT_SPRINT_WINDOW = 7;
+    /** {@code TridentItem.releaseUsing}: the ticks a riptide's spin attack runs ({@code startAutoSpinAttack(20)}). */
+    public static final int SPIN_ATTACK_TICKS = 20;
+    /** {@code TridentItem.releaseUsing}: how far a riptide released on the ground lifts the player. */
+    public static final double RIPTIDE_LIFT = 1.1999999F;
     /**
      * Blocks whose {@code entityInside} changes the player's movement on the client: velocity (bubble
      * columns, honey slides) or the next tick's stuck multiplier (cobwebs, berry bushes, powder snow).
@@ -71,7 +75,24 @@ public final class OnFoot {
      *                         climbs out of it); null when not known: a tick that reads it is {@link Colliders.Unknown}
      */
     public record Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
-            boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots) {
+            boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots, Float riptide, boolean spinAttack) {
+
+        public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled, Speed speed, Effects effects, ItemUse use,
+                boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots) {
+            this(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, border, leatherBoots, null, false);
+        }
+
+        /** These conditions with a riptide trident let go before the tick (its spin attack strength; null none). */
+        public Conditions withRiptide(Float strength) {
+            return new Conditions(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, border, leatherBoots, strength,
+                    spinAttack);
+        }
+
+        /** These conditions with the server's spin attack flag on the player ({@code isAutoSpinAttack}: its living flag 4). */
+        public Conditions withSpinAttack(boolean flag) {
+            return new Conditions(foodAllowsSprint, sprintWindow, autoJumpEnabled, speed, effects, use, glider, cosine, border, leatherBoots, riptide,
+                    flag);
+        }
         public static final Conditions VANILLA_DEFAULTS = new Conditions(true, DEFAULT_SPRINT_WINDOW, false, Speed.VANILLA, Effects.NONE, null);
 
         public Conditions(boolean foodAllowsSprint, int sprintWindow, boolean autoJumpEnabled) {
@@ -235,8 +256,10 @@ public final class OnFoot {
     private boolean jumping;
     private float moveX;
     private float moveY;
-    /** {@code oldPosition()}: where the tick started. */
+    /** {@code oldPosition()}: where the tick started (read only when it made no move: a riptide's lift is one). */
     private final Vec3d oldPosition;
+    /** {@code LivingEntity.autoSpinAttackTicks} (under 0: not known, at most its opposite). */
+    private int spinAttackTicks;
     /** {@code movementThisTick}: the moves {@code Entity.move} made during the tick. */
     private final java.util.ArrayList<Terrain.Movement> movements = new java.util.ArrayList<>(2);
 
@@ -268,6 +291,7 @@ public final class OnFoot {
         support = pre.support();
         onGroundNoBlocks = pre.onGroundNoBlocks();
         stuck = pre.stuckSpeedMultiplier();
+        spinAttackTicks = pre.spinAttackTicks();
         swimming = pre.swimming();
         eyeInWater = pre.eyeInWater();
         fallFlying = pre.fallFlying();
@@ -335,10 +359,13 @@ public final class OnFoot {
     private PlayerState state() {
         return new PlayerState(x, y, z, delta, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuck, swimming, eyeInWater, fallFlying, inPowderSnow);
+                onGroundNoBlocks, stuck, swimming, eyeInWater, fallFlying, inPowderSnow, wasTouchingWater, spinAttackTicks);
     }
 
     private void run(PlayerState.Keys polled) throws Colliders.Unknown {
+        if (conditions.riptide() != null) {
+            riptide(conditions.riptide());
+        }
         // --- Player.tick: updateIsUnderwater, from the last tick's eye ---
         wasUnderwater = eyeInWater;
         // --- Entity.baseTick: water and lava (no other fluid), the eye, swimming, a fall in lava halved ---
@@ -471,6 +498,14 @@ public final class OnFoot {
             travelInAir(input);
         }
         applyEffectsFromBlocks();
+        // --- LivingEntity.aiStep's push: a spin attack runs down (checkAutoSpinAttack); with no entity in its way (the
+        // caller vouches: a living one would turn it back), a horizontal collision ends it ---
+        if (spinAttackTicks != 0) {
+            spinAttackTicks += spinAttackTicks > 0 ? -1 : 1;
+            if (horizontalCollision) {
+                spinAttackTicks = 0;
+            }
+        }
 
         // --- Player.tick after LivingEntity.tick ---
         double clampedX = VanillaMath.clamp(x, -2.9999999E7, 2.9999999E7);
@@ -480,6 +515,29 @@ public final class OnFoot {
             z = clampedZ;
         }
         updatePlayerPose();
+    }
+
+    /**
+     * {@code TridentItem.releaseUsing} of a riptide trident used long enough in water, as {@code Minecraft.handleKeybinds}
+     * lets it go before the player's tick: a push along the look of {@code strength} ({@code Entity.push}), the spin
+     * attack for 20 ticks ({@code startAutoSpinAttack}: on the client the count alone, the pose follows the server's
+     * flag), and on the ground a lift of 1.2 ({@code move(SELF)}: one of the tick's moves for the blocks it passes).
+     */
+    private void riptide(float strength) throws Colliders.Unknown {
+        float yaw = yRot * VanillaMath.DEG_TO_RAD;
+        float pitch = xRot * VanillaMath.DEG_TO_RAD;
+        float px = -VanillaMath.sin(yaw) * VanillaMath.cos(pitch);
+        float py = -VanillaMath.sin(pitch);
+        float pz = VanillaMath.cos(yaw) * VanillaMath.cos(pitch);
+        float length = VanillaMath.sqrt(px * px + py * py + pz * pz);
+        px *= strength / length;
+        py *= strength / length;
+        pz *= strength / length;
+        delta = delta.add(px, py, pz);
+        spinAttackTicks = SPIN_ATTACK_TICKS;
+        if (onGround) {
+            move(new Vec3d(0.0, RIPTIDE_LIFT, 0.0)); // off the ground after it: no auto-jump (canAutoJump)
+        }
     }
 
     /** {@code LivingEntity.setSprinting}: the flag and the attribute's sprinting modifier together. */
@@ -1226,7 +1284,8 @@ public final class OnFoot {
     private void updatePlayerPose() throws Colliders.Unknown {
         if (fits(PlayerState.Pose.SWIMMING)) {
             PlayerState.Pose desired = swimming ? PlayerState.Pose.SWIMMING : fallFlying ? PlayerState.Pose.FALL_FLYING
-                    : keys.shift() ? PlayerState.Pose.CROUCHING : PlayerState.Pose.STANDING; // getDesiredPose
+                    : conditions.spinAttack() ? PlayerState.Pose.SPIN_ATTACK : keys.shift() ? PlayerState.Pose.CROUCHING
+                    : PlayerState.Pose.STANDING; // getDesiredPose
             if (fits(desired)) {
                 pose = desired;
             } else if (fits(PlayerState.Pose.CROUCHING)) {

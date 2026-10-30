@@ -317,10 +317,30 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   elin o anki yığınını alır. Bitiş olayı (9) kullanımı bitirir (aç karnına yemek iddiayı bitirir: client'ın kendi
   açlığı koşmayı sunucudan önce belirler). Çapa her olası kullanımı dener: hiçbiri ya da ellerdeki her yığın.
   İddia yok: blok değiştirebilen kullanım (kova, nilüfer), kendi kendine bitebilen kullanım (fırça, kese),
-  riptide'lı ya da gücü bilinmeyen bırakılan trident (riptide oyuncuyu client'ta iter), bloğa kullanım (`UseItemOn`).
+  gücü bilinmeyen ya da WhyNotAC'ın suda mı yağmurda mı olduğunu bilemediği yerde bırakılan riptide'lı trident,
+  bloğa kullanım (`UseItemOn`).
   Trident'in dönme saldırısı gücünü (`EnchantmentHelper.getTridentSpinAttackStrength`) sunucu tarafındaki çevirici her
   tam yığın için büyülerinden hesaplar: sunucunun client'a senkronladığı tanımlarla (bir datapack'in değişiklikleri
-  dahil), iki rastgele çekilişte aynı değilse NaN; client'ın kendi hash'lediği yığında ve eski kayıtlarda bilinmez.
+  dahil), iki rastgele çekilişte aynı değilse NaN; bir sonraki hasarı kıracak trident'te de NaN (`nextDamageWillBreak`:
+  kullanım da bırakış da başarısız olur, oyuncu kıpırdamaz); client'ın kendi hash'lediği yığında ve eski kayıtlarda
+  bilinmez.
+- **Riptide:** `TridentItem.releaseUsing`, `handleKeybinds` içinde tikten önce: kullanım en az 10 tik sürdüyse
+  (`getUseDuration` eksi kalan; her `updatingUsingItem` bir sayar, kullanımın başladığı yerden: client'ın kendi
+  eylemi ya da sunucunun bayraklarını işlediği yer), güç 0'dan büyükse ve oyuncu suda ya da yağmurdaysa
+  (`isInWaterOrRain`, tikten önce: son tikin `baseTick`'inin bıraktığı `wasTouchingWater`) oyuncu bakışı boyunca gücü
+  kadar itilir (float matematiği, birim vektör), 20 tiklik dönme saldırısı başlar, yerdeyse 1.2 kaldırılır
+  (`move(SELF)`: tikin hareketlerinden biri). Motor bunu tikin başında yapar (`OnFoot.Conditions.withRiptide`);
+  `PlayerState` artık `wasTouchingWater`'ı ve dönme sayacını taşır. Bırakışın elindeki yığın kullanımınkiyle aynı eşya
+  olmalı; o tik elleriyle bir şey yapan client'ta iddia biter (yeni slotun yığını bırakılır). 10 tikten kısa bir
+  kullanım elde ne olursa olsun itmez. Kuru ve kesin yağmursuz yerde bırakış itmez; yağmurda, suda değilken WhyNotAC
+  yağmurun oyuncuya değip değmediğini (gök, biyom) bilemez: iddia biter. Çapanın bulduğu, süresi bilinmeyen kullanımdan
+  bırakış da iddiayı bitirir. Dönme saldırısının pozu (`SPIN_ATTACK`, 0.6×0.6, göz 0.4) yalnızca sunucunun bayrağından
+  gelir (canlı varlık bayrağı 4, `isAutoSpinAttack`; sunucunun gönderdiği `SPIN_ATTACK` duruşu da hemen alınır,
+  `updatePlayerPose` tikin sonunda). Dönme sürerken (`checkAutoSpinAttack`: `aiStep`'te sayaç 0'dan büyükken)
+  süpürdüğü kutuda (kaldırma dahil) hiçbir varlık olmamalı: canlı biri onu bitirip oyuncuyu geri sektirir, cansız
+  biri (düşen eşya) yatay çarpışmanın onu bitirmesini engeller; client'ın kendisi simüle ettiği (durumu bilinmeyen)
+  varlıklar sunucunun son konumuna göre sayılır (`ClientEntities.mayHaveEntityNear`). Bir bırakıştan (ya da sunucunun
+  başka yığında bitirdiği kullanımdan) sonraki 19 tik boyunca dönme sürebileceğinden "durağan" çapa kurulmaz.
   Gücü 0 olan trident'i bırakmak (`TridentItem.releaseUsing`: client onu fırlatır, oyuncuyu hareket ettirmez) yayınki
   gibi sıradan bir bırakıştır ve iddiayı bitirmez; hileli bir client riptide'sız trident bırakarak kontrolü susturamaz.
   Riptide'lı trident'in kullanımı suda ya da yağmurda değilken başlamaz (`TridentItem.use`: `isInWaterOrRain` değilse
@@ -330,7 +350,14 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   bırakıp riptide gibi fırlayan client ("her yerde riptide") açıklanamayan harekettir. `MovementCheckTest`: riptide'sız
   trident 15 tik doldurulup bırakılır, sonrası açıklanır; kuru yerde riptide III'lü trident'i (3.0) bırakıp fırlamak
   bulgu (kural kaldırılınca kırılır); yağmurda aynı bırakış iddiayı bitirir; eşleme kaldırılınca ilk test kırılır.
-  `InventoryPacketViewsTest`: riptide I–III 1.5, 2.25 ve 3.0 verir.
+  Suda: 10 tik doldurulan riptide III itilir, döner ve izlenir; 9 tikte aynı riptide bulgu; riptide I'in III kadar
+  itmesi bulgu; kullanımı suda başlayıp su boşaltılınca bırakış itmez ve izlenir; elin değiştiği tikte bırakış iddiayı
+  bitirir; yukarı bakan riptide'ın dönme pozu tavanın altına sığar, tek blok yüksekliğindeki delikten geçer; yoldaki,
+  geride kalan ya da kaldırmanın üstündeki varlık iddiayı bitirir; bırakıştan sonraki 18. tike kadar çapa kurulmaz,
+  19.'da kurulur; çapanın bulduğu kullanımdan bırakış iddiayı bitirir (her kural kaldırılınca ya da bir kaydırılınca bir
+  test kırılır). `InventoryPacketViewsTest`: riptide I–III 1.5, 2.25 ve 3.0 verir; kırılmak üzere olan riptide'lı
+  trident NaN, riptide'sız olan 0. `ClientPushersTest`: düşen eşya iten ya da çarpışan değildir ama dönmenin
+  süpürmesinde sayılır.
 - **Kullanırken eylem yok:** `handleKeybinds` oyuncu bir eşya kullanırken yalnızca bırakır (kullanma tuşu
   kalkmışsa) ve saldırı ile kullanma tuşlarının tıklarını boşa harcar; saldırı, mızrak dürtmesi, varlıkla etkileşim
   ve yeni kullanım yalnızca kullanmayan bir durumun `startAttack`/`startUseItem`'ından gelir. Bunlardan birini içeren

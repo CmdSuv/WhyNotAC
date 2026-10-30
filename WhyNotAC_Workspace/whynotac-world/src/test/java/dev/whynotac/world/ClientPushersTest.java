@@ -163,4 +163,20 @@ class ClientPushersTest {
         assertFalse(entities.mayHaveColliderNear(SELF, BOX[0] - 1.5, BOX[1] - 1.5, BOX[2] - 1.5, BOX[3] + 1.5, BOX[4] + 1.5, BOX[5] + 1.5, 64.0));
         assertTrue(entities.mayHavePusherNear(SELF, BOX[0] - 1.5, BOX[1] - 1.5, BOX[2] - 1.5, BOX[3] + 1.5, BOX[4] + 1.5, BOX[5] + 1.5, 64.0));
     }
+
+    /** A spin attack's sweep counts every entity: a dropped item neither pushes nor collides, but stops a collision ending it. */
+    @Test
+    void everyEntityCountsForASpinAttack() {
+        sync();
+        tick();
+        assertFalse(entities.mayHaveEntityNear(SELF, BOX[0] - 1.5, BOX[1] - 1.5, BOX[2] - 1.5, BOX[3] + 1.5, BOX[4] + 1.5, BOX[5] + 1.5, 64.0),
+                "the player alone");
+        out(add(5, "minecraft:item", 0.9, 64.0, 0.5));
+        sync();
+        tick();
+        assertFalse(entities.mayHavePusherNear(SELF, BOX[0] - 1.5, BOX[1] - 1.5, BOX[2] - 1.5, BOX[3] + 1.5, BOX[4] + 1.5, BOX[5] + 1.5, 64.0));
+        assertTrue(entities.mayHaveEntityNear(SELF, BOX[0] - 1.5, BOX[1] - 1.5, BOX[2] - 1.5, BOX[3] + 1.5, BOX[4] + 1.5, BOX[5] + 1.5, 64.0));
+        // the client simulates a dropped item itself: where the server last put it, widened by the radius
+        assertFalse(entities.mayHaveEntityNear(SELF, BOX[0] + 100.0, BOX[1], BOX[2], BOX[3] + 100.0, BOX[4], BOX[5], 64.0), "far from it");
+    }
 }

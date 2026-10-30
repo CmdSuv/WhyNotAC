@@ -140,6 +140,8 @@ class OnFootTruthTest {
         // powder snow in the ground: a strip one deep, a pit two deep
         {60, -61, 29, 65, -61, 31, blockState("minecraft:powder_snow")},
         {68, -62, 29, 70, -61, 31, blockState("minecraft:powder_snow")},
+        // the riptide's pool, two deep in the ground far east of everything
+        {398, -62, -6, 445, -61, 6, blockState("minecraft:water", "level=0")},
     };
 
     private static int scaffolding(String bottom, String distance) {
@@ -376,7 +378,8 @@ class OnFootTruthTest {
      * lava, in a lava channel's current, and jumping out of lava at a wall, then ticks in scaffolding, standing on its top,
      * standing on a hanging block's floor, climbing it, and going down it with shift, then ticks ending in powder snow, held
      * by it, standing on it in leather boots, climbing out of it in them, landings on its falling shape, and ticks under
-     * its frost}.
+     * its frost, then riptides let go (each compared from the tick before too), ticks in the spin attack's pose and ticks
+     * in a spin attack}.
      */
     private static int[] replay(String resource, Colliders.World world) throws Exception {
         List<String> lines = new ArrayList<>();
@@ -386,10 +389,13 @@ class OnFootTruthTest {
                 lines.add(line);
             }
         }
-        int[] counts = new int[48];
+        int[] counts = new int[51];
+        String previousPost = null;
         for (int i = 0; i + 1 < lines.size(); i += 2) {
             String pre = lines.get(i);
             String post = lines.get(i + 1);
+            String previous = previousPost;
+            previousPost = post;
             RecordedSpeed speedBefore = RecordedSpeed.of(f32(text(pre, "speed")), bool(pre, "sprinting"));
             RecordedSpeed speedAfter = RecordedSpeed.of(f32(text(post, "speed")), bool(post, "sprinting"));
             if (speedBefore == null || speedAfter == null) {
@@ -406,9 +412,27 @@ class OnFootTruthTest {
                 OnFoot.ItemUse use = use(pre);
                 // canEntityWalkOnPowderSnow: the leather boots (recorded in newer files; the older ones never met powder snow)
                 Boolean boots = pre.contains("\"leatherBoots\":true") ? Boolean.TRUE : pre.contains("\"leatherBoots\":false") ? Boolean.FALSE : null;
-                predicted = OnFoot.tick(before, keys(text(post, "keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, speedAfter, effects, use, false,
-                                dev.whynotac.math.vanilla.PlatformCos.X86_64, null, boots));
+                // the server's spin attack flag gives the pose (recorded in newer files; the older ones never spun)
+                boolean spinFlag = pre.contains("\"autoSpinAttack\":true");
+                OnFoot.Conditions conditions = new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, speedAfter, effects, use, false,
+                        dev.whynotac.math.vanilla.PlatformCos.X86_64, null, boots).withSpinAttack(spinFlag);
+                predicted = OnFoot.tick(before, keys(text(post, "keys")), world, conditions);
+                if (before.spinAttackTicks() == OnFoot.SPIN_ATTACK_TICKS && previous != null
+                        && number(previous, "tickCount") + 1 == number(pre, "tickCount")) {
+                    // a riptide let go in this tick's keybinds, already in the record before the tick: from the tick before,
+                    // the engine's own release (the session's trident: riptide III, 3.0)
+                    RecordedSpeed speedPrevious = RecordedSpeed.of(f32(text(previous, "speed")), bool(previous, "sprinting"));
+                    PlayerState from = state(previous, speedPrevious != null && speedPrevious.sprintModifier());
+                    from = new PlayerState(from.x(), from.y(), from.z(), from.deltaMovement(), before.yRot(), before.xRot(), from.onGround(),
+                            from.horizontalCollision(), from.minorHorizontalCollision(), from.verticalCollision(), from.verticalCollisionBelow(),
+                            from.fallDistance(), from.sprinting(), from.sprintModifier(), from.crouching(), from.pose(), from.keys(), from.noJumpDelay(),
+                            from.sprintTriggerTime(), from.autoJumpTime(), from.support(), from.onGroundNoBlocks(), from.stuckSpeedMultiplier(),
+                            from.swimming(), from.eyeInWater(), from.fallFlying(), from.inPowderSnow(), from.inWater(), from.spinAttackTicks());
+                    assertEquals(expected, OnFoot.tick(from, keys(text(post, "keys")), world, conditions.withRiptide(3.0F)), "the riptide at " + where);
+                    counts[48]++;
+                }
+                counts[49] += spinFlag ? 1 : 0;
+                counts[50] += before.spinAttackTicks() > 0 ? 1 : 0;
                 counts[47] += speedAfter.frost() != 0.0 ? 1 : 0;
                 counts[11] += use != null ? 1 : 0;
                 counts[12] += use != null && predicted.sprinting() ? 1 : 0;
@@ -522,7 +546,8 @@ class OnFootTruthTest {
                 sprintModifier, bool(line, "crouching"), PlayerState.Pose.valueOf(text(line, "pose")), keys(text(line, "keys")), number(line, "noJumpDelay"),
                 number(line, "sprintTriggerTime"), number(line, "autoJumpTime"), supportPos, bool(line, "onGroundNoBlocks"),
                 vec(list(line, "stuckSpeedMultiplier")), line.contains("\"swimming\":true"), line.contains("\"eyeInWater\":true"),
-                line.contains("\"fallFlying\":true"), line.contains("\"inPowderSnow\":true"));
+                line.contains("\"fallFlying\":true"), line.contains("\"inPowderSnow\":true"), line.contains("\"wasTouchingWater\":true"),
+                line.contains("\"autoSpinAttackTicks\":") ? number(line, "autoSpinAttackTicks") : 0);
     }
 
     /** The recorded active effects ({@code "effects":{"minecraft:jump_boost":1,...}}, newer files only), by amplifier. */

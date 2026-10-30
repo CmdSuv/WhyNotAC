@@ -55,6 +55,9 @@ public final class Recorder {
     private static Method isFallFlying, getItemBySlot, canGlideUsing;
     private static Method level, getWorldBorder, borderMinX, borderMinZ, borderMaxX, borderMaxZ;
     private static Field isInPowderSnow;
+    // a riptide's spin attack: the client's own count (startAutoSpinAttack) and the server's living flag 4 (its pose)
+    private static Field autoSpinAttackTicks;
+    private static Method isAutoSpinAttack;
     // a boat the player steers: AbstractBoat's own state, the entity's id, whether it is interpolating
     private static Field boatDeltaRotation, boatStatus, boatOldStatus, boatWaterLevel, boatLandFriction, boatLastYd, boatInputLeft, boatInputRight,
             boatInputUp, boatInputDown, entityId, firstTick;
@@ -449,6 +452,8 @@ public final class Recorder {
             bool(line, "fallFlying", (Boolean) isFallFlying.invoke(player)); // the shared flag 7
             bool(line, "glider", glider(player));
             bool(line, "inPowderSnow", isInPowderSnow.getBoolean(player));
+            line.append(",\"autoSpinAttackTicks\":").append(autoSpinAttackTicks.getInt(player));
+            bool(line, "autoSpinAttack", (Boolean) isAutoSpinAttack.invoke(player));
             // canEntityWalkOnPowderSnow: ItemStack.toString is "count item", Item.toString its registered name
             bool(line, "leatherBoots", String.valueOf(getItemBySlot.invoke(player, feetSlot)).endsWith(" minecraft:leather_boots"));
             // the level's world border as the collision reads it (it steps after the entities: at "pre", the move's)
@@ -569,6 +574,8 @@ public final class Recorder {
         mainSupportingBlockPos = field(loader, entity, "mainSupportingBlockPos");
         onGroundNoBlocks = field(loader, entity, "onGroundNoBlocks");
         noJumpDelay = field(loader, living, "noJumpDelay");
+        autoSpinAttackTicks = field(loader, living, "autoSpinAttackTicks");
+        isAutoSpinAttack = method(loader, living, "isAutoSpinAttack()");
         speed = field(loader, living, "speed");
         crouching = field(loader, local, "crouching");
         sprintTriggerTime = field(loader, local, "sprintTriggerTime");

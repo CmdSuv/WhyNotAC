@@ -111,6 +111,7 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" \
   "setblock 135 -56 26 minecraft:scaffolding[distance=3,bottom=true]" \
   "fill 60 -61 29 65 -61 31 minecraft:powder_snow" "fill 68 -62 29 70 -61 31 minecraft:powder_snow" \
   "forceload add 32 -48 127 -17" "forceload add -120 -72 -40 -56" "forceload add -95 -106 -63 -74" "fill 40 -62 -40 70 -61 -28 minecraft:water" "fill 60 -63 -37 66 -63 -31 minecraft:water" \
+  "forceload add 392 -16 447 15" "fill 398 -62 -6 445 -61 6 minecraft:water" \
   "forceload add -158 -72 -121 -56" "forceload add -158 -100 -121 -73" "fill -147 -61 -67 -136 -61 -62 minecraft:lava" "fill -129 -61 -67 -126 -61 -62 minecraft:air" \
   "fill -129 -61 -67 -129 -61 -62 minecraft:lava" \
   "fill 76 -61 -40 87 -61 -28 minecraft:ice" "fill 88 -61 -40 100 -61 -28 minecraft:blue_ice" "fill 101 -60 -40 101 -59 -28 minecraft:stone" \
@@ -498,6 +499,16 @@ camel() { echo "kill @e[tag=wnc]" > "$FIFO"; echo "tp $NAME -79.5 -60 -69.5 $1 0
 uncamel() { echo "tp $NAME -79.5 -60 -71.5 -90 0" > "$FIFO"; sleep 0.5; echo "kill @e[tag=wnc]" > "$FIFO"; sleep 2.0; }
 camel -90; paddle w/0.5 w,Control_L/1.0 w,Control_L,space/0.5 w,Control_L/0.6 -/0.8; uncamel
 camel 90; paddle space/0.4 -/3.2 w/0.3 w,space/0.4 w/0.6 -/0.8; uncamel
+# Riptide, far east of everything (a pool two deep dug into the ground, x 398..445, z -6..6, built at the start: no entity
+# the client holds is near enough for the spin attack's sweep to meet it): a trident with riptide III charged standing on
+# the pool's floor and let go along the level look (the lift off the floor, the push, 20 ticks of spin attack, its pose
+# from the server's flag), looking up out of the water (it flies and falls back), and let go before 10 ticks (no riptide).
+riptide() { echo "tp $NAME 400.5 -62 0.5 -90 $1" > "$FIFO"; sleep 2.0; shift; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+echo "item replace entity $NAME weapon.mainhand with minecraft:trident[enchantments={riptide:3}]" > "$FIFO"; sleep 0.5
+riptide 0 -/1.0 Button3/0.8 -/2.5
+riptide -30 -/1.0 Button3/0.8 -/3.0
+riptide 0 -/1.0 Button3/0.3 -/1.0
+echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 # Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
 # stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks
 # (Pig.getRiddenInput) up the step ring and into the wall ring; boosted by the use key (the server's boost time reaches

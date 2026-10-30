@@ -46,6 +46,11 @@ import java.util.TreeMap;
  * boat holds, must give its state after it, bit for bit (position, motion, rotation and turn, status, fall, collision
  * flags, supporting block), in each status it can be in and on landing on water from the air.
  *
+ * <p>A riptide (the course's trident, riptide III, let go in a pool) is in the record before its tick already: the
+ * tick from the record after the tick before it, with the engine's own release, must give the same state
+ * ({@code riptides}, none mismatched); the spin attack's count is compared every tick, and its pose follows the
+ * server's flag the agent records ({@code spinAttackPose}: more than none).
+ *
  * <p>Each tick is evaluated in the world the replica holds when the client's movement packet of that tick (or of
  * the next tick that sent one) arrives in the replay: the k-th packet the client sent, rebuilt from its own
  * tick states as verify_truth.py does, is the k-th one the server recorded (teleport replies aside). Only what a
@@ -58,7 +63,9 @@ import java.util.TreeMap;
  * would: at every tick whose movement packet it explained, the client's own state after the tick must be one of
  * its hypotheses as they stood when the client sent it ({@code truthMissing} counts those where it is not), no tick
  * may be unexplained, and the pushes of living entities it followed ({@code pushesFollowed}; the session walks into
- * villagers) and the firework rocket boosts ({@code rocketBoosts}; it glides with one) must each be more than none.
+ * villagers), the firework rocket boosts ({@code rocketBoosts}; it glides with one), the riptides' releases and the
+ * spin attack's later ticks it explained ({@code riptidesExplained}, {@code spinAttackExplained}) must each be more
+ * than none.
  *
  * <p>usage: java -cp WhyNotAC.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on any difference
  */
@@ -153,7 +160,10 @@ public class MovementTruth {
                 && ((Number) tracker.get("striderTruthCompared")).longValue() > 0 && ((Number) tracker.get("ghastTruthCompared")).longValue() > 0
                 && ((Number) tracker.get("nautilusTruthCompared")).longValue() > 0 && ((Number) tracker.get("camelTruthCompared")).longValue() > 0
                 && Long.valueOf(0).equals(tracker.get("vehicleUncontrolled")) && ((Number) tracker.get("ridingUncontrolled")).longValue() > 0
-                && ((Number) tracker.get("ridingUnsaddled")).longValue() > 0;
+                && ((Number) tracker.get("ridingUnsaddled")).longValue() > 0
+                && ((Number) result.get("riptides")).longValue() > 0 && Long.valueOf(0).equals(result.get("riptidesMismatched"))
+                && ((Number) result.get("spinAttackPose")).longValue() > 0 && ((Number) tracker.get("riptidesExplained")).longValue() > 0
+                && ((Number) tracker.get("spinAttackExplained")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -193,6 +203,7 @@ public class MovementTruth {
         Map<String, Long> outcomes = new TreeMap<>();
         Map<String, Long> reasons = new TreeMap<>();
         long[] counts = new long[4]; // explained ticks compared, truth found, truth missing, unexplained
+        long[] spins = new long[2]; // of those found: a riptide's release, a spin attack's later tick
         List<String> examples = new ArrayList<>();
         int[] sentIndex = {0};
         boolean[] moved = {false};
@@ -324,6 +335,9 @@ public class MovementTruth {
                         }
                     }
                     counts[found ? 1 : 2]++;
+                    if (found && truth.spinAttackTicks() > 0) {
+                        spins[truth.spinAttackTicks() == OnFoot.SPIN_ATTACK_TICKS - 1 ? 0 : 1]++; // the release's tick, or a spin's
+                    }
                     if (!found && examples.size() < 12) {
                         examples.add("tick " + tick.number() + " (sent tick " + (sentIndex[0] - 1) + "): the client's state is no hypothesis of "
                                 + tracker.sentHypotheses().size() + "; nearest differs in " + nearest);
@@ -337,6 +351,8 @@ public class MovementTruth {
         out.put("reasons", reasons);
         out.put("explainedSentTicks", counts[0]);
         out.put("truthFound", counts[1]);
+        out.put("riptidesExplained", spins[0]);
+        out.put("spinAttackExplained", spins[1]);
         out.put("truthMissing", counts[2]);
         out.put("unexplained", counts[3]);
         out.put("pushesFollowed", tracker.pushesFollowed());
@@ -593,6 +609,13 @@ public class MovementTruth {
         long borderTicks;
         long powderSnowTicks;
         long frostTicks;
+        long spinTicks;
+        long spinPoseTicks;
+        long riptides;
+        long riptidesMatched;
+        long riptidesMismatched;
+        /** The last on-foot tick compared, its post record: a riptide's release is compared from it (null after a tick not). */
+        private Map<String, Object> lastPost;
         final Map<String, Long> unknown = new TreeMap<>();
         final Map<String, Long> differingFields = new TreeMap<>();
         final List<String> examples = new ArrayList<>();
@@ -675,8 +698,10 @@ public class MovementTruth {
                 }
                 if (riding.get(next - 1)) {
                     ridingTicks++;
+                    lastPost = null;
                 } else if (onLastBoat(tick[0])) {
                     unknown.merge("standing on the boat it just left, which the client still holds (a solid entity)", 1L, Long::sum);
+                    lastPost = null;
                 } else {
                     compare(tick[0], tick[1], world);
                 }
@@ -687,6 +712,8 @@ public class MovementTruth {
         }
 
         private void compare(Map<String, Object> pre, Map<String, Object> post, Colliders.World world) {
+            Map<String, Object> previous = lastPost;
+            lastPost = post;
             // LocalPlayer.autoJumpEnabled: true until a new player's first sendPosition, then the option (older truth files: off)
             boolean autoJump = firstLoaded || Boolean.TRUE.equals(pre.get("autoJumpEnabled"));
             firstLoaded = false;
@@ -727,9 +754,40 @@ public class MovementTruth {
                     powderSnowTicks++;
                 }
                 Boolean boots = (Boolean) pre.get("leatherBoots"); // older truth files: not recorded, not known
-                PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world,
-                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, speedAfter, effects, use, glider, CLIENT_COSINE,
-                                border, boots));
+                // the server's spin attack flag gives the pose (older truth files: not recorded, none)
+                boolean spinFlag = Boolean.TRUE.equals(pre.get("autoSpinAttack"));
+                if (before.spinAttackTicks() > 0) {
+                    spinTicks++;
+                }
+                if (spinFlag) {
+                    spinPoseTicks++;
+                }
+                OnFoot.Conditions conditions = new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, autoJump, speedAfter, effects, use, glider,
+                        CLIENT_COSINE, border, boots).withSpinAttack(spinFlag);
+                PlayerState predicted = OnFoot.tick(before, keys((String) post.get("keys")), world, conditions);
+                if (before.spinAttackTicks() == OnFoot.SPIN_ATTACK_TICKS && previous != null
+                        && ((Number) previous.get("tickCount")).longValue() + 1 == ((Number) pre.get("tickCount")).longValue()) {
+                    // TridentItem.releaseUsing in this tick's keybinds (the record before the tick holds its push and lift): the
+                    // whole tick from the one before, the release the engine's own (the course's trident: riptide III)
+                    riptides++;
+                    RecordedSpeed speedPrevious = RecordedSpeed.of(f32(previous.get("speed")), (Boolean) previous.get("sprinting"));
+                    PlayerState from = state(previous, speedPrevious != null && speedPrevious.sprintModifier());
+                    from = new PlayerState(from.x(), from.y(), from.z(), from.deltaMovement(), before.yRot(), before.xRot(), from.onGround(),
+                            from.horizontalCollision(), from.minorHorizontalCollision(), from.verticalCollision(), from.verticalCollisionBelow(),
+                            from.fallDistance(), from.sprinting(), from.sprintModifier(), from.crouching(), from.pose(), from.keys(), from.noJumpDelay(),
+                            from.sprintTriggerTime(), from.autoJumpTime(), from.support(), from.onGroundNoBlocks(), from.stuckSpeedMultiplier(),
+                            from.swimming(), from.eyeInWater(), from.fallFlying(), from.inPowderSnow(), from.inWater(), from.spinAttackTicks());
+                    List<String> d = differences(OnFoot.tick(from, keys((String) post.get("keys")), world, conditions.withRiptide(COURSE_RIPTIDE)),
+                            expected);
+                    if (d.isEmpty()) {
+                        riptidesMatched++;
+                    } else {
+                        riptidesMismatched++;
+                        if (examples.size() < 12) {
+                            examples.add("riptide at tick " + pre.get("tickCount") + ": " + String.join("; ", d));
+                        }
+                    }
+                }
                 List<String> differences = differences(predicted, expected);
                 if (differences.isEmpty()) {
                     matched++;
@@ -1126,6 +1184,11 @@ public class MovementTruth {
             out.put("gliding", glideTicks);
             out.put("nearBorder", borderTicks);
             out.put("inPowderSnow", powderSnowTicks);
+            out.put("spinAttack", spinTicks);
+            out.put("spinAttackPose", spinPoseTicks);
+            out.put("riptides", riptides);
+            out.put("riptidesMatched", riptidesMatched);
+            out.put("riptidesMismatched", riptidesMismatched);
             out.put("frozen", frostTicks);
             out.put("unknown", unknown);
             out.put("differingFields", differingFields);
@@ -1270,6 +1333,9 @@ public class MovementTruth {
         return d;
     }
 
+    /** The spin attack strength of the course's trident (riptide III: 1.5 and 0.75 for each level above I). */
+    static final float COURSE_RIPTIDE = 3.0F;
+
     private static List<String> differences(PlayerState p, PlayerState e) {
         List<String> d = new ArrayList<>();
         bits(d, "x", p.x(), e.x());
@@ -1297,6 +1363,10 @@ public class MovementTruth {
         same(d, "eyeInWater", p.eyeInWater(), e.eyeInWater());
         same(d, "fallFlying", p.fallFlying(), e.fallFlying());
         same(d, "inPowderSnow", p.inPowderSnow(), e.inPowderSnow());
+        if (p.inWater() != null && e.inWater() != null) {
+            same(d, "inWater", p.inWater(), e.inWater());
+        }
+        same(d, "spinAttackTicks", p.spinAttackTicks(), e.spinAttackTicks());
         return d;
     }
 
@@ -1362,7 +1432,8 @@ public class MovementTruth {
                 support == null ? null : new BlockPos(((Number) support.get(0)).intValue(), ((Number) support.get(1)).intValue(),
                         ((Number) support.get(2)).intValue()),
                 (Boolean) r.get("onGroundNoBlocks"), vec(r.get("stuckSpeedMultiplier")), Boolean.TRUE.equals(r.get("swimming")),
-                Boolean.TRUE.equals(r.get("eyeInWater")), Boolean.TRUE.equals(r.get("fallFlying")), Boolean.TRUE.equals(r.get("inPowderSnow")));
+                Boolean.TRUE.equals(r.get("eyeInWater")), Boolean.TRUE.equals(r.get("fallFlying")), Boolean.TRUE.equals(r.get("inPowderSnow")),
+                (Boolean) r.get("wasTouchingWater"), r.get("autoSpinAttackTicks") == null ? 0 : ((Number) r.get("autoSpinAttackTicks")).intValue());
     }
 
     /** The recorded effects the on-foot step reads (older truth files: none); null if one was not recorded by name. */

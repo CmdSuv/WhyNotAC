@@ -22,12 +22,26 @@ import dev.whynotac.math.vector.Vec3d;
  *                          only by the server's own (echoed back) or a climbable block in the glide
  * @param inPowderSnow      {@code isInPowderSnow}: the tick's move went through powder snow ({@code InsideBlockEffectType.FREEZE});
  *                          the next tick's {@code wasInPowderSnow}
+ * @param inWater           {@code wasTouchingWater}, as the tick's {@code baseTick} left it: what an item use before the next
+ *                          tick reads ({@code isInWater}, a riptide's {@code isInWaterOrRain}); null when not known
+ * @param spinAttackTicks   {@code LivingEntity.autoSpinAttackTicks}, the ticks a riptide's spin attack still runs (set to 20
+ *                          by the release, down one each tick while above 0); under 0 when not known, at most its opposite
  */
 public record PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround,
         boolean horizontalCollision, boolean minorHorizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow,
         double fallDistance, boolean sprinting, boolean sprintModifier, boolean crouching, Pose pose, Keys keys, int noJumpDelay, int sprintTriggerTime,
         int autoJumpTime, BlockPos support, boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, boolean swimming, boolean eyeInWater,
-        boolean fallFlying, boolean inPowderSnow) {
+        boolean fallFlying, boolean inPowderSnow, Boolean inWater, int spinAttackTicks) {
+
+    /** A state whose last {@code baseTick}'s water flag is not known, not in a spin attack. */
+    public PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround, boolean horizontalCollision,
+            boolean minorHorizontalCollision, boolean verticalCollision, boolean verticalCollisionBelow, double fallDistance, boolean sprinting,
+            boolean sprintModifier, boolean crouching, Pose pose, Keys keys, int noJumpDelay, int sprintTriggerTime, int autoJumpTime, BlockPos support,
+            boolean onGroundNoBlocks, Vec3d stuckSpeedMultiplier, boolean swimming, boolean eyeInWater, boolean fallFlying, boolean inPowderSnow) {
+        this(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision, verticalCollisionBelow,
+                fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support, onGroundNoBlocks,
+                stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow, null, 0);
+    }
 
     /** A state not in powder snow. */
     public PlayerState(double x, double y, double z, Vec3d deltaMovement, float yRot, float xRot, boolean onGround, boolean horizontalCollision,
@@ -53,21 +67,28 @@ public record PlayerState(double x, double y, double z, Vec3d deltaMovement, flo
     public PlayerState withWater(boolean swimming, boolean eyeInWater) {
         return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow);
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow, inWater, spinAttackTicks);
     }
 
     /** This state with the gliding flag. */
     public PlayerState withFallFlying(boolean fallFlying) {
         return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow);
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow, inWater, spinAttackTicks);
+    }
+
+    /** This state with its spin attack's count ({@code autoSpinAttackTicks}; under 0: not known, at most its opposite). */
+    public PlayerState withSpinAttackTicks(int ticks) {
+        return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
+                verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow, inWater, ticks);
     }
 
     /** This state with the powder snow flag. */
     public PlayerState withInPowderSnow(boolean inPowderSnow) {
         return new PlayerState(x, y, z, deltaMovement, yRot, xRot, onGround, horizontalCollision, minorHorizontalCollision, verticalCollision,
                 verticalCollisionBelow, fallDistance, sprinting, sprintModifier, crouching, pose, keys, noJumpDelay, sprintTriggerTime, autoJumpTime, support,
-                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow);
+                onGroundNoBlocks, stuckSpeedMultiplier, swimming, eyeInWater, fallFlying, inPowderSnow, inWater, spinAttackTicks);
     }
 
     /** The poses the step handles ({@code Player.POSES}; SWIMMING is crawling too). */
@@ -75,7 +96,8 @@ public record PlayerState(double x, double y, double z, Vec3d deltaMovement, flo
         STANDING(0.6F, 1.8F, 1.62F),
         CROUCHING(0.6F, 1.5F, 1.27F),
         SWIMMING(0.6F, 0.6F, 0.4F),
-        FALL_FLYING(0.6F, 0.6F, 0.4F);
+        FALL_FLYING(0.6F, 0.6F, 0.4F),
+        SPIN_ATTACK(0.6F, 0.6F, 0.4F);
 
         final float width;
         final float height;

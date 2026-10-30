@@ -204,7 +204,8 @@ class InventoryPacketViewsTest {
      */
     /**
      * A trident's riptide level gives its spin attack strength (riptide's definition: 1.5 at I, 0.75 a level more, built
-     * here as the vanilla registry does; the tests hold no data-driven registry), none without one.
+     * here as the vanilla registry does; the tests hold no data-driven registry), none without one; not known on a
+     * trident its next damage breaks.
      */
     @Test
     void aTridentsRiptideGivesItsSpinAttackStrength() {
@@ -221,6 +222,21 @@ class InventoryPacketViewsTest {
             assertEquals(1.5F + 0.75F * (level - 1), PacketTranslator.stack(trident).spinAttack(), "riptide " + level);
         }
         assertEquals(0.0F, PacketTranslator.stack(new ItemStack(Items.TRIDENT)).spinAttack());
+        ItemStack worn = new ItemStack(Items.TRIDENT);
+        worn.enchant(net.minecraft.core.Holder.direct(riptide), 3);
+        worn.setDamageValue(worn.getMaxDamage() - 2);
+        assertEquals(3.0F, PacketTranslator.stack(worn).spinAttack(), "two damage from breaking");
+        worn.setDamageValue(worn.getMaxDamage() - 1);
+        assertEquals(Float.NaN, PacketTranslator.stack(worn).spinAttack(), "its next damage breaks it: no riptide, though it may be used");
+        net.minecraft.world.item.enchantment.Enchantment loyalty = net.minecraft.world.item.enchantment.Enchantment.enchantment(
+                net.minecraft.world.item.enchantment.Enchantment.definition(net.minecraft.core.HolderSet.direct(BuiltInRegistries.ITEM.wrapAsHolder(Items.TRIDENT)),
+                        5, 3, net.minecraft.world.item.enchantment.Enchantment.dynamicCost(12, 7),
+                        net.minecraft.world.item.enchantment.Enchantment.constantCost(50), 2, net.minecraft.world.entity.EquipmentSlotGroup.HAND))
+                .build(net.minecraft.resources.Identifier.withDefaultNamespace("loyalty"));
+        ItemStack plain = new ItemStack(Items.TRIDENT);
+        plain.enchant(net.minecraft.core.Holder.direct(loyalty), 3);
+        plain.setDamageValue(plain.getMaxDamage() - 1);
+        assertEquals(0.0F, PacketTranslator.stack(plain).spinAttack(), "without riptide nothing moves either way");
         assertEquals(0.0F, ((ClientboundPacket.ContainerSetSlot) setSlot(0, 1, 36, new ItemStack(Items.TRIDENT))).item().spinAttack(),
                 "the bytes' view too");
     }

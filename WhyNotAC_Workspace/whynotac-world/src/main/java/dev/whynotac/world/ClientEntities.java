@@ -2192,7 +2192,18 @@ public final class ClientEntities {
      * counted: {@code self}, and entities WhyNotAC lost track of only if the replica is complete.
      */
     public boolean mayHavePusherNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
-        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, false);
+        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, this::pushesOrCollides);
+    }
+
+    /**
+     * {@link #mayHavePusherNear} for every entity whatever its type ({@code Level.getEntities}): a spin attack ends on a
+     * living one in the box it sweeps, and a horizontal collision ends it only where the box holds none at all
+     * ({@code LivingEntity.checkAutoSpinAttack}). A candidate whose state is not known (a dropped item or an orb the client
+     * simulates) counts as one whose position is not: where the server's last position for it is within
+     * {@code unknownRadius} of the box, whatever its size.
+     */
+    public boolean mayHaveEntityNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
+        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, null);
     }
 
     /**
@@ -2201,11 +2212,11 @@ public final class ClientEntities {
      */
     public boolean mayHaveVehicleColliderNear(int self, int vehicle, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
             double unknownRadius) {
-        return mayHaveNear(self, vehicle, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, false);
+        return mayHaveNear(self, vehicle, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, this::pushesOrCollides);
     }
 
     private boolean mayHaveNear(int self, int other, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
-            double unknownRadius, boolean collidersOnly) {
+            double unknownRadius, java.util.function.Predicate<String> counts) { // counts null: every entity
         if (!complete) {
             return true;
         }
@@ -2220,7 +2231,12 @@ public final class ClientEntities {
                     return;
                 }
                 String type = st.type() != null ? st.type() : head != null ? head.type : null;
-                if (type != null && types.known(type) && !(collidersOnly ? collidesOrPushesItself(type) : pushesOrCollides(type))) {
+                boolean boxKnown = st.known() && st.positionKnown() && st.bounds() != null;
+                if (counts == null && !boxKnown) {
+                    near[0] = near(serverOrderBase(track.id), minX, minY, minZ, maxX, maxY, maxZ, unknownRadius);
+                    return;
+                }
+                if (counts != null && type != null && types.known(type) && !counts.test(type)) {
                     return;
                 }
                 if (!st.known() || type == null || (st.positionKnown() ? st.bounds() == null : st.size() == null)) {
@@ -2228,9 +2244,7 @@ public final class ClientEntities {
                     return;
                 }
                 if (!st.positionKnown()) {
-                    Vec3d base = serverOrderBase(track.id);
-                    near[0] = base == null || base.x() > minX - unknownRadius && base.x() < maxX + unknownRadius && base.y() > minY - unknownRadius
-                            && base.y() < maxY + unknownRadius && base.z() > minZ - unknownRadius && base.z() < maxZ + unknownRadius;
+                    near[0] = near(serverOrderBase(track.id), minX, minY, minZ, maxX, maxY, maxZ, unknownRadius);
                     return;
                 }
                 EntitySizes.Box b = st.bounds(); // the position's radius included
@@ -2241,6 +2255,12 @@ public final class ClientEntities {
             }
         }
         return false;
+    }
+
+    /** Whether the server's last position for an entity ({@code base}, null: not known) is within {@code radius} of the box. */
+    private static boolean near(Vec3d base, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double radius) {
+        return base == null || base.x() > minX - radius && base.x() < maxX + radius && base.y() > minY - radius && base.y() < maxY + radius
+                && base.z() > minZ - radius && base.z() < maxZ + radius;
     }
 
     /** Living entities are pushable (armour stands too, conservatively), boats collide and push, minecarts push. */
@@ -2263,7 +2283,7 @@ public final class ClientEntities {
      * push are followed by {@link #pushers}.
      */
     public boolean mayHaveColliderNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, double unknownRadius) {
-        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, true);
+        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, ClientEntities::collidesOrPushesItself);
     }
 
     /**

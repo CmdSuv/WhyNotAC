@@ -168,6 +168,15 @@ public final class MovementTracker {
     // --- the tick being collected ------------------------------------------------------------------------------------
     private final List<TimelineEvent.Inbound> inbound = new ArrayList<>();
     private long ticks;
+    /**
+     * The most ticks after the last one in which the client may still be in a spin attack, for the settle anchor: one
+     * starts only at a trident's release ({@code TridentItem.releaseUsing}: {@code startAutoSpinAttack(20)}, before the
+     * tick that runs it down first), the client's own or one a use the server completed may make
+     * ({@code completeUsingItem} on another stack, wherever the client processed it), and runs down one each tick.
+     */
+    private int spinMayRun;
+    /** The queue index of a completed use the client may not have processed yet (its release may start a spin), or -1. */
+    private long spinStartQueued = -1;
 
     // --- the items in the player's hands (the inventory replica, after the event being handled) ------------------------
     static final String USE_EFFECTS = "minecraft:use_effects";
@@ -389,6 +398,7 @@ public final class MovementTracker {
             }
             case TimelineEvent.Gap gap -> {
                 lose("events were lost");
+                spinMayRun = OnFoot.SPIN_ATTACK_TICKS; // a release among them
                 if (ride != null) {
                     ride.unclaim("events were lost");
                 }
@@ -443,6 +453,9 @@ public final class MovementTracker {
             return;
         }
         pending.add(new Pending(seq, packet));
+        if (packet instanceof ClientboundPacket.EntityEvent e && e.event() == ClientboundPacket.EntityEvent.FINISH_USING_ITEM) {
+            spinStartQueued = queueBase + pending.size() - 1;
+        }
         if (pending.size() > MAX_PENDING) {
             // the client stopped answering: forget the oldest (they are applied to nothing any more)
             lose("too many packets waiting for the client");
@@ -782,6 +795,14 @@ public final class MovementTracker {
         TickInput in = sortOut();
         inbound.clear();
         long[] w = window();
+        if (spinStartQueued >= w[0]) {
+            spinMayRun = OnFoot.SPIN_ATTACK_TICKS; // the client may process it after this tick
+        } else if (spinStartQueued >= 0 || in.itemActions.contains(RELEASE)) {
+            spinMayRun = OnFoot.SPIN_ATTACK_TICKS - 1;
+            spinStartQueued = -1;
+        } else {
+            spinMayRun = Math.max(spinMayRun - 1, 0);
+        }
         Hypothesis fresh = advanceBase(w[0]);
         if (hypotheses == null && fresh != null) {
             hypotheses = List.of(fresh); // a new player: the client's defaults, from the packet that made it
@@ -1401,22 +1422,37 @@ public final class MovementTracker {
         return List.copyOf(out);
     }
 
-    /** A state a tick may start from, with the speed attribute it holds then and the item it uses. */
-    private record Start(PlayerState player, SpeedAttribute speed, Using using) {
+    /**
+     * A state a tick may start from, with the speed attribute it holds then and the item it uses; {@code riptide}: the
+     * spin attack strength a trident released in this tick's item actions pushes the player with, or null.
+     */
+    private record Start(PlayerState player, SpeedAttribute speed, Using using, Float riptide) {
         Start withUsing(Using u) {
-            return new Start(player, speed, u);
+            return new Start(player, speed, u, riptide);
+        }
+
+        Start withRiptide(float strength) {
+            return new Start(player, speed, using, strength);
         }
     }
 
-    /** One stack a hand may hold, as far as using it goes: the item (null: none), its use effects and what its use does. */
-    /** {@code riptide}: a trident whose spin attack strength is known and above 0 (its use needs water or rain). */
-    private record HandItem(String item, OnFoot.ItemUse effects, ItemPrototypes.UseKind kind, boolean riptide) {
-        static final HandItem NONE = new HandItem(null, null, null, false);
+    /**
+     * One stack a hand may hold, as far as using it goes: the item (null: none), its use effects and what its use does;
+     * {@code spin}: a trident's spin attack strength ({@link dev.whynotac.protocol.packet.Stack#spinAttack}: NaN where not
+     * known exactly, null for another item or where not known at all).
+     */
+    private record HandItem(String item, OnFoot.ItemUse effects, ItemPrototypes.UseKind kind, Float spin) {
+        static final HandItem NONE = new HandItem(null, null, null, null);
+
+        /** A trident whose spin attack strength is known and above 0: its use needs water or rain. */
+        boolean riptide() {
+            return spin != null && spin > 0.0F;
+        }
     }
 
     /** What one on-foot step depends on, the double-tap counter aside (see {@link #simulate}). */
     private record StepKey(PlayerState start, PlayerState.Keys keys, boolean food, boolean autoJump, SpeedAttribute speed, OnFoot.Effects effects,
-            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots) {}
+            OnFoot.ItemUse use, int window, boolean glider, PlatformCos cosine, Border border, Boolean leatherBoots, Float riptide, boolean spinAttack) {}
 
     private void lose(String reason) {
         hypotheses = null; // the base goes on from what the server knows for certain
@@ -1564,6 +1600,7 @@ public final class MovementTracker {
         SelfState s = h.self();
         boolean noGravity = s.noGravity();
         Using using = s.using();
+        boolean spinAttack = s.spinAttack();
         for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
             switch (e.index()) {
                 case 0 -> { // Entity.DATA_SHARED_FLAGS_ID
@@ -1581,6 +1618,7 @@ public final class MovementTracker {
                         case CROUCHING -> withPose(p, PlayerState.Pose.CROUCHING);
                         case SWIMMING -> withPose(p, PlayerState.Pose.SWIMMING);
                         case FALL_FLYING -> withPose(p, PlayerState.Pose.FALL_FLYING);
+                        case SPIN_ATTACK -> withPose(p, PlayerState.Pose.SPIN_ATTACK);
                         default -> throw new Lose("pose " + pose + " set by the server");
                     };
                 }
@@ -1592,11 +1630,12 @@ public final class MovementTracker {
                     } else if (!flag) {
                         using = null;
                     }
+                    spinAttack = (e.value() & 4) != 0; // isAutoSpinAttack: the pose's, the client sets no such flag itself
                 }
                 default -> { }
             }
         }
-        return h.withPlayer(p).withSelf(s.withNoGravity(noGravity).withUsing(using));
+        return h.withPlayer(p).withSelf(s.withNoGravity(noGravity).withUsing(using).withSpinAttack(spinAttack));
     }
 
     /** A new {@code LocalPlayer} (login or respawn): the client's defaults, its rotation {@code -180, 0}, not ticking until loaded. */
@@ -1616,7 +1655,7 @@ public final class MovementTracker {
         PlayerState.Pose pose = keepData ? old.pose() : PlayerState.Pose.STANDING;
         PlayerState player = new PlayerState(0.0, 0.0, 0.0, delta, yRot, xRot, false, false, false, false, false, 0.0, sprinting, sprintModifier, false,
                 pose, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO, keepData && old.swimming(), false, // a new entity's eye holds no fluid
-                keepData && old.fallFlying()); // the entity data, with its flags
+                keepData && old.fallFlying(), false, false, 0); // the entity data, with its flags; a new entity touched no water and spins not
         Hypothesis.Sent sent = keepData ? Hypothesis.Sent.fresh(h.sent().input(), old.sprinting()) : Hypothesis.Sent.fresh(PlayerState.Keys.NONE, false);
         return new Hypothesis(player, self, sent, h.windowMask(), h.autoJumpMask(), h.cosineMask(), h.applied());
     }
@@ -1663,7 +1702,7 @@ public final class MovementTracker {
         PlayerState moved = new PlayerState(x, y, z, delta.isFinite() ? delta : d, p.yRot(), p.xRot(), p.onGround(), p.horizontalCollision(),
                 p.minorHorizontalCollision(), p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(),
                 p.crouching(), p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(), p.onGroundNoBlocks(),
-                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow());
+                p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(), p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
         return moved;
     }
 
@@ -1723,7 +1762,7 @@ public final class MovementTracker {
             }
         }
         PlayerState pre = rotated(h.player(), yRot, xRot);
-        List<Start> starts = itemActions(new Start(pre, self.speed(), self.using()), in, view, self);
+        List<Start> starts = itemActions(new Start(pre, self.speed(), self.using(), null), in, view, self);
         for (int i = 0; i < in.attacks; i++) {
             // Player.causeExtraKnockback, when the client's own simulation of the hit knocks back: slowed, not sprinting
             List<Start> more = new ArrayList<>();
@@ -1733,7 +1772,7 @@ public final class MovementTracker {
                     throw new Lose("more speed modifiers than the client's table holds unresized");
                 }
                 Start slowed = new Start(withSprinting(withSprintModifier(withDelta(s.player(), s.player().deltaMovement().multiply(0.6, 1.0, 0.6)),
-                        false), false), speed, s.using());
+                        false), false), speed, s.using(), s.riptide());
                 if (!starts.contains(slowed) && !more.contains(slowed)) {
                     more.add(slowed);
                 }
@@ -1779,7 +1818,7 @@ public final class MovementTracker {
         OnFoot.ItemUse use = begin.using() == null ? null : begin.using().effects();
         Border border = self.border().collision(); // as it is at the move: the level ticks it after the entities
         StepKey key = new StepKey(withSprintTrigger(start, 0), keys, self.foodAllowsSprint(), autoJump, begin.speed(), self.effects(), use, window,
-                glider, cosine, border, leatherBoots);
+                glider, cosine, border, leatherBoots, begin.riptide(), self.spinAttack());
         OnFoot.Step step = steps.get(key);
         if (step != null && !step.readSprintTrigger()) {
             // the same step: only this state's own counter counted down (or was cleared by shift or backward)
@@ -1790,9 +1829,16 @@ public final class MovementTracker {
         }
         try {
             step = OnFoot.step(start, keys, view, new OnFoot.Conditions(self.foodAllowsSprint(), window, autoJump, begin.speed(), self.effects(),
-                    use, glider, cosine, border, leatherBoots));
+                    use, glider, cosine, border, leatherBoots).withRiptide(begin.riptide()).withSpinAttack(self.spinAttack()));
         } catch (Colliders.Unknown e) {
             throw new Lose(e.getMessage());
+        }
+        if (start.spinAttackTicks() != 0 || begin.riptide() != null) {
+            // LivingEntity.checkAutoSpinAttack: the box from the tick's travel on (a riptide's lift before it) to after it
+            Box a = start.box();
+            Box b = step.state().box();
+            view.checkSpinAttack(Math.min(a.minX(), b.minX()), Math.min(a.minY(), b.minY()), Math.min(a.minZ(), b.minZ()), Math.max(a.maxX(), b.maxX()),
+                    Math.max(a.maxY() + OnFoot.RIPTIDE_LIFT, b.maxY()), Math.max(a.maxZ(), b.maxZ()));
         }
         steps.putIfAbsent(key, step);
         return step;
@@ -1898,23 +1944,80 @@ public final class MovementTracker {
                     if (s.using() == null) { // LocalPlayer.startUsingItem: not while using, not with an empty hand
                         for (HandItem item : items) {
                             // TridentItem.use: a riptide trident fails out of water and rain (isInWaterOrRain)
-                            if (item.item() != null && (!item.riptide() || mayBeInWaterOrRain(s.player(), view, self))) {
-                                addIfNew(next, s.withUsing(new Using(hand, item.item(), item.effects(), item.kind())));
+                            if (item.item() != null && (!item.riptide() || !Boolean.FALSE.equals(inWaterOrRain(s.player(), view, self)))) {
+                                addIfNew(next, s.withUsing(new Using(hand, item.item(), item.effects(), item.kind(), 0)));
                             }
                         }
                     }
                 }
             } else {
                 for (Start s : starts) {
-                    if (s.using() != null && s.using().kind() == ItemPrototypes.UseKind.RELEASE_MOVES) {
-                        throw new Lose("a trident released (its riptide moves the player on the client)");
-                    }
-                    addIfNew(next, s.withUsing(null)); // LivingEntity.releaseUsingItem, then stopUsingItem
+                    addIfNew(next, released(s, in, view, self));
                 }
             }
             starts = next;
         }
         return starts;
+    }
+
+    /**
+     * {@code LivingEntity.releaseUsingItem}, then {@code stopUsingItem}. A trident's release ({@code TridentItem.releaseUsing},
+     * with the hand's stack: the same item as the use's) pushes the player along its look with its spin attack strength
+     * and starts a spin attack when it was used 10 ticks at least, the strength is above 0 and the player in water or rain
+     * ({@code isInWaterOrRain}, before the tick: the last tick's {@code wasTouchingWater}); the step applies it
+     * ({@link OnFoot.Conditions#withRiptide}). A release that may be such a one where WhyNotAC cannot tell ends the claim.
+     */
+    private Start released(Start s, TickInput in, View view, SelfState self) throws Lose {
+        Using u = s.using();
+        Start stopped = s.withUsing(null);
+        if (u == null) {
+            return stopped;
+        }
+        List<HandItem> items = handItems(u.hand());
+        boolean trident = u.kind() == ItemPrototypes.UseKind.RELEASE_MOVES;
+        for (HandItem item : items) {
+            trident |= item.kind() == ItemPrototypes.UseKind.RELEASE_MOVES;
+        }
+        if (!trident || u.used() >= 0 && u.used() < Using.USED_KNOWN) {
+            return stopped; // used under 10 ticks, whatever stack the hand holds (a use the server's flags started too)
+        }
+        if (in.handsTouched) {
+            throw new Lose("a trident released in a tick the client changed its hands in");
+        }
+        Float spin = null;
+        for (HandItem item : items) {
+            if (item.item() == null || !item.item().equals(u.item()) || item.spin() == null || item.spin().isNaN()
+                    || spin != null && Float.compare(spin, item.spin()) != 0) {
+                throw new Lose("a trident released whose riptide is not known");
+            }
+            spin = item.spin();
+        }
+        if (spin == null || !(spin > 0.0F)) {
+            return stopped; // thrown by the server: nothing on the client's movement
+        }
+        if (u.used() < 0) {
+            throw new Lose("a riptide released from a use whose ticks are not known");
+        }
+        Boolean wet = inWaterOrRain(s.player(), view, self);
+        if (wet == null) {
+            throw new Lose("a riptide released where WhyNotAC cannot tell water or rain");
+        }
+        return wet ? stopped.withRiptide(spin) : stopped;
+    }
+
+    /**
+     * {@code Entity.isInWaterOrRain} before the tick: true in water ({@code wasTouchingWater}), false out of it where the
+     * level certainly does not rain or no fluid is in reach ({@link #mayBeInWaterOrRain}), else null (in rain or not: the
+     * sky and the biome at the player).
+     */
+    private static Boolean inWaterOrRain(PlayerState p, View view, SelfState self) {
+        if (Boolean.TRUE.equals(p.inWater())) {
+            return true;
+        }
+        if (Boolean.FALSE.equals(p.inWater()) && Boolean.FALSE.equals(self.raining())) {
+            return false;
+        }
+        return mayBeInWaterOrRain(p, view, self) ? null : false;
     }
 
     /**
@@ -1934,7 +2037,7 @@ public final class MovementTracker {
             List<HandItem> items = handItems(u.hand());
             for (HandItem item : items) {
                 boolean goesOn = item.item() != null && (!u.resolved() || item.item().equals(u.item()));
-                addIfNew(out, s.withUsing(goesOn ? new Using(u.hand(), item.item(), item.effects(), item.kind()) : null));
+                addIfNew(out, s.withUsing(goesOn ? u.ticked(item.item(), item.effects(), item.kind()) : null));
             }
             if (in.handsTouched || !u.resolved() && (items.size() > 1 || lastHands == null || !items.equals(lastHands.get(u.hand())))) {
                 addIfNew(out, s.withUsing(null));
@@ -2028,10 +2131,9 @@ public final class MovementTracker {
         OnFoot.ItemUse effects = stack.removed().contains(USE_EFFECTS) ? OnFoot.ItemUse.DEFAULT : new OnFoot.ItemUse(p.useCanSprint(), p.useSpeed());
         // TridentItem.releaseUsing: with no spin attack strength (no riptide) the client throws it and does not move; a
         // strength not known exactly is a riptide's
-        ItemPrototypes.UseKind kind = p.useKind() == ItemPrototypes.UseKind.RELEASE_MOVES && stack.spinAttack() != null
-                && Float.compare(stack.spinAttack(), 0.0F) == 0 ? ItemPrototypes.UseKind.PLAIN : p.useKind();
-        boolean riptide = p.useKind() == ItemPrototypes.UseKind.RELEASE_MOVES && stack.spinAttack() != null && stack.spinAttack() > 0.0F;
-        return new HandItem(stack.item(), effects, kind, riptide);
+        Float spin = p.useKind() == ItemPrototypes.UseKind.RELEASE_MOVES ? stack.spinAttack() : null;
+        ItemPrototypes.UseKind kind = spin != null && Float.compare(spin, 0.0F) == 0 ? ItemPrototypes.UseKind.PLAIN : p.useKind();
+        return new HandItem(stack.item(), effects, kind, spin);
     }
 
     /** The hands' stacks now, for the next tick's check of a use the server's flags start (null where not known). */
@@ -2126,7 +2228,7 @@ public final class MovementTracker {
                     if (item.kind() == ItemPrototypes.UseKind.SELF_ENDING) {
                         return null;
                     }
-                    out.add(settled.withSelf(settled.self().withUsing(new Using(hand, item.item(), item.effects(), item.kind()))));
+                    out.add(settled.withSelf(settled.self().withUsing(new Using(hand, item.item(), item.effects(), item.kind(), -1))));
                 }
             }
         } catch (Lose e) {
@@ -2281,6 +2383,9 @@ public final class MovementTracker {
         if (baseMayGlide || lastGlideStart != Long.MIN_VALUE && lastBaseFlags < lastGlideStart) {
             return null; // the client may still glide: only the server's flags, processed after its start, end it
         }
+        if (spinMayRun > 0) {
+            return null; // a spin attack may still run, its ticks not known
+        }
         View view = new View(world, entities, selfId);
         double x = move.x();
         double y = move.y();
@@ -2299,7 +2404,7 @@ public final class MovementTracker {
         }
         PlayerState guess = new PlayerState(x, y, z, new Vec3d(0.0, settled, 0.0), baseSent.yRot(), baseSent.xRot(), true, false, false, true,
                 true, 0.0, baseSent.sprinting(), base.speed().holdsSprinting(), false, PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null,
-                false, Vec3d.ZERO, false, false); // the step finds the eye; standing still, it does not swim
+                false, Vec3d.ZERO, false, false, false, false, null, 0); // the step finds the eye; standing still, it does not swim
         try {
             Box box = guess.box();
             if (!base.border().known() && !base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
@@ -2307,7 +2412,7 @@ public final class MovementTracker {
             }
             view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
             OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects(),
-                    null, false, PlatformCos.X86_64, base.border().collision(), leatherBoots);
+                    null, false, PlatformCos.X86_64, base.border().collision(), leatherBoots).withSpinAttack(base.spinAttack());
             PlayerState first = OnFoot.tick(guess, PlayerState.Keys.NONE, view, conditions);
             PlayerState again = OnFoot.tick(first, PlayerState.Keys.NONE, view, conditions);
             if (!first.equals(again) || first.x() != x || first.y() != y || first.z() != z || !first.onGround() || first.horizontalCollision()
@@ -2436,6 +2541,17 @@ public final class MovementTracker {
         }
 
         /**
+         * {@code LivingEntity.checkAutoSpinAttack} with no entity at all in the box the spin attack sweeps: one there may
+         * meet it (a living one ends it and bounces the player back) or keep a horizontal collision from ending it.
+         */
+        void checkSpinAttack(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) throws Lose {
+            if (entities.mayHaveEntityNear(self, minX - ENTITY_MARGIN, minY - ENTITY_MARGIN, minZ - ENTITY_MARGIN, maxX + ENTITY_MARGIN,
+                    maxY + ENTITY_MARGIN, maxZ + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)) {
+                throw new Lose("an entity near a spin attack");
+            }
+        }
+
+        /**
          * {@link #checkSurroundings} for one box that may be swept this tick; {@code living}: living entities too (the
          * anchor, which follows no push).
          */
@@ -2461,7 +2577,7 @@ public final class MovementTracker {
         return new PlayerState(p.x(), p.y(), p.z(), delta, yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), sprinting, sprintModifier, p.crouching(), pose, p.keys(),
                 p.noJumpDelay(), sprintTrigger, autoJump, p.support(), p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(),
-                p.fallFlying(), p.inPowderSnow());
+                p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
     }
 
     private static PlayerState rotated(PlayerState p, float yRot, float xRot) {

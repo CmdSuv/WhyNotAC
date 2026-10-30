@@ -405,7 +405,9 @@ public final class PacketTranslator {
      * {@code EnchantmentHelper.getTridentSpinAttackStrength}: every enchantment on the stack adds what its
      * {@code trident_spin_attack_strength} effects give at its level (riptide's in vanilla), with the definitions the
      * client holds too (the server syncs its enchantment registry, a datapack's changes included). The effects need
-     * no entity, only a random draw for some ({@code RemoveBinomial}): NaN when two draws give different strengths.
+     * no entity, only a random draw for some ({@code RemoveBinomial}): NaN when two draws give different strengths, and
+     * for a strength on a stack its next damage breaks ({@code nextDamageWillBreak}: {@code TridentItem.use} fails
+     * then, and so does {@code releaseUsing}, not moving the player, although the use may have started before).
      */
     static float spinAttack(net.minecraft.world.item.ItemStack stack) {
         net.minecraft.world.item.enchantment.ItemEnchantments enchantments = stack.getOrDefault(net.minecraft.core.component.DataComponents.ENCHANTMENTS,
@@ -423,7 +425,8 @@ public final class PacketTranslator {
             }
             strength[draw] = value.floatValue();
         }
-        return Float.compare(strength[0], strength[1]) == 0 ? strength[0] : Float.NaN;
+        float strengthOf = Float.compare(strength[0], strength[1]) == 0 ? strength[0] : Float.NaN;
+        return Float.compare(strengthOf, 0.0F) != 0 && stack.nextDamageWillBreak() ? Float.NaN : strengthOf;
     }
 
     /**

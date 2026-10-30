@@ -311,4 +311,16 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     ayaklar içinde değilken tutsun, `isInPowderSnow` açılmasın, bu tikin bayrağıyla ya da botsuz tırmansın; envanter
     zırh slotunu yazmasın, yer değiştirmede ayağı korusun, kendi ekipman paketini yok saysın; takipçi botları vermesin ya
     da hep var saysın.
+  - **Riptide (`Conditions.riptide`, `Conditions.spinAttack`):** `TridentItem.releaseUsing` tikten önce, `handleKeybinds`
+    içinde: bakış float matematiğiyle (`Mth.sin`/`cos`, birim vektör) gücü kadar itme (`Entity.push`), 20 tiklik dönme
+    saldırısı (`startAutoSpinAttack`: client'ta yalnızca sayaç), yerdeyse 1.1999999F kaldırma (`move(SELF)`, tikin
+    hareketlerinden biri; ardından yerde değildir: otomatik zıplama yok). `aiStep`'in itme bölümünde sayaç 0'dan
+    büyükse bir azalır ve yatay çarpışma onu bitirir (`checkAutoSpinAttack`: kutuda varlık yoksa; varlıkları motor
+    değil takipçi denetler). Poz (`SPIN_ATTACK`: 0.6 × 0.6, göz 0.4) yalnızca sunucunun bayrağıyla (`isAutoSpinAttack`)
+    seçilir, yüzme ve süzülmeden sonra, çömelmeden önce. `PlayerState` `wasTouchingWater`'ı (`inWater`: bir sonraki
+    tikten önceki kullanımın okuduğu) ve sayacı (`spinAttackTicks`, eksi: bilinmiyor) taşır. Kullanım süresi, su ya da
+    yağmur ve güç (bırakılan yığının büyüleri) takipçinin işidir. Gerçek client (truth ajanı `autoSpinAttackTicks`'i ve
+    bayrağı da kaydeder; bırakış tikin başındaki kayıtta zaten vardır, bu yüzden bir önceki tikin sonundan motorun kendi
+    bırakışıyla da karşılaştırılır): parkurun riptide ayağı (havuzda düz ve yukarı bakarak, 10 tikten kısa). `RiptideTest`: itme bakış boyunca gücü kadar, yerde kaldırma
+    (kesin durum), sayaç ve yatay çarpışma, pozun bayrağa bağlılığı.
 - **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.
