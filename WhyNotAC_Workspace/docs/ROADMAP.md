@@ -100,7 +100,9 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   kümesi ve `RegressionReplayTest` (her derlemede bütün kontroller, 0 kanıt ve 0 reddedilen aday; ortasına yarım blok
   adım konan oturumu hareket kontrolü bulur). Tekne interpolasyonu hatasının oturumu kümede: düzeltmesiz kapı kırılır.
 - **Meşru davranış kataloğu** (`E1`, `DATA-01`, `VAL-13`): vanilla seçenekleri, erişilebilirlik
-  yolları, izinli makrolar. Gerçek client senaryo matrisi.
+  yolları, izinli makrolar. Gerçek client senaryo matrisi. Başladı: [katalog](LEGITIMATE-BEHAVIOUR.md). Kare başına
+  birden çok tik (kare başına 4,6 tike kadar), otomatik zıplama, fare dönüşleri, sunucunun dönüşüne cevap, menü ve
+  kalkan sınandı: 0 vaka. Sınanmayanlar katalogda sayılıdır.
 - **Paylar** (`VAL-4`): her kanıt, dürüst trafiğin sınıra ne kadar yaklaştığını raporlar. Sınırı olan üç kontrol için
   yapıldı (`attack-reach`, `break-time`, `client-clock`). Paylar `/whynotac stats`'ta ve `ReplayCost`'ta raporlanır,
   tekrar oynatma kapısı negatif payı reddeder. Değerler [analiz README'sinde](../whynotac-analysis/README.md).
