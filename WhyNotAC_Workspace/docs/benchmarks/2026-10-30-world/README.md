@@ -135,10 +135,31 @@ Canlı profil iki yeni sıcak nokta gösterdi, ikisi de düzeltildi:
 - Hareket kontrolü (`MovementTracker.aboutSelf`, `ridePacket`: %6 + %3). Etraftaki her varlığın hareket paketi takım,
   binek ve öz-oyuncu desen `switch`'lerini varsayılana kadar dolaşıyordu (Java 21 desen `switch`'inin türlerini tek tek
   dener). Başka bir varlığa ait bu paketler artık `switch`'lerden önce, onların vereceği sonuçla ayrılır.
-- Netty'de işlem kimlikleri (`TransactionTracker.allocate`, WhyNotAC'ın Netty örneklerinin %10'u). Her ping paylaşılan
-  `SecureRandom`'dan bir kimlik çekiyordu, yani her ağ thread'i onun kilidini alıyordu. Kimlikler artık 64'lük
-  bloklarla çekilir; ikisi de aynı kriptografik kaynaktır ve kimlik gönderilmeden önce kimse onu görmez. Dört thread'de
-  işlem başına 2.917 ns'den 482 ns'ye (ayır, gönder, cevapla).
+- Netty'de işlem kimlikleri. Her ping paylaşılan `SecureRandom`'dan bir kimlik çekiyordu; her ağ thread'i onun kilidini
+  alıyordu. Bu maliyet CPU örneklerinde değil, kilit beklemelerinde görünür. 02347db'nin commit mesajında yazan
+  "Netty örneklerinin %10'u" yanlıştır: o örnekler kimlik aramalarıydı. Kimlikler artık 64'lük bloklarla çekilir. Kaynak
+  aynı kriptografik kaynaktır ve hiçbir kimlik gönderilmeden önce görülmez. Ayır, gönder, cevapla döngüsü dört thread'de
+  işlem başına 2.917 ns'den 482 ns'ye indi.
+
+Kilit beklemeleri (JFR `jdk.JavaMonitorEnter`, eşik 10 ms, 60 s pencere, 40 bot; JFR'nin kendi thread'i hariç). Bu
+beklemeler CPU harcamaz ama thread'i durdurur. Sunucu thread'inde beklemek tik süresine eklenir:
+
+| Koşu | Netty, `SecureRandom` | Sunucu thread'i, `PlayerSession` | Analiz |
+|---|---|---|---|
+| 3bfd554 (1) | 5 kez, 77 ms | 1 kez, 18 ms | 1 kez, 11 ms (`SecureRandom`) |
+| 3bfd554 (2) | 9 kez, 140 ms | 1 kez, 18 ms | 8 kez, 166 ms (vaka açılışı, `SecureRandom`) |
+| 5409a1f (1) | 3 kez, 36 ms (+2 kez, 26 ms, iç kilit) | 2 kez, 26 ms | 1 kez, 15 ms (`SecureRandom`) |
+| 5409a1f (2) | 0 | 2 kez, 23 ms | 0 |
+| 02347db (bloklarla kimlik) | 1 kez, 10 ms | 3 kez, 38 ms | 0 |
+| 4c1e2fc (işlem kilidi) | 0 | 0 | 2 kez, 36 ms (vaka açılışı) |
+
+Sunucu thread'i her tik her oyuncu için bir ping kimliği ayırır. Bunun için oturumun kilidini alıyordu. Ağ thread'leri
+oturumun her paketini işlerken aynı kilidi tutar. Sunucunun iki çekirdeği doyduğunda kilidi tutan ağ thread'i işlemciden
+düşürülebiliyor, bu da sunucu thread'ini 10-18 ms bekletiyordu. İşlem izleyicisinin artık kendi kilidi var
+(4c1e2fc). Bu kilit oturumun kilidi içinde alınır, hiçbir zaman onun dışından değil. Kimlik ayırmak yalnızca bu kilidi
+alır: bir oturumun paketleri işlenirken kimlik ayrılabilir (`PlayerSessionTest`; metot yeniden `synchronized` yapılınca
+test başarısız olur). Kalan analiz beklemeleri yalnızca vaka açılırken görülür (`ShadowVerdict.accept`, kabul
+edilebilirlik izleyicisi); burada bunlar botların blok arkasından vuruşlarıdır.
 
 ## Sonuç ve sıradaki adımlar (görev #27)
 
