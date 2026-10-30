@@ -511,6 +511,14 @@ echo "item replace entity $NAME weapon.mainhand with minecraft:trident[enchantme
 riptide 0 -/1.0 Button3/0.8 -/2.5
 riptide -30 -/1.0 Button3/0.8 -/3.0
 riptide 0 -/1.0 Button3/0.3 -/1.0
+# Spear lunge, on the grass beside the riptide pool (x 396.5, along +z): an iron spear with lunge III stabbed with the
+# attack key (MultiPlayerGameMode.piercingAttack: STAB and the swing), standing and walking. Only the server runs the lunge
+# (LivingEntity.lungeForwardMaybe): it pushes the player along its look on the level (3 * 0.458) and sends it its motion,
+# which the client sets. Saturation first: a lunge needs more than 6 food and costs 3 of it.
+echo "effect give $NAME minecraft:saturation 1 10 true" > "$FIFO"
+echo "item replace entity $NAME weapon.mainhand with minecraft:iron_spear[enchantments={lunge:3}]" > "$FIFO"; sleep 0.5
+echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 4.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" -/0.5 Button1/0.1 -/2.0 w/0.5 w,Button1/0.1 w/1.0 -/1.0; sleep 0.5
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 # Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
 # stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks

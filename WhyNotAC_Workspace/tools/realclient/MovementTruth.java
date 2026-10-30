@@ -65,7 +65,8 @@ import java.util.TreeMap;
  * may be unexplained, and the pushes of living entities it followed ({@code pushesFollowed}; the session walks into
  * villagers), the firework rocket boosts ({@code rocketBoosts}; it glides with one), the riptides' releases and the
  * spin attack's later ticks it explained ({@code riptidesExplained}, {@code spinAttackExplained}) must each be more
- * than none.
+ * than none, and so must the spear lunges (the server's motion for the player, more than a block a tick on the level) one
+ * of the five ticks after it explained with the client's own state ({@code lungesFollowed}).
  *
  * <p>usage: java -cp WhyNotAC.jar MovementTruth.java RECORDING TRUTH.jsonl; one JSON line, exit code 1 on any difference
  */
@@ -163,7 +164,8 @@ public class MovementTruth {
                 && ((Number) tracker.get("ridingUnsaddled")).longValue() > 0
                 && ((Number) result.get("riptides")).longValue() > 0 && Long.valueOf(0).equals(result.get("riptidesMismatched"))
                 && ((Number) result.get("spinAttackPose")).longValue() > 0 && ((Number) tracker.get("riptidesExplained")).longValue() > 0
-                && ((Number) tracker.get("spinAttackExplained")).longValue() > 0;
+                && ((Number) tracker.get("spinAttackExplained")).longValue() > 0
+                && ((Number) tracker.get("lungesFollowed")).longValue() > 0;
         System.exit(clean ? 0 : 1);
     }
 
@@ -204,6 +206,11 @@ public class MovementTruth {
         Map<String, Long> reasons = new TreeMap<>();
         long[] counts = new long[4]; // explained ticks compared, truth found, truth missing, unexplained
         long[] spins = new long[2]; // of those found: a riptide's release, a spin attack's later tick
+        // a spear's lunge: the server's motion for the player along its look (more than a block a tick on the level), and
+        // whether one of the five ticks that sent a movement packet after it was explained with the client's own state
+        long[] lunges = new long[2]; // seen, followed
+        int[] lungeWindow = {0};
+        int[] self = {-1};
         List<String> examples = new ArrayList<>();
         int[] sentIndex = {0};
         boolean[] moved = {false};
@@ -218,6 +225,14 @@ public class MovementTruth {
             if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetPassengers set
                     && set.passengerIds().length > 0) {
                 mounting.add(set.vehicleId()); // every boat of the session carries the player
+            }
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.Login login) {
+                self[0] = login.entityId();
+            }
+            if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetEntityMotion m && m.entityId() == self[0]
+                    && Math.hypot(m.clientMotion().x(), m.clientMotion().z()) > 1.0) {
+                lunges[0]++;
+                lungeWindow[0] = 5;
             }
             MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(session), replicas.entities().entities(session),
                     replicas.inventory().inventory(session));
@@ -335,6 +350,10 @@ public class MovementTruth {
                         }
                     }
                     counts[found ? 1 : 2]++;
+                    if (found && lungeWindow[0] > 0 && Math.hypot(truth.deltaMovement().x(), truth.deltaMovement().z()) > 0.5) {
+                        lunges[1]++; // the client lunging, its state a hypothesis
+                        lungeWindow[0] = 0;
+                    }
                     if (found && truth.spinAttackTicks() > 0) {
                         spins[truth.spinAttackTicks() == OnFoot.SPIN_ATTACK_TICKS - 1 ? 0 : 1]++; // the release's tick, or a spin's
                     }
@@ -343,6 +362,7 @@ public class MovementTruth {
                                 + tracker.sentHypotheses().size() + "; nearest differs in " + nearest);
                     }
                 }
+                lungeWindow[0] = Math.max(lungeWindow[0] - 1, 0);
             }
         });
         Replayer.replay(RecordingReader.open(recording), chain);
@@ -351,6 +371,8 @@ public class MovementTruth {
         out.put("reasons", reasons);
         out.put("explainedSentTicks", counts[0]);
         out.put("truthFound", counts[1]);
+        out.put("lunges", lunges[0]);
+        out.put("lungesFollowed", lunges[1]);
         out.put("riptidesExplained", spins[0]);
         out.put("spinAttackExplained", spins[1]);
         out.put("truthMissing", counts[2]);
