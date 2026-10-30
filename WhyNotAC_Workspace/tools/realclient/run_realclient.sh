@@ -73,7 +73,9 @@ HOLDER=$!
 SERVER=$!
 CLIENT=
 RELAY=
-cleanup() { [ -n "$RELAY" ] && kill "$RELAY" 2>/dev/null || true; [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null || true; kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; kill "$XVFB" "$HOLDER" 2>/dev/null || true; rm -f "$FIFO"; }
+FREEZER=
+cleanup() { [ -n "$FREEZER" ] && kill "$FREEZER" 2>/dev/null || true; [ -n "$CLIENT" ] && kill -CONT "$CLIENT" 2>/dev/null || true
+  [ -n "$RELAY" ] && kill "$RELAY" 2>/dev/null || true; [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null || true; kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; kill "$XVFB" "$HOLDER" 2>/dev/null || true; rm -f "$FIFO"; }
 trap cleanup EXIT
 until grep -q 'Done (' "$WORK_DIR/server.log" 2>/dev/null; do
   kill -0 "$SERVER" 2>/dev/null || { echo "server died"; tail -40 "$WORK_DIR/server.log"; exit 1; }
@@ -179,6 +181,18 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 grep -q "$NAME joined the game" "$WORK_DIR/server.log" || { echo "client never joined"; tail -40 "$WORK_DIR/client.log"; exit 1; }
+# REALCLIENT_FREEZE="PERIOD_S SECONDS" stops the client's process every PERIOD_S seconds for SECONDS (VAL-13: a
+# legitimate client that freezes, a garbage collection or a stalled machine; afterwards it catches up at most 10 ticks a
+# frame and drops the rest, as vanilla does).
+if [ -n "${REALCLIENT_FREEZE:-}" ]; then
+  read -r FREEZE_PERIOD FREEZE_SECONDS <<< "$REALCLIENT_FREEZE"
+  (while kill -0 "$CLIENT" 2>/dev/null; do
+     sleep "$FREEZE_PERIOD"; kill -STOP "$CLIENT" 2>/dev/null || break; sleep "$FREEZE_SECONDS"; kill -CONT "$CLIENT" 2>/dev/null || break
+     echo "froze the client for ${FREEZE_SECONDS} s" >> "$WORK_DIR/freezes.log"
+   done) &
+  FREEZER=$!
+  echo "freezes: ${FREEZE_SECONDS} s every ${FREEZE_PERIOD} s"
+fi
 sleep 5 # let the world render and the player land
 # The world spawn is random within its radius: place the player where everything below expects it (the entities are
 # summoned around it, and the reach stage's line to its husk must stay clear of them).
