@@ -72,7 +72,8 @@ HOLDER=$!
 (cd "$WORK_DIR" && exec java -Xms512M -Xmx1G -jar "$PAPER_JAR" --nogui < "$FIFO" > "$WORK_DIR/server.log" 2>&1) &
 SERVER=$!
 CLIENT=
-cleanup() { [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null || true; kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; kill "$XVFB" "$HOLDER" 2>/dev/null || true; rm -f "$FIFO"; }
+RELAY=
+cleanup() { [ -n "$RELAY" ] && kill "$RELAY" 2>/dev/null || true; [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null || true; kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; kill "$XVFB" "$HOLDER" 2>/dev/null || true; rm -f "$FIFO"; }
 trap cleanup EXIT
 until grep -q 'Done (' "$WORK_DIR/server.log" 2>/dev/null; do
   kill -0 "$SERVER" 2>/dev/null || { echo "server died"; tail -40 "$WORK_DIR/server.log"; exit 1; }
@@ -153,13 +154,24 @@ CP=$(python3 -I -c "import json, os, sys; print(os.pathsep.join(json.load(open(s
 INDEX=$(python3 -I -c "import json, sys; print(json.load(open(sys.argv[1]))['assetIndex'])" "$LAUNCH")
 MAPPINGS=$(python3 -I -c "import json, sys; print(json.load(open(sys.argv[1]))['mappings'])" "$LAUNCH")
 OFFLINE_UUID=$(python3 -I -c "import hashlib, uuid; print(uuid.UUID(bytes=hashlib.md5(b'OfflinePlayer:$NAME').digest(), version=3))")
+# REALCLIENT_LATENCY="DELAY_MS JITTER_MS" puts a relay between client and server that delays both directions (VAL-13: a
+# legitimate laggy connection); the server sees the relay's address, everything else is the same.
+JOIN_PORT=$PORT
+if [ -n "${REALCLIENT_LATENCY:-}" ]; then
+  JOIN_PORT=$((PORT + 1))
+  read -r LATENCY_MS JITTER_MS <<< "$REALCLIENT_LATENCY"
+  python3 -I "$HERE/latency.py" "$JOIN_PORT" "127.0.0.1:$PORT" "$LATENCY_MS" "$JITTER_MS" "${GITHUB_RUN_ID:-1}" > "$WORK_DIR/relay.log" 2>&1 &
+  RELAY=$!
+  sleep 1
+  echo "relay: ${LATENCY_MS} ms each way, +-${JITTER_MS} ms"
+fi
 (cd "$WORK_DIR/game" && DISPLAY="$DISPLAY_NUM" LIBGL_ALWAYS_SOFTWARE=1 exec java -Xmx1500M \
   --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED \
   -javaagent:"$AGENT_OUT/truth-agent.jar=$MAPPINGS,$WORK_DIR/truth.jsonl" \
   -cp "$CP" net.minecraft.client.main.Main \
   --username "$NAME" --uuid "$OFFLINE_UUID" --version 1.21.11 --gameDir "$WORK_DIR/game" \
   --assetsDir "$WORK_DIR/client-cache/assets" --assetIndex "$INDEX" --accessToken 0 --userType legacy \
-  --width 854 --height 480 --quickPlayMultiplayer "127.0.0.1:$PORT" > "$WORK_DIR/client.log" 2>&1) &
+  --width 854 --height 480 --quickPlayMultiplayer "127.0.0.1:$JOIN_PORT" > "$WORK_DIR/client.log" 2>&1) &
 CLIENT=$!
 for _ in $(seq 1 180); do
   grep -q "$NAME joined the game" "$WORK_DIR/server.log" && break
