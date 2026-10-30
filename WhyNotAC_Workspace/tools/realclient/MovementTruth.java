@@ -143,7 +143,8 @@ public class MovementTruth {
                 && Long.valueOf(0).equals(tracker.get("unexplained")) && Long.valueOf(0).equals(tracker.get("truthMissing"))
                 && ((Number) tracker.get("truthFound")).longValue() > 0 && ((Number) tracker.get("pushesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rocketBoosts")).longValue() > 0
-                && ((Number) tracker.get("mounts")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("mountsDiffering"))
+                && ((Number) tracker.get("mounts")).longValue() > ((Number) tracker.get("mountsAmbiguous")).longValue()
+                && Long.valueOf(0).equals(tracker.get("mountsDiffering"))
                 && ((Number) tracker.get("rideExplained")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rideUnexplained"))
                 && ((Number) tracker.get("ridingNothing")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("vehicleOnFoot"))
                 && Long.valueOf(0).equals(tracker.get("rideTruthMissing"))
@@ -173,7 +174,7 @@ public class MovementTruth {
             }
         }
         java.util.Set<Integer> mounting = new java.util.LinkedHashSet<>();
-        long[] mounts = new long[2]; // compared, differing
+        long[] mounts = new long[3]; // compared, differing, several states
         List<String> mountExamples = new ArrayList<>();
         // Each vehicle move the client sent is its boat's state after a tick (verify_truth): at an explained ride tick, that
         // state must be one of the ride's.
@@ -222,6 +223,9 @@ public class MovementTruth {
                 Map<String, Object> pre = firstBoatTick.get(id);
                 mounts[0]++;
                 String d = pre == null ? "no boat tick in the truth" : mountDifference(mounted, pre);
+                if (mounted.size() != 1) {
+                    mounts[2]++; // the tracker has no claim on this ride (the boat's state at the mount not known exactly)
+                }
                 if (d != null) {
                     mounts[1]++;
                     if (mountExamples.size() < 8) {
@@ -360,6 +364,7 @@ public class MovementTruth {
         out.put("horseTruthMissing", horses[1]);
         out.put("mounts", mounts[0]);
         out.put("mountsDiffering", mounts[1]);
+        out.put("mountsAmbiguous", mounts[2]);
         out.put("mountExamples", mountExamples);
         out.put("examples", examples);
         return out;
@@ -367,11 +372,27 @@ public class MovementTruth {
 
     /** Null if the replica's only state for the boat at the mount is exactly the client's before its first tick, else how not. */
     @SuppressWarnings("unchecked")
+    /**
+     * Null when the client's boat at its first tick is one of the replica's states at the mount, each of them exact.
+     * Several states are where the client may or may not have processed a packet before the mount: the client's own
+     * must then be among them.
+     */
     private static String mountDifference(List<ClientEntities.Mounted> mounted, Map<String, Object> pre) {
-        if (mounted.size() != 1 || !mounted.getFirst().exact()) {
+        if (!mounted.stream().allMatch(ClientEntities.Mounted::exact)) {
             return mounted.size() + " states, exact " + mounted.stream().map(ClientEntities.Mounted::exact).toList();
         }
-        ClientEntities.Mounted m = mounted.getFirst();
+        List<String> each = new ArrayList<>();
+        for (ClientEntities.Mounted m : mounted) {
+            String d = stateDifference(m, pre);
+            if (d == null) {
+                return null;
+            }
+            each.add(d);
+        }
+        return mounted.size() + " states, none the client's: " + each;
+    }
+
+    private static String stateDifference(ClientEntities.Mounted m, Map<String, Object> pre) {
         List<Object> pos = (List<Object>) pre.get("pos");
         List<String> d = new ArrayList<>();
         if (Double.compare(m.position().x(), f64(pos.get(0))) != 0 || Double.compare(m.position().y(), f64(pos.get(1))) != 0
