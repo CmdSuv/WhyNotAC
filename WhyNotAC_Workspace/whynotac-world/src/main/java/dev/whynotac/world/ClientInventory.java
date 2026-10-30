@@ -244,7 +244,7 @@ public final class ClientInventory {
             return;
         }
         int applicable = applicable(windowEnd());
-        Set<State> next = new LinkedHashSet<>();
+        List<State> next = new ArrayList<>();
         for (State state : candidates) {
             for (State s : prefixes(state, applicable)) {
                 State after = apply(event, s);
@@ -257,7 +257,12 @@ public final class ClientInventory {
             // No state the client may hold explains what it did: it holds one this replica does not know.
             next.add(State.unknown().at(applicable));
         }
-        candidates = bound(new ArrayList<>(next));
+        candidates = bound(distinct(next));
+    }
+
+    /** The states without repeats, in order: one state (every tick end of a settled inventory) is not hashed. */
+    private static List<State> distinct(List<State> states) {
+        return states.size() > 1 ? new ArrayList<>(new LinkedHashSet<>(states)) : states;
     }
 
     private void onAcknowledged(int id) {
@@ -281,14 +286,14 @@ public final class ClientInventory {
         if (done == 0) {
             return;
         }
-        Set<State> next = new LinkedHashSet<>();
+        List<State> next = new ArrayList<>();
         for (State state : candidates) {
             for (State s : applyUpTo(state, done)) {
                 next.add(s.at(s.applied - done));
             }
         }
         pending.subList(0, done).clear();
-        candidates = bound(new ArrayList<>(next));
+        candidates = bound(distinct(next));
     }
 
     private void lose() {

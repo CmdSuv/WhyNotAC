@@ -8,7 +8,10 @@ ping, walks slowly in a circle on the ground, turns with the exact vanilla mouse
 its movement keys, swings its arm now and then, and ends every tick with ClientTickEnd. Once the runner
 has placed a cow where each bot stood, a bot attacks a cow every half second while the cow's box is
 within 2.95 blocks of the eye at the position the bot last told the server (where a vanilla attack is
-picked from: the attack comes before the tick's movement), just inside the vanilla 3. It never breaks a rule on purpose, so any anomaly,
+picked from: the attack comes before the tick's movement), just inside the vanilla 3, and the cow has stood still for
+half a second (a vanilla client lerps an entity toward each position the server sends over three ticks, so a moving
+cow, such as one of real terrain's own, is behind the server's position in its view; one that stood still is where
+the server put it). It never breaks a rule on purpose, so any anomaly,
 divergence or finding WhyNotAC reports for these bots under load is a false positive.
 
 Usage: load_bots.py HOST PORT NAME_PREFIX FIRST COUNT SECONDS [LOGIN_INTERVAL] [STOP_FILE]
@@ -29,6 +32,7 @@ import probe_client as pc  # noqa: E402  (stdlib-only module of this repository)
 
 PLAY_S_SWING = 0x3C
 ENTITY_COW = 30
+STILL_SECONDS = 0.5  # a cow attacked has not moved for this long (vanilla's lerp takes three ticks)
 ATTACK_DISTANCE = 2.95  # from the standing eye to the cow's box (0.9 wide, 1.4 high), just inside vanilla's 3
 EYE_HEIGHT = 1.62
 COW_HEIGHT = 1.4
@@ -56,10 +60,19 @@ class LoadBot(pc.Client):
         # thread) must not interleave: a move from the old spot after the accept is "moved too quickly".
         self.move_lock = threading.Lock()
         self.attacks = 0
+        self.cow_since = {}  # entity id -> (position, when it last changed)
 
-    def cows(self):
-        """Entity id -> (x, y, z) of every cow, where the server last put it (players push them)."""
-        return {i: e[1:] for i, e in list(self.entities.items()) if e[0] == ENTITY_COW}
+    def watch_cows(self, now):
+        """Each tick: when each cow's position, as the server last put it (players push them), last changed."""
+        for i, e in list(self.entities.items()):
+            if e[0] == ENTITY_COW:
+                seen = self.cow_since.get(i)
+                if seen is None or seen[0] != e[1:]:
+                    self.cow_since[i] = (e[1:], now)
+
+    def cows(self, now):
+        """Entity id -> (x, y, z) of every cow that stood still for STILL_SECONDS: where a vanilla client has it too."""
+        return {i: seen[0] for i, seen in list(self.cow_since.items()) if i in self.entities and now - seen[1] >= STILL_SECONDS}
 
     def handle(self, packet_id, r):
         if self.state == "play" and packet_id == pc.PLAY_C_POSITION:
@@ -92,6 +105,7 @@ def run_bot(host, port, name, seconds, results, start_gate, stop_file):
         while bot.alive and time.monotonic() - start < seconds:
             if tick % 20 == 0 and stop_file and os.path.exists(stop_file):
                 break
+            bot.watch_cows(time.monotonic())
             forward = (tick // 60) % 2 == 0
             flags = 0x01 if forward else 0x00
             if flags != sent_input:
@@ -103,7 +117,7 @@ def run_bot(host, port, name, seconds, results, start_gate, stop_file):
                 if tick % 10 == 5 and bot.teleports == seen_teleports and sent is not None:
                     # As Minecraft.tick: the pick and attack come before the tick's movement, from the position sent last.
                     eye = (sent[0], sent[1] + EYE_HEIGHT, sent[2])
-                    cows = bot.cows()
+                    cows = bot.cows(time.monotonic())
                     near = [i for i, cow in cows.items() if box_distance(eye, cow) <= ATTACK_DISTANCE]
                     if near:
                         pc.attack(bot, near[0])  # the attack and its swing back to back, as the client's main thread sends them

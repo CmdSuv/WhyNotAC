@@ -142,19 +142,29 @@ public final class ClientTags {
         if (seq == Long.MIN_VALUE) {
             return;
         }
+        long oldEnd = windowEnd();
         while (!pings.isEmpty() && pings.peekFirst()[1] <= seq) {
             pings.pollFirst();
         }
         certain = Math.max(certain, seq);
-        revision++;
+        long newEnd = windowEnd();
+        boolean changed = false;
         for (List<Version> versions : registries.values()) {
+            // what possible() answers moves only with a version the window's end passed, or with the certain one among several
+            changed |= versions.size() > 1;
+            for (Version v : versions) {
+                changed |= v.seq() >= oldEnd && v.seq() < newEnd;
+            }
             while (versions.size() > 1 && versions.get(1).seq() < certain) {
                 versions.removeFirst();
             }
         }
+        if (changed) {
+            revision++;
+        }
     }
 
-    /** Changes whenever what the queries may answer changes (a new version, or a ping answered). */
+    /** Changes whenever what the queries may answer changes (a new version, or a ping answered that moves them). */
     public long revision() {
         return revision;
     }
