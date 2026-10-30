@@ -43,8 +43,10 @@ find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-s
 find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delete
 # Options that would otherwise stop the client on a screen (first-run onboarding, warnings) or slow it down; auto-jump
 # on, so the course's step-ups exercise it (the engine and the movement check model it). REALCLIENT_MAX_FPS plays a
-# legitimate slow client (VAL-13): at 10 frames a second each frame runs two ticks.
+# legitimate slow client (VAL-13): at 10 frames a second each frame runs two ticks. REALCLIENT_OPTIONS adds option
+# lines of its own (other legitimate settings, e.g. "toggleSprint:true").
 MAX_FPS=${REALCLIENT_MAX_FPS:-60}
+EXTRA_OPTIONS=${REALCLIENT_OPTIONS:-}
 cat > "$WORK_DIR/game/options.txt" <<OPTS
 onboardAccessibility:false
 skipMultiplayerWarning:true
@@ -58,6 +60,7 @@ narrator:0
 soundCategory_master:0.0
 mouseSensitivity:0.83
 autoJump:true
+${EXTRA_OPTIONS}
 OPTS
 
 Xvfb "$DISPLAY_NUM" -screen 0 1024x768x24 -nolisten tcp > "$WORK_DIR/xvfb.log" 2>&1 &
