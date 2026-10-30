@@ -241,6 +241,18 @@ effect give $NAME minecraft:levitation 1 1 true
 effect give $NAME minecraft:blindness 60 0 true
 leg 152.5 -60 -90 w,Control_L/1.0 -/0.3 w/0.1 -/0.1 w/1.0
 effect clear $NAME minecraft:blindness
+# Random walks over the course (PHY-A10: the real client's own physics is the oracle, each tick compared with the engine
+# and claimed by the movement check): three starts, yaws and key sequences drawn from a seed, new every run (fuzz.py; the
+# same seed walks the same keys). From 4 blocks up, above every block of the lane; fire resistance (an effect the step
+# does not read) so lava or magma met on the way cannot end the session.
+FUZZ_SEED=${GITHUB_RUN_ID:-$(date +%s)}
+echo "fuzz seed $FUZZ_SEED"
+effect give $NAME minecraft:fire_resistance 60 0 true
+for walk in 0 1 2; do
+  read -r FX FYAW FSTEPS < <(python3 -I "$HERE/fuzz.py" "$FUZZ_SEED" "$walk")
+  leg "$FX" -56 "$FYAW" $FSTEPS
+done
+effect clear $NAME minecraft:fire_resistance
 # Climbing, at z = -9.5: a ladder on a wall walked into, held with shift, jumped on and slid down; vines likewise; an
 # open trapdoor over a ladder facing its way (a ladder too). Ladders and trapdoors do not suffocate: walking against
 # them is no push.
