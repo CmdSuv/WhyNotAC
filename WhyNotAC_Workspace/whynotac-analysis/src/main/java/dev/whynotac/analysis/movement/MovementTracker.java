@@ -150,6 +150,13 @@ public final class MovementTracker {
     private final ArrayDeque<long[]> pings = new ArrayDeque<>();
     private long certain = Long.MIN_VALUE;
 
+    // --- the server's rotations and the client's replies, kept out of the ticks -------------------------------------
+    private final RotationReplies rotationReplies = new RotationReplies();
+    /** A rotation's reply may have been taken for the tick's own packet or the other way: the last sent rotation and flags are not known. */
+    private boolean sentUnsure;
+    /** Whether the last tick sent a movement packet of its own (not a reply to a teleport or a rotation). */
+    private boolean lastTickMoved;
+
     // --- packets about the player, server order; index = queueBase + position -------------------------------------
     private record Pending(long sequence, ClientboundPacket packet) {}
 
@@ -302,6 +309,14 @@ public final class MovementTracker {
         return pushesFollowed;
     }
 
+    /**
+     * Whether the tick last closed sent a movement packet of its own: not the reply to a teleport nor to a rotation
+     * the server set (diagnostics: the real client's ticks that sent one, in order).
+     */
+    public boolean lastTickMoved() {
+        return lastTickMoved;
+    }
+
     /** The firework rocket boosts followed so far ({@link #boosted}). */
     public long rocketBoosts() {
         return rocketBoosts;
@@ -409,11 +424,21 @@ public final class MovementTracker {
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
                 pings.clear();
                 inbound.clear();
+                rotationReplies.clear();
             }
-            case TimelineEvent.Disconnected ignored -> pings.clear();
+            case TimelineEvent.Disconnected ignored -> {
+                pings.clear();
+                rotationReplies.clear();
+            }
             case TimelineEvent.Inbound in -> {
                 if (in.packet() instanceof ServerboundPacket.ClientTickEnd) {
+                    if (rotationReplies.atTickEnd() == RotationReplies.Outcome.AMBIGUOUS) {
+                        rotationUnsure("a rotation set by the server whose reply may be the tick's own packet");
+                    }
                     return closeTick(in, world, entities);
+                }
+                if (rotationReplies.onInbound(in.packet())) {
+                    return null; // a rotation's reply, not the tick's
                 }
                 if (in.packet() instanceof ServerboundPacket.MovePlayer move && move.hasPosition()) {
                     sentPositions.add(new double[] {ticks, move.x(), move.y(), move.z()});
@@ -431,6 +456,9 @@ public final class MovementTracker {
     // --- outbound ------------------------------------------------------------------------------------------------
 
     private void onOutbound(long seq, ClientboundPacket packet) {
+        if (rotationReplies.onOutbound(seq, packet) == RotationReplies.Outcome.OVERFLOW) {
+            rotationUnsure("too many rotations set by the server waiting for the client's reply");
+        }
         if (packet instanceof ClientboundPacket.Ping ping) {
             pings.add(new long[] {ping.id(), seq});
             if (pings.size() > MAX_PINGS) {
@@ -557,6 +585,9 @@ public final class MovementTracker {
     }
 
     private void onAcknowledged(int id) {
+        if (rotationReplies.onAcknowledged(id) == RotationReplies.Outcome.UNANSWERED) {
+            rotationUnsure("a rotation set by the server the client did not answer");
+        }
         long seq = Long.MIN_VALUE;
         for (long[] ping : pings) {
             if (ping[0] == id) {
@@ -574,6 +605,20 @@ public final class MovementTracker {
         while (!teamChanges.isEmpty() && (long) teamChanges.peekFirst()[0] < certain) {
             teamsBase = (ClientTeams) teamChanges.pollFirst()[1];
         }
+    }
+
+    // --- the server's rotations --------------------------------------------------------------------------------------
+
+    /** No claim, and no anchor until the client sends a rotation: the last rotation and flags it sent are not known. */
+    private void rotationUnsure(String reason) {
+        lose(reason);
+        if (ride != null) {
+            ride.unclaim(reason);
+        }
+        if (horseRide != null) {
+            horseRide.unclaim(reason);
+        }
+        sentUnsure = true;
     }
 
     // --- teams ------------------------------------------------------------------------------------------------------
@@ -793,6 +838,7 @@ public final class MovementTracker {
         handsNow.clear();
         leatherBoots = inventory == null ? null : inventory.wearsOnFeet(LEATHER_BOOTS);
         TickInput in = sortOut();
+        lastTickMoved = in.move != null;
         inbound.clear();
         long[] w = window();
         if (spinStartQueued >= w[0]) {
@@ -1488,7 +1534,7 @@ public final class MovementTracker {
                 }
                 yield h.withPlayer(teleported(p, teleport)).withSelf(s.withPositionKnown());
             }
-            case ClientboundPacket.PlayerRotation ignored -> throw new Lose("rotation set by the server (its reply is not modelled)");
+            case ClientboundPacket.PlayerRotation ignored -> h; // the reply is outside the tick (RotationReplies), sendPosition's last rotation is the client's
             case ClientboundPacket.SetEntityMotion motion -> h.withPlayer(withDelta(p, motion.clientMotion()));
             case ClientboundPacket.Explosion explosion -> h.withPlayer(withDelta(p, p.deltaMovement().add(explosion.playerKnockback())));
             case ClientboundPacket.UpdateAttributes update -> {
@@ -2300,6 +2346,9 @@ public final class MovementTracker {
         ServerboundPacket.MovePlayer move = in.move;
         boolean position = move != null && move.hasPosition();
         boolean rotation = move != null && move.hasRotation();
+        if (rotation) {
+            sentUnsure = false; // a rotation and flags the client sent, exactly
+        }
         baseSent = new Hypothesis.Sent(position ? move.x() : s.x(), position ? move.y() : s.y(), position ? move.z() : s.z(),
                 rotation ? move.yaw() : s.yRot(), rotation ? move.pitch() : s.xRot(), move != null ? move.onGround() : s.onGround(),
                 move != null ? move.horizontalCollision() : s.horizontalCollision(), position ? 0 : s.positionReminder() + 1, sprinting, keys);
@@ -2385,6 +2434,9 @@ public final class MovementTracker {
         }
         if (spinMayRun > 0) {
             return null; // a spin attack may still run, its ticks not known
+        }
+        if (sentUnsure) {
+            return null; // what the client sent last is not known (rotationUnsure)
         }
         View view = new View(world, entities, selfId);
         double x = move.x();

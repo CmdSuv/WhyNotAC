@@ -522,6 +522,14 @@ echo "item replace entity $NAME weapon.mainhand with minecraft:iron_spear[enchan
 echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 4.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" -/0.5 Button1/0.1 -/2.0 w/0.5 w,Button1/0.1 w/1.0 -/1.0; sleep 0.5
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
+# Rotations the server sets while the player walks on the same grass (/rotate: ServerPlayer.forceSetRotation sends
+# ClientboundPlayerRotationPacket): an absolute one with its pitch past 90 (the client clamps it before % 360), a
+# relative one, then one facing a point (ClientboundPlayerLookAtPacket, which the client does not answer). The client
+# answers each set rotation at once with Rot(yRot, xRot, false, false), outside its tick; its next tick sends the rotation.
+echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 2.0
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/3.2 & ROTATING=$!
+sleep 0.8; echo "rotate $NAME 90 400" > "$FIFO"; sleep 0.8; echo "rotate $NAME ~-60 ~-120" > "$FIFO"; sleep 0.8
+echo "rotate $NAME facing 396.5 -59 0" > "$FIFO"; wait $ROTATING; sleep 0.5
 # Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
 # stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks
 # (Pig.getRiddenInput) up the step ring and into the wall ring; boosted by the use key (the server's boost time reaches

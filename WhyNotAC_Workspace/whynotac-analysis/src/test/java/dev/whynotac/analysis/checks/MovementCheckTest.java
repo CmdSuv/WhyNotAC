@@ -575,6 +575,12 @@ class MovementCheckTest {
         }
     }
 
+    private void ticks(int count, PlayerState.Keys keys, float yRot, float xRot) throws Colliders.Unknown {
+        for (int i = 0; i < count; i++) {
+            tick(keys, yRot, xRot, Vec3d.ZERO);
+        }
+    }
+
     private static PlayerState rotate(PlayerState p, float yRot, float xRot) {
         return new PlayerState(p.x(), p.y(), p.z(), p.deltaMovement(), yRot, xRot, p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(),
                 p.verticalCollision(), p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(), p.pose(), p.keys(),
@@ -2058,6 +2064,136 @@ class MovementCheckTest {
     void aLungeTheClientDidNotApplyIsAFinding() throws Exception {
         stabWithALunge(false);
         assertEquals(1, evidence.size(), String.valueOf(ticks));
+    }
+
+    /**
+     * The server sets the player's rotation (ClientPacketListener.handleRotatePlayer): the client sets it and answers at
+     * once with Rot(yRot, xRot, false, false), while it processes packets (between the transactions around the
+     * rotation), not in its tick; sendPosition's last rotation stays what the tick sent, so the next tick sends the new one.
+     */
+    private void rotatedByTheServer(ClientboundPacket.PlayerRotation rotation, float replyYaw, float replyPitch, boolean answered) {
+        int before = ping();
+        out(rotation);
+        int after = ping();
+        acknowledge(before);
+        if (answered) {
+            in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, replyYaw, replyPitch, false, true, false, false));
+        }
+        acknowledge(after);
+    }
+
+    @Test
+    void aRotationTheServerSetsIsFollowed() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        rotatedByTheServer(new ClientboundPacket.PlayerRotation(90.0F, false, 400.0F, false), 90.0F, 90.0F, true); // clamped before % 360
+        ticks(10, FORWARD, 90.0F, 90.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(20, count(MovementTracker.Outcome.EXPLAINED), String.valueOf(ticks));
+    }
+
+    @Test
+    void aRelativeRotationTheServerSetsIsFollowed() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        rotatedByTheServer(new ClientboundPacket.PlayerRotation(15.0F, true, -20.0F, true), 45.0F, -20.0F, true);
+        ticks(10, FORWARD, 45.0F, -20.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(20, count(MovementTracker.Outcome.EXPLAINED), String.valueOf(ticks));
+    }
+
+    @Test
+    void twoRotationsInOneFlushAreFollowed() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        int before = ping();
+        out(new ClientboundPacket.PlayerRotation(90.0F, false, 0.0F, false));
+        out(new ClientboundPacket.PlayerRotation(-45.0F, false, 10.0F, false));
+        int after = ping();
+        acknowledge(before);
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 90.0F, 0.0F, false, true, false, false));
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, -45.0F, 10.0F, false, true, false, false));
+        acknowledge(after);
+        ticks(10, FORWARD, -45.0F, 10.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(20, count(MovementTracker.Outcome.EXPLAINED), String.valueOf(ticks));
+    }
+
+    /** No reply, or none with the rotation the client set: not a vanilla client, but the claim only ends (no finding rests on it). */
+    private void rotationNotAnswered(float replyYaw, float replyPitch, boolean answered) throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        rotatedByTheServer(new ClientboundPacket.PlayerRotation(90.0F, false, 0.0F, false), replyYaw, replyPitch, answered);
+        claimEndsAfterTheRotation();
+    }
+
+    private void claimEndsAfterTheRotation() throws Exception {
+        ticks(10, FORWARD, 90.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(10, count(MovementTracker.Outcome.UNTRACKED), String.valueOf(ticks));
+    }
+
+    @Test
+    void aReplyWithAnotherRotationEndsTheClaim() throws Exception {
+        rotationNotAnswered(91.0F, 0.0F, true);
+    }
+
+    @Test
+    void aReplyWithAnotherPitchEndsTheClaim() throws Exception {
+        rotationNotAnswered(90.0F, 1.0F, true);
+    }
+
+    @Test
+    void aRotationTheClientDidNotAnswerEndsTheClaim() throws Exception {
+        rotationNotAnswered(90.0F, 0.0F, false);
+    }
+
+    @Test
+    void aReplyOnTheGroundEndsTheClaim() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        int before = ping();
+        out(new ClientboundPacket.PlayerRotation(90.0F, false, 0.0F, false));
+        int after = ping();
+        acknowledge(before);
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 90.0F, 0.0F, false, true, true, false));
+        acknowledge(after);
+        claimEndsAfterTheRotation();
+    }
+
+    @Test
+    void aReplyBeforeTheClientHandledTheRotationEndsTheClaim() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        int before = ping();
+        out(new ClientboundPacket.PlayerRotation(90.0F, false, 0.0F, false));
+        int after = ping();
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 90.0F, 0.0F, false, true, false, false));
+        acknowledge(before);
+        acknowledge(after);
+        claimEndsAfterTheRotation();
+    }
+
+    /**
+     * The rotation's flush split across two frames: the client handles it, replies and runs a tick that sends nothing
+     * before it answers the transaction after it. The reply cannot be told from a tick's own packet: no claim, and no
+     * anchor until the client sends a rotation again (the one it sent last is not known).
+     */
+    @Test
+    void aReplyBeforeATickThatSentNothingEndsTheClaimUntilARotationIsSent() throws Exception {
+        ticks(30, PlayerState.Keys.NONE, 30.0F); // standing still: anchored
+        int before = ping();
+        out(new ClientboundPacket.PlayerRotation(90.0F, false, 0.0F, false));
+        int after = ping();
+        acknowledge(before);
+        in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 90.0F, 0.0F, false, true, false, false));
+        sentYRot = 90.0F; // the harness's tick then sends nothing: as if the reply had been the tick's own
+        ticks(1, PlayerState.Keys.NONE, 90.0F);
+        acknowledge(after);
+        assertEquals("a rotation set by the server whose reply may be the tick's own packet", ticks.getLast().reason(), "the tick that ended: " + ticks);
+        int explainedBefore = count(MovementTracker.Outcome.EXPLAINED);
+        ticks(60, PlayerState.Keys.NONE, 90.0F);
+        assertEquals(explainedBefore, count(MovementTracker.Outcome.EXPLAINED), "no anchor while the last sent rotation is not known: " + ticks);
+        ticks(30, PlayerState.Keys.NONE, 95.0F); // a turn: the rotation sent, then anchored again
+        ticks(10, FORWARD, 95.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertTrue(count(MovementTracker.Outcome.EXPLAINED) > explainedBefore, String.valueOf(ticks));
     }
 
     @Test

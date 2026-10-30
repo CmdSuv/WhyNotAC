@@ -8,7 +8,9 @@ sendPosition() sent is reconstructed exactly (vanilla rules: nothing while the c
 the player, which tick() checks first; otherwise the position was sent iff positionReminder was reset to 0, the rotation iff yRotLast/xRotLast changed, a status-only packet iff onGround or
 horizontalCollision changed). A passenger sends its rotation every tick instead (MovePlayer.Rot), and the vehicle
 it steers its move (MoveVehicle: the boat's state after its own tick, which runs first). Those sequences must equal
-the server-side recording's MovePlayer and MoveVehicle packets, bit for bit, in order. This is the ground truth the
+the server-side recording's MovePlayer and MoveVehicle packets, bit for bit, in order, but for the client's replies to
+the rotations the server set (ClientPacketListener.handleRotatePlayer: Rot(yRot, xRot, false, false), sent at once while
+it processes packets, not in a tick), each found and set aside. This is the ground truth the
 physics engine is tested against: the client's exact position, velocity and collision flags for every tick, aligned
 with the packets.
 
@@ -16,6 +18,7 @@ usage: verify_truth.py <work-dir>     (prints PASS/FAIL lines; exit code 0 = ali
 """
 import json
 import os
+import struct
 import sys
 
 
@@ -106,11 +109,47 @@ def server_vehicle_moves(events):
     return moves, corrections, answered
 
 
+def f32(field):
+    return struct.unpack(">f", struct.pack(">I", bits(field["bits"])))[0]
+
+
+def rotation_windows(events):
+    """Each rotation the server set: the event indices between which the client handled it (after its answer to the
+    last ping sent before it, before its answer to the next) and its reply's yaw and pitch where known (an absolute
+    one: 0.0F + the value, the pitch clamped to +-90, which % 360 keeps; None where relative or not finite)."""
+    pings = {}
+    ping_seqs = []
+    acks = {}
+    rotations = []
+    for index, e in enumerate(events):
+        if e["type"] == "Outbound" and e["packet"]["type"] == "Ping":
+            pings[e["packet"]["id"]] = e["sequence"]
+            ping_seqs.append(e["sequence"])
+        elif e["type"] == "Outbound" and e["packet"]["type"] == "PlayerRotation":
+            p = e["packet"]
+            yaw = None if p["relativeYaw"] else f32(p["yaw"]) + 0.0
+            pitch = None if p["relativePitch"] else min(max(f32(p["pitch"]) + 0.0, -90.0), 90.0)
+            yaw = yaw if yaw is not None and abs(yaw) != float("inf") and yaw == yaw else None
+            pitch = pitch if pitch is not None and pitch == pitch else None
+            before = ping_seqs[-1] if ping_seqs else None
+            rotations.append({"sequence": e["sequence"], "before": before, "yaw": yaw, "pitch": pitch})
+        elif e["type"] == "Acknowledged" and e["transactionId"] in pings:
+            acks.setdefault(pings[e["transactionId"]], index)
+    for r in rotations:
+        after = next((q for q in ping_seqs if q > r["sequence"]), None)
+        r["start"] = 0 if r["before"] is None else acks.get(r["before"], len(events))
+        r["end"] = acks.get(after, len(events))
+        r["answered"] = after in acks
+    return rotations
+
+
 def server_received(events):
-    """MovePlayer packets on the server timeline, without teleport replies (sent at frame start, not in a tick)."""
+    """MovePlayer packets on the server timeline, without teleport replies (sent at frame start, not in a tick), each with
+    the rotations whose reply it may be (handled in its window, its shape and rotation)."""
+    rotations = rotation_windows(events)
     received = []
     after_accept = False
-    for e in events:
+    for index, e in enumerate(events):
         if e["type"] != "Inbound":
             continue
         p = e["packet"]
@@ -118,14 +157,41 @@ def server_received(events):
         after_accept = p["type"] == "AcceptTeleportation"
         if p["type"] != "MovePlayer" or teleport_reply:
             continue
+        shaped = p["hasRotation"] and not p["hasPosition"] and not p["onGround"] and not p["horizontalCollision"]
+        replies = [k for k, r in enumerate(rotations) if shaped and r["start"] < index < r["end"]
+                   and (r["yaw"] is None or bits(p["yaw"]["bits"]) == struct.unpack(">I", struct.pack(">f", r["yaw"]))[0])
+                   and (r["pitch"] is None or bits(p["pitch"]["bits"]) == struct.unpack(">I", struct.pack(">f", r["pitch"]))[0])]
         received.append({
+            "replies": replies,
             "hasPosition": p["hasPosition"],
             "hasRotation": p["hasRotation"],
             "pos": tuple(bits(p[a]["bits"]) for a in ("x", "y", "z")) if p["hasPosition"] else None,
             "rot": (bits(p["yaw"]["bits"]), bits(p["pitch"]["bits"])) if p["hasRotation"] else None,
             "flags": (p["onGround"], p["horizontalCollision"]),
         })
-    return received
+    return received, rotations
+
+
+KEYS = ("hasPosition", "hasRotation", "pos", "rot", "flags")
+
+
+def without_replies(sent, received):
+    """The received packets with each rotation's reply set aside: a candidate is the reply where it is not the client's
+    next packet of its own, or where the packet after it is that one too. Also the rotations answered so."""
+    same = lambda a, b: all(a[k] == b[k] for k in KEYS)
+    taken = set()
+    out = []
+    for j, r in enumerate(received):
+        k = next((k for k in r["replies"] if k not in taken), None)
+        if k is not None:
+            i = len(out)
+            own = i < len(sent) and same(sent[i], r)
+            next_own = i < len(sent) and j + 1 < len(received) and same(sent[i], received[j + 1])
+            if not own or next_own:
+                taken.add(k)
+                continue
+        out.append(r)
+    return out, taken
 
 
 def main():
@@ -142,8 +208,13 @@ def main():
     check(len(records) > 400, f"the truth agent recorded the client's state every tick ({len(records)} records)")
     events = [json.loads(line) for line in open(os.path.join(work, "dump.jsonl")) if line.strip()]
     sent = client_sent(records)
-    received = server_received(events)
-    keys = ("hasPosition", "hasRotation", "pos", "rot", "flags")
+    received, rotations = server_received(events)
+    received, replied = without_replies(sent, received)
+    answered = [k for k, r in enumerate(rotations) if r["answered"]]
+    check(len(answered) > 0 and set(answered) == replied,
+          f"the client answered each rotation the server set at once, outside its ticks, with the rotation it set "
+          f"({len(replied)} replies, {len(answered)} rotations handled of {len(rotations)})")
+    keys = KEYS
     mismatch = next((i for i, (a, b) in enumerate(zip(sent, received)) if any(a[k] != b[k] for k in keys)), None)
     aligned = mismatch is None and len(sent) == len(received)
     detail = (f"{len(sent)} packets" if aligned else

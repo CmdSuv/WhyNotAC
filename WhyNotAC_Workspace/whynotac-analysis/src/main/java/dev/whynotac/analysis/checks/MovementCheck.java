@@ -23,8 +23,10 @@ import java.util.TreeMap;
  * Movement (P-M): the client moved on foot as no vanilla 1.21.11 client could, every state it may have been
  * in considered ({@link MovementTracker}). Its own player is followed tick by tick through the bit-exact
  * on-foot step, from an anchor where its state is known (a new player, or one standing still), through what
- * the server sends it (teleports, knockback, explosions, attributes, effects, food, its own flags), each in the client
- * tick the transactions place it in or, where they cannot, in every tick it may be in. A tick is a finding
+ * the server sends it (teleports, rotations, knockback, explosions, attributes, effects, food, its own flags), each in the
+ * client tick the transactions place it in or, where they cannot, in every tick it may be in. A rotation the server sets
+ * the client answers at once, outside its tick ({@code handleRotatePlayer}): that reply is kept out of the tick
+ * ({@code RotationReplies}); where it cannot be told from a tick's own packet, or does not come, the claim ends. A tick is a finding
  * when no state the client may have been in sends what it sent: the position to the bit, the flags, the
  * sprint and input packets. Items in use slow it as their use effects say; while one is in use, {@code handleKeybinds}
  * neither attacks nor starts a use, so a tick that does is explained only by a state not using one. A riptide trident
@@ -58,7 +60,7 @@ import java.util.TreeMap;
 public final class MovementCheck implements TimelineListener {
 
     public static final String ID = "movement";
-    public static final int VERSION = 12;
+    public static final int VERSION = 13;
     private static final EngineTags ENGINE_TAGS = new EngineTags(dev.whynotac.world.BlockStates.vanilla());
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
