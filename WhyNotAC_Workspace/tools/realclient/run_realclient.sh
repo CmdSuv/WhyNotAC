@@ -42,8 +42,10 @@ printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 
 find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' -exec cp {} "$WORK_DIR/plugins/WhyNotAC.jar" \;
 find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delete
 # Options that would otherwise stop the client on a screen (first-run onboarding, warnings) or slow it down; auto-jump
-# on, so the course's step-ups exercise it (the engine and the movement check model it).
-cat > "$WORK_DIR/game/options.txt" <<'OPTS'
+# on, so the course's step-ups exercise it (the engine and the movement check model it). REALCLIENT_MAX_FPS plays a
+# legitimate slow client (VAL-13): at 10 frames a second each frame runs two ticks.
+MAX_FPS=${REALCLIENT_MAX_FPS:-60}
+cat > "$WORK_DIR/game/options.txt" <<OPTS
 onboardAccessibility:false
 skipMultiplayerWarning:true
 joinedFirstServer:true
@@ -51,7 +53,7 @@ tutorialStep:none
 pauseOnLostFocus:false
 renderDistance:2
 simulationDistance:5
-maxFps:60
+maxFps:$MAX_FPS
 narrator:0
 soundCategory_master:0.0
 mouseSensitivity:0.83
