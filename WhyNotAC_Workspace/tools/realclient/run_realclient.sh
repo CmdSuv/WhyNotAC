@@ -523,13 +523,12 @@ echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 4.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" -/0.5 Button1/0.1 -/2.0 w/0.5 w,Button1/0.1 w/1.0 -/1.0; sleep 0.5
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 # Rotations the server sets while the player walks on the same grass (/rotate: ServerPlayer.forceSetRotation sends
-# ClientboundPlayerRotationPacket): an absolute one with its pitch past 90 (the client clamps it before % 360), a
-# relative one, then one facing a point (ClientboundPlayerLookAtPacket, which the client does not answer). The client
-# answers each set rotation at once with Rot(yRot, xRot, false, false), outside its tick; its next tick sends the rotation.
+# ClientboundPlayerRotationPacket): an absolute one with its pitch past 90 (the client clamps it before % 360), then a
+# relative one (from the console's rotation: -150 on the yaw). The client answers each at once with
+# Rot(yRot, xRot, false, false), outside its tick; its next tick sends the rotation.
 echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 2.0
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/3.2 & ROTATING=$!
-sleep 0.8; echo "rotate $NAME 90 400" > "$FIFO"; sleep 0.8; echo "rotate $NAME ~-60 ~-120" > "$FIFO"; sleep 0.8
-echo "rotate $NAME facing 396.5 -59 0" > "$FIFO"; wait $ROTATING; sleep 0.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/2.6 & ROTATING=$!
+sleep 0.8; echo "rotate $NAME 90 400" > "$FIFO"; sleep 0.8; echo "rotate $NAME ~-60 ~-120" > "$FIFO"; wait $ROTATING; sleep 0.5
 # Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
 # stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks
 # (Pig.getRiddenInput) up the step ring and into the wall ring; boosted by the use key (the server's boost time reaches
@@ -633,7 +632,7 @@ RECORDING=$(find "$WORK_DIR/plugins/WhyNotAC/recordings" -name '*.wnrec' | head 
 echo "--- recording: ${RECORDING:-<none>}"
 JARS=$(find "$ROOT/whynotac-math/build/libs" "$ROOT/whynotac-protocol/build/libs" "$ROOT/whynotac-recording/build/libs" -name '*.jar' ! -name '*-sources.jar' | paste -sd:)
 java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/dump.jsonl"
-java -cp "$JARS" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
+java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
 # Every attack, assessed as the attack-reach check does (in reach, out of reach, or no claim and why).
 java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/ReachAudit.java" "$RECORDING" > "$WORK_DIR/reach-audit.jsonl"
 # Every block finish, as the break-time check judged it (within, early, not known), with its ticks off the ground.

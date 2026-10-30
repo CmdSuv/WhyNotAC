@@ -143,6 +143,10 @@ def main():
     events = [json.loads(line) for line in open(os.path.join(work, "dump.jsonl")) if line.strip()]
     result = json.load(open(os.path.join(work, "check.json")))
     inbound = [e["packet"] for e in events if e["type"] == "Inbound"]
+    # the client's replies to the rotations the server set (handleRotatePlayer: sent at once, outside its ticks), found by
+    # RealClientCheck as the movement check finds them
+    replies = set(result.get("rotation_replies", []))
+    in_ticks = [e["packet"] for e in events if e["type"] == "Inbound" and e["sequence"] not in replies]
 
     check(re.search(r"RealProbe (was kicked|lost connection: (?!Disconnected))", log) is None,
           "the real client was never kicked or flagged by the server")
@@ -166,11 +170,11 @@ def main():
     check(len(swings) >= 5, f"left clicks became swings ({len(swings)})")
     # The action grammar, read independently of the action-grammar check: each attack is followed by the main hand's
     # swing (the network thread's keep-alive and chunk-batch answers aside), and every action handleKeybinds sends
-    # comes before the tick's own movement packet (the reply right after a teleport's accept aside; this session is
-    # sent no rotation or entity teleport).
+    # comes before the tick's own movement packet (the reply right after a teleport's accept aside, and the replies to the
+    # rotations the server set; this session is sent no entity teleport).
     keybind = ("InteractEntity", "UseItemOn", "UseItem", "SetCarriedItem", "PlayerAction")
     attacks, actions, broken, due, moved, accepted = 0, {}, [], None, False, False
-    for i, p in enumerate(inbound):
+    for i, p in enumerate(in_ticks):
         if p["type"] in ("KeepAlive", "ChunkBatchReceived"):
             continue
         if due is not None and not (p["type"] == "Swing" and p["hand"] == "MAIN_HAND"):
@@ -240,8 +244,8 @@ def main():
     check(len(blocks) >= 3 and not any(blocks) and after_last and after_last[0] == "Swing",
           f"while the shield was up the client sent no swing, attack or use though the attack button was clicked, and the "
           f"click after the release swung: {blocks} then {after_last}")
-    rotations = sum(1 for e in events if e["type"] == "Outbound" and e["packet"]["type"] in ("PlayerRotation", "TeleportEntity"))
-    check(attacks >= 2 and actions.get("UseItem", 0) >= 3 and actions.get("SetCarriedItem", 0) >= 3 and not broken and rotations == 0,
+    teleports = sum(1 for e in events if e["type"] == "Outbound" and e["packet"]["type"] == "TeleportEntity")
+    check(attacks >= 2 and actions.get("UseItem", 0) >= 3 and actions.get("SetCarriedItem", 0) >= 3 and not broken and teleports == 0,
           f"the client's actions all came before its tick's movement, each of its {attacks} attacks followed by the main hand's swing "
           f"({actions}): {broken}")
     slots = [p["slot"] for p in inbound if p["type"] == "SetCarriedItem"]

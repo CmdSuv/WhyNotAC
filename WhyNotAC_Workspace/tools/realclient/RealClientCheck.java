@@ -1,3 +1,4 @@
+import dev.whynotac.analysis.movement.RotationReplies;
 import dev.whynotac.math.vanilla.MouseTurnModel;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
@@ -20,10 +21,12 @@ import java.util.Map;
  *       them apart proves nothing and fails.
  *   <li>Wire order: a vanilla client answers pings at frame start, before that frame's ticks, so in the
  *       play phase no Pong may appear between a tick's first packet and its ClientTickEnd (a teleport
- *       reply is frame-start work too: AcceptTeleportation + MovePlayer from handleMovePlayer).
+ *       reply is frame-start work too: AcceptTeleportation + MovePlayer from handleMovePlayer, and so is the reply to a
+ *       rotation the server set, Rot from handleRotatePlayer, found as the movement check finds it: RotationReplies).
+ *       Both carry the rotation the server set: the mouse's steps start again from it.
  * </ul>
  *
- * usage: java -cp <math,protocol,recording jars> RealClientCheck.java <recording.wnrec> [sensitivity]
+ * usage: java -cp WhyNotAC.jar RealClientCheck.java <recording.wnrec> [sensitivity]
  */
 public class RealClientCheck {
 
@@ -48,6 +51,8 @@ public class RealClientCheck {
         long steadyTicks = 0;
         long steadyFirst = Long.MIN_VALUE;
         java.util.Set<Integer> teleports = new java.util.HashSet<>();
+        RotationReplies rotationReplies = new RotationReplies();
+        List<Long> replies = new ArrayList<>();
         boolean riding = false;
         boolean afterRide = false;
         RecordingReader reader = RecordingReader.open(Path.of(args[0]));
@@ -56,10 +61,25 @@ public class RealClientCheck {
                 if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetPassengers set) {
                     riding = set.passengerIds().length > 0; // every boat of the session carries the player
                 }
+                if (event instanceof TimelineEvent.Outbound out) {
+                    rotationReplies.onOutbound(out.sequence(), out.packet());
+                }
+                if (event instanceof TimelineEvent.Acknowledged ack) {
+                    rotationReplies.onAcknowledged(ack.transactionId());
+                }
                 if (!(event instanceof TimelineEvent.Inbound in)) {
                     continue;
                 }
-                boolean teleportReply = afterTeleportAck && in.packet() instanceof ServerboundPacket.MovePlayer;
+                boolean rotationReply = false;
+                if (in.packet() instanceof ServerboundPacket.ClientTickEnd) {
+                    rotationReplies.atTickEnd(); // a reply that may be the tick's own stays out of it, as for the movement check
+                } else {
+                    rotationReply = rotationReplies.onInbound(in.packet());
+                }
+                if (rotationReply) {
+                    replies.add(in.sequence());
+                }
+                boolean teleportReply = (afterTeleportAck || rotationReply) && in.packet() instanceof ServerboundPacket.MovePlayer;
                 afterTeleportAck = in.packet() instanceof ServerboundPacket.AcceptTeleportation;
                 switch (in.packet()) {
                     case ServerboundPacket.ClientTickEnd ignored -> {
@@ -116,6 +136,7 @@ public class RealClientCheck {
         out.put("pongs", pongs);
         out.put("pongs_inside_a_tick", pongsInsideTicks);
         out.put("rotation_packets", rotations.size());
+        out.put("rotation_replies", replies);
         out.put("sensitivity", sensitivity);
         out.put("multiplier", multiplier);
         out.put("yaw_steps", real.yawSteps);

@@ -372,6 +372,25 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   client'ın tikini hamlenin hızıyla açıkladı (client'ın kendi durumu hipotezlerinden biri), 0 açıklanamayan. Kapı
   (`MovementTruth`): kendi oyuncusuna düzlemde 1'den büyük hız gönderildikten sonraki 5 gönderilmiş tikte, client'ın
   düzlemde 0.5'ten uzun hareket ettiği açıklanmış bir tik.
+- **Sunucunun koyduğu dönüş:** `ClientPacketListener.handleRotatePlayer` dönüşü kurar ve hemen
+  `Rot(yRot, xRot, false, false)` gönderir: client paketleri işlerken, tikinin dışında; `sendPosition`'ın son dönüşü
+  tikin gönderdiği kalır, bu yüzden sonraki tik yeni dönüşü gönderir. Yanıtı `RotationReplies` akıştaki yerinden bulur:
+  bir pingden sonra gönderilen dönüşü client o pingi yanıtladıktan sonra ve bir sonrakini yanıtlamadan önce işler, yanıtı
+  da aradaki ilk hareket paketidir (ışınlamanın yanıtı hariç), o biçimde ve mutlak bir dönüşte değeriyle (`0.0F +` yaw;
+  pitch önce `Mth.clamp`, sonra `setXRot`'un `% 360` ve sıkıştırması; sonlu olmayan değer atılır). Bu biçimdeki paket,
+  tik bitmeden ikinci bir hareket paketi ya da sonraki pingin yanıtı onun paket işlerken gönderildiğini gösterene kadar
+  tikin dışında tutulur. Önce tik biterse (dönüşün flush'ı iki kareye bölünmüş) yanıt tikin kendi paketinden ayrılamaz:
+  iddia biter ve client bir dönüş gönderene kadar çapa kurulmaz (son gönderdiği dönüş bilinmez). Yanıt gelmezse ya da
+  başka bir dönüşle gelirse de yalnızca iddia biter: üstüne bulgu kurulmaz. `MovementCheckTest`: mutlak (400 pitch'in
+  `% 360`'tan önce 90'a sıkışması) ve göreli dönüş izlenir, bir flush'ta iki dönüş de; başka yaw'lı, pitch'li ya da yerde
+  yanıt, dönüş işlenmeden gelen yanıt ya da yanıtsızlık iddiayı bitirir; hiçbir şey göndermeyen tikten önceki yanıt
+  iddiayı bitirir ve dönüş gönderilene kadar çapayı engeller (her kural kaldırılınca bir test kırılır: 11 mutasyon). Gerçek
+  client (mızrak ayağının çiminde yürürken `/rotate`: 400 pitch'li mutlak ve göreli dönüş): iki yanıt da vanilla
+  hesabıyla bit bit tuttu (90/90 ve -60/-90), takipçi iki dönüşten sonra da client'ın tikini client'ın kendi durumuyla
+  açıkladı, 0 açıklanamayan. Kapı (`MovementTruth`): `rotationsFollowed` ve yanıtsız dönüş olmaması; `verify_truth.py`
+  yanıtları client'ın kendi kaydından ayırır, `RealClientCheck` (tel düzeni, fare adımları) ve eylem dilbilgisi de
+  aynı kuralla. Sunucunun bakış hedefi (`ClientboundPlayerLookAtPacket`) yanıt istemez, yalnızca sonraki tikin gönderdiği
+  dönüşü değiştirir: takipçi o dönüşü zaten paketinden okur.
 - **Kullanırken eylem yok:** `handleKeybinds` oyuncu bir eşya kullanırken yalnızca bırakır (kullanma tuşu
   kalkmışsa) ve saldırı ile kullanma tuşlarının tıklarını boşa harcar; saldırı, mızrak dürtmesi, varlıkla etkileşim
   ve yeni kullanım yalnızca kullanmayan bir durumun `startAttack`/`startUseItem`'ından gelir. Bunlardan birini içeren
