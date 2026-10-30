@@ -367,7 +367,7 @@ class OnFootTruthTest {
     void riptideIsTheClientsOwn() throws Exception {
         int[] counts = replay("truth-riptide.jsonl.gz", COURSE_WORLD);
         // riptides let go (each compared from the tick before too), ticks in the spin attack's pose, ticks in a spin attack
-        assertTrue(counts[0] > 350 && counts[48] == 2 && counts[49] > 30 && counts[50] > 30, java.util.Arrays.toString(counts));
+        assertTrue(counts[0] > 300 && counts[48] == 2 && counts[49] > 30 && counts[50] > 30, java.util.Arrays.toString(counts));
     }
 
     @Test

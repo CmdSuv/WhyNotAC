@@ -357,7 +357,11 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
   19.'da kurulur; çapanın bulduğu kullanımdan bırakış iddiayı bitirir (her kural kaldırılınca ya da bir kaydırılınca bir
   test kırılır). `InventoryPacketViewsTest`: riptide I–III 1.5, 2.25 ve 3.0 verir; kırılmak üzere olan riptide'lı
   trident NaN, riptide'sız olan 0. `ClientPushersTest`: düşen eşya iten ya da çarpışan değildir ama dönmenin
-  süpürmesinde sayılır.
+  süpürmesinde sayılır. Gerçek client (parkurun riptide ayağı, diğer bütün varlıklardan uzak bir havuzda; her ayak
+  önce yanındaki çimde çapalanır, sonra havuza): takipçi iki riptide bırakışını ve dönme saldırısının 36 tikini açıkladı
+  (client'ın kendi durumu her birinde hipotezlerinden biri), ayağın 506 tiki açıklandı, 0 açıklanamayan; 82 tik
+  motorun kapsamı dışında (düşerken bir tikte bir bloktan uzun hareket). Kapı (`MovementTruth`): riptide bırakışlarının ve
+  dönme tiklerinin açıklanmış olması; ilk koşu, havuza doğrudan ışınlanan ayağın hiç izlenmediğini böyle yakaladı.
 - **Kullanırken eylem yok:** `handleKeybinds` oyuncu bir eşya kullanırken yalnızca bırakır (kullanma tuşu
   kalkmışsa) ve saldırı ile kullanma tuşlarının tıklarını boşa harcar; saldırı, mızrak dürtmesi, varlıkla etkileşim
   ve yeni kullanım yalnızca kullanmayan bir durumun `startAttack`/`startUseItem`'ından gelir. Bunlardan birini içeren

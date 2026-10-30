@@ -321,6 +321,11 @@ Her formül `docs/reference/vanilla-1.21.11.md` gibi decompile edilmiş kaynakta
     tikten önceki kullanımın okuduğu) ve sayacı (`spinAttackTicks`, eksi: bilinmiyor) taşır. Kullanım süresi, su ya da
     yağmur ve güç (bırakılan yığının büyüleri) takipçinin işidir. Gerçek client (truth ajanı `autoSpinAttackTicks`'i ve
     bayrağı da kaydeder; bırakış tikin başındaki kayıtta zaten vardır, bu yüzden bir önceki tikin sonundan motorun kendi
-    bırakışıyla da karşılaştırılır): parkurun riptide ayağı (havuzda düz ve yukarı bakarak, 10 tikten kısa). `RiptideTest`: itme bakış boyunca gücü kadar, yerde kaldırma
+    bırakışıyla da karşılaştırılır): iki blok derin havuzda riptide III düz ve yukarı bakarak, bir de 10 tikten kısa bırakış: iki
+    bırakış da bir önceki tikten motorun kendi bırakışıyla bit bit eşit (kaldırma, itme, sayaç), dönme saldırısının 40
+    tiki ve pozu da; oturumun tamamında 0 fark. `truth-riptide.jsonl.gz` (`OnFootTruthTest`) bu ayağın suya ilk değdiği
+    tikten 339 tikidir; kaldırmanın 1.1999999F'si 1.2 olunca, itmenin birim vektörü kaldırılınca ya da poz bayraktan
+    kopunca kırılır (havuzda duvara çarpılmadığından yatay çarpışmanın dönmeyi bitirmesini `RiptideTest` sınar). Kapsam
+    dışı: düşerken bir tikte bir bloktan uzun hareket (`a fall reset by a ray`, yukarı bakan riptide'ın düşüşü). `RiptideTest`: itme bakış boyunca gücü kadar, yerde kaldırma
     (kesin durum), sayaç ve yatay çarpışma, pozun bayrağa bağlılığı.
 - **Sunucu tarafı kontrol (`MovementCheck`, P-M, SHADOW):** `whynotac-analysis` içinde; bkz. o modülün README'si.
