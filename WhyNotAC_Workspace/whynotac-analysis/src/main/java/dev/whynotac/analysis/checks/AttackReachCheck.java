@@ -57,7 +57,7 @@ public final class AttackReachCheck implements TimelineListener {
     static final String SHULKER = "minecraft:shulker";
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
     private final Replicas replicas;

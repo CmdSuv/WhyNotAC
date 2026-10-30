@@ -60,7 +60,7 @@ public final class ClientClockCheck implements TimelineListener {
     static final double SLACK_TICKS = 22.0;
     private static final double TICKS_PER_NANO = (1.0 + DRIFT) / 50_000_000.0;
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
 

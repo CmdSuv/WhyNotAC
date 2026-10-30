@@ -23,19 +23,26 @@ public final class Section {
     private final int[] palette;   // null: data holds global ids
     private final int globalLimit; // global ids at or above this are not block states
     private final int hash;
+    /**
+     * Packed by {@link #of} with a palette: the palette has no duplicates, every stored value indexes it, the width is
+     * {@code of}'s for its size, the unused bits are zero, so {@code of} would pack it again as it is (not part of the
+     * content: a decoded section equal to it is not marked).
+     */
+    private final boolean canonical;
 
-    private Section(int single, int bits, long[] data, int[] palette, int globalLimit) {
+    private Section(int single, int bits, long[] data, int[] palette, int globalLimit, boolean canonical) {
         this.single = single;
         this.bits = bits;
         this.data = data;
         this.palette = palette;
         this.globalLimit = globalLimit;
+        this.canonical = canonical;
         this.valuesPerLong = bits == 0 ? 0 : 64 / bits;
         this.hash = ((31 * single + bits) * 31 + Arrays.hashCode(data)) * 31 + Arrays.hashCode(palette);
     }
 
     static Section uniform(int state) {
-        return new Section(state, 0, null, null, 0);
+        return new Section(state, 0, null, null, 0, false);
     }
 
     /**
@@ -44,7 +51,7 @@ public final class Section {
      * when {@code palette} is null.
      */
     static Section packed(int bits, long[] data, int[] palette, int globalLimit) {
-        return new Section(-1, bits, data, palette, globalLimit);
+        return new Section(-1, bits, data, palette, globalLimit, false);
     }
 
     /** The number of longs {@code SimpleBitStorage} uses for {@code size} values of {@code bits} bits. */
@@ -78,6 +85,10 @@ public final class Section {
      * then global ids), and a section whose values no longer fit a palette keeps global ids.
      */
     Section with(int[] indices, int[] states, int globalBits, int stateCount) {
+        Section inPlace = canonical && globalLimit == stateCount ? withinPalette(indices, states, stateCount) : null;
+        if (inPlace != null) {
+            return inPlace;
+        }
         int[] values = new int[4096];
         for (int i = 0; i < 4096; i++) {
             values[i] = get(i);
@@ -86,6 +97,57 @@ public final class Section {
             values[indices[i]] = states[i] >= 0 && states[i] < stateCount ? states[i] : INVALID;
         }
         return of(values, palette, globalBits, stateCount);
+    }
+
+    /**
+     * {@link #with} of a canonical section whose palette holds every new state, without unpacking it: {@code of} would
+     * keep the palette as it is (nothing to append), so the width and every other stored value stay, only the changed
+     * values are rewritten. Null where the palette lacks a state or the section turns uniform ({@code of}'s cases).
+     */
+    private Section withinPalette(int[] indices, int[] states, int stateCount) {
+        if ((long) indices.length * palette.length > 4096) {
+            return null; // looking them up costs more than unpacking
+        }
+        int[] positions = new int[indices.length];
+        for (int i = 0; i < indices.length; i++) {
+            int state = states[i] >= 0 && states[i] < stateCount ? states[i] : INVALID;
+            int position = 0;
+            while (position < palette.length && palette[position] != state) {
+                position++;
+            }
+            if (position == palette.length) {
+                return null;
+            }
+            positions[i] = position;
+        }
+        long[] changed = data.clone();
+        long mask = (1L << bits) - 1;
+        for (int i = 0; i < indices.length; i++) {
+            int cell = indices[i] / valuesPerLong;
+            int shift = (indices[i] - cell * valuesPerLong) * bits;
+            changed[cell] = changed[cell] & ~(mask << shift) | (long) positions[i] << shift;
+        }
+        if (uniform(changed)) {
+            return null;
+        }
+        return new Section(-1, bits, changed, palette, globalLimit, true);
+    }
+
+    /** Whether every one of the 4096 values in {@code packed} (this section's width) is the same. */
+    private boolean uniform(long[] packed) {
+        long first = packed[0] & (1L << bits) - 1;
+        long full = 0;
+        for (int slot = 0; slot < valuesPerLong; slot++) {
+            full |= first << slot * bits;
+        }
+        int last = packed.length - 1;
+        for (int cell = 0; cell < last; cell++) {
+            if (packed[cell] != full) {
+                return false;
+            }
+        }
+        int rest = 4096 - last * valuesPerLong;
+        return packed[last] == (rest == valuesPerLong ? full : full & (1L << rest * bits) - 1);
     }
 
     /** One block changed (see {@link #with(int[], int[], int, int)}). */
@@ -143,7 +205,7 @@ public final class Section {
             long value = global ? (values[i] < 0 ? stateCount : values[i]) : index.position(values[i]);
             data[i / perLong] |= value << (i % perLong) * storedBits;
         }
-        return packed(storedBits, data, global ? null : Arrays.copyOf(palette, size), stateCount);
+        return new Section(-1, storedBits, data, global ? null : Arrays.copyOf(palette, size), stateCount, !global);
     }
 
     /**
@@ -182,6 +244,16 @@ public final class Section {
         private static int slot(int state) {
             return (state * 0x9E3779B9) >>> 22;
         }
+    }
+
+    /** Whether {@link #with} can rewrite this section in place (for tests). */
+    boolean canonical() {
+        return canonical;
+    }
+
+    /** An equal section as a chunk packet delivers it, not marked canonical (for tests). */
+    Section asDelivered() {
+        return bits == 0 ? this : packed(bits, data, palette, globalLimit);
     }
 
     /** Approximate retained bytes. */

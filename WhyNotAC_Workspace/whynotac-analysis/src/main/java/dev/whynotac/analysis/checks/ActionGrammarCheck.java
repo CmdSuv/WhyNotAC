@@ -69,7 +69,7 @@ public final class ActionGrammarCheck implements TimelineListener {
     static final String AFTER_MOVEMENT = "actionsAfterMovement";
     static final String IN_MENU = "actionsInMenu";
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
     private final Replicas replicas;

@@ -62,7 +62,7 @@ public final class BreakTimeCheck implements TimelineListener {
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final String TOOL = "minecraft:tool";
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
     private final Replicas replicas;

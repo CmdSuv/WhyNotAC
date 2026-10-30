@@ -50,7 +50,7 @@ public final class AttackAimCheck implements TimelineListener {
     /** How far along the look a report measures the miss. */
     static final double REPORT_LENGTH = 64.0;
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
     private final Replicas replicas;

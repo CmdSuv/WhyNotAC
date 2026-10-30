@@ -1,5 +1,9 @@
 package dev.whynotac.world;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteOrder;
+
 /**
  * Decodes the body of a {@code level_chunk_with_light} packet (everything after the two coordinates)
  * into block sections, reading exactly what the 1.21.11 client reads:
@@ -132,6 +136,7 @@ public final class ChunkDecoder {
 
     /** Big-endian reads over a byte range, as Netty's {@code ByteBuf}. */
     static final class Reader {
+        private static final VarHandle BIG_ENDIAN_LONG = MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.BIG_ENDIAN);
         private final byte[] bytes;
         private int position;
         private final int limit;
@@ -169,10 +174,7 @@ public final class ChunkDecoder {
 
         long readLong() throws FormatException {
             need(8);
-            long value = 0;
-            for (int i = 0; i < 8; i++) {
-                value = value << 8 | bytes[position + i] & 0xFF;
-            }
+            long value = (long) BIG_ENDIAN_LONG.get(bytes, position);
             position += 8;
             return value;
         }
@@ -181,7 +183,8 @@ public final class ChunkDecoder {
             need(count * 8);
             long[] out = new long[count];
             for (int i = 0; i < count; i++) {
-                out[i] = readLong();
+                out[i] = (long) BIG_ENDIAN_LONG.get(bytes, position);
+                position += 8;
             }
             return out;
         }

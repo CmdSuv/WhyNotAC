@@ -32,7 +32,7 @@ public final class RecordingListener implements TimelineListener {
     /** Pre-login events kept per connection. A measured vanilla login uses 16; this leaves room for modded clients. */
     public static final int MAX_BUFFERED_BEFORE_BIND = 512;
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final RecordingStore store;
     private final Pseudonymizer pseudonymizer;

@@ -16,7 +16,7 @@ import java.util.function.Function;
  */
 public final class ClientSelfTracker implements TimelineListener {
 
-    private static final Object KEY = new Object();
+    private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();
 

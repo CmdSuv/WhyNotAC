@@ -48,6 +48,23 @@ class PlayerSessionTest {
     }
 
     @Test
+    void attachmentsAreMadeOncePerSessionAndKey() {
+        PlayerSession.AttachmentKey first = new PlayerSession.AttachmentKey();
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
+        PlayerSession one = registry.open("127.0.0.1");
+        PlayerSession two = registry.open("127.0.0.1");
+        PlayerSession.AttachmentKey later = new PlayerSession.AttachmentKey(); // made after the sessions: their slots widen
+        AtomicInteger made = new AtomicInteger();
+        assertEquals(1, (int) one.attachment(first, made::incrementAndGet));
+        assertEquals(1, (int) one.attachment(first, made::incrementAndGet));
+        assertEquals(2, (int) one.attachment(later, made::incrementAndGet));
+        assertEquals(3, (int) two.attachment(later, made::incrementAndGet));
+        assertEquals(4, (int) two.attachment(first, made::incrementAndGet));
+        assertEquals(1, (int) one.attachment(first, made::incrementAndGet));
+        assertEquals(2, (int) one.attachment(later, made::incrementAndGet));
+    }
+
+    @Test
     void eventsArriveInOrderWithClientTickIndex() {
         SessionRegistry registry = new SessionRegistry(Runnable::run, 64, (s, e, t) -> { throw new AssertionError(t); });
         List<TimelineEvent> events = record(registry);

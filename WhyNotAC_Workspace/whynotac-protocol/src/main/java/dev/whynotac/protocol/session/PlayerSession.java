@@ -4,10 +4,10 @@ import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.latency.TransactionTracker;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.OptionalInt;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
 
@@ -50,7 +50,7 @@ public final class PlayerSession {
     private volatile long clientTicksPublished;
 
     // analysis-thread confined
-    private final Map<Object, Object> attachments = new HashMap<>();
+    private Object[] attachments = new Object[AttachmentKey.count()];
 
     PlayerSession(long connectionId, String remoteAddress, SessionRegistry registry, int mailboxCapacity, boolean replay) {
         this.connectionId = connectionId;
@@ -313,13 +313,30 @@ public final class PlayerSession {
      * it is unsynchronised by design (calls for a session never overlap).
      */
     @SuppressWarnings("unchecked")
-    public <T> T attachment(Object key, Supplier<T> factory) {
-        Object value = attachments.get(key); // no capturing lambda: this runs for every event
+    public <T> T attachment(AttachmentKey key, Supplier<T> factory) {
+        int index = key.index; // an array read, no capturing lambda: this runs for every event, for every listener
+        Object value = index < attachments.length ? attachments[index] : null;
         if (value == null) {
             value = factory.get();
-            attachments.put(key, value);
+            if (index >= attachments.length) {
+                attachments = Arrays.copyOf(attachments, Math.max(index + 1, AttachmentKey.count()));
+            }
+            attachments[index] = value;
         }
         return (T) value;
+    }
+
+    /**
+     * A key of {@link #attachment}, a slot in every session: a listener class holds one as a constant (each key made
+     * widens every session made after it by a slot).
+     */
+    public static final class AttachmentKey {
+        private static final AtomicInteger MADE = new AtomicInteger();
+        private final int index = MADE.getAndIncrement();
+
+        static int count() {
+            return MADE.get();
+        }
     }
 
     @Override

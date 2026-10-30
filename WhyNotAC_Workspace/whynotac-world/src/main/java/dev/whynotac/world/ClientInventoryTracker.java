@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 public final class ClientInventoryTracker implements TimelineListener {
 
-    private static final Object KEY = new Object();
+    private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
     private final Supplier<ClientInventory> factory;
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();

@@ -39,7 +39,7 @@ public final class PredictionSequenceCheck implements TimelineListener {
     public static final int VERSION = 1;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
     private final Replicas replicas;

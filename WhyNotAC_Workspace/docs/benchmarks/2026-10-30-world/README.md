@@ -64,14 +64,47 @@ oyuncu başına saniyede yaklaşık **3,3 ms**; süreç düzeyinde (JIT ve GC da
 
 İkisinin toplam etkisi (%6 civarı) bu düzenekte koşudan koşuya gürültünün içinde kalıyor.
 
+## Tekrar oynatmayla ölçülen kesintiler
+
+Yük testi koşudan koşuya gürültülü olduğu için kesintiler kayıtların tekrar oynatılmasıyla karşılaştırıldı:
+`java -cp WhyNotAC.jar tools/load/ReplayCost.java <kayıt klasörü> 6 20 all`. Bu yük testinin ilk 20 kaydı belleğe
+okunur, taze replikalara ve eklentinin bağladığı bütün kontrollere tek thread'de 6 tur oynatılır. İlk iki tur JIT
+ısınmasıdır, sonra thread CPU süresi istemci tiki başına ölçülür (142.526 tik). Ağ ve sunucu bu ölçüme girmez. Kayıtlar
+oturumların tamamını kapsar. Isınma dakikalarındaki blok değişiklikleri de buna dahildir; dünya replikası bu yüzden canlı
+ölçümdeki payından ağır çıkar.
+
+| Derleme | En iyi tur (ns/tik) | Ortalama (ns/tik) | Bulgu |
+|---|---|---|---|
+| 3bfd554 | 27.988 / 27.240 | 29.733 / 30.599 | 24 |
+| üç kesintiyle | 22.156 / 23.354 | 22.829 / 24.396 | 24 |
+
+Tabloda iki ayrı koşu var. Kesintiler maliyeti %17-22 düşürdü. Bulgular değişmedi: 24'ün hepsi `attack-aim`'dir, botun
+blok arkasından vuruşudur. Yüz kaydın tamamında 115 bulgu çıkar, hepsi aynı yapıntıdır. Profil (JFR, aynı oynatma):
+
+- Blok değişikliği (`Section.with`, kapsayıcı %18,3 → %6,2). Her değişiklik bölümün 4096 bloğunu açıp yeniden
+  paketliyordu. Artık bölüm `Section.of`'un kendi paketlediği bir bölümse ve yeni durumların hepsi paletinde varsa
+  yalnızca değişen değerler yeniden yazılır. Sonuç tam paketlemenin vereceği bölümle aynıdır: değer değer ve eşitlikte
+  (`SectionTest`, 6.000 rastgele adım; mutasyonlar öldürüldü). Paketten gelen bir bölümün ilk değişikliği, palet
+  büyümesi ve tekdüze olan sonuç eski yoldan gider.
+- Oturum ekleri (`PlayerSession.attachment`, `HashMap` araması %7 civarı → dizi okuması). Anahtarlar
+  `PlayerSession.AttachmentKey`'dir; her biri her oturumda bir yuvadır.
+- Chunk çözümü: bölüm verisi bayt bayt değil, big-endian `VarHandle` ile uzun uzun okunur.
+
+Denenip alınmayan: dinlenen varlık izleri. Tek adaylı, bekleyen işi olmayan ve tiki yalnızca `ticked`'i değiştiren bir iz
+tik döngüsünden çıkarılıyor, `ticked` gerektiğinde son tikin penceresinden çözülüyordu. İzlerin %60'ı dinlendi. Ancak
+yalnız replikalarla ölçülen kazanç %0-7 arasında, gürültü düzeyinde kaldı. Varlık replikasının maliyeti tik döngüsünde
+değil, giden paketlerin işlenmesinde. Doğruluğa dokunan bir karmaşıklık bu kazanca değmedi.
+
 ## Sonuç ve sıradaki adımlar (görev #27)
 
 - Doğruluk: bütün kontroller gerçek arazide 100 dürüst botla 0 vaka (bot yapıntıları ayrı), 0 kayıp, 0 sapma.
-- Performans: oyuncu başına 3,3 ms/s; hedefin 3 katı. Kazanç profile göre şu sırayla aranacak:
-  1. Varlık replikasını tembel ilerletmek: bir varlığın adımı yalnızca bir kontrol ona sorduğunda (itme, seçim,
-     yakınlık) ve sorduğu tike kadar atılır; kimsenin sormadığı varlıklar tik başına ilerlemez.
+- Performans: oyuncu başına 3,3 ms/s; hedefin 3 katı. Yukarıdaki üç kesinti analiz thread'ini tekrar oynatmada %17-22
+  hafifletti; canlı payı bir sonraki yük testi gösterecek. Kalan kazanç profile göre şu sırayla aranacak:
+  1. Olay dağıtımı: her olay her dinleyiciye gider (tekrar oynatmada `SessionRegistry.dispatch`'in kendi payı %14).
+     Dinleyicilerin hangi olayları okuduğunu bildirmesi ve yalnızca onları alması gerekir. Bir dinleyicinin okuduğu bir
+     olayı kaçırması replikayı bozar, bu yüzden her dinleyici için tam ve testle kanıtlanmış bir bildirim şarttır.
   2. Netty: kenar tap'lerinde yalnızca replikaların ve kontrollerin okuduğu paketleri çözmek, ping'i tick'in kendi
      flush'ına bindirmek.
   3. Kayıt: chunk ve büyük paketleri içerik adresli saklamak ya da sıkıştırmak.
-  4. Hareket takipçisi ve olay dağıtımı: tik başına tekrar edilen sorguları bir kez hesaplamak, dinleyici başına
-     ek aramalarını oturumda önbelleğe almak.
+  4. Varlık replikasında giden paketlerin işlenmesi (`ClientEntities.onOutbound`, `onAcknowledged`) ve paketten gelen
+     bir bölümün ilk blok değişikliği.

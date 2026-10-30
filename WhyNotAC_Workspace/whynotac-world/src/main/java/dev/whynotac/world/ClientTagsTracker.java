@@ -10,7 +10,7 @@ import dev.whynotac.protocol.session.TimelineListener;
  */
 public final class ClientTagsTracker implements TimelineListener {
 
-    private static final Object KEY = new Object();
+    private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {

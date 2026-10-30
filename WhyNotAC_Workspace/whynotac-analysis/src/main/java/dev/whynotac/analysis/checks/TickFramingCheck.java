@@ -54,7 +54,7 @@ public final class TickFramingCheck implements TimelineListener {
     public static final int VERSION = 2;
     static final int MAX_TOKENS = MoveReplies.MAX_TOKENS;
 
-    private static final Object STATE = new Object();
+    private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
 
