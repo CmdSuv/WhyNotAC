@@ -470,6 +470,14 @@ public final class MovementTracker {
             selfId = login.entityId();
             teamChange(seq, ClientTeams.NONE); // a new ClientPacketListener, with a new scoreboard
         }
+        // Another entity's motion, half of all events with players and mobs around: what the switches below (each
+        // testing the types one by one) would decide, nothing (no team, no ride's, not about the player).
+        if (packet instanceof ClientboundPacket.RotateHead
+                || packet instanceof ClientboundPacket.MoveEntity m && m.entityId() != selfId
+                || packet instanceof ClientboundPacket.EntityPositionSync s && s.entityId() != selfId
+                || packet instanceof ClientboundPacket.SetEntityMotion v && v.entityId() != selfId && v.entityId() != serverVehicle) {
+            return;
+        }
         switch (packet) {
             case ClientboundPacket.SetPlayerTeam team -> teamChange(seq, latestTeams().apply(team));
             case ClientboundPacket.Unmodeled u when u.type().equals("minecraft:set_player_team") -> teamChange(seq, ClientTeams.LOST); // an older recording
