@@ -2,12 +2,7 @@ package dev.whynotac.protocol.latency;
 
 import java.nio.ByteBuffer;
 import java.security.SecureRandom;
-import java.util.ArrayDeque;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
 import java.util.OptionalInt;
-import java.util.Set;
 
 /**
  * Transaction bookkeeping for one connection.
@@ -47,8 +42,6 @@ public final class TransactionTracker {
     /** Ids drawn from {@link #RANDOM} per call: its lock, which every network thread takes, once per this many ids. */
     private static final int DRAWN = 64;
 
-    private record Pending(int id, long sentNanoTime) {}
-
     /** Outcome of a pong. */
     public sealed interface PongResult {
         /** Answered; {@code skipped} older transactions were never answered (0 for vanilla). */
@@ -61,12 +54,21 @@ public final class TransactionTracker {
         record Foreign(int id) implements PongResult {}
     }
 
-    private final ArrayDeque<Pending> pending = new ArrayDeque<>();
-    private final Map<Integer, Pending> pendingById = new HashMap<>();
+    // Plain arrays, no boxing: every ping passes through allocate, onSent and onPong on a network thread.
+    /** Sent and unanswered, oldest first: a ring of ids and send times. */
+    private int[] pendingIds = new int[16];
+    private long[] pendingSent = new long[16];
+    private int pendingHead;
+    private int pendingSize;
+    /** Pending id -> send time. */
+    private final IdTable pendingById = new IdTable();
     /** Allocated id -> allocation time, for pings not yet seen leaving the server. */
-    private final Map<Integer, Long> allocatedUnsent = new HashMap<>();
-    private final ArrayDeque<Integer> rememberedOrder = new ArrayDeque<>();
-    private final Set<Integer> remembered = new HashSet<>();
+    private final IdTable allocatedUnsent = new IdTable();
+    /** The last {@link #REMEMBERED} answered or skipped ids, a ring (once full, the oldest is at {@code rememberedNext}). */
+    private final int[] rememberedOrder = new int[REMEMBERED];
+    private int rememberedNext;
+    private int rememberedCount;
+    private final IdTable remembered = new IdTable();
     private final LatencyEstimator estimator = new LatencyEstimator();
     /** Random ids drawn ahead; never sent before {@link #allocate} hands them out, so no less unpredictable. */
     private final int[] drawn = new int[DRAWN];
@@ -90,7 +92,7 @@ public final class TransactionTracker {
      */
     public OptionalInt allocate(long nanoTime) {
         expireUnsent(nanoTime);
-        if (pending.size() >= MAX_PENDING) {
+        if (pendingSize >= MAX_PENDING) {
             withheld = true;
             return OptionalInt.empty();
         }
@@ -100,7 +102,7 @@ public final class TransactionTracker {
         int id;
         do {
             id = nextRandom();
-        } while (isReservedForOthers(id) || pendingById.containsKey(id) || allocatedUnsent.containsKey(id) || remembered.contains(id));
+        } while (isReservedForOthers(id) || pendingById.contains(id) || allocatedUnsent.contains(id) || remembered.contains(id));
         allocatedUnsent.put(id, nanoTime);
         return OptionalInt.of(id);
     }
@@ -116,14 +118,8 @@ public final class TransactionTracker {
     }
 
     private void expireUnsent(long nanoTime) {
-        if (allocatedUnsent.isEmpty()) {
-            return;
-        }
-        for (var it = allocatedUnsent.values().iterator(); it.hasNext(); ) {
-            if (nanoTime - it.next() >= UNSENT_EXPIRY_NANOS) {
-                it.remove();
-                lostBeforeWire++;
-            }
+        if (!allocatedUnsent.isEmpty()) {
+            lostBeforeWire += allocatedUnsent.removeOlderThan(nanoTime, UNSENT_EXPIRY_NANOS);
         }
     }
 
@@ -132,19 +128,31 @@ public final class TransactionTracker {
      * id was not allocated here (another plugin's ping), which is then not tracked.
      */
     public boolean onSent(int id, long nanoTime) {
-        if (allocatedUnsent.remove(id) == null) {
+        if (!allocatedUnsent.remove(id)) {
             return false;
         }
-        Pending entry = new Pending(id, nanoTime);
-        pending.addLast(entry);
-        pendingById.put(id, entry);
+        if (pendingSize == pendingIds.length) {
+            int[] ids = new int[pendingSize * 2];
+            long[] times = new long[pendingSize * 2];
+            for (int i = 0; i < pendingSize; i++) {
+                ids[i] = pendingIds[(pendingHead + i) % pendingSize];
+                times[i] = pendingSent[(pendingHead + i) % pendingSize];
+            }
+            pendingIds = ids;
+            pendingSent = times;
+            pendingHead = 0;
+        }
+        int tail = (pendingHead + pendingSize) % pendingIds.length;
+        pendingIds[tail] = id;
+        pendingSent[tail] = nanoTime;
+        pendingSize++;
+        pendingById.put(id, nanoTime);
         sent++;
         return true;
     }
 
     public PongResult onPong(int id, long nanoTime) {
-        Pending match = pendingById.get(id);
-        if (match == null) {
+        if (!pendingById.contains(id)) {
             if (remembered.contains(id)) {
                 duplicates++;
                 return new PongResult.Duplicate(id);
@@ -152,31 +160,41 @@ public final class TransactionTracker {
             return new PongResult.Foreign(id);
         }
         int skippedNow = 0;
+        long sentNanoTime;
         while (true) {
-            Pending head = pending.removeFirst();
-            pendingById.remove(head.id);
-            remember(head.id);
-            if (head == match) {
+            int head = pendingIds[pendingHead];
+            long headSent = pendingSent[pendingHead];
+            pendingHead = (pendingHead + 1) % pendingIds.length;
+            pendingSize--;
+            pendingById.remove(head);
+            remember(head);
+            if (head == id) {
+                sentNanoTime = headSent;
                 break;
             }
             skippedNow++;
         }
         acknowledged++;
         skipped += skippedNow;
-        estimator.addSample(nanoTime - match.sentNanoTime);
-        if (pending.size() < MAX_PENDING) {
+        estimator.addSample(nanoTime - sentNanoTime);
+        if (pendingSize < MAX_PENDING) {
             withheld = false;
         }
-        return new PongResult.Matched(id, match.sentNanoTime, skippedNow);
+        return new PongResult.Matched(id, sentNanoTime, skippedNow);
     }
 
     private void remember(int id) {
-        if (remembered.add(id)) {
-            rememberedOrder.addLast(id);
-            if (rememberedOrder.size() > REMEMBERED) {
-                remembered.remove(rememberedOrder.removeFirst());
-            }
+        if (remembered.contains(id)) {
+            return;
         }
+        if (rememberedCount == REMEMBERED) {
+            remembered.remove(rememberedOrder[rememberedNext]);
+        } else {
+            rememberedCount++;
+        }
+        rememberedOrder[rememberedNext] = id;
+        rememberedNext = (rememberedNext + 1) % REMEMBERED;
+        remembered.put(id, 0);
     }
 
     /** True while the pending limit is reached: the client stopped answering transactions. */
@@ -186,15 +204,14 @@ public final class TransactionTracker {
 
     /** Age of the oldest unanswered transaction, or 0 if none is pending. */
     public long oldestPendingAgeNanos(long nowNanoTime) {
-        Pending oldest = pending.peekFirst();
-        return oldest == null ? 0 : nowNanoTime - oldest.sentNanoTime;
+        return pendingSize == 0 ? 0 : nowNanoTime - pendingSent[pendingHead];
     }
 
     public LatencySnapshot snapshot(long nowNanoTime) {
         return new LatencySnapshot(
                 estimator.lastMillis(), estimator.smoothedMillis(), estimator.jitterMillis(),
                 estimator.minMillis(), estimator.maxMillis(),
-                pending.size(), oldestPendingAgeNanos(nowNanoTime) / 1.0e6,
+                pendingSize, oldestPendingAgeNanos(nowNanoTime) / 1.0e6,
                 sent, acknowledged, skipped, duplicates, lostBeforeWire, withheld);
     }
 }

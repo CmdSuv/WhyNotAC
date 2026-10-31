@@ -297,11 +297,21 @@ public final class PacketTranslator {
     };
 
     /** Best-effort type id of a packet whose translation failed (the failure may be in {@code type()} itself). */
-    /** Packet class -> type id. A packet class always has the same type; built once per class, never per packet. */
-    private static final Map<Class<?>, String> TYPE_NAMES = new ConcurrentHashMap<>();
+    /**
+     * Packet class -> type id. A packet class always has the same type; built once per class, never per packet.
+     * A {@link ClassValue} slot (filled from the first packet of the class) instead of a map: this runs several
+     * times for every packet on the network threads.
+     */
+    private static final ClassValue<String[]> TYPE_NAMES = new ClassValue<>() {
+        @Override
+        protected String[] computeValue(Class<?> type) {
+            return new String[1];
+        }
+    };
 
     public static String typeName(Packet<?> packet) {
-        String name = TYPE_NAMES.get(packet.getClass());
+        String[] slot = TYPE_NAMES.get(packet.getClass());
+        String name = slot[0];
         if (name != null) {
             return name;
         }
@@ -310,7 +320,7 @@ public final class PacketTranslator {
         } catch (RuntimeException | LinkageError e) {
             return packet.getClass().getName();
         }
-        TYPE_NAMES.put(packet.getClass(), name);
+        slot[0] = name; // a race writes the same name
         return name;
     }
 

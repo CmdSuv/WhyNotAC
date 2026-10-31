@@ -171,4 +171,34 @@ class TransactionTrackerTest {
         long withheld = events.stream().filter(e -> e instanceof TimelineEvent.Anomaly a && a.kind() == TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD).count();
         assertEquals(1, withheld);
     }
+
+    @Test
+    void manyInFlightAnsweredInOrderAfterTheQueueWrappedAndGrew() {
+        TransactionTracker tracker = new TransactionTracker();
+        List<Integer> ids = new ArrayList<>();
+        List<Long> sentAt = new ArrayList<>();
+        long now = 0;
+        int answered = 0;
+        for (int round = 0; round < 6; round++) {
+            for (int i = 0; i < 7 + 9 * round; i++) { // more in flight every round: the queue grows while it has wrapped
+                now += MS;
+                ids.add(sendOne(tracker, now));
+                sentAt.add(now);
+            }
+            for (int i = 0; i < 5 + round; i++, answered++) {
+                now += MS;
+                var matched = assertInstanceOf(TransactionTracker.PongResult.Matched.class, tracker.onPong(ids.get(answered), now));
+                assertEquals(sentAt.get(answered), matched.sentNanoTime());
+                assertEquals(0, matched.skipped());
+            }
+        }
+        assertEquals(ids.size() - answered, tracker.snapshot(now).pending());
+        assertEquals(now - sentAt.get(answered), tracker.oldestPendingAgeNanos(now));
+        // the last one answers every older one: they count as skipped, then as duplicates
+        var last = assertInstanceOf(TransactionTracker.PongResult.Matched.class, tracker.onPong(ids.getLast(), now + MS));
+        assertEquals(ids.size() - answered - 1, last.skipped());
+        assertEquals(sentAt.getLast(), last.sentNanoTime());
+        assertInstanceOf(TransactionTracker.PongResult.Duplicate.class, tracker.onPong(ids.get(answered), now + 2 * MS));
+        assertEquals(0, tracker.snapshot(now).pending());
+    }
 }
