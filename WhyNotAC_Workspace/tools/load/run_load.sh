@@ -36,6 +36,8 @@ CPUS=$(nproc)
 SERVER_CPUS=${LOAD_SERVER_CPUS:-0-1}
 BOT_CPUS=${LOAD_BOT_CPUS:-2-$((CPUS - 1))}
 PROCESSES=${LOAD_BOT_PROCESSES:-4}
+# Extra JFR.start options, e.g. method-profiling=max (a Java sample every millisecond, for a finer breakdown).
+JFR_OPTIONS=${LOAD_JFR_OPTIONS:-}
 OUT="$WORK_DIR/load-$VARIANT"
 
 if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
@@ -146,7 +148,7 @@ echo "$WARMED $SETTLED" > "$OUT-warmup.txt"
 
 cpu_ticks() { awk '{print $14 + $15}' "/proc/$JAVA_PID/stat"; }
 CPU_START=$(cpu_ticks); T_START=$(date +%s.%N)
-jcmd "$JAVA_PID" JFR.start name=load settings=profile filename="$OUT.jfr" > /dev/null
+jcmd "$JAVA_PID" JFR.start name=load settings=profile $JFR_OPTIONS filename="$OUT.jfr" > /dev/null
 sleep "$MEASURE"
 jcmd "$JAVA_PID" JFR.stop name=load > /dev/null
 CPU_END=$(cpu_ticks); T_END=$(date +%s.%N)
