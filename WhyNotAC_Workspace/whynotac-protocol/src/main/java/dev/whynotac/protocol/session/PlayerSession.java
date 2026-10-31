@@ -1,0 +1,372 @@
+package dev.whynotac.protocol.session;
+
+import dev.whynotac.protocol.latency.LatencySnapshot;
+import dev.whynotac.protocol.latency.TransactionTracker;
+import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.ServerboundPacket;
+import java.util.Arrays;
+import java.util.OptionalInt;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongFunction;
+import java.util.function.Supplier;
+
+/**
+ * Everything WhyNotAC knows about one network connection, from channel creation to disconnect.
+ *
+ * <h2>Threading</h2>
+ * <ul>
+ *   <li>{@code on*} / {@code bind} / {@code disconnect} are called by the platform (mostly the
+ *       connection's network thread) and are serialised on this object. They only stamp, count and
+ *       enqueue, so the network thread is never held up by analysis.
+ *   <li>Analysis happens later, on a pool thread, through {@link TimelineListener}s that receive
+ *       this session's events strictly in order. {@link #attachment} state belongs to that side.
+ * </ul>
+ */
+public final class PlayerSession {
+
+    /** Authenticated identity, known from the moment the player joins the game. */
+    public record Identity(UUID playerId, String name, int entityId) {}
+
+    private final long connectionId;
+    private final String remoteAddress;
+    private final boolean replay;
+    private final SerialMailbox mailbox;
+    private final TransactionTracker transactions = new TransactionTracker();
+    /**
+     * Guards {@link #transactions} alone (taken inside this session's lock, never around it), so the server thread
+     * allocating a tick's ping waits for no packet handling: a network thread holding this session while the server's
+     * cores are saturated held the server thread up to 18 ms.
+     */
+    private final Object transactionLock = new Object();
+
+    // guarded by this
+    private long sequence;
+    private long clientTick;
+    private long droppedSinceGap;
+    private long droppedTotal;
+    private long inboundCount;
+    private long outboundModeled;
+    private long outboundUnmodeled;
+    private long divergences;
+    private long lastDeliveredSequence = -1;
+    private volatile boolean closed;
+
+    private volatile Identity identity;
+    private volatile long clientTicksPublished;
+
+    // analysis-thread confined
+    private Object[] attachments = new Object[AttachmentKey.count()];
+
+    PlayerSession(long connectionId, String remoteAddress, SessionRegistry registry, int mailboxCapacity, boolean replay) {
+        this.connectionId = connectionId;
+        this.remoteAddress = remoteAddress;
+        this.replay = replay;
+        this.mailbox = new SerialMailbox(registry.executor(), mailboxCapacity, registry.globalQueued(),
+                replay ? Long.MAX_VALUE : registry.globalQueueCapacity(), event -> registry.dispatch(this, event));
+    }
+
+    // --- platform side ---------------------------------------------------------------------------
+
+    /** A decoded packet from the client, observed on the network thread at {@code nanoTime}. */
+    public synchronized void onInbound(ServerboundPacket packet, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        inboundCount++;
+        long tick = clientTick;
+        emit(nanoTime, seq -> new TimelineEvent.Inbound(seq, nanoTime, tick, packet));
+        switch (packet) {
+            case ServerboundPacket.Pong pong -> onTransactionPong(pong.id(), nanoTime);
+            case ServerboundPacket.MovePlayer move when move.hasNonFiniteValue() ->
+                    emit(nanoTime, seq -> new TimelineEvent.Anomaly(seq, nanoTime, TimelineEvent.Anomaly.Kind.NON_FINITE_MOVEMENT, move.toString()));
+            case ServerboundPacket.ClientTickEnd ignored -> clientTicksPublished = ++clientTick;
+            default -> { }
+        }
+    }
+
+    /**
+     * A packet to the client, observed as it enters the network pipeline. Unmodelled packets are
+     * counted but not queued.
+     */
+    public synchronized void onOutbound(ClientboundPacket packet, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        if (packet instanceof ClientboundPacket.Unmodeled) {
+            outboundUnmodeled++;
+            return;
+        }
+        outboundModeled++;
+        if (packet instanceof ClientboundPacket.Ping ping) {
+            synchronized (transactionLock) {
+                transactions.onSent(ping.id(), nanoTime); // ignored unless the id was allocated here
+            }
+        }
+        emit(nanoTime, SerialMailbox.weight(packet), seq -> new TimelineEvent.Outbound(seq, nanoTime, packet));
+    }
+
+    /** Records where {@link #onInbound}/{@link #onOutbound} observations come from from now on. */
+    public synchronized void onObservation(TimelineEvent.Observation.Source inbound, TimelineEvent.Observation.Source outbound,
+            int clientProtocol, String detail, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        emit(nanoTime, seq -> new TimelineEvent.Observation(seq, nanoTime, inbound, outbound, clientProtocol, detail));
+    }
+
+    /** Records a fact about the client (see {@link TimelineEvent.ClientFact} for the trust rule). */
+    public synchronized void onFact(TimelineEvent.ClientFact.Fact fact, String value, TimelineEvent.ClientFact.Trust trust, String source,
+            long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        emit(nanoTime, seq -> new TimelineEvent.ClientFact(seq, nanoTime, fact, value, trust, source));
+    }
+
+    /** The client's inbound stream and the game's differ by this packet. */
+    public synchronized void onInboundDivergence(TimelineEvent.DivergenceKind kind, ServerboundPacket packet, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        divergences++;
+        emit(nanoTime, seq -> new TimelineEvent.InboundDivergence(seq, nanoTime, kind, packet));
+    }
+
+    /** The client's outbound stream and the game's differ by this packet. */
+    public synchronized void onOutboundDivergence(TimelineEvent.DivergenceKind kind, ClientboundPacket packet, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        divergences++;
+        emit(nanoTime, seq -> new TimelineEvent.OutboundDivergence(seq, nanoTime, kind, packet));
+    }
+
+    /** Reserves a transaction id for a ping the platform is about to send. */
+    public OptionalInt allocateTransaction() {
+        requireLive();
+        if (closed) {
+            return OptionalInt.empty();
+        }
+        long now = System.nanoTime();
+        OptionalInt id;
+        long withheldAge = -1;
+        synchronized (transactionLock) {
+            boolean wasWithheld = transactions.isWithheld();
+            id = transactions.allocate(now);
+            if (transactions.isWithheld() && !wasWithheld) {
+                withheldAge = transactions.oldestPendingAgeNanos(now) / 1_000_000;
+            }
+        }
+        if (withheldAge >= 0) {
+            long age = withheldAge;
+            synchronized (this) {
+                if (!closed) {
+                    emit(now, seq -> new TimelineEvent.Anomaly(seq, now, TimelineEvent.Anomaly.Kind.TRANSACTIONS_WITHHELD,
+                            TransactionTracker.MAX_PENDING + " unanswered, oldest " + age + " ms"));
+                }
+            }
+        }
+        return id;
+    }
+
+    /** Links this connection to the player who logged in on it. */
+    public synchronized void bind(UUID playerId, String name, int entityId, long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        Identity bound = new Identity(playerId, name, entityId);
+        identity = bound;
+        emit(nanoTime, seq -> new TimelineEvent.Bound(seq, nanoTime, bound.playerId(), bound.name(), bound.entityId()));
+    }
+
+    /** The connection closed. Idempotent; the {@code Disconnected} event is delivered even if the mailbox is full. */
+    public synchronized void disconnect(long nanoTime) {
+        requireLive();
+        if (closed) {
+            return;
+        }
+        closed = true;
+        flushGap(nanoTime, true);
+        mailbox.enqueue(new TimelineEvent.Disconnected(sequence++, nanoTime));
+    }
+
+    // --- replay side ------------------------------------------------------------------------------
+
+    /**
+     * Replay sessions only: hands a previously recorded event to the listeners exactly as it was
+     * recorded (same sequence number, timestamp and client tick). Sequence numbers must strictly
+     * increase. Nothing is dropped: replay sessions have an unbounded mailbox, so a replay is either
+     * complete or fails loudly.
+     */
+    public synchronized void deliver(TimelineEvent event) {
+        if (!replay) {
+            throw new IllegalStateException("deliver() is only valid on replay sessions");
+        }
+        if (closed) {
+            throw new IllegalStateException("event after Disconnected: " + event);
+        }
+        if (event.sequence() <= lastDeliveredSequence) {
+            throw new IllegalArgumentException("sequence " + event.sequence() + " does not follow " + lastDeliveredSequence);
+        }
+        lastDeliveredSequence = event.sequence();
+        sequence = event.sequence() + 1;
+        switch (event) {
+            case TimelineEvent.Bound bound -> identity = new Identity(bound.playerId(), bound.playerName(), bound.entityId());
+            case TimelineEvent.Inbound inbound when inbound.packet() instanceof ServerboundPacket.ClientTickEnd ->
+                    clientTicksPublished = clientTick = inbound.clientTick() + 1;
+            case TimelineEvent.Disconnected ignored -> closed = true;
+            default -> { }
+        }
+        mailbox.enqueue(event);
+    }
+
+    /** True for sessions created by {@link SessionRegistry#openReplay}. */
+    public boolean isReplay() {
+        return replay;
+    }
+
+    private void requireLive() {
+        if (replay) {
+            throw new IllegalStateException("live packet calls are not allowed on a replay session");
+        }
+    }
+
+    private void onTransactionPong(int id, long nanoTime) {
+        TransactionTracker.PongResult result;
+        synchronized (transactionLock) {
+            result = transactions.onPong(id, nanoTime);
+        }
+        switch (result) {
+            case TransactionTracker.PongResult.Matched matched -> {
+                emit(nanoTime, seq -> new TimelineEvent.Acknowledged(seq, nanoTime, matched.id(), matched.sentNanoTime(), matched.skipped()));
+                if (matched.skipped() > 0) {
+                    emit(nanoTime, seq -> new TimelineEvent.Anomaly(seq, nanoTime, TimelineEvent.Anomaly.Kind.SKIPPED_TRANSACTION,
+                            matched.skipped() + " transaction(s) before " + Integer.toHexString(id) + " were never answered"));
+                }
+            }
+            case TransactionTracker.PongResult.Duplicate duplicate -> emit(nanoTime, seq -> new TimelineEvent.Anomaly(seq, nanoTime,
+                    TimelineEvent.Anomaly.Kind.DUPLICATE_TRANSACTION, "pong " + Integer.toHexString(duplicate.id())));
+            case TransactionTracker.PongResult.Foreign ignored -> { }
+        }
+    }
+
+    /** Assigns the next sequence number and enqueues, converting overflow into an explicit gap. */
+    private void emit(long nanoTime, LongFunction<TimelineEvent> factory) {
+        emit(nanoTime, 1, factory);
+    }
+
+    /** As {@link #emit(long, LongFunction)}, for an event of {@code units} mailbox units. */
+    private void emit(long nanoTime, int units, LongFunction<TimelineEvent> factory) {
+        boolean gapPending = droppedSinceGap > 0;
+        if (!mailbox.hasRoomFor(gapPending ? units + 1 : units)) {
+            sequence++; // dropped events still consume a sequence number, so the gap is visible in the numbering too
+            droppedSinceGap++;
+            droppedTotal++;
+            return;
+        }
+        if (gapPending) {
+            flushGap(nanoTime, false);
+        }
+        mailbox.enqueue(factory.apply(sequence++));
+    }
+
+    private void flushGap(long nanoTime, boolean force) {
+        if (droppedSinceGap > 0 && (force || mailbox.hasRoomFor(1))) {
+            mailbox.enqueue(new TimelineEvent.Gap(sequence++, nanoTime, droppedSinceGap));
+            droppedSinceGap = 0;
+        }
+    }
+
+    // --- observation (any thread) -------------------------------------------------------------------
+
+    public long connectionId() {
+        return connectionId;
+    }
+
+    public String remoteAddress() {
+        return remoteAddress;
+    }
+
+    /** Null until {@link #bind}. */
+    public Identity identity() {
+        return identity;
+    }
+
+    /** {@code ClientTickEnd} packets received so far. */
+    public long clientTicks() {
+        return clientTicksPublished;
+    }
+
+    public LatencySnapshot latency(long nowNanoTime) {
+        synchronized (transactionLock) {
+            return transactions.snapshot(nowNanoTime);
+        }
+    }
+
+    public synchronized Counters counters() {
+        return new Counters(inboundCount, outboundModeled, outboundUnmodeled, divergences, droppedTotal, mailbox.size());
+    }
+
+    /**
+     * Traffic counters; {@code divergences} counts packets that differ between the client's stream and
+     * the game's, {@code dropped} counts events lost to back-pressure (each one became part of a gap),
+     * {@code queued} is in mailbox units (an event, plus its chunk data in 128-byte units).
+     */
+    public record Counters(long inbound, long outboundModeled, long outboundUnmodeled, long divergences, long dropped, int queued) {}
+
+    public synchronized boolean isClosed() {
+        return closed;
+    }
+
+    /** Closed and every queued event delivered to the listeners. */
+    public boolean isFullyDelivered() {
+        return isClosed() && mailbox.isIdle();
+    }
+
+    // --- analysis side ---------------------------------------------------------------------------
+
+    /**
+     * Per-session state owned by a listener. Only call this from {@link TimelineListener#onEvent}:
+     * it is unsynchronised by design (calls for a session never overlap).
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T attachment(AttachmentKey key, Supplier<T> factory) {
+        int index = key.index; // an array read, no capturing lambda: this runs for every event, for every listener
+        Object value = index < attachments.length ? attachments[index] : null;
+        if (value == null) {
+            value = factory.get();
+            if (index >= attachments.length) {
+                attachments = Arrays.copyOf(attachments, Math.max(index + 1, AttachmentKey.count()));
+            }
+            attachments[index] = value;
+        }
+        return (T) value;
+    }
+
+    /**
+     * A key of {@link #attachment}, a slot in every session: a listener class holds one as a constant (each key made
+     * widens every session made after it by a slot).
+     */
+    public static final class AttachmentKey {
+        private static final AtomicInteger MADE = new AtomicInteger();
+        private final int index = MADE.getAndIncrement();
+
+        static int count() {
+            return MADE.get();
+        }
+    }
+
+    @Override
+    public String toString() {
+        Identity id = identity;
+        return "PlayerSession[" + connectionId + (id == null ? ", unbound" : ", " + id.name()) + "]"; // no address: this goes into logs
+    }
+}

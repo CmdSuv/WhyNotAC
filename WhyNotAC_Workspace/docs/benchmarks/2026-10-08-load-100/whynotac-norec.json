@@ -1,0 +1,89 @@
+{
+ "variant": "whynotac-norec",
+ "layout": "cluster",
+ "bots": 100,
+ "measureSeconds": 61.69,
+ "warmup": {
+  "seconds": 130,
+  "settled": true
+ },
+ "mspt": {
+  "avg": 30.6,
+  "min": 14.8,
+  "max": 2474.7,
+  "window": "1m"
+ },
+ "tps": 18.3,
+ "serverCpuCores": 1.1211,
+ "heapAfterFullGcBytes": 432366528,
+ "whynotacHeapBytes": 212600,
+ "whynotacStatsAfterAllLeft": {
+  "sessionsLive": 0,
+  "queuedEvents": 0,
+  "sessions": 100,
+  "ended": 100,
+  "inbound": 1198705,
+  "outbound": 507591,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 0,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 3838,
+   "meanWallMicros": 685.882,
+   "meanCpuMicros": 389.113,
+   "maxWallMicros": 11517.917
+  }
+ },
+ "botSide": {
+  "processes": 4,
+  "joined": 100,
+  "still_connected": 100,
+  "pings_seen": 374989,
+  "pings_answered": 374989,
+  "errors": [],
+  "disconnects": []
+ },
+ "serverMovementCorrections": 0,
+ "threadCpuCores": {
+  "Async-profiler Timer": 0.0005,
+  "Attach Listener": 0.0448,
+  "C# CompilerThread#": 0.479,
+  "Common-Cleaner": 0.0,
+  "Craft Async Scheduler Management Thread": 0.002,
+  "DestroyJavaVM": 0.0097,
+  "JFR Periodic Tasks": 0.0073,
+  "JFR Recorder Thread": 0.0013,
+  "JNA Cleaner": 0.0,
+  "Log#j#-AsyncAppenderEventDispatcher-#-Async": 0.001,
+  "Monitor Deflation Thread": 0.0011,
+  "Netty Epoll IO ##": 0.5448,
+  "Paper Async Command Builder Thread Pool - #": 0.001,
+  "Paper Async Task Handler Thread - #": 0.0014,
+  "Paper Common Worker ##": 0.0487,
+  "Paper I/O Worker ##": 0.0035,
+  "Paper Watchdog Thread": 0.0011,
+  "PaperFilledProfileCache-cleanup-#": 0.0,
+  "Reference Handler": 0.0001,
+  "Server console handler": 0.0,
+  "Server thread": 0.7614,
+  "Service Thread": 0.0017,
+  "WhyNotAC Analysis ##": 0.0957,
+  "Worker-Main-#": 0.0112,
+  "Yggdrasil Key Fetcher": 0.003,
+  "spark-async-sampler-worker-thread": 0.0112,
+  "spark-monitoring-thread": 0.0028
+ },
+ "jfrWhynotacShare": 0.036238532110091745
+}

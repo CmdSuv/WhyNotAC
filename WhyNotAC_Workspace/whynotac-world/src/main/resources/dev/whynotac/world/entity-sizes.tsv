@@ -1,0 +1,157 @@
+minecraft:acacia_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:acacia_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:allay	living	0.35	0.6	0.36	0	0.5	-1	any	pick=always
+minecraft:area_effect_cloud	cloud	6.0	0.5	0.425	0	-	-1	-	data=8:FLOAT:3.0
+minecraft:armadillo	living	0.7	0.65	0.26	0	0.6	16	any	pick=always
+minecraft:armor_stand	armor_stand	0.5	1.975	1.7775	0	0.5	-1	any	data=15:BYTE:0	alt=-:0.25:0.9875:0.9875:0	marker=0.0:0.0:0.0:1	pick=armor_stand
+minecraft:arrow	type	0.5	0.5	0.13	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:axolotl	living	0.75	0.42	0.2751	0	0.5	16	any	pick=always
+minecraft:bamboo_chest_raft	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:bamboo_raft	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:bat	living	0.5	0.9	0.45	0	0.5	-1	any	pick=always
+minecraft:bee	living	0.7	0.6	0.3	0	0.5	16	any	pick=always
+minecraft:birch_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:birch_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:blaze	living	0.6	1.8	1.53	0	0.5	-1	any	pick=always
+minecraft:block_display	type	0.0	0.0	0.0	0	-	-1	-
+minecraft:bogged	living	0.6	1.99	1.74	0	0.5	-1	any	pick=always
+minecraft:breeze	living	0.6	1.77	1.3452	0	0.5	-1	any	pick=always
+minecraft:breeze_wind_charge	state	0.3125	0.3125	0.0	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:camel	pose	1.7	2.375	2.275	0	0.45	16	any	alt=SITTING:1.7:0.94500005:0.845:0	pick=always
+minecraft:camel_husk	pose	1.7	2.375	2.275	0	0.45	16	any	alt=SITTING:1.7:0.94500005:0.845:0	pick=always
+minecraft:cat	living	0.6	0.7	0.35	0	0.5	16	any	pick=always
+minecraft:cave_spider	living	0.7	0.5	0.45	0	0.5	-1	any	pick=always
+minecraft:cherry_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:cherry_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:chest_minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:chicken	baby	0.4	0.7	0.644	0	0.5	16	any	alt=-:0.2:0.35:0.2975:0	pick=always
+minecraft:cod	living	0.5	0.3	0.195	0	0.5	-1	any	pick=always
+minecraft:command_block_minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:copper_golem	living	0.49	0.98	0.8125	0	0.5	-1	any	pick=always
+minecraft:cow	baby	0.9	1.4	1.3	0	0.5	16	any	alt=-:0.45:0.7:0.665:0	pick=always
+minecraft:creaking	living	0.9	2.7	2.3	0	0.5	-1	any	pick=always
+minecraft:creeper	living	0.6	1.7	1.445	0	0.5	-1	any	pick=always
+minecraft:dark_oak_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:dark_oak_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:dolphin	living	0.9	0.6	0.3	0	0.65	16	any	pick=always
+minecraft:donkey	baby	1.3964844	1.5	1.425	0	0.5	16	any	alt=-:0.6982422:0.75:0.7125:0	pick=always
+minecraft:dragon_fireball	type	1.0	1.0	0.85	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:drowned	baby	0.6	1.95	1.74	0	0.5	16	any	alt=-:0.3:0.975:0.93:0	pick=always
+minecraft:egg	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:elder_guardian	living	1.9975	1.9975	0.99875	0	0.5	-1	any	pick=always
+minecraft:end_crystal	type	2.0	2.0	1.7	0	-	-1	-	pick=always
+minecraft:ender_dragon	living	16.0	8.0	6.8	0	0.5	-1	one
+minecraft:ender_pearl	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:enderman	living	0.6	2.9	2.55	0	0.5	-1	any	pick=always
+minecraft:endermite	living	0.4	0.3	0.13	0	0.5	-1	any	pick=always
+minecraft:evoker	living	0.6	1.95	1.6575	0	0.5	-1	any	pick=always
+minecraft:evoker_fangs	type	0.5	0.8	0.68	0	-	-1	-
+minecraft:experience_bottle	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:experience_orb	type	0.5	0.5	0.425	0	-	-1	-
+minecraft:eye_of_ender	type	0.25	0.25	0.2125	0	-	-1	-
+minecraft:falling_block	type	0.98	0.98	0.83300006	0	-	-1	-	pick=always
+minecraft:fireball	type	1.0	1.0	0.85	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:firework_rocket	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:fishing_bobber	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:fox	baby	0.6	0.7	0.4	0	0.5	16	any	alt=-:0.3:0.35:0.2975:0	pick=always
+minecraft:frog	living	0.5	0.5	0.425	0	0.5	-1	any	pick=always
+minecraft:furnace_minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:ghast	living	4.0	4.0	2.6	0	0.5	-1	any	pick=always
+minecraft:giant	living	3.6	12.0	10.44	0	0.5	-1	any	pick=always
+minecraft:glow_item_frame	state	0.5	0.5	0.0	0	-	-1	-	pick=always
+minecraft:glow_squid	living	0.8	0.8	0.4	0	0.5	16	any	pick=always
+minecraft:goat	pose	0.9	1.3	1.105	0	0.5	16	any	alt=LONG_JUMPING:0.63:0.90999997:0.7735:0	pick=always
+minecraft:guardian	living	0.85	0.85	0.425	0	0.5	-1	any	pick=always
+minecraft:happy_ghast	living	4.0	4.0	2.6	0	0.2375	16	max:1.0	pick=always
+minecraft:hoglin	living	1.3964844	1.4	1.19	0	0.5	16	any	pick=always
+minecraft:hopper_minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:horse	baby	1.3964844	1.6	1.52	0	0.5	16	any	alt=-:0.6982422:0.8:0.76:0	pick=always
+minecraft:husk	baby	0.6	1.95	1.74	0	0.5	16	any	alt=-:0.3:0.975:0.93:0	pick=always
+minecraft:illusioner	living	0.6	1.95	1.6575	0	0.5	-1	any	pick=always
+minecraft:interaction	interaction	0.0	0.0	0.0	0	-	-1	-	data=8:FLOAT:1.0,9:FLOAT:1.0	pick=always
+minecraft:iron_golem	living	1.4	2.7	2.295	0	0.5	-1	any	pick=always
+minecraft:item	type	0.25	0.25	0.2125	0	-	-1	-
+minecraft:item_display	type	0.0	0.0	0.0	0	-	-1	-
+minecraft:item_frame	state	0.5	0.5	0.0	0	-	-1	-	pick=always
+minecraft:jungle_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:jungle_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:leash_knot	state	0.375	0.5	0.0625	0	-	-1	-	pick=always
+minecraft:lightning_bolt	type	0.0	0.0	0.0	0	-	-1	-
+minecraft:lingering_potion	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:llama	baby	0.9	1.87	1.7765	0	0.5	16	any	alt=-:0.45:0.935:0.88825:0	pick=always
+minecraft:llama_spit	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:magma_cube	slime	0.52	0.52	0.325	0	0.5	-1	any	data=16:INT:1	pick=always
+minecraft:mangrove_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:mangrove_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:mannequin	player	0.6	1.8	1.62	0	0.5	-1	any	pick=always
+minecraft:marker	type	0.0	0.0	0.0	0	-	-1	-
+minecraft:minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:mooshroom	baby	0.9	1.4	1.3	0	0.5	16	any	alt=-:0.45:0.7:0.665:0	pick=always
+minecraft:mule	baby	1.3964844	1.6	1.52	0	0.5	16	any	alt=-:0.6982422:0.8:0.76:0	pick=always
+minecraft:nautilus	living	0.875	0.95	0.2751	0	0.5	16	any	pick=always
+minecraft:oak_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:oak_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:ocelot	living	0.6	0.7	0.595	0	0.5	16	any	pick=always
+minecraft:ominous_item_spawner	type	0.25	0.25	0.2125	0	-	-1	-
+minecraft:painting	state	0.5	0.5	0.425	0	-	-1	-	pick=always
+minecraft:pale_oak_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:pale_oak_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:panda	baby	1.3	1.25	1.0625	0	0.5	16	any	alt=-:0.65:0.625:0.53125:0	pick=always
+minecraft:parched	living	0.6	1.99	1.74	0	0.5	-1	any	pick=always
+minecraft:parrot	living	0.5	0.9	0.54	0	0.5	-1	any	pick=always
+minecraft:phantom	phantom	0.9	0.5	0.175	0	0.5	-1	any	data=16:INT:0	pick=always
+minecraft:pig	living	0.9	0.9	0.765	0	0.5	16	any	pick=always
+minecraft:piglin	baby	0.6	1.95	1.79	0	0.5	17	any	alt=-:0.3:0.975:0.97:0	pick=always
+minecraft:piglin_brute	living	0.6	1.95	1.79	0	0.5	-1	any	pick=always
+minecraft:pillager	living	0.6	1.95	1.6575	0	0.5	-1	any	pick=always
+minecraft:player	player	0.6	1.8	1.62	0	0.5	-1	any	pick=player
+minecraft:polar_bear	polar_bear	1.4	1.4	1.19	0	0.5	16	any	data=17:BOOLEAN:0	pick=always
+minecraft:pufferfish	pufferfish	0.7	0.7	0.455	0	0.5	-1	any	data=17:INT:0	factors=0.5,0.7,1.0	pick=always
+minecraft:rabbit	living	0.4	0.5	0.425	0	0.5	16	any	pick=always
+minecraft:ravager	living	1.95	2.2	1.8700001	0	0.5	-1	any	pick=always
+minecraft:salmon	salmon	0.7	0.4	0.26	0	0.5	-1	any	data=17:INT:1	factors=0.5,1.0,1.5	pick=always
+minecraft:sheep	living	0.9	1.3	1.235	0	0.5	16	any	pick=always
+minecraft:shulker	state	1.0	1.0	0.5	0	0.5	-1	max:3.0	pick=always
+minecraft:shulker_bullet	type	0.3125	0.3125	0.265625	0	-	-1	-	pick=always	pickRadius=1.0
+minecraft:silverfish	living	0.4	0.3	0.13	0	0.5	-1	any	pick=always
+minecraft:skeleton	living	0.6	1.99	1.74	0	0.5	-1	any	pick=always
+minecraft:skeleton_horse	baby	1.3964844	1.6	1.52	0	0.5	16	any	alt=-:0.6982422:0.8:0.76:0	pick=always
+minecraft:slime	slime	0.52	0.52	0.325	0	0.5	-1	any	data=16:INT:1	pick=always
+minecraft:small_fireball	type	0.3125	0.3125	0.265625	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:sniffer	sniffer	1.9	1.75	1.05	0	0.5	16	any	data=17:SNIFFER_STATE:0	alt=-:1.9:1.35:0.81:0	select=5	pick=always
+minecraft:snow_golem	living	0.7	1.9	1.7	0	0.5	-1	any	pick=always
+minecraft:snowball	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:spawner_minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:spectral_arrow	type	0.5	0.5	0.13	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:spider	living	1.4	0.9	0.65	0	0.5	-1	any	pick=always
+minecraft:splash_potion	type	0.25	0.25	0.2125	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:spruce_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:spruce_chest_boat	type	1.375	0.5625	0.5625	0	-	-1	-	pick=always
+minecraft:squid	living	0.8	0.8	0.4	0	0.5	16	any	pick=always
+minecraft:stray	living	0.6	1.99	1.74	0	0.5	-1	any	pick=always
+minecraft:strider	living	0.9	1.7	1.445	0	0.5	16	any	pick=always
+minecraft:tadpole	living	0.4	0.3	0.19500001	0	0.5	-1	any	pick=always
+minecraft:text_display	type	0.0	0.0	0.0	0	-	-1	-
+minecraft:tnt	type	0.98	0.98	0.15	0	-	-1	-	pick=always
+minecraft:tnt_minecart	type	0.98	0.7	0.595	0	-	-1	-	pick=always
+minecraft:trader_llama	baby	0.9	1.87	1.7765	0	0.5	16	any	alt=-:0.45:0.935:0.88825:0	pick=always
+minecraft:trident	type	0.5	0.5	0.13	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:tropical_fish	living	0.5	0.4	0.26	0	0.5	-1	any	pick=always
+minecraft:turtle	baby	1.2	0.4	0.34	0	0.3	16	any	alt=-:0.36:0.120000005:0.102000006:0	pick=always
+minecraft:vex	living	0.4	0.8	0.51875	0	0.5	-1	any	pick=always
+minecraft:villager	living	0.6	1.95	1.62	0	0.5	16	any	pick=always
+minecraft:vindicator	living	0.6	1.95	1.6575	0	0.5	-1	any	pick=always
+minecraft:wandering_trader	living	0.6	1.95	1.62	0	0.5	16	any	pick=always
+minecraft:warden	warden	0.9	2.9	2.4650002	0	0.5	-1	any	pick=always
+minecraft:wind_charge	state	0.3125	0.3125	0.0	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:witch	living	0.6	1.95	1.62	0	0.5	-1	any	pick=always
+minecraft:wither	living	0.9	3.5	2.9750001	0	0.5	-1	any	pick=always
+minecraft:wither_skeleton	living	0.7	2.4	2.1	0	0.5	-1	any	pick=always
+minecraft:wither_skull	type	0.3125	0.3125	0.265625	0	-	-1	-	pick=tag	pickRadius=1.0
+minecraft:wolf	living	0.6	0.85	0.68	0	0.5	16	any	pick=always
+minecraft:zoglin	living	1.3964844	1.4	1.19	0	0.5	16	any	pick=always
+minecraft:zombie	baby	0.6	1.95	1.74	0	0.5	16	any	alt=-:0.3:0.975:0.93:0	pick=always
+minecraft:zombie_horse	baby	1.3964844	1.6	1.52	0	0.5	16	any	alt=-:0.6982422:0.8:0.76:0	pick=always
+minecraft:zombie_nautilus	living	0.875	0.95	0.2751	0	0.5	-1	any	pick=always
+minecraft:zombie_villager	baby	0.6	1.95	1.74	0	0.5	16	any	alt=-:0.3:0.975:0.93:0	pick=always
+minecraft:zombified_piglin	baby	0.6	1.95	1.79	0	0.5	16	any	alt=-:0.3:0.975:0.97:0	pick=always
