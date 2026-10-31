@@ -11,7 +11,11 @@ import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.TimelineEvent;
+import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -51,6 +55,12 @@ public final class EventCodec {
         private long previousClientTick;
         private final Map<String, Integer> strings = new HashMap<>();
         private final ByteSink body = new ByteSink(512);
+        /** Recording-wide, not reset per block: digest of each of the last CHUNK_WINDOW stored bodies to its ordinal. */
+        private final Map<Digest, Long> storedChunks = new HashMap<>();
+        private final Digest[] chunkWindow = new Digest[CHUNK_WINDOW];
+        private long nextChunkOrdinal;
+        private long blockFirstChunkOrdinal;
+        private MessageDigest sha256;
 
         /** Restarts delta and string state for a new block. */
         public void reset(long baseSequence, long baseNanoTime, long baseClientTick) {
@@ -58,6 +68,20 @@ public final class EventCodec {
             previousNanoTime = baseNanoTime;
             previousClientTick = baseClientTick;
             strings.clear();
+            blockFirstChunkOrdinal = nextChunkOrdinal;
+        }
+
+        /**
+         * The block encoded since the last {@link #reset} never reaches the file (its writer dropped it): the chunk
+         * bodies it stored are forgotten, so no later repeat refers to them. Ordinals are not reused.
+         */
+        public void forgetBlock() {
+            for (long ordinal = Math.max(blockFirstChunkOrdinal, nextChunkOrdinal - CHUNK_WINDOW); ordinal < nextChunkOrdinal; ordinal++) {
+                int slot = (int) (ordinal % CHUNK_WINDOW);
+                storedChunks.remove(chunkWindow[slot], ordinal);
+                chunkWindow[slot] = null;
+            }
+            blockFirstChunkOrdinal = nextChunkOrdinal;
         }
 
         /** Appends one framed record ({@code tag, length, body}) to {@code out}. */
@@ -188,6 +212,53 @@ public final class EventCodec {
             }
             if (stack.spinAttack() != null) {
                 body.writeFloat(stack.spinAttack());
+            }
+        }
+
+        private void levelChunk(ClientboundPacket.LevelChunk c) {
+            if (c.body() == null) {
+                body.writeVarInt(CB_LEVEL_CHUNK);
+                body.writeZigZag(c.x());
+                body.writeZigZag(c.z());
+                body.writeByte(0);
+                return;
+            }
+            if (sha256 == null) {
+                try {
+                    sha256 = MessageDigest.getInstance("SHA-256");
+                } catch (NoSuchAlgorithmException e) {
+                    throw new IllegalStateException("every Java platform has SHA-256", e);
+                }
+            }
+            Digest digest = Digest.of(sha256.digest(c.body()));
+            Long stored = storedChunks.get(digest);
+            if (stored != null && stored >= nextChunkOrdinal - CHUNK_WINDOW) {
+                body.writeVarInt(CB_LEVEL_CHUNK_REPEAT);
+                body.writeZigZag(c.x());
+                body.writeZigZag(c.z());
+                body.writeVarLong(stored);
+                return;
+            }
+            long ordinal = nextChunkOrdinal++;
+            int slot = (int) (ordinal % CHUNK_WINDOW);
+            if (chunkWindow[slot] != null) {
+                storedChunks.remove(chunkWindow[slot], ordinal - CHUNK_WINDOW);
+            }
+            chunkWindow[slot] = digest;
+            storedChunks.put(digest, ordinal);
+            body.writeVarInt(CB_LEVEL_CHUNK_STORED);
+            body.writeZigZag(c.x());
+            body.writeZigZag(c.z());
+            body.writeVarLong(ordinal);
+            body.writeVarInt(c.body().length);
+            body.writeBytes(c.body());
+        }
+
+        /** A SHA-256 digest as a map key. */
+        private record Digest(long a, long b, long c, long d) {
+            static Digest of(byte[] sha) {
+                ByteBuffer in = ByteBuffer.wrap(sha);
+                return new Digest(in.getLong(), in.getLong(), in.getLong(), in.getLong());
             }
         }
 
@@ -418,16 +489,7 @@ public final class EventCodec {
                     body.writeZigZag(r.gameMode());
                     body.writeZigZag(r.dataToKeep());
                 }
-                case ClientboundPacket.LevelChunk c -> {
-                    body.writeVarInt(CB_LEVEL_CHUNK);
-                    body.writeZigZag(c.x());
-                    body.writeZigZag(c.z());
-                    body.writeByte(c.body() == null ? 0 : 1);
-                    if (c.body() != null) {
-                        body.writeVarInt(c.body().length);
-                        body.writeBytes(c.body());
-                    }
-                }
+                case ClientboundPacket.LevelChunk c -> levelChunk(c);
                 case ClientboundPacket.ForgetLevelChunk f -> {
                     body.writeVarInt(CB_FORGET_LEVEL_CHUNK);
                     body.writeZigZag(f.x());
@@ -818,6 +880,11 @@ public final class EventCodec {
         private long previousNanoTime;
         private long previousClientTick;
         private final List<String> strings = new ArrayList<>();
+        /** Recording-wide, not reset per block: the last CHUNK_WINDOW stored chunk bodies by ordinal. */
+        private final byte[][] chunkBodies = new byte[CHUNK_WINDOW][];
+        private final long[] chunkOrdinals = new long[CHUNK_WINDOW];
+        /** The record being decoded repeats a chunk body this reader does not hold (it was in a skipped block). */
+        private boolean unresolvedChunk;
 
         /** A decoder for the current format version. */
         public Decoder() {
@@ -830,6 +897,7 @@ public final class EventCodec {
                 throw new IllegalArgumentException("unsupported recording format version " + version);
             }
             this.version = version;
+            Arrays.fill(chunkOrdinals, -1);
         }
 
         public void reset(long baseSequence, long baseNanoTime, long baseClientTick) {
@@ -840,6 +908,7 @@ public final class EventCodec {
         }
 
         public Decoded decode(ByteSource in) {
+            unresolvedChunk = false;
             int tag = in.readVarInt();
             int length = in.readVarInt();
             ByteSource body = in.slice(length);
@@ -893,6 +962,10 @@ public final class EventCodec {
             }
             if (body.remaining() != 0) {
                 throw new RecordingFormatException("trailing bytes in record " + tag);
+            }
+            if (unresolvedChunk) {
+                // the chunk was sent, its bytes are not here: an explicit loss, never another chunk's bytes
+                return new Decoded.Event(new TimelineEvent.Gap(sequence, nanoTime, 1));
             }
             return new Decoded.Event(event);
         }
@@ -1104,6 +1177,28 @@ public final class EventCodec {
                     int x = zint(in);
                     int z = zint(in);
                     yield new ClientboundPacket.LevelChunk(x, z, in.readUnsignedByte() != 0 ? in.readBytes(in.readVarInt()) : null);
+                }
+                case CB_LEVEL_CHUNK_STORED -> {
+                    int x = zint(in);
+                    int z = zint(in);
+                    long ordinal = chunkOrdinal(in);
+                    byte[] bytes = in.readBytes(in.readVarInt());
+                    int slot = (int) (ordinal % CHUNK_WINDOW);
+                    chunkOrdinals[slot] = ordinal;
+                    chunkBodies[slot] = bytes;
+                    yield new ClientboundPacket.LevelChunk(x, z, bytes);
+                }
+                case CB_LEVEL_CHUNK_REPEAT -> {
+                    int x = zint(in);
+                    int z = zint(in);
+                    long ordinal = chunkOrdinal(in);
+                    int slot = (int) (ordinal % CHUNK_WINDOW);
+                    if (chunkOrdinals[slot] != ordinal) {
+                        unresolvedChunk = true;
+                        yield new ClientboundPacket.LevelChunk(x, z, null);
+                    }
+                    // shared with the stored chunk's event: decoded bodies are never written to
+                    yield new ClientboundPacket.LevelChunk(x, z, chunkBodies[slot]);
                 }
                 case CB_FORGET_LEVEL_CHUNK -> new ClientboundPacket.ForgetLevelChunk(zint(in), zint(in));
                 case CB_BLOCK_UPDATE -> new ClientboundPacket.BlockUpdate(new BlockPosition(zint(in), zint(in), zint(in)), zint(in));
@@ -1344,6 +1439,14 @@ public final class EventCodec {
                     yield new ClientboundPacket.Unmodeled(UNKNOWN_PACKET_PREFIX + tag);
                 }
             };
+        }
+
+        private static long chunkOrdinal(ByteSource in) {
+            long ordinal = in.readVarLong();
+            if (ordinal < 0) {
+                throw new RecordingFormatException("negative chunk ordinal " + ordinal);
+            }
+            return ordinal;
         }
 
         private static int[] ids(ByteSource in) {

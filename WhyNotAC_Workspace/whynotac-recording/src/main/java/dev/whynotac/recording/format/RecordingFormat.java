@@ -156,6 +156,22 @@ public final class RecordingFormat {
     public static final int CB_SET_EQUIPMENT = 62;
     /** The level's time: game time, day time, whether the day time runs. */
     public static final int CB_SET_TIME = 63;
+    /**
+     * A chunk whose body is kept for later repeats: x, z, the body's ordinal in this recording (one more than
+     * the last stored body's), the body. Written for every chunk with a body since CB_LEVEL_CHUNK (still read).
+     */
+    public static final int CB_LEVEL_CHUNK_STORED = 64;
+    /**
+     * A chunk whose body is byte for byte (SHA-256) the stored body of that ordinal: x, z, the ordinal. The
+     * ordinal is one of the last {@link #CHUNK_WINDOW} stored, so a reader holds at most that many bodies.
+     */
+    public static final int CB_LEVEL_CHUNK_REPEAT = 65;
+
+    /**
+     * Stored chunk bodies a repeat may refer to: part of the format, never smaller (a reader keeps this
+     * many). A chunk is resent whenever the client walks back into it; most resends carry the same bytes.
+     */
+    public static final int CHUNK_WINDOW = 512;
 
     /**
      * Type id given to a recorded packet whose tag this reader does not know (written by a newer

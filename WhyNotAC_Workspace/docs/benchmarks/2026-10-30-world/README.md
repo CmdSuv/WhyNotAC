@@ -182,6 +182,37 @@ edilebilirlik izleyicisi); burada bunlar botların blok arkasından vuruşlarıd
   2. Ağ kenarı (oyuncu başına yaklaşık 1 ms/s): her paket kenarda bayt düzeyinde bir kez daha çözülür ve oyunun
      gönderdiğiyle uzlaştırılır (`WireObserver`, `Reconciler`). Bu, başka bir eklentinin paketi değiştirmesine karşı
      replikaların doğruluğunun güvencesidir; kapsamını daraltmak kanıt gücünü azaltır.
-  3. Kayıt kodlaması (analizin %11'i).
+  3. Kayıt kodlaması (analizin %11'i). Yeniden gönderilen chunk'lar artık başvuruyla yazılır; aşağıya bakın.
   4. Ping defterleri: yaklaşık on dinleyici (replikalar, hareket takipçisi, üç kontrolün `MoveReplies`'i) her ping'in
      sırasını ayrı ayrı tutar. Oturum başına tek bir defter paylaşılabilir.
+
+## Kayıtta yeniden gönderilen chunk'lar (2026-10-31)
+
+Kayıt kodlaması tekrar oynatma ölçümüne girmiyordu; ayrıca ölçüldü. Ölçüm, aynı yük testinin ilk 20 kaydının
+3.658.363 olayı ve 142.526 istemci tiki (7.126 oyuncu saniyesi) üzerinde yapıldı. Kayıtlar `RecordingWriter` ile
+yeniden yazıldı; sıkıştırma kayıt I/O thread'indeki gibi `Deflater(BEST_SPEED)` ve CRC32C ile ölçüldü. Thread CPU süresi
+tek çekirdekte (`taskset`) ölçüldü ve oyuncu saniyesine bölündü.
+
+- Ham baytların %90'ı chunk paketleri (10.212 chunk, 444 MB). Bunların %68'i (6.970 chunk, 300 MB), aynı kayıtta
+  daha önce bayt bayt aynısıyla gönderilmiş bir chunk'tır: oyuncu bir chunk'a geri döndüğünde sunucu onu yeniden
+  gönderir. Bu tekrarların hepsi son 256 farklı gövdenin içindedir. Pencere 32 iken %61, 128 iken %67 yakalanır.
+- Biçim değişikliği: gövdesi olan her chunk, kayıttaki sıra numarasıyla saklanır (`CB_LEVEL_CHUNK_STORED`). Son
+  `CHUNK_WINDOW` = 512 gövdeden birinin SHA-256'sı ile aynı olan bir chunk, yalnızca o numarayı taşır
+  (`CB_LEVEL_CHUNK_REPEAT`). Okuyucu en fazla 512 gövde tutar. Başvurduğu gövde bozuk bir blokta kaldıysa ya da yazıcı
+  o bloğu atmışsa, başvuru başka bir chunk'ın baytları olarak okunmaz, tek olaylık açık bir `Gap` olarak okunur.
+  Yazıcı attığı bloğun gövdelerini unutur ve onları yeniden saklar. Eski chunk kaydı okunmaya devam eder; biçim sürümü
+  değişmedi, çünkü yeni etiketleri bilmeyen eski bir okuyucu onları bilinmeyen paket olarak atlar.
+
+Üç ayrı JVM'de sırayla, oyuncu saniyesi başına µs:
+
+| Derleme | Kodlama (analiz thread'i) | Sıkıştırma (kayıt I/O) | Diskte |
+|---|---|---|---|
+| önce | 52-54 | 539-553 | 111,3 MB |
+| sonra | 90-94 | 270-287 | 63,8 MB |
+
+Net olarak oyuncu başına saniyede yaklaşık 0,23 ms kazanıldı ve disk %43 küçüldü. SHA-256 bu işlemcide
+(SHA-NI) gerçek gövdelerde yaklaşık 1 GB/s hızla çalışır ve analiz thread'ine 39 µs ekler. Sıkıştırma ise
+141 MB/s hızla çalışır. Tekrar yazılmayan her gövde bu sıkıştırma maliyetinden kurtulur. 20 kaydın 3.658.363 olayı
+yeni biçimde yazıldı ve geri okundu: hepsi aynı, 6.970 chunk daha önceki gövdeden çözüldü, 0 fark.
+Botlar dar bir alanda dolaştığı için tekrar oranı burada yüksektir. Bir yere geri dönmeden keşfe çıkan bir
+oyuncuda oran daha düşük olur. O durumda maliyet, SHA-256'nın chunk başına 40 µs'si kadar artar.

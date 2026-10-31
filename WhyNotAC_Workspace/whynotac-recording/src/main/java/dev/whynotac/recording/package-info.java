@@ -17,7 +17,12 @@
  * </pre>
  * Blocks are self-contained (delta and string-table state restart in every block), so a damaged
  * block costs exactly its own events: the reader resynchronises on the next {@code WNBK} marker and
- * reports the loss as an explicit {@link dev.whynotac.protocol.session.TimelineEvent.Gap}. Records of
+ * reports the loss as an explicit {@link dev.whynotac.protocol.session.TimelineEvent.Gap}. One state
+ * crosses blocks: a chunk resent with the same bytes (SHA-256) as one of the last
+ * {@link dev.whynotac.recording.format.RecordingFormat#CHUNK_WINDOW} stored chunk bodies refers to that
+ * body's ordinal instead of carrying it again. A reference whose body was in a damaged block, or in one
+ * the writer dropped, reads as a one-event Gap, never as another chunk's bytes (the writer stores the
+ * dropped block's bodies again). Records of
  * a kind this reader does not know are skipped; since version 2 a string-table definition carries its
  * own index, so skipping one shifts nothing else. A file is
  * written as {@code .wnrec.part} and renamed to {@code .wnrec} only after its end record is durable;

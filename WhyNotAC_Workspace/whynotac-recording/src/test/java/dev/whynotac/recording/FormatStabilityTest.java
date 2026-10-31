@@ -57,6 +57,28 @@ class FormatStabilityTest {
         assertEquals(GOLDEN_V2, HexFormat.of().formatHex(sink.toByteArray()));
     }
 
+    @Test
+    void chunkRecordsAreFrozen() {
+        // stored (x 1, z -2, ordinal 0, 3 bytes), a repeat of ordinal 0 at (3, 4), a chunk without a body
+        List<TimelineEvent> chunks = List.of(
+                new TimelineEvent.Outbound(0, 1_000, new ClientboundPacket.LevelChunk(1, -2, new byte[] {1, 2, 3})),
+                new TimelineEvent.Outbound(1, 1_000, new ClientboundPacket.LevelChunk(3, 4, new byte[] {1, 2, 3})),
+                new TimelineEvent.Outbound(2, 1_000, new ClientboundPacket.LevelChunk(5, 6, null)));
+        EventCodec.Encoder encoder = new EventCodec.Encoder();
+        encoder.reset(0, 1_000, 0);
+        ByteSink sink = new ByteSink(64);
+        chunks.forEach(e -> encoder.encode(e, sink));
+        String golden = "020a" + "0100" + "40" + "0203" + "00" + "03010203"
+                + "0206" + "0100" + "41" + "0608" + "00"
+                + "0206" + "0100" + "14" + "0a0c" + "00";
+        assertEquals(golden, HexFormat.of().formatHex(sink.toByteArray()));
+        List<TimelineEvent> decoded = decodeAll(RecordingFormat.VERSION, golden);
+        assertEquals(chunks.size(), decoded.size());
+        for (int i = 0; i < chunks.size(); i++) {
+            BitExact.assertSame(chunks.get(i), decoded.get(i));
+        }
+    }
+
     private static List<TimelineEvent> decodeAll(int version, String hex) {
         EventCodec.Decoder decoder = new EventCodec.Decoder(version);
         decoder.reset(0, 1_000, 0);

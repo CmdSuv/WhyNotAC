@@ -111,6 +111,7 @@ public final class RecordingWriter {
         } else {
             lostPending += eventsInBlock;
             lostTotal += eventsInBlock;
+            encoder.forgetBlock();
         }
         current.reset();
         eventsInBlock = 0;
