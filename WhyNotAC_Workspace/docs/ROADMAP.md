@@ -136,7 +136,7 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
     eklenebildiğinde açılacak.
   - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`).
 - **Gözlemlenebilirlik:** metrikler ve sağlık modeli (`OBS-01`). Performans hedefi gerçek arazide
-  oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 3,2 ms/s (analiz 1,9, ağ kenarı 1,0, kayıt 0,3).
+  oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 2,5 ms/s (analiz 1,6, ağ kenarı 0,8, kayıt 0,2; 2026-10-30'da 3,2).
   Yeniden gönderilen chunk'ların kayda başvuruyla yazılması, tekrar yazılan kayıtlarda kaydın sıkıştırmasını
   yarıya indirdi (oyuncu başına net yaklaşık 0,23 ms/s) ve diski %43 küçülttü; canlı 40 bot koşusunda toplam 2,8 ms/s
   (kayıt 0,28'den 0,15'e). Ağ kenarının dökümü ve iç içe tekrar oynatma: docs/benchmarks/2026-10-31-edge-and-tick.md.

@@ -58,7 +58,51 @@ attığı için sıra bir şey değiştirmez. Diğer bütün gezintiler map'in s
 toplamını etkileyebilir. İç içe kipte beş çift ölçüldü; en iyi değerlerin ortancası 24.236 ns'den 23.116 ns'ye indi
 (yaklaşık %5, tek koşuların gürültüsü içinde). Kanıt ve paylar aynıdır.
 
-Asıl kazanç, duran varlıkların tik başına adımını hiç yapmamakta olurdu. Ancak bu "tiklendi mi" bayrağını tik anının
-penceresine göre sonradan hesaplamayı gerektirir. Chunk ve donma geçmişi alındılarla budandıkça bu sonradan hesap, tik
-anındaki yanıttan sapabilir: bir MAYBE, TRUE ya da FALSE'a dönebilir. Bu güvensiz yönde bir sapmadır. Bu yüzden yapılmadı;
-budamadan önce o pencerenin yanıtını saklayan bir tasarım gerekir.
+## Dinlenen izler (0d4e10b)
+
+40 botluk kayıtlarda bir tikte izlerin ortalama %64'ü, tik bayrakları (`ticked`, `tickedKnown`) dışında hiçbir şeyi
+değiştirmez. Bunlar tek bir chunk içinde duran canlı varlıklardır. Yok olan ve kaybedilen izler ile duran oyuncular ise
+bayraklarını bile değiştirmez. Bekleyen işlemi olmayan böyle bir iz artık dinlenir: tik onu adımlamaz.
+
+Engel, bayrağı sonradan hesaplamaktı. Chunk ve donma geçmişi, cevaplanan ping'lerle budanır. Bu geçmişten sonradan
+yapılan bir hesap, tik anındaki cevaptan güvensiz yönde sapabilir: bir MAYBE, TRUE ya da FALSE'a dönebilir. Bu yüzden
+hiçbir şey sonradan hesaplanmaz. Her tik, kendi penceresiyle, dinlenen varlık barındıran her chunk için bir cevap
+çıkarır. Dinlenen aday bayraklarını bu cevaptan, bir sonraki okunuşunda (itenler, roketler) ya da değişişinde (bir işlem
+onu uyandırır) alır.
+
+Doğrulama: `ClientEntities.steppingEveryTrack`, eskisi gibi her izi her tikte adımlar. İki test aynı olayları iki
+replikaya verir ve her olaydan sonra karşılaştırır. Önce itenler karşılaştırılır, böylece bir okumanın bayrakları kendisi
+güncellemesi gerekir. Ardından olası durumlar ve tik bayrakları karşılaştırılır.
+
+- 1000 tohumlu simülasyon: 10.000'den fazla karşılaştırmada dinlenen iz vardı.
+- Bir senaryo: dünya donar ve çözülür, ineğin chunk'ı unutulur ve yeniden gönderilir, bu sırada ping'ler geçmişi budar.
+  Sonra inek hareket eder, uyanır ve yeniden dinlenir.
+
+Beş mutantın her biri bu testlerden birinde başarısız olur:
+
+- her izi tiklenmiş saymak;
+- izi hiç uyandırmamak;
+- chunk cevabını tikte güncellememek;
+- donmayı yok saymak;
+- itenleri bayrakları güncellemeden okumak.
+
+| Ölçüm | Önce | Sonra |
+|---|---|---|
+| İç içe tekrar oynatma, ortalama ns/tik (üç çift) | 24.222-26.047 | 22.894-23.620 |
+| Canlı analiz thread'inde `ClientEntities.onTick` payı | %33 | %16 (208 örnek) |
+
+Kanıt ve paylar aynıdır.
+
+## Canlı sonuç (40 bot, 0d4e10b)
+
+Değerler oyuncu başına ms/s:
+
+| Derleme | Analiz | Kayıt | Netty (WhyNotAC payı) | Toplam |
+|---|---|---|---|---|
+| 4c1e2fc | 1,88 | 0,28 | 1,03 | 3,19 |
+| 0b507d3 | 1,70 | 0,15 | 0,94 | 2,79 |
+| 0d4e10b | 1,58 | 0,18 | 0,78 | 2,54 |
+
+0 vaka (bot yapıntıları ayrı), 0 kayıp olay, 0 dinleyici hatası, 0 anomali. Tek koşular gürültülüdür. Netty'deki
+düşüş ping takibinin mikro ölçümüyle, analizdeki düşüş tik payının yarıya inmesiyle uyumludur. Hedef (< 1 ms/s) 2,5 kat
+uzakta.
