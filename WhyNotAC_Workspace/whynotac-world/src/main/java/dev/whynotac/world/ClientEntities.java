@@ -214,6 +214,29 @@ public final class ClientEntities {
      */
     private Track[] ticking = new Track[16];
     private int tickingCount;
+    /**
+     * Resting tracks ({@link #rest}) by the one chunk their tick depends on. A tick works the answer out once per chunk,
+     * at the tick, with the tick's own window; a resting candidate's flags are set from it when the track is next read or
+     * changed. Nothing is worked out later from a history the pings have pruned since.
+     */
+    private final Map<Long, RestGroup> resting = new HashMap<>();
+    /** False: every track steps at every tick (tests compare the two). */
+    private final boolean restingAllowed;
+
+    private static final class RestGroup {
+        final long chunk;
+        /** Whether an entity of this chunk ticked in tick {@link #tick} (the latest worked out). */
+        Tri last;
+        long tick = -1;
+        int members;
+
+        RestGroup(long chunk) {
+            this.chunk = chunk;
+        }
+    }
+
+    /** Resting tracks no tick changes at all: absent, lost, a living entity whose position is lost, a player (always ticks). */
+    private static final RestGroup INERT = new RestGroup(Long.MIN_VALUE);
     private final Set<Track> pendingTracks = new LinkedHashSet<>();
 
     /**
@@ -270,8 +293,37 @@ public final class ClientEntities {
 
     /** {@code totals}: where this replica's counters are summed with every other's (null: nowhere). */
     public ClientEntities(EntityTypes types, Totals totals) {
+        this(types, totals, true);
+    }
+
+    private ClientEntities(EntityTypes types, Totals totals, boolean restingAllowed) {
         this.types = types;
         this.totals = totals;
+        this.restingAllowed = restingAllowed;
+    }
+
+    /** A replica whose every track steps at every tick, as before resting tracks (for tests: the two must agree). */
+    static ClientEntities steppingEveryTrack(EntityTypes types) {
+        return new ClientEntities(types, null, false);
+    }
+
+    /** How many tracks rest now (for tests). */
+    int restingTracks() {
+        return tracks.size() - tickingCount;
+    }
+
+    /** The tick flags ({@code ticked}, {@code tickedKnown}) of each candidate of {@code entityId} (for tests). */
+    List<boolean[]> tickFlags(int entityId) {
+        Track track = tracks.get(entityId);
+        if (track == null) {
+            return List.of();
+        }
+        materialize(track);
+        List<boolean[]> flags = new ArrayList<>();
+        for (State st : track.candidates) {
+            flags.add(new boolean[] {st.ticked, st.tickedKnown});
+        }
+        return flags;
     }
 
     private void report() {
@@ -956,6 +1008,10 @@ public final class ClientEntities {
 
     private void addTrack(Track track) {
         tracks.put(track.id, track);
+        addTicking(track);
+    }
+
+    private void addTicking(Track track) {
         if (tickingCount == ticking.length) {
             ticking = Arrays.copyOf(ticking, tickingCount * 2);
         }
@@ -963,11 +1019,7 @@ public final class ClientEntities {
         ticking[tickingCount++] = track;
     }
 
-    private void removeTrack(int id) {
-        Track track = tracks.remove(id);
-        if (track == null) {
-            return;
-        }
+    private void removeTicking(Track track) {
         Track last = ticking[--tickingCount];
         ticking[track.dense] = last;
         last.dense = track.dense;
@@ -975,10 +1027,89 @@ public final class ClientEntities {
         track.dense = -1;
     }
 
+    private void removeTrack(int id) {
+        Track track = tracks.remove(id);
+        if (track == null) {
+            return;
+        }
+        if (track.restingIn != null) {
+            leaveGroup(track);
+        } else {
+            removeTicking(track);
+        }
+    }
+
     private void clearTracks() {
         tracks.clear();
         Arrays.fill(ticking, 0, tickingCount, null);
         tickingCount = 0;
+        resting.clear();
+    }
+
+    /**
+     * Lets a track that has no pending op rest after its tick when no further tick would change its only candidate but for
+     * its tick flags: the tick then steps it no more, and the flags come from its chunk's answer ({@link #materialize}). The
+     * others: a living entity at an exact position, on no vehicle, not interpolating, not turning its head, no horse, no
+     * animation, its scale settled, inside one chunk. Absent and lost ones, a living one whose position is lost and players
+     * (who always tick) change not even their flags. True if it rests (it left {@link #ticking}).
+     */
+    private boolean rest(Track track) {
+        State s = track.only;
+        if (s == null) {
+            return false;
+        }
+        RestGroup group;
+        if (!s.present || s.lostAll || s.lostPosition && s.kind.living()) {
+            group = INERT; // the tick leaves it as it is
+        } else if (!s.kind.living() || s.lostPosition || s.vehicle != NONE || s.horse != null || s.animated || s.headSteps != 0
+                || s.kind.interpolationSteps() > 0 && s.steps > 0
+                || Double.compare(s.scaleLow, s.scale) != 0 || Double.compare(s.scaleHigh, s.scale) != 0) {
+            return false;
+        } else if (s.player) {
+            group = INERT; // ticked and known at every tick
+        } else {
+            int x = VanillaMath.floor(s.x - s.rPos) >> 4;
+            int z = VanillaMath.floor(s.z - s.rPos) >> 4;
+            if (x != VanillaMath.floor(s.x + s.rPos) >> 4 || z != VanillaMath.floor(s.z + s.rPos) >> 4) {
+                return false; // it may be in more than one chunk
+            }
+            group = resting.computeIfAbsent(ClientWorld.chunkKey(x, z), RestGroup::new);
+            group.members++;
+        }
+        track.restingIn = group;
+        track.settled = ticks;
+        removeTicking(track);
+        return true;
+    }
+
+    /** The resting track's only candidate takes the tick flags of the latest tick (what stepping it would have left). */
+    private void materialize(Track track) {
+        RestGroup group = track.restingIn;
+        if (group == null || group == INERT || group.tick <= track.settled) {
+            return;
+        }
+        State s = track.only;
+        s.ticked = group.last == Tri.TRUE;
+        s.tickedKnown = group.last != Tri.MAYBE;
+        track.settled = group.tick;
+    }
+
+    /** The track steps at every tick again (an op for it came). */
+    private void wake(Track track) {
+        if (track.restingIn == null) {
+            return;
+        }
+        materialize(track);
+        leaveGroup(track);
+        addTicking(track);
+    }
+
+    private void leaveGroup(Track track) {
+        RestGroup group = track.restingIn;
+        track.restingIn = null;
+        if (group != INERT && --group.members == 0) {
+            resting.remove(group.chunk);
+        }
     }
 
     private void enqueue(long seq, int id, Op op) {
@@ -986,6 +1117,7 @@ public final class ClientEntities {
         if (track == null) {
             return; // never added: the client has no such entity either (or it is unknown and stays so)
         }
+        wake(track);
         if (track.pending.size() >= MAX_PENDING_OPS) {
             // The client stopped answering: give the entity up rather than hold its history.
             track.pending.clear();
@@ -1076,6 +1208,14 @@ public final class ClientEntities {
         lastTickLower = certain;
         lastTickUpper = end;
         selfDuring = selfBox(end);
+        if (!resting.isEmpty()) {
+            // A resting track's window is the tick's own, (certain, end]: it has no pending op.
+            Tri notFrozen = notFrozen(certain, end);
+            for (RestGroup group : resting.values()) {
+                group.last = notFrozen.and(chunks.ticking(group.chunk, certain, end));
+                group.tick = ticks;
+            }
+        }
         List<State> scratch = new ArrayList<>(2);
         for (int t = 0; t < tickingCount; t++) {
             Track track = ticking[t];
@@ -1089,6 +1229,9 @@ public final class ClientEntities {
                     if (scratch.size() != 1 || scratch.getFirst() != only) {
                         track.candidates(merge(new ArrayList<>(scratch)));
                     }
+                }
+                if (restingAllowed && track.pending.isEmpty() && rest(track)) {
+                    t--; // the last track took its place
                 }
                 continue;
             }
@@ -2363,6 +2506,7 @@ public final class ClientEntities {
             Head head = heads.get(track.id);
             Pusher effect = null;
             boolean first = true;
+            materialize(track);
             for (State st : track.candidates) {
                 Pusher e;
                 try {
@@ -2418,6 +2562,7 @@ public final class ClientEntities {
             }
             Head head = heads.get(track.id);
             Boolean boosts = null;
+            materialize(track);
             for (State st : track.candidates) {
                 boolean b;
                 try {
@@ -2777,8 +2922,12 @@ public final class ClientEntities {
         /** The only candidate, or null when there are several (read by every tick without touching the list). */
         State only;
         final ArrayList<Op> pending = new ArrayList<>();
-        /** This track's place in {@link #ticking}. */
+        /** This track's place in {@link #ticking}, or -1 while it rests. */
         int dense = -1;
+        /** The group this track rests in ({@link #rest}), or null while it steps at every tick. */
+        RestGroup restingIn;
+        /** The tick whose outcome the only candidate's tick flags hold (while it rests). */
+        long settled;
 
         Track(int id, State initial) {
             this.id = id;

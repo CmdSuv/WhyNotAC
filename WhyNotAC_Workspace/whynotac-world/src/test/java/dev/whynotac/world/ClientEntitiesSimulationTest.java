@@ -1,5 +1,6 @@
 package dev.whynotac.world;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -38,13 +39,16 @@ class ClientEntitiesSimulationTest {
         long[] exact = new long[4];
         long[] checks = new long[4];
         long[] overflows = new long[4];
+        long comparedWhileResting = 0;
         for (int seed = 0; seed < 1000; seed++) {
             Run run = new Run(seed);
             run.simulate(300);
             exact[run.pingMode] += run.exact;
             checks[run.pingMode] += run.checks;
             overflows[run.pingMode] += run.replica.stats().overflows();
+            comparedWhileResting += run.comparedWhileResting;
         }
+        assertTrue(comparedWhileResting > 10_000, "tracks rested in " + comparedWhileResting + " comparisons");
         String[] modes = {"ping before and after each flush", "ping at flush start", "ping at flush end", "random pings"};
         for (int mode = 0; mode < 4; mode++) {
             System.out.printf("%s: %d checks, exact %.1f%%, overflows %d%n", modes[mode], checks[mode], 100.0 * exact[mode] / checks[mode],
@@ -103,6 +107,9 @@ class ClientEntitiesSimulationTest {
     private static final class Run {
         final Random random;
         final ClientEntities replica = new ClientEntities(EntityTypes.vanilla());
+        /** The same events with every track stepped at every tick: resting tracks must change no answer. */
+        final ClientEntities stepping = ClientEntities.steppingEveryTrack(EntityTypes.vanilla());
+        long comparedWhileResting;
         final int seed;
         /** 0: a ping before and after every flush; 1: one at the start; 2: one at the end; 3: random. */
         int pingMode;
@@ -223,10 +230,18 @@ class ClientEntitiesSimulationTest {
                 }
             }
             switch (event) {
-                case ClientboundPacket packet -> replica.onEvent(new TimelineEvent.Outbound(sequence++, sequence, packet));
-                case Pong pong -> replica.onEvent(new TimelineEvent.Acknowledged(sequence++, sequence, pong.id, 0, 0));
+                case ClientboundPacket packet -> {
+                    deliver(new TimelineEvent.Outbound(sequence++, sequence, packet));
+                    int id = entityOf(packet);
+                    compareWithStepping(id >= 0 ? List.of(id) : List.of());
+                }
+                case Pong pong -> {
+                    deliver(new TimelineEvent.Acknowledged(sequence++, sequence, pong.id, 0, 0));
+                    compareWithStepping(logs.keySet());
+                }
                 case TickEnd tickEnd -> {
-                    replica.onEvent(new TimelineEvent.Inbound(sequence++, sequence, 0, new ServerboundPacket.ClientTickEnd()));
+                    deliver(new TimelineEvent.Inbound(sequence++, sequence, 0, new ServerboundPacket.ClientTickEnd()));
+                    compareWithStepping(logs.keySet());
                     for (int id : logs.keySet()) {
                         List<ClientEntities.PossibleState> states = new ArrayList<>();
                         replica.forEachPossibleState(id, states::add);
@@ -235,6 +250,41 @@ class ClientEntitiesSimulationTest {
                     check(tickEnd.truth);
                 }
                 default -> throw new IllegalStateException();
+            }
+        }
+
+        void deliver(TimelineEvent event) {
+            replica.onEvent(event);
+            stepping.onEvent(event);
+        }
+
+        /** Pushers first (they must set the flags of the resting tracks they read themselves), then each entity's states. */
+        void compareWithStepping(java.util.Collection<Integer> ids) {
+            if (replica.restingTracks() > 0) {
+                comparedWhileResting++;
+            }
+            for (boolean beforeSelf : new boolean[] {false, true}) {
+                List<ClientEntities.Pusher> expected = stepping.pushers(SELF, -40, -64, -40, 40, 320, 40, beforeSelf, 1.0);
+                String expectedWhy = expected == null ? stepping.whyNotKnown() : null;
+                List<ClientEntities.Pusher> actual = replica.pushers(SELF, -40, -64, -40, 40, 320, 40, beforeSelf, 1.0);
+                assertEquals(expected, actual, "seed " + seed + ": pushers at " + sequence);
+                if (actual == null) {
+                    assertEquals(expectedWhy, replica.whyNotKnown(), "seed " + seed + ": why at " + sequence);
+                }
+            }
+            for (int id : ids) {
+                List<ClientEntities.PossibleState> expected = new ArrayList<>();
+                List<ClientEntities.PossibleState> actual = new ArrayList<>();
+                stepping.forEachPossibleState(id, expected::add);
+                replica.forEachPossibleState(id, actual::add);
+                assertEquals(expected, actual, "seed " + seed + ": entity " + id + " at " + sequence);
+                List<boolean[]> expectedFlags = stepping.tickFlags(id);
+                List<boolean[]> actualFlags = replica.tickFlags(id);
+                assertEquals(expectedFlags.size(), actualFlags.size(), "seed " + seed + ": entity " + id + " at " + sequence);
+                for (int i = 0; i < expectedFlags.size(); i++) {
+                    assertTrue(java.util.Arrays.equals(expectedFlags.get(i), actualFlags.get(i)),
+                            "seed " + seed + ": tick flags of entity " + id + " at " + sequence);
+                }
             }
         }
 
