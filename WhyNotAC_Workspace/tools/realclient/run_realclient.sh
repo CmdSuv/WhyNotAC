@@ -28,7 +28,7 @@ server-port=$PORT
 level-type=minecraft\:flat
 generate-structures=false
 spawn-protection=0
-view-distance=3
+view-distance=${REALCLIENT_VIEW_DISTANCE:-3}
 simulation-distance=3
 difficulty=peaceful
 spawn-monsters=false
@@ -53,7 +53,7 @@ skipMultiplayerWarning:true
 joinedFirstServer:true
 tutorialStep:none
 pauseOnLostFocus:false
-renderDistance:2
+renderDistance:${REALCLIENT_VIEW_DISTANCE:-2}
 simulationDistance:5
 maxFps:$MAX_FPS
 narrator:0
