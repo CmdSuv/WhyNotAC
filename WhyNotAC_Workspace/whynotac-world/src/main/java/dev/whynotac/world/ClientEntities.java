@@ -207,6 +207,13 @@ public final class ClientEntities {
     private long lastTickLower = Long.MIN_VALUE;
     private long lastTickUpper = Long.MAX_VALUE;
     private final Map<Integer, Track> tracks = new HashMap<>();
+    /**
+     * The same tracks in a dense array, for the tick, which steps each one on its own (their order changes nothing there):
+     * with many players a session's tracks are cold in the CPU caches at its tick, and the map's nodes are one more miss
+     * each. Every other walk keeps the map's order.
+     */
+    private Track[] ticking = new Track[16];
+    private int tickingCount;
     private final Set<Track> pendingTracks = new LinkedHashSet<>();
 
     /**
@@ -299,7 +306,7 @@ public final class ClientEntities {
 
     private void release() {
         report();
-        tracks.clear();
+        clearTracks();
         pendingTracks.clear();
         heads.clear();
         pings.clear();
@@ -501,7 +508,7 @@ public final class ClientEntities {
         head.base(new Vec3d(add.x(), add.y(), add.z())); // syncPacketPositionCodec
         heads.put(id, head);
         if (!tracks.containsKey(id)) {
-            tracks.put(id, new Track(id, complete ? State.absent() : State.lostAll()));
+            addTrack(new Track(id, complete ? State.absent() : State.lostAll()));
         }
         enqueue(seq, id, new Op.Add(seq, kind, add.type(), player, minY, add.x(), add.y(), add.z(), VanillaMath.unpackDegrees(add.yRot()),
                 VanillaMath.unpackDegrees(add.xRot()), VanillaMath.unpackDegrees(add.yHeadRot()), maybe, player ? spectator(add.uuid()) : 0, add.uuid(),
@@ -934,7 +941,7 @@ public final class ClientEntities {
     /** Events were lost ({@code Gap}): nothing about the entities, the player list or the chunks is known any more. */
     private void lostEverything() {
         losses++;
-        tracks.clear(); // with the level incomplete, an id without a track is unknown
+        clearTracks(); // with the level incomplete, an id without a track is unknown
         pendingTracks.clear();
         heads.clear();
         self.vehicle = NONE;
@@ -947,6 +954,33 @@ public final class ClientEntities {
         stepSeen = true;
     }
 
+    private void addTrack(Track track) {
+        tracks.put(track.id, track);
+        if (tickingCount == ticking.length) {
+            ticking = Arrays.copyOf(ticking, tickingCount * 2);
+        }
+        track.dense = tickingCount;
+        ticking[tickingCount++] = track;
+    }
+
+    private void removeTrack(int id) {
+        Track track = tracks.remove(id);
+        if (track == null) {
+            return;
+        }
+        Track last = ticking[--tickingCount];
+        ticking[track.dense] = last;
+        last.dense = track.dense;
+        ticking[tickingCount] = null;
+        track.dense = -1;
+    }
+
+    private void clearTracks() {
+        tracks.clear();
+        Arrays.fill(ticking, 0, tickingCount, null);
+        tickingCount = 0;
+    }
+
     private void enqueue(long seq, int id, Op op) {
         Track track = tracks.get(id);
         if (track == null) {
@@ -957,6 +991,7 @@ public final class ClientEntities {
             track.pending.clear();
             track.candidates.clear();
             track.candidates.add(State.lostAll());
+            track.only = track.candidates.getFirst();
             overflows++;
         }
         track.pending.add(op.seq() == Long.MIN_VALUE ? op.at(seq) : op);
@@ -1004,12 +1039,12 @@ public final class ClientEntities {
                 state.applied -= done;
             }
             track.pending.subList(0, done).clear();
-            track.candidates = merge(next);
+            track.candidates(merge(next));
             if (track.pending.isEmpty()) {
                 it.remove();
                 State only = track.candidates.size() == 1 ? track.candidates.getFirst() : null;
                 if (only != null && (only.isAbsent() && complete || only.lostAll && !complete)) {
-                    tracks.remove(track.id); // gone for certain, or unknown: what an id without a track means
+                    removeTrack(track.id); // gone for certain, or unknown: what an id without a track means
                 }
             }
         }
@@ -1042,16 +1077,17 @@ public final class ClientEntities {
         lastTickUpper = end;
         selfDuring = selfBox(end);
         List<State> scratch = new ArrayList<>(2);
-        for (Track track : tracks.values()) {
+        for (int t = 0; t < tickingCount; t++) {
+            Track track = ticking[t];
             int applicable = applicable(track, end);
-            if (track.candidates.size() == 1 && track.candidates.getFirst().applied == applicable) {
+            State only = track.only;
+            if (only != null && only.applied == applicable) {
                 // The common case: nothing of this entity is in doubt.
-                State only = track.candidates.getFirst();
                 if (only.present && !only.lostAll && (!only.lostPosition || !only.kind.living())) {
                     scratch.clear();
                     tick(only, lower(track, only.applied), upper(track, only.applied, end), scratch);
                     if (scratch.size() != 1 || scratch.getFirst() != only) {
-                        track.candidates = merge(new ArrayList<>(scratch));
+                        track.candidates(merge(new ArrayList<>(scratch)));
                     }
                 }
                 continue;
@@ -1063,7 +1099,7 @@ public final class ClientEntities {
                     tick(s, lower(track, s.applied), upper(track, s.applied, end), next);
                 }
             }
-            track.candidates = merge(next);
+            track.candidates(merge(next));
         }
         selfSentAtTick = selfSent;
         report();
@@ -2738,11 +2774,21 @@ public final class ClientEntities {
     private static final class Track {
         final int id;
         List<State> candidates = new ArrayList<>(1);
+        /** The only candidate, or null when there are several (read by every tick without touching the list). */
+        State only;
         final ArrayList<Op> pending = new ArrayList<>();
+        /** This track's place in {@link #ticking}. */
+        int dense = -1;
 
         Track(int id, State initial) {
             this.id = id;
             candidates.add(initial);
+            only = initial;
+        }
+
+        void candidates(List<State> states) {
+            candidates = states;
+            only = states.size() == 1 ? states.getFirst() : null;
         }
     }
 
