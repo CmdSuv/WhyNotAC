@@ -14,8 +14,10 @@ import java.lang.management.ThreadMXBean;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 
@@ -27,7 +29,12 @@ import java.util.stream.Stream;
  * ({@code EvidenceSink.margin}). Deterministic enough to compare two builds of the same code path on the same
  * recordings, unlike a load test.
  *
- * <p>usage: java -cp WhyNotAC.jar ReplayCost.java DIR [ROUNDS] [MAX_RECORDINGS] [replicas|all]
+ * <p>{@code sequential} (the default) replays one session after the other, so each one's state stays in the CPU caches.
+ * {@code interleaved} delivers the events of all sessions in the order of their timestamps, as the server did (the
+ * recordings of one load test share its clock): every session's state is then as cold as it is live, which is what
+ * costs most where a tick walks many objects.
+ *
+ * <p>usage: java -cp WhyNotAC.jar ReplayCost.java DIR [ROUNDS] [MAX_RECORDINGS] [replicas|all] [sequential|interleaved]
  */
 public final class ReplayCost {
 
@@ -36,6 +43,7 @@ public final class ReplayCost {
         int rounds = args.length > 1 ? Integer.parseInt(args[1]) : 5;
         int max = args.length > 2 ? Integer.parseInt(args[2]) : 20;
         boolean checks = args.length <= 3 || !args[3].equals("replicas");
+        boolean interleaved = args.length > 4 && args[4].equals("interleaved");
         List<Path> files;
         try (Stream<Path> s = Files.walk(dir)) {
             files = s.filter(p -> p.toString().endsWith(".wnrec")).sorted().limit(max).toList();
@@ -51,6 +59,29 @@ public final class ReplayCost {
                 }
             }
             sessions.add(events);
+        }
+        // all events merged by timestamp, each session's own order kept (a session's events follow its sequence numbers,
+        // and their timestamps are not always in that order): the session whose next event is oldest goes next
+        int total = sessions.stream().mapToInt(List::size).sum();
+        int[] mergedSession = new int[total];
+        TimelineEvent[] mergedEvent = new TimelineEvent[total];
+        if (interleaved) {
+            int[] next = new int[sessions.size()];
+            PriorityQueue<Integer> heads = new PriorityQueue<>(Comparator
+                    .comparingLong((Integer i) -> sessions.get(i).get(next[i]).nanoTime()).thenComparingInt(i -> i));
+            for (int i = 0; i < sessions.size(); i++) {
+                if (!sessions.get(i).isEmpty()) {
+                    heads.add(i);
+                }
+            }
+            for (int k = 0; k < total; k++) {
+                int i = heads.poll();
+                mergedSession[k] = i;
+                mergedEvent[k] = sessions.get(i).get(next[i]++);
+                if (next[i] < sessions.get(i).size()) {
+                    heads.add(i);
+                }
+            }
         }
         ThreadMXBean bean = ManagementFactory.getThreadMXBean();
         long[] perRound = new long[rounds];
@@ -84,16 +115,33 @@ public final class ReplayCost {
                 Checks.all(sink, replicas).forEach(registry::addListener);
             }
             long start = bean.getCurrentThreadCpuTime();
-            int n = 0;
-            for (List<TimelineEvent> events : sessions) {
-                PlayerSession session = registry.openReplay("cost:" + (n++));
-                TimelineEvent last = null;
-                for (TimelineEvent e : events) {
-                    session.deliver(e);
-                    last = e;
+            if (interleaved) {
+                PlayerSession[] open = new PlayerSession[sessions.size()];
+                for (int i = 0; i < open.length; i++) {
+                    open[i] = registry.openReplay("cost:" + i);
                 }
-                if (!session.isClosed() && last != null) {
-                    session.deliver(new TimelineEvent.Disconnected(last.sequence() + 1, last.nanoTime()));
+                for (int i = 0; i < total; i++) {
+                    open[mergedSession[i]].deliver(mergedEvent[i]);
+                }
+                for (int i = 0; i < open.length; i++) {
+                    List<TimelineEvent> events = sessions.get(i);
+                    if (!open[i].isClosed() && !events.isEmpty()) {
+                        TimelineEvent last = events.getLast();
+                        open[i].deliver(new TimelineEvent.Disconnected(last.sequence() + 1, last.nanoTime()));
+                    }
+                }
+            } else {
+                int n = 0;
+                for (List<TimelineEvent> events : sessions) {
+                    PlayerSession session = registry.openReplay("cost:" + (n++));
+                    TimelineEvent last = null;
+                    for (TimelineEvent e : events) {
+                        session.deliver(e);
+                        last = e;
+                    }
+                    if (!session.isClosed() && last != null) {
+                        session.deliver(new TimelineEvent.Disconnected(last.sequence() + 1, last.nanoTime()));
+                    }
                 }
             }
             perRound[round] = bean.getCurrentThreadCpuTime() - start;
@@ -111,8 +159,8 @@ public final class ReplayCost {
         for (Evidence e : given) {
             byCheck.merge(e.check(), 1, Integer::sum);
         }
-        System.out.printf("{\"recordings\":%d,\"clientTicks\":%d,\"rounds\":%d,\"checks\":%b,\"bestNsPerTick\":%.1f,\"meanNsPerTick\":%.1f,"
-                + "\"evidence\":%d,\"byCheck\":\"%s\",\"margins\":\"%s\"}%n", files.size(), ticks, rounds, checks, (double) best / ticks, (double) sum / counted / ticks,
+        System.out.printf("{\"recordings\":%d,\"interleaved\":%b,\"clientTicks\":%d,\"rounds\":%d,\"checks\":%b,\"bestNsPerTick\":%.1f,\"meanNsPerTick\":%.1f,"
+                + "\"evidence\":%d,\"byCheck\":\"%s\",\"margins\":\"%s\"}%n", files.size(), interleaved, ticks, rounds, checks, (double) best / ticks, (double) sum / counted / ticks,
                 given.size(), byCheck, margins.snapshot());
     }
 }
