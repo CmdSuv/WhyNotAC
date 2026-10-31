@@ -769,8 +769,8 @@ public class MovementTruth {
                 if (riding.get(next - 1)) {
                     ridingTicks++;
                     lastPost = null;
-                } else if (onLastBoat(tick[0])) {
-                    unknown.merge("standing on the boat it just left, which the client still holds (a solid entity)", 1L, Long::sum);
+                } else if (nearLastBoat(tick[0])) {
+                    unknown.merge("near the boat it just left, which the client still holds (a solid entity)", 1L, Long::sum);
                     lastPost = null;
                 } else {
                     compare(tick[0], tick[1], world);
@@ -883,7 +883,12 @@ public class MovementTruth {
          * client's player collides with that entity, a solid one the on-foot engine does not model.
          */
         @SuppressWarnings("unchecked")
-        private boolean onLastBoat(Map<String, Object> pre) {
+        /**
+         * The boat the player just left may still be in the client's world (its removal not processed yet): the engine
+         * collides with blocks only, so a tick whose player stands on it, walks into it or auto-jumps at it (the search
+         * reaches about a block and a half ahead, MovementTracker's ENTITY_MARGIN) is outside its scope.
+         */
+        private boolean nearLastBoat(Map<String, Object> pre) {
             if (lastBoat == null) {
                 return false;
             }
@@ -891,8 +896,9 @@ public class MovementTruth {
             double x = f64(pos.get(0));
             double y = f64(pos.get(1));
             double z = f64(pos.get(2));
-            return x + 0.3 > lastBoat.minX() && x - 0.3 < lastBoat.maxX() && z + 0.3 > lastBoat.minZ() && z - 0.3 < lastBoat.maxZ()
-                    && y > lastBoat.maxY() - 1.0E-3 && y < lastBoat.maxY() + 0.5;
+            double reach = 0.3 + 1.5; // the half width and MovementTracker.ENTITY_MARGIN
+            return x + reach > lastBoat.minX() && x - reach < lastBoat.maxX() && z + reach > lastBoat.minZ() && z - reach < lastBoat.maxZ()
+                    && y > lastBoat.minY() - 1.8 && y < lastBoat.maxY() + 0.5;
         }
 
         /** The boat's tick from {@code pre} to {@code post}, in the client tick whose player record starts at {@code player}. */
