@@ -173,6 +173,7 @@ edilebilirlik izleyicisi); burada bunlar botların blok arkasından vuruşlarıd
 | 3bfd554 (1) | 2,23 | 0,21 | 1,09 | 3,54 |
 | 3bfd554 (2) | 2,27 | 0,38 | 1,35 | 3,99 |
 | 4c1e2fc | 1,88 | 0,28 | 1,03 | 3,19 |
+| 0b507d3 (yeniden gönderilen chunk'lar başvuruyla) | 1,70 | 0,15 | 0,94 | 2,79 |
 
   Kesintiler %10-20 kazandırdı ve sunucu thread'inin kilit beklemelerini kaldırdı. Hedef (< 1 ms/s) hâlâ 3 kat uzakta.
   Kalan maliyet tek tük sıcak noktalarda değil, tasarımda:
@@ -216,3 +217,9 @@ Net olarak oyuncu başına saniyede yaklaşık 0,23 ms kazanıldı ve disk %43 k
 yeni biçimde yazıldı ve geri okundu: hepsi aynı, 6.970 chunk daha önceki gövdeden çözüldü, 0 fark.
 Botlar dar bir alanda dolaştığı için tekrar oranı burada yüksektir. Bir yere geri dönmeden keşfe çıkan bir
 oyuncuda oran daha düşük olur. O durumda maliyet, SHA-256'nın chunk başına 40 µs'si kadar artar.
+
+Canlı koşu (40 bot, aynı düzen, 2026-10-31, `40-0b507d3.json`): kayıt I/O thread'i oyuncu başına saniyede 0,28 ms'den
+0,15 ms'ye indi. Bu, yukarıdaki yeniden yazma ölçümünün yarıya inme beklentisiyle tutarlıdır. Analiz ve Netty'deki düşüş
+koşudan koşuya gürültünün içindedir. 0 vaka (bot yapıntıları ayrı), 0 kayıp, 0 dinleyici hatası. Bu koşunun 40 kaydının
+hepsi tam okundu: 2.101.285 olay, 0 boşluk; 6.852 chunk'ın 2.201'i önceki bir gövdeden çözüldü. Koşu kısa olduğu için
+botlar daha az geri döndü, tekrar oranı bu yüzden daha düşük (%32).
