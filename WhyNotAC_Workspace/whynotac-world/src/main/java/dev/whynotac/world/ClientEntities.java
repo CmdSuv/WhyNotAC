@@ -3023,6 +3023,8 @@ public final class ClientEntities {
         boolean lostPosition;
         EntityTypes.Kind kind;
         String type;
+        /** {@code ClientMotion.keptAtMount(type)}, worked out once with the type (read at every ground flag and merge). */
+        boolean keptAtMount;
         boolean player;
         int minY;
         double x;
@@ -3141,7 +3143,7 @@ public final class ClientEntities {
 
         /** A packet set the ground flag of a boat or a horse (see {@link #hasGround}). */
         void groundSet() {
-            if (ClientMotion.keptAtMount(type)) {
+            if (keptAtMount) {
                 hasGround = true;
                 gx = x;
                 gy = y;
@@ -3191,6 +3193,7 @@ public final class ClientEntities {
             s.uuid = add.uuid();
             s.kind = add.kind();
             s.type = add.type();
+            s.keptAtMount = ClientMotion.keptAtMount(s.type);
             s.player = add.player();
             s.spectator = add.spectator();
             s.minY = add.minY();
@@ -3237,6 +3240,7 @@ public final class ClientEntities {
             c.lostPosition = lostPosition;
             c.kind = kind;
             c.type = type;
+            c.keptAtMount = keptAtMount;
             c.player = player;
             c.minY = minY;
             c.x = x;
@@ -3335,7 +3339,7 @@ public final class ClientEntities {
                     || !java.util.Objects.equals(horse, o.horse) || !java.util.Objects.equals(horseMounted, o.horseMounted)) {
                 return false;
             }
-            if (ClientMotion.keptAtMount(type) && (!java.util.Objects.equals(motion, o.motion) || everTicked != o.everTicked
+            if (keptAtMount && (!java.util.Objects.equals(motion, o.motion) || everTicked != o.everTicked
                     || hasTickStart != o.hasTickStart || tickStartLower != o.tickStartLower || hasGround != o.hasGround
                     || hasTickStart && (Double.compare(sx, o.sx) != 0 || Double.compare(sy, o.sy) != 0 || Double.compare(sz, o.sz) != 0 || rStart != o.rStart)
                     || hasGround && (Double.compare(gx, o.gx) != 0 || Double.compare(gy, o.gy) != 0 || Double.compare(gz, o.gz) != 0 || rGround != o.rGround))) {
