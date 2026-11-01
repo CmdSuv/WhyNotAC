@@ -29,6 +29,11 @@ public final class Section {
      * content: a decoded section equal to it is not marked).
      */
     private final boolean canonical;
+    /**
+     * For a section not marked {@link #canonical} (as a chunk packet delivered it): 1 if it is laid out as {@code of} would
+     * pack it all the same, -1 if not, 0 until its first change works it out (a race works it out twice, alike).
+     */
+    private byte packedAsOf;
 
     private Section(int single, int bits, long[] data, int[] palette, int globalLimit, boolean canonical) {
         this.single = single;
@@ -85,10 +90,15 @@ public final class Section {
      * then global ids), and a section whose values no longer fit a palette keeps global ids.
      */
     Section with(int[] indices, int[] states, int globalBits, int stateCount) {
-        Section inPlace = canonical && globalLimit == stateCount ? withinPalette(indices, states, stateCount) : null;
+        Section inPlace = globalLimit == stateCount && packedAsOf() ? withinPalette(indices, states, stateCount) : null;
         if (inPlace != null) {
             return inPlace;
         }
+        return repack(indices, states, globalBits, stateCount);
+    }
+
+    /** {@link #with} by unpacking every value and packing them again ({@link #of}); package-private for tests. */
+    Section repack(int[] indices, int[] states, int globalBits, int stateCount) {
         int[] values = new int[4096];
         for (int i = 0; i < 4096; i++) {
             values[i] = get(i);
@@ -99,30 +109,157 @@ public final class Section {
         return of(values, palette, globalBits, stateCount);
     }
 
+    /** Whether {@link #withinPalette} may rewrite this section: {@link #canonical}, or laid out as if it were. */
+    private boolean packedAsOf() {
+        if (canonical) {
+            return true;
+        }
+        byte known = packedAsOf;
+        if (known == 0) {
+            known = layoutOfOf() ? (byte) 1 : (byte) -1;
+            packedAsOf = known;
+        }
+        return known > 0;
+    }
+
     /**
-     * {@link #with} of a canonical section whose palette holds every new state, without unpacking it: {@code of} would
-     * keep the palette as it is (nothing to append), so the width and every other stored value stay, only the changed
-     * values are rewritten. Null where the palette lacks a state or the section turns uniform ({@code of}'s cases).
+     * What {@code of} requires to pack this section's values with its palette as they are: a palette without duplicates,
+     * {@code of}'s width for its size, every stored value an index into it, the unused bits zero. A chunk packet's section
+     * from the game's own palette almost always is (checked once per section, at its first change: a few microseconds,
+     * against tens for unpacking and packing it).
+     */
+    private boolean layoutOfOf() {
+        if (palette == null || bits == 0 || data == null) {
+            return false;
+        }
+        int size = palette.length;
+        int needed = 32 - Integer.numberOfLeadingZeros(Math.max(size - 1, 1));
+        if (size == 0 || size > PaletteIndex.MAX || bits != Math.max(4, needed) || data.length != longsFor(bits, 4096)) {
+            return false;
+        }
+        if (size <= 32) {
+            for (int i = 1; i < size; i++) {
+                for (int j = 0; j < i; j++) {
+                    if (palette[i] == palette[j]) {
+                        return false;
+                    }
+                }
+            }
+        } else {
+            int[] sorted = palette.clone();
+            Arrays.sort(sorted);
+            for (int i = 1; i < size; i++) {
+                if (sorted[i] == sorted[i - 1]) {
+                    return false;
+                }
+            }
+        }
+        long mask = (1L << bits) - 1;
+        boolean everyIndexValid = size == 1 << bits;
+        int last = data.length - 1;
+        for (int cell = 0; cell <= last; cell++) {
+            long word = data[cell];
+            int count = cell == last ? 4096 - last * valuesPerLong : valuesPerLong;
+            if (count * bits < 64 && word >>> count * bits != 0) {
+                return false;
+            }
+            if (!everyIndexValid) {
+                for (int k = 0; k < count; k++) {
+                    if ((word >>> k * bits & mask) >= size) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * {@link #with} of a section laid out as {@code of} packs it ({@link #packedAsOf}), without unpacking it: {@code of}
+     * would keep the palette and append the states it lacks, in the order the changed values first hold them (it scans
+     * the values by index), so while they fit the width every other stored value stays and only the changed ones are
+     * rewritten. Null where the width would grow or the section turns uniform ({@code of}'s other cases).
      */
     private Section withinPalette(int[] indices, int[] states, int stateCount) {
         if ((long) indices.length * palette.length > 4096) {
             return null; // looking them up costs more than unpacking
         }
-        int[] positions = new int[indices.length];
-        for (int i = 0; i < indices.length; i++) {
+        int n = indices.length;
+        // a later change of the same index wins: only the last one per index stays
+        boolean[] stays = new boolean[n];
+        long[] seen = new long[64];
+        for (int i = n - 1; i >= 0; i--) {
+            int index = indices[i];
+            if ((seen[index >>> 6] & 1L << index) == 0) {
+                seen[index >>> 6] |= 1L << index;
+                stays[i] = true;
+            }
+        }
+        int[] positions = new int[n];
+        int[] added = null; // states the palette lacks, with the lowest index each stays at
+        int[] addedAt = null;
+        int addedCount = 0;
+        for (int i = 0; i < n; i++) {
+            if (!stays[i]) {
+                continue;
+            }
             int state = states[i] >= 0 && states[i] < stateCount ? states[i] : INVALID;
             int position = 0;
             while (position < palette.length && palette[position] != state) {
                 position++;
             }
             if (position == palette.length) {
-                return null;
+                int a = 0;
+                while (a < addedCount && added[a] != state) {
+                    a++;
+                }
+                if (a == addedCount) {
+                    if (palette.length + addedCount + 1 > 1 << bits) {
+                        return null; // the width grows
+                    }
+                    if (added == null) {
+                        added = new int[4];
+                        addedAt = new int[4];
+                    } else if (addedCount == added.length) {
+                        added = Arrays.copyOf(added, addedCount * 2);
+                        addedAt = Arrays.copyOf(addedAt, addedCount * 2);
+                    }
+                    added[addedCount] = state;
+                    addedAt[addedCount++] = indices[i];
+                } else {
+                    addedAt[a] = Math.min(addedAt[a], indices[i]);
+                }
+                position = -1 - a; // resolved once the order of the added states is known
             }
             positions[i] = position;
         }
+        int[] newPalette = palette;
+        if (addedCount > 0) {
+            // of appends them by the lowest index holding each
+            Integer[] order = new Integer[addedCount];
+            for (int a = 0; a < addedCount; a++) {
+                order[a] = a;
+            }
+            int[] at = addedAt;
+            Arrays.sort(order, (x, y) -> Integer.compare(at[x], at[y]));
+            int[] rank = new int[addedCount];
+            newPalette = Arrays.copyOf(palette, palette.length + addedCount);
+            for (int r = 0; r < addedCount; r++) {
+                rank[order[r]] = palette.length + r;
+                newPalette[palette.length + r] = added[order[r]];
+            }
+            for (int i = 0; i < n; i++) {
+                if (stays[i] && positions[i] < 0) {
+                    positions[i] = rank[-1 - positions[i]];
+                }
+            }
+        }
         long[] changed = data.clone();
         long mask = (1L << bits) - 1;
-        for (int i = 0; i < indices.length; i++) {
+        for (int i = 0; i < n; i++) {
+            if (!stays[i]) {
+                continue;
+            }
             int cell = indices[i] / valuesPerLong;
             int shift = (indices[i] - cell * valuesPerLong) * bits;
             changed[cell] = changed[cell] & ~(mask << shift) | (long) positions[i] << shift;
@@ -130,7 +267,7 @@ public final class Section {
         if (uniform(changed)) {
             return null;
         }
-        return new Section(-1, bits, changed, palette, globalLimit, true);
+        return new Section(-1, bits, changed, newPalette, globalLimit, true);
     }
 
     /** Whether every one of the 4096 values in {@code packed} (this section's width) is the same. */
@@ -246,9 +383,14 @@ public final class Section {
         }
     }
 
-    /** Whether {@link #with} can rewrite this section in place (for tests). */
+    /** Whether this section is marked as packed by {@code of} (for tests). */
     boolean canonical() {
         return canonical;
+    }
+
+    /** Whether {@link #with} may rewrite this section in place (for tests). */
+    boolean rewritesInPlace() {
+        return packedAsOf();
     }
 
     /** An equal section as a chunk packet delivers it, not marked canonical (for tests). */

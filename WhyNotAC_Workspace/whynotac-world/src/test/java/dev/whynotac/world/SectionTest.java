@@ -38,7 +38,7 @@ class SectionTest {
                 }
                 inPlace += section.canonical() ? 1 : 0;
                 Section fast = section.with(indices, states, GLOBAL_BITS, STATES);
-                Section repacked = section.asDelivered().with(indices, states, GLOBAL_BITS, STATES);
+                Section repacked = section.repack(indices, states, GLOBAL_BITS, STATES);
                 assertEquals(repacked, fast, "seed " + seed + " step " + step);
                 assertEquals(repacked.hashCode(), fast.hashCode());
                 for (int i = 0; i < 4096; i++) {
@@ -69,15 +69,101 @@ class SectionTest {
     }
 
     @Test
-    void aSectionAsDeliveredIsNotRewrittenInPlaceButEndsEqual() {
+    void aSectionAsDeliveredEndsEqualWhicheverWayItIsRewritten() {
         Section one = Section.uniform(0).with(5, 7, GLOBAL_BITS, STATES);
         Section delivered = one.asDelivered();
         assertFalse(delivered.canonical());
+        assertTrue(delivered.rewritesInPlace(), "laid out as of packs it");
         assertEquals(one, delivered);
         assertEquals(one.with(6, 7, GLOBAL_BITS, STATES), delivered.with(6, 7, GLOBAL_BITS, STATES));
         assertTrue(delivered.with(6, 7, GLOBAL_BITS, STATES).canonical());
         // packed for another registry: repacked for this one
         assertEquals(delivered.with(6, 7, GLOBAL_BITS, 500), one.with(6, 7, GLOBAL_BITS, 500));
+    }
+
+    /**
+     * Sections as a chunk packet may deliver them, well formed or with one flaw {@code of} would not reproduce: a palette
+     * entry twice, a wider storage than needed, a set unused bit, a stored index past the palette. Only the well formed
+     * ones are rewritten in place, and every rewrite equals unpacking and packing, representation and all.
+     */
+    @Test
+    void deliveredLayoutsGiveWhatRepackingGives() {
+        int[] inPlace = new int[5];
+        int[] built = new int[5];
+        for (int seed = 0; seed < 400; seed++) {
+            Random random = new Random(seed);
+            int flaw = seed % 5;
+            int size = 1 + random.nextInt(flaw == 2 ? 100 : 40);
+            int[] palette = random.ints(0, STATES).distinct().limit(size).toArray();
+            int bits = Math.max(4, 32 - Integer.numberOfLeadingZeros(Math.max(size - 1, 1)));
+            if (flaw == 1) {
+                if (size < 2) {
+                    continue;
+                }
+                palette[size - 1] = palette[0];
+            }
+            if (flaw == 2) {
+                if (bits == 8) {
+                    continue;
+                }
+                bits++;
+            }
+            int perLong = 64 / bits;
+            long[] data = new long[Section.longsFor(bits, 4096)];
+            int[] values = new int[4096];
+            for (int i = 0; i < 4096; i++) {
+                values[i] = random.nextInt(size);
+                data[i / perLong] |= (long) values[i] << (i % perLong) * bits;
+            }
+            if (flaw == 3) {
+                int last = data.length - 1;
+                int usedInLast = (4096 - last * perLong) * bits;
+                if (perLong * bits < 64 && random.nextBoolean()) {
+                    data[random.nextInt(last)] |= 1L << 63;
+                } else if (usedInLast < 64) {
+                    data[last] |= 1L << 63;
+                } else {
+                    continue;
+                }
+            }
+            if (flaw == 4) {
+                if (size == 1 << bits) {
+                    continue;
+                }
+                int i = random.nextInt(4096);
+                data[i / perLong] |= (long) size << (i % perLong) * bits;
+            }
+            Section section = Section.packed(bits, data, palette, STATES);
+            built[flaw]++;
+            inPlace[flaw] += section.rewritesInPlace() ? 1 : 0;
+            for (int step = 0; step < 4; step++) {
+                int count = 1 + random.nextInt(random.nextBoolean() ? 6 : 200);
+                int[] indices = new int[count];
+                int[] states = new int[count];
+                for (int i = 0; i < count; i++) {
+                    indices[i] = random.nextInt(4096);
+                    states[i] = random.nextInt(8) == 0 ? random.nextInt(STATES) : palette[random.nextInt(size)];
+                }
+                int[] expected = new int[4096];
+                for (int i = 0; i < 4096; i++) {
+                    expected[i] = section.get(i);
+                }
+                for (int i = 0; i < count; i++) {
+                    expected[indices[i]] = states[i];
+                }
+                Section rewritten = section.with(indices, states, GLOBAL_BITS, STATES);
+                assertEquals(section.repack(indices, states, GLOBAL_BITS, STATES), rewritten, "seed " + seed + " step " + step);
+                for (int i = 0; i < 4096; i++) {
+                    assertEquals(expected[i], rewritten.get(i), "seed " + seed + " step " + step + " index " + i);
+                }
+                section = rewritten;
+            }
+        }
+        assertEquals(built[0], inPlace[0], "every well formed section is rewritten in place");
+        for (int flaw = 1; flaw < 5; flaw++) {
+            assertTrue(built[flaw] > 20, "flaw " + flaw + " built " + built[flaw] + " times");
+            assertEquals(0, inPlace[flaw], "a section with flaw " + flaw + " is repacked");
+        }
     }
 
     private static int[] allBut(int index) {
