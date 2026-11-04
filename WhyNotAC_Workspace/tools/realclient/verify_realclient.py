@@ -272,7 +272,9 @@ def main():
     mouse = next(a for a in drive["actions"] if a["what"] == "mouse")
     yaw_ok, yaw_detail = aligned(result["yaw_counts"], mouse["horizontal"])
     check(yaw_ok, f"every yaw step is exactly one commanded mouse motion through the vanilla float math: {yaw_detail}")
-    pitch_ok, pitch_detail = aligned(result["pitch_counts"], mouse["vertical"])
+    # with the vertical axis inverted (invertYMouse) the same motion turns the other way
+    vertical = [-v for v in mouse["vertical"]] if os.environ.get("REALCLIENT_INVERT_Y") == "true" else mouse["vertical"]
+    pitch_ok, pitch_detail = aligned(result["pitch_counts"], vertical)
     check(pitch_ok, f"every pitch step too: {pitch_detail}")
     rejected = {name: not aligned(c["yaw_counts"], mouse["horizontal"])[0] for name, c in result["negative_controls"].items()}
     check(all(rejected.values()), f"the same data rejects every wrong model (negative controls): {rejected}")

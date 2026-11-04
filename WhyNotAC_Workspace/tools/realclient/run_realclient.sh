@@ -47,6 +47,10 @@ find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delet
 # lines of its own (other legitimate settings, e.g. "toggleSprint:true").
 MAX_FPS=${REALCLIENT_MAX_FPS:-60}
 EXTRA_OPTIONS=${REALCLIENT_OPTIONS:-}
+# The mouse (VAL-13): REALCLIENT_SENSITIVITY is the options' slider value (0.0..1.0; 0.83 by default),
+# REALCLIENT_INVERT_Y=true inverts the vertical axis. The rotation check infers the commanded motions with them.
+SENSITIVITY=${REALCLIENT_SENSITIVITY:-0.83}
+export REALCLIENT_INVERT_Y=${REALCLIENT_INVERT_Y:-false}
 cat > "$WORK_DIR/game/options.txt" <<OPTS
 onboardAccessibility:false
 skipMultiplayerWarning:true
@@ -58,7 +62,8 @@ simulationDistance:5
 maxFps:$MAX_FPS
 narrator:0
 soundCategory_master:0.0
-mouseSensitivity:0.83
+mouseSensitivity:$SENSITIVITY
+invertYMouse:$REALCLIENT_INVERT_Y
 autoJump:true
 ${EXTRA_OPTIONS}
 OPTS
@@ -675,7 +680,7 @@ RECORDING=$(find "$WORK_DIR/plugins/WhyNotAC/recordings" -name '*.wnrec' | head 
 echo "--- recording: ${RECORDING:-<none>}"
 JARS=$(find "$ROOT/whynotac-math/build/libs" "$ROOT/whynotac-protocol/build/libs" "$ROOT/whynotac-recording/build/libs" -name '*.jar' ! -name '*-sources.jar' | paste -sd:)
 java -jar "$WORK_DIR/plugins/WhyNotAC.jar" dump "$RECORDING" > "$WORK_DIR/dump.jsonl"
-java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/RealClientCheck.java" "$RECORDING" 0.83 > "$WORK_DIR/check.json"
+java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/RealClientCheck.java" "$RECORDING" "$SENSITIVITY" > "$WORK_DIR/check.json"
 # Every attack, assessed as the attack-reach check does (in reach, out of reach, or no claim and why).
 java -cp "$WORK_DIR/plugins/WhyNotAC.jar" "$HERE/ReachAudit.java" "$RECORDING" > "$WORK_DIR/reach-audit.jsonl"
 # Every block finish, as the break-time check judged it (within, early, not known), with its ticks off the ground.
