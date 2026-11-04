@@ -220,6 +220,7 @@ public final class ClientEntities {
      * changed. Nothing is worked out later from a history the pings have pruned since.
      */
     private final Map<Long, RestGroup> resting = new HashMap<>();
+    private final ArrayList<State> tickNext = new ArrayList<>();
     /** False: every track steps at every tick (tests compare the two). */
     private final boolean restingAllowed;
 
@@ -469,7 +470,7 @@ public final class ClientEntities {
             case ClientboundPacket.SetEntityData data -> entityData(seq, data);
             case ClientboundPacket.SetEntityMotion motion -> {
                 Head head = heads.get(motion.entityId());
-                if (head != null && ClientMotion.keptAtMount(head.type)) {
+                if (head != null && head.keptAtMount) {
                     // handleSetEntityMotion: lerpMotion sets the motion; a boat the client does not control zeroes it in its tick,
                     // a horse's slows down in each (LivingEntity.aiStep)
                     enqueue(seq, head.id, new Op.Motion(seq, motion.clientMotion()));
@@ -1235,15 +1236,18 @@ public final class ClientEntities {
                 }
                 continue;
             }
-            List<State> next = new ArrayList<>();
+            List<State> next = tickNext; // every outcome of every prefix before the merge: reused, it grows once
+            next.clear();
             for (State state : track.candidates) {
                 // Any further prefix of the window may have been processed before this tick.
                 for (State s : prefixes(track, state, applicable)) {
                     tick(s, lower(track, s.applied), upper(track, s.applied, end), next);
                 }
             }
-            track.candidates(merge(next));
+            List<State> merged = merge(next);
+            track.candidates(merged == next ? new ArrayList<>(next) : merged);
         }
+        tickNext.clear();
         selfSentAtTick = selfSent;
         report();
     }
@@ -2900,11 +2904,15 @@ public final class ClientEntities {
         int vehicle = NONE;
         final List<Integer> passengers = new ArrayList<>(1);
 
+        /** {@code ClientMotion.keptAtMount(type)} (read at every SetEntityMotion). */
+        final boolean keptAtMount;
+
         Head(int id, EntityTypes.Kind kind, String type, boolean player) {
             this.id = id;
             this.kind = kind;
             this.type = type;
             this.player = player;
+            this.keptAtMount = ClientMotion.keptAtMount(type);
         }
 
         void base(Vec3d p) {
