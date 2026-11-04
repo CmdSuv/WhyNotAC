@@ -175,6 +175,8 @@ edilebilirlik izleyicisi); burada bunlar botların blok arkasından vuruşlarıd
 | 4c1e2fc | 1,88 | 0,28 | 1,03 | 3,19 |
 | 0b507d3 (yeniden gönderilen chunk'lar başvuruyla) | 1,70 | 0,15 | 0,94 | 2,79 |
 | 0d4e10b (ping takibi ilkel dizilerde, varlık izleri dinlenir) | 1,58 | 0,18 | 0,78 | 2,54 |
+| ed6ed13 (1) | 1,62 | 0,15 | 0,88 | 2,64 |
+| ed6ed13 (2) | 1,80 | 0,18 | 0,95 | 2,92 |
 
   Kesintiler %10-20 kazandırdı ve sunucu thread'inin kilit beklemelerini kaldırdı. Hedef (< 1 ms/s) hâlâ 3 kat uzakta.
   Kalan maliyet tek tük sıcak noktalarda değil, tasarımda:

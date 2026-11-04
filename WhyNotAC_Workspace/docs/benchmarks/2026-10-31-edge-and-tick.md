@@ -106,3 +106,31 @@ Değerler oyuncu başına ms/s:
 0 vaka (bot yapıntıları ayrı), 0 kayıp olay, 0 dinleyici hatası, 0 anomali. Tek koşular gürültülüdür. Netty'deki
 düşüş ping takibinin mikro ölçümüyle, analizdeki düşüş tik payının yarıya inmesiyle uyumludur. Hedef (< 1 ms/s) 2,5 kat
 uzakta.
+
+## Blok değişiklikleri ve belirsiz izler (1d99c39, d712620, ed6ed13)
+
+- **Bölümler.** 40 botluk 10 kayıtta 7.095 bölüm değişikliğinin 2.338'i bütün 4.096 değeri açıp yeniden paketliyordu.
+  Bunların 741'i, chunk paketinin getirdiği hâliyle duran bölümlerdeydi. Böyle bir bölüm artık ilk değişikliğinde bir kez
+  denetlenir: `of` onu aynen paketler mi? 1.480 değişiklik ise palette'te olmayan, ama genişliğe sığan bir durum
+  getiriyordu. `of` böyle bir durumu, değişen değerlerin onu ilk tuttuğu sırayla sona ekler; yerinde yazım da artık aynı
+  şeyi yapar. Her yerinde yazım, açıp yeniden paketlemeyle temsiliyle birlikte aynıdır. Yedi mutantın her biri
+  testlerde başarısız olur.
+- **Belirsiz izler.** Birkaç adaylı bir izin bütün sonuçları her tikte yeni bir listede toplanıyordu ve bu listenin
+  büyümesi tekrar oynatmanın %5,7'siydi. Artık tik boyunca tek liste kullanılır.
+- **Küçük bir hesap.** `keptAtMount`, tür atandığında bir kez hesaplanır.
+
+İç içe tekrar oynatmada en iyi ns/tik:
+
+| Derleme | En iyi ns/tik |
+|---|---|
+| 0d4e10b | yaklaşık 22.500-24.000 |
+| 1d99c39 | 20.413-20.831 |
+| ed6ed13 | 18.912-19.437 |
+
+Kanıt ve paylar her adımda aynıdır.
+
+Canlıda aynı derlemenin (ed6ed13) iki koşusu oyuncu başına 2,64 ve 2,92 ms/s verdi; 0d4e10b'nin koşusu 2,54'tü. Ağ
+kenarında hiçbir şey değişmediği hâlde onun payı da 0,78'den 0,88 ve 0,95'e çıktı. İkinci koşuda TPS de düşüktü (16,2).
+Tek bir canlı koşu, makinenin yüküne göre ±%10-15 oynar. Bu turun kazancı (tekrar oynatmada yaklaşık %20) canlıda bu
+gürültünün altında kalıyor. Tekrar oynatmadaki A/B, aynı kayıtlarla ve deterministik olduğu için güvenilir ölçümdür.
+Canlı sayıları ayırt etmek için her derlemeden birkaç koşu gerekir.
