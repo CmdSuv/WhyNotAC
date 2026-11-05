@@ -87,26 +87,38 @@ def server_vehicle_moves(events):
     """MoveVehicle packets on the server timeline from the vehicle's ticks, the vehicle moves the server sent back (its
     corrections: "moved wrongly") and the client's answers to them. The client answers each where it handles it, at frame
     start and not in a tick (ClientPacketListener.handleMoveVehicle: snapped to the server's position when it is more
-    than 1e-5 away, then ServerboundMoveVehiclePacket.fromEntity): the next MoveVehicle after one, left out here, and
-    counted as matching when it is at the correction's position."""
+    than 1e-5 away, then ServerboundMoveVehiclePacket.fromEntity): the first MoveVehicle at the correction's position
+    after it, left out here. The moves of the ticks before the client handled it may come first (still on their way when
+    the server sent it, on a slow connection): those are the ticks' own. A correction no move answers within
+    ANSWER_WINDOW moves counts as not answered (one within 1e-5 of the boat is answered at the boat's own position)."""
     moves = []
     corrections = 0
     answered = 0
     pending = None
+    waited = 0
     for e in events:
         if e["type"] == "Outbound" and e["packet"]["type"] == "MoveVehicle":
             corrections += 1
             pending = tuple(bits(e["packet"]["position"][a]["bits"]) for a in ("x", "y", "z"))
+            waited = 0
         if e["type"] != "Inbound" or e["packet"]["type"] != "MoveVehicle":
             continue
         p = e["packet"]
         pos = tuple(bits(p["position"][a]["bits"]) for a in ("x", "y", "z"))
         if pending is not None:
-            answered += pos == pending
-            pending = None
-            continue
+            if pos == pending:
+                answered += 1
+                pending = None
+                continue
+            waited += 1
+            if waited > ANSWER_WINDOW:
+                pending = None
         moves.append({"pos": pos, "rot": (bits(p["yaw"]["bits"]), bits(p["pitch"]["bits"])), "onGround": p["onGround"]})
     return moves, corrections, answered
+
+
+# A correction's answer comes after the ticks' moves still on their way: 40 ticks is two seconds of round trip.
+ANSWER_WINDOW = 40
 
 
 def f32(field):
