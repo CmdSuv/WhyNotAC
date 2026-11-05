@@ -3,6 +3,8 @@ package dev.whynotac.world;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.whynotac.math.vector.Vec3d;
@@ -263,6 +265,148 @@ class ClientWorldTest {
         assertFalse(world.settled(5, 11, 5)); // sent, not yet processed by the client
         sync();
         assertTrue(world.settled(5, 11, 5));
+    }
+
+    // --- block uses resolved by the caller (ClientWorld.placement, resolveUse) ---
+
+    private static final int CHEST = STATES.firstStateOf("minecraft:chest");
+    private static final int FENCE = STATES.firstStateOf("minecraft:oak_fence");
+    private static final int SHORT_GRASS = STATES.firstStateOf("minecraft:short_grass");
+    private static final int OAK_LOG = STATES.firstStateOf("minecraft:oak_log");
+    private static final int SAND = STATES.onlyStateOf("minecraft:sand");
+
+    private void useOn(int x, int y, int z, BlockFace face, int sequence) {
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(x, y, z), face, new Vec3d(x + 0.5, y + 1, z + 0.5), false, false, sequence));
+    }
+
+    private void setBlock(int x, int y, int z, int state) {
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(x, y, z), state));
+    }
+
+    /** An empty chunk at 0, 0 with stone at (5, 10, 5), all settled. */
+    private void stoneInTheAir() {
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0)));
+        setBlock(5, 10, 5, STONE);
+        sync();
+    }
+
+    private static int[] distinct(int[] states) {
+        return states == null ? null : java.util.Arrays.stream(states).distinct().sorted().toArray();
+    }
+
+    @Test
+    void aResolvedPlacementHoldsItsStateUntilTheAckAndTheServersStateAfter() {
+        assertEquals(STATES.firstStateOf("minecraft:stone"), STATES.onlyStateOf("minecraft:stone"));
+        assertEquals(-1, STATES.onlyStateOf("minecraft:oak_log"));
+        stoneInTheAir();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        assertNull(world.possibleStates(5, 11, 5)); // not resolved: the default, a prediction not known
+        BlockPosition first = world.placement(7, STONE);
+        assertEquals(new BlockPosition(5, 11, 5), first);
+        world.resolveUse(7, first, STONE);
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 11, 5));
+        assertFalse(world.settled(5, 11, 5));
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 10, 5)); // clicked, kept
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(5, 12, 5)); // neighbours, kept
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(6, 11, 5));
+        assertArrayEquals(new int[] {AIR}, world.possibleStatesBefore(5, 11, 5, 7)); // what the use's own pick saw
+
+        // a tower: the next use clicks the block the first one placed, before any ack
+        useOn(5, 11, 5, BlockFace.UP, 8);
+        BlockPosition second = world.placement(8, STONE);
+        assertEquals(new BlockPosition(5, 12, 5), second);
+        world.resolveUse(8, second, STONE);
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 12, 5));
+        assertArrayEquals(new int[] {AIR}, world.possibleStatesBefore(5, 12, 5, 8));
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 11, 5));
+
+        // the server places the first too; the client keeps its own state for it until the ack
+        setBlock(5, 11, 5, STONE);
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 11, 5));
+        out(new ClientboundPacket.BlockChangedAck(7));
+        assertArrayEquals(new int[] {STONE}, distinct(world.possibleStates(5, 11, 5))); // the server's as of the ack: stone too
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 12, 5)); // the ack is not the second use's
+        sync();
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 11, 5));
+
+        // the server refuses the second: the client holds stone until it processes the ack, air after
+        setBlock(5, 12, 5, AIR);
+        out(new ClientboundPacket.BlockChangedAck(8));
+        assertArrayEquals(new int[] {AIR, STONE}, distinct(world.possibleStates(5, 12, 5)));
+        sync();
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(5, 12, 5));
+        assertTrue(world.settled(5, 12, 5));
+        assertTrue(world.settled(5, 11, 5));
+        assertNull(world.placement(8, STONE)); // acknowledged: no longer one to resolve
+    }
+
+    @Test
+    void anAckSentBeforeTheServersChangeLeavesTheStateBeforeItPossible() {
+        stoneInTheAir();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        world.resolveUse(7, world.placement(7, STONE), STONE);
+        out(new ClientboundPacket.BlockChangedAck(7)); // before the server's own change: the client may restore air
+        setBlock(5, 11, 5, STONE);
+        assertArrayEquals(new int[] {AIR, STONE}, distinct(world.possibleStates(5, 11, 5)));
+    }
+
+    @Test
+    void aBlockedUseKeepsEveryPosition() {
+        stoneInTheAir();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        world.resolveUse(7, null, 0);
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(5, 11, 5));
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 10, 5));
+        assertFalse(world.settled(5, 11, 5)); // still a prediction until the ack: only its outcome is known
+        assertThrows(IllegalArgumentException.class, () -> world.resolveUse(7, new BlockPosition(9, 9, 9), STONE));
+    }
+
+    @Test
+    void aPlacementIsOnlyWhereTheBlocksDecideIt() {
+        stoneInTheAir();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        assertNull(world.placement(7, OAK_LOG)); // its state depends on the click (CUSTOM_PLACEMENT)
+        assertNull(world.placement(7, SAND)); // reacts to its neighbours (falls on the server, shape updates)
+        assertNull(world.placement(99, STONE)); // no such use
+        setBlock(4, 10, 4, CHEST);
+        sync();
+        useOn(4, 10, 4, BlockFace.UP, 8);
+        assertNull(world.placement(8, STONE)); // the chest's own use comes first
+        setBlock(7, 11, 7, SHORT_GRASS);
+        sync();
+        useOn(7, 10, 7, BlockFace.UP, 9);
+        assertNull(world.placement(9, STONE)); // short grass is replaced, but it reacts to the change
+        setBlock(2, 10, 2, STONE);
+        setBlock(2, 11, 3, FENCE);
+        sync();
+        useOn(2, 10, 2, BlockFace.UP, 10);
+        assertNull(world.placement(10, STONE)); // a fence next to the new block connects to it
+        setBlock(9, 319, 9, STONE);
+        sync();
+        useOn(9, 319, 9, BlockFace.UP, 11);
+        assertNull(world.placement(11, STONE)); // above the build height
+        assertNull(world.placement(12, STONE));
+        useOn(9, 319, 9, BlockFace.DOWN, 12);
+        assertNull(world.placement(12, STONE)); // use 11, not resolved, may have changed the clicked block
+        setBlock(12, 319, 12, STONE);
+        setBlock(13, 10, 13, STONE);
+        sync();
+        useOn(12, 319, 12, BlockFace.DOWN, 13);
+        assertEquals(new BlockPosition(12, 318, 12), world.placement(13, STONE));
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(13, 10, 13), BlockFace.UP, 14));
+        useOn(13, 10, 13, BlockFace.UP, 15);
+        assertNull(world.placement(15, STONE)); // the clicked block may be the dig's prediction
+    }
+
+    @Test
+    void aChunkSentAgainHoldsTheServersStateNotTheClientsOwn() {
+        stoneInTheAir();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        world.resolveUse(7, world.placement(7, STONE), STONE);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0)));
+        sync();
+        assertNull(world.possibleStates(5, 11, 5)); // the chunk replaced the placed block; the ack will restore the server's
     }
 
     @Test

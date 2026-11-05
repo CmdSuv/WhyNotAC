@@ -379,7 +379,6 @@ public final class BlockStates {
         return fluidFalling[state];
     }
 
-    /** The lowest state id of {@code block} (for blocks with one state, its only state), or -1. */
     /** The registry id of the state's block ({@code BuiltInRegistries.BLOCK}: what block tags list). */
     public int blockId(int state) {
         return blockId[state];
@@ -394,8 +393,15 @@ public final class BlockStates {
         return blockKeys.size();
     }
 
+    /** The lowest state id of {@code block} (for blocks with one state, its only state), or -1. */
     public int firstStateOf(String block) {
         return firstState.getOrDefault(block, -1);
+    }
+
+    /** The state of {@code block} if it has no other (a block's states have consecutive ids), else -1. */
+    public int onlyStateOf(String block) {
+        int first = firstStateOf(block);
+        return first < 0 || first + 1 < this.block.length && block.equals(this.block[first + 1]) ? -1 : first;
     }
 
     public int shapeCount() {

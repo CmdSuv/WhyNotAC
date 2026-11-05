@@ -7,6 +7,7 @@ import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -46,6 +47,8 @@ public final class ClientWorld {
     private static final int DEFAULT_SECTIONS = 24;
     private static final int DEFAULT_MIN_Y = -64;
     private static final int MAX_TRACKED_PINGS = 4096;
+    /** In {@link #resolvedUses}: the use set no block there. */
+    private static final int KEPT = Integer.MIN_VALUE;
     /** A block action can change the clicked block, the block next to it and that one's neighbours (doors, beds, tall plants). */
     private static final int[][] PREDICTION_NEIGHBOURS = {{0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
     private static final int[][] PREDICTION_SELF = {{0, 0, 0}};
@@ -79,6 +82,15 @@ public final class ClientWorld {
     private final Map<Long, Integer> predictions = new HashMap<>();
     /** The lowest block-action sequence that may still hold each position in {@link #predictions}. */
     private final Map<Long, Integer> earliestPredictions = new HashMap<>();
+    /** Per position in {@link #predictions}: the block-action sequence of each prediction still outstanding there, in the order made. */
+    private final Map<Long, int[]> predictionSequences = new HashMap<>();
+    /** The block uses whose predictions {@link #resolveUse} may resolve, by block-action sequence. */
+    private final Map<Integer, ServerboundPacket.UseItemOn> uses = new HashMap<>();
+    /**
+     * Resolved uses ({@link #resolveUse}): block-action sequence -> position -> the state the client set there,
+     * {@link #KEPT} where it set none.
+     */
+    private final Map<Integer, Map<Long, Integer>> resolvedUses = new HashMap<>();
     /** Block-action sequences of item uses whose block changes (if any) WhyNotAC cannot locate. */
     private final ArrayDeque<Integer> unlocatedPredictions = new ArrayDeque<>();
     /** block_changed_ack values the client may not have processed yet: [outbound sequence, acked sequence]. */
@@ -265,6 +277,7 @@ public final class ClientWorld {
             }
             case ClientboundPacket.LevelChunk chunk -> loadChunk(sequence, chunk);
             case ClientboundPacket.ForgetLevelChunk forget -> {
+                forgetResolvedIn(forget.x(), forget.z());
                 Column dropped = storage == null ? null : storage.drop(forget.x(), forget.z());
                 change(sequence, (long) forget.x() << 4, Long.MIN_VALUE, (long) forget.z() << 4, ((long) forget.x() << 4) + 15, Long.MAX_VALUE,
                         ((long) forget.z() << 4) + 15);
@@ -300,6 +313,7 @@ public final class ClientWorld {
     private void onInbound(long eventSequence, ServerboundPacket packet) {
         switch (packet) {
             case ServerboundPacket.UseItemOn use -> {
+                uses.put(use.sequence(), use);
                 BlockPosition p = use.position();
                 predict(eventSequence, p.x(), p.y(), p.z(), use.sequence(), false);
                 BlockFace face = use.face();
@@ -351,6 +365,10 @@ public final class ClientWorld {
             }
             predictions.values().removeIf(sequence -> sequence <= acked);
             earliestPredictions.keySet().retainAll(predictions.keySet());
+            predictionSequences.keySet().retainAll(predictions.keySet());
+            predictionSequences.replaceAll((key, sequences) -> after(sequences, acked));
+            uses.keySet().removeIf(sequence -> sequence <= acked);
+            resolvedUses.keySet().removeIf(sequence -> sequence <= acked);
             earliestPredictions.replaceAll((key, sequence) -> sequence <= acked ? acked + 1 : sequence); // some later one is left
             while (!unlocatedPredictions.isEmpty() && unlocatedPredictions.peekFirst() <= acked) {
                 unlocatedPredictions.pollFirst();
@@ -381,6 +399,9 @@ public final class ClientWorld {
         // A new ClientLevel has a new BlockStatePredictionHandler: its block-action sequence starts again.
         predictions.clear();
         earliestPredictions.clear();
+        predictionSequences.clear();
+        uses.clear();
+        resolvedUses.clear();
         unlocatedPredictions.clear();
         pendingBlockAcks.clear();
         confirmedBlockAck = Integer.MIN_VALUE;
@@ -395,6 +416,7 @@ public final class ClientWorld {
             chunksIgnored++; // the client logs "Ignoring chunk since it's not in the view range"
             return;
         }
+        forgetResolvedIn(chunk.x(), chunk.z());
         Column column = new Column(chunk.x(), chunk.z());
         if (chunk.body() == null) {
             column.stale = true;
@@ -482,8 +504,29 @@ public final class ClientWorld {
         int[][] offsets = withNeighbours ? PREDICTION_NEIGHBOURS : PREDICTION_SELF;
         for (int[] o : offsets) {
             change(eventSequence, x + o[0], y + o[1], z + o[2], x + o[0], y + o[1], z + o[2]);
-            predictions.merge(blockKey(x + o[0], y + o[1], z + o[2]), sequence, Math::max);
-            earliestPredictions.merge(blockKey(x + o[0], y + o[1], z + o[2]), sequence, Math::min);
+            long key = blockKey(x + o[0], y + o[1], z + o[2]);
+            predictions.merge(key, sequence, Math::max);
+            earliestPredictions.merge(key, sequence, Math::min);
+            int[] sequences = predictionSequences.get(key);
+            if (sequences == null) {
+                predictionSequences.put(key, new int[] {sequence});
+            } else if (sequences[sequences.length - 1] != sequence) {
+                int[] more = Arrays.copyOf(sequences, sequences.length + 1);
+                more[sequences.length] = sequence;
+                predictionSequences.put(key, more);
+            }
+        }
+    }
+
+    /** The sequences above {@code acked}, in their order (some are: the position still has a prediction). */
+    private static int[] after(int[] sequences, int acked) {
+        return Arrays.stream(sequences).filter(q -> q > acked).toArray();
+    }
+
+    /** A chunk the client replaced or dropped holds no state a use set in it any more: those positions are not resolved. */
+    private void forgetResolvedIn(int chunkX, int chunkZ) {
+        for (Map<Long, Integer> cells : resolvedUses.values()) {
+            cells.keySet().removeIf(key -> blockX(key) >> 4 == chunkX && blockZ(key) >> 4 == chunkZ);
         }
     }
 
@@ -588,8 +631,77 @@ public final class ClientWorld {
         long key = blockKey(x, y, z);
         Integer earliest = earliestPredictions.get(key);
         if (earliest != null && earliest < sequence) {
+            return predictedBefore(x, y, z, key, sequence);
+        }
+        return serverStates(x, y, z, key, now);
+    }
+
+    /**
+     * {@link #possibleStatesBefore} where predictions before {@code sequence} hold the position: known only where each of
+     * them is resolved ({@link #resolveUse}). Where none set a state there the client holds the server's (a position the
+     * client set nothing at is not held back: {@code BlockStatePredictionHandler} keeps only those it set); where one set a
+     * state the client holds it until it processes an ack of that use, and the server's states after.
+     */
+    private int[] predictedBefore(int x, int y, int z, long key, int sequence) {
+        int[] sequences = predictionSequences.get(key);
+        if (sequences == null) {
             return null;
         }
+        int placed = KEPT;
+        int placedBy = 0;
+        for (int q : sequences) {
+            if (q >= sequence) {
+                continue; // made after the pick of that action (a vanilla client's sequences only grow)
+            }
+            Map<Long, Integer> cells = resolvedUses.get(q);
+            Integer set = cells == null ? null : cells.get(key);
+            if (set == null) {
+                return null;
+            }
+            if (set != KEPT) {
+                if (placed != KEPT) {
+                    return null; // set twice: the second may come before or after the ack of the first
+                }
+                placed = set;
+                placedBy = q;
+            }
+        }
+        int now = blockState(x, y, z);
+        if (placed == KEPT) {
+            return serverStates(x, y, z, key, now);
+        }
+        int cx = x >> 4;
+        int cz = z >> 4;
+        if (unsettledChunks.containsKey(chunkKey(cx, cz))) {
+            return null;
+        }
+        for (View view : pendingViews) {
+            if (view.inRange(cx, cz) != storage.inRange(cx, cz)) {
+                return null;
+            }
+        }
+        for (long[] ack : pendingBlockAcks) {
+            if (ack[1] >= placedBy) {
+                // the client may have processed it: then it holds the server's state again, as of that ack or later
+                int[] server = serverStates(x, y, z, key, now, ack[0]);
+                if (server == null) {
+                    return null;
+                }
+                int[] out = Arrays.copyOf(server, server.length + 1);
+                out[server.length] = placed;
+                return out;
+            }
+        }
+        return new int[] {placed};
+    }
+
+    /** {@link #possibleStatesBefore} where no prediction of the client's holds the position. */
+    private int[] serverStates(int x, int y, int z, long key, int now) {
+        return serverStates(x, y, z, key, now, Long.MIN_VALUE);
+    }
+
+    /** As {@link #serverStates(int, int, int, long, int)} once the client processed everything sent before {@code processed}. */
+    private int[] serverStates(int x, int y, int z, long key, int now, long processed) {
         int cx = x >> 4;
         int cz = z >> 4;
         if (unsettledChunks.containsKey(chunkKey(cx, cz))) {
@@ -607,9 +719,24 @@ public final class ClientWorld {
         if (before == null) {
             return null;
         }
-        int[] out = new int[before.size() + 1];
+        int skip = 0; // the states before changes the client processed: no longer possible
+        if (processed != Long.MIN_VALUE) {
+            for (Pending p : pending) {
+                if (p.sequence >= processed) {
+                    break;
+                }
+                if (p.kind == Pending.BLOCK && p.key == key) {
+                    skip++;
+                }
+            }
+        }
+        int[] out = new int[before.size() - skip + 1];
         int i = 0;
         for (int state : before) {
+            if (skip > 0) {
+                skip--;
+                continue;
+            }
             if (state == Section.INVALID || state == UNKNOWN) {
                 return null;
             }
@@ -617,6 +744,92 @@ public final class ClientWorld {
         }
         out[i] = now;
         return out;
+    }
+
+    /**
+     * Where the client's block use {@code sequence} places {@code state}, if its hand holds a block item that places
+     * nothing but that state ({@code ItemPrototypes.Prototype#places}, a block of one state) and the blocks alone decide
+     * it (decompiled 1.21.11: {@code MultiPlayerGameMode.performUseItemOn}, {@code BlockItem.place}, {@code Level.setBlock}).
+     * In every state the client may hold before the use: the clicked block takes no part ({@link BlockStates#INTERACTIVE}:
+     * its {@code useItemOn} and {@code useWithoutItem} are the defaults, which pass) and is not replaced (neither
+     * {@link BlockStates#REPLACEABLE} nor {@link BlockStates#CUSTOM_REPLACING}); the block on the clicked face is (it is
+     * REPLACEABLE without a rule of its own and is not of the placed block); the placed state is placed as it is
+     * (not {@link BlockStates#CUSTOM_PLACEMENT}); neither it nor the replaced one changes the blocks diagonal to it, and
+     * no block next to it reacts ({@link BlockStates#NEIGHBOUR_REACTIVE}): {@code setBlock} then changes the one position.
+     * The position is within the level's height, no use the replica cannot locate comes before, and the use is one this
+     * replica saw and has not seen acknowledged. Null where any of that is not known. What else stops the placement (an
+     * entity or the player in the way: {@code Level.isUnobstructed}) is the caller's to know; it says what happened
+     * with {@link #resolveUse}.
+     */
+    public BlockPosition placement(int sequence, int state) {
+        ServerboundPacket.UseItemOn use = uses.get(sequence);
+        if (use == null || storage == null || hasUnlocatedPredictionBefore(sequence) || !states.isValid(state)
+                || states.has(state, BlockStates.CUSTOM_PLACEMENT | BlockStates.NEIGHBOUR_REACTIVE)) {
+            return null;
+        }
+        BlockPosition c = use.position();
+        BlockFace face = use.face();
+        int tx = c.x() + face.stepX();
+        int ty = c.y() + face.stepY();
+        int tz = c.z() + face.stepZ();
+        if (ty < minY() || ty >= minY() + height()) {
+            return null;
+        }
+        int[] clicked = possibleStatesBefore(c.x(), c.y(), c.z(), sequence);
+        int[] target = possibleStatesBefore(tx, ty, tz, sequence);
+        if (clicked == null || target == null) {
+            return null;
+        }
+        for (int s : clicked) {
+            if (states.has(s, BlockStates.INTERACTIVE | BlockStates.REPLACEABLE | BlockStates.CUSTOM_REPLACING)) {
+                return null;
+            }
+        }
+        for (int s : target) {
+            if (!states.has(s, BlockStates.REPLACEABLE) || states.has(s, BlockStates.CUSTOM_REPLACING | BlockStates.NEIGHBOUR_REACTIVE)
+                    || states.block(s).equals(states.block(state))) {
+                return null;
+            }
+        }
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] o = PREDICTION_NEIGHBOURS[i];
+            int[] beside = possibleStatesBefore(tx + o[0], ty + o[1], tz + o[2], sequence);
+            if (beside == null) {
+                return null;
+            }
+            for (int s : beside) {
+                if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE)) {
+                    return null;
+                }
+            }
+        }
+        return new BlockPosition(tx, ty, tz);
+    }
+
+    /**
+     * What the client's block use {@code sequence} did to the positions it may have changed ({@link #onInbound}: the clicked
+     * one, the one on the clicked face and that one's neighbours): {@code placed} (a {@link #placement} of this use) took
+     * {@code state} and the others kept theirs, or (null) none changed. Ignored for a use already acknowledged.
+     */
+    public void resolveUse(int sequence, BlockPosition placed, int state) {
+        ServerboundPacket.UseItemOn use = uses.get(sequence);
+        if (use == null) {
+            return;
+        }
+        Map<Long, Integer> cells = new HashMap<>();
+        BlockPosition c = use.position();
+        BlockFace face = use.face();
+        cells.put(blockKey(c.x(), c.y(), c.z()), KEPT);
+        for (int[] o : PREDICTION_NEIGHBOURS) {
+            cells.put(blockKey(c.x() + face.stepX() + o[0], c.y() + face.stepY() + o[1], c.z() + face.stepZ() + o[2]), KEPT);
+        }
+        if (placed != null) {
+            Integer before = cells.put(blockKey(placed.x(), placed.y(), placed.z()), state);
+            if (before == null) {
+                throw new IllegalArgumentException(placed + " is not where use " + sequence + " predicts");
+            }
+        }
+        resolvedUses.put(sequence, cells);
     }
 
     /** Whether the client may hold blocks of an item use before {@code sequence} that WhyNotAC cannot locate. */

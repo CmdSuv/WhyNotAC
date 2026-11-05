@@ -526,7 +526,7 @@ public final class ClientInventory {
                         // slots (merging, else into empty ones), then the offer's costs are taken out of them; no slot is sent
                         n.emptySlotsUnknown();
                         for (int k = 0; k < HOTBAR; k++) {
-                            n.mayBeNone[k] |= n.hotbar[k] != null;
+                            n.mayTake(k);
                         }
                     }
                     case Event.KIND_DROP -> {
@@ -534,7 +534,7 @@ public final class ClientInventory {
                         // the drop key is handled after the hotbar keys of the same tick, whose selection is only sent
                         // at the next tick (ensureHasSentCarriedItem is not called on this path).
                         for (int k = 0; k < HOTBAR; k++) {
-                            n.mayBeNone[k] |= n.hotbar[k] != null;
+                            n.mayTake(k);
                         }
                     }
                     default -> throw new IllegalStateException();
@@ -566,9 +566,15 @@ public final class ClientInventory {
         }
         switch (uses.outcome(stack, use)) {
             case KEEP -> { }
-            case KEEP_OR_NONE -> n.mayBeNone[slot] = true;
+            case KEEP_OR_NONE -> {
+                if (use == Use.ITEM_ON_BLOCK) {
+                    n.usedOnBlock(slot);
+                } else {
+                    n.mayTake(slot);
+                }
+            }
             case KEEP_OR_NONE_ADD -> {
-                n.mayBeNone[slot] = true;
+                n.mayTake(slot);
                 n.emptySlotsUnknown();
                 n.feet = null;
             }
@@ -731,8 +737,16 @@ public final class ClientInventory {
         for (State s : possible()) {
             State key = s.at(0);
             if (seen.add(key)) {
-                out.add(new View(Arrays.asList(s.hotbar.clone()), s.offhand, s.selected, s.menuId, s.mayBeNone.clone(), s.feet));
+                out.add(new View(Arrays.asList(s.hotbar.clone()), s.offhand, s.selected, s.menuId, s.mayBeNone.clone(), s.feet, blockUses(s)));
             }
+        }
+        return out;
+    }
+
+    private static int[] blockUses(State s) {
+        int[] out = new int[HOTBAR + 1];
+        for (int k = 0; k <= HOTBAR; k++) {
+            out[k] = s.blockUses[k];
         }
         return out;
     }
@@ -749,29 +763,48 @@ public final class ClientInventory {
     /**
      * One state: the hotbar (null: not known), the off hand, the selected slot (-1: not known), the open
      * menu (-1: not known), per hotbar slot (0..8) and the off hand (9) whether its stack may have been
-     * used up or turned into one without {@code attack_range}, and the feet armor (null: not known).
+     * used up or turned into one without {@code attack_range}, and the feet armor (null: not known); per hand slot, how many
+     * uses on a block alone may have taken from its stack since it was last set ({@code blockUses}: 0 where it may not
+     * have changed, -1 where something else may have taken from it too).
      */
-    public record View(List<Stack> hotbar, Stack offhand, int selected, int menuId, boolean[] mayBeNone, Stack feet) {
+    public record View(List<Stack> hotbar, Stack offhand, int selected, int menuId, boolean[] mayBeNone, Stack feet, int[] blockUses) {
         public View {
             hotbar = Collections.unmodifiableList(new ArrayList<>(hotbar));
             mayBeNone = mayBeNone.clone();
+            blockUses = blockUses.clone();
+        }
+
+        @Override
+        public boolean[] mayBeNone() {
+            return mayBeNone.clone();
+        }
+
+        @Override
+        public int[] blockUses() {
+            return blockUses.clone();
+        }
+
+        /** Uses on a block since the hand slot's stack was last set ({@code ClientInventory.HOTBAR}: the off hand), -1 if not only those. */
+        public int blockUses(int slot) {
+            return blockUses[slot];
         }
 
         @Override
         public boolean equals(Object o) {
             return o instanceof View v && hotbar.equals(v.hotbar) && Objects.equals(offhand, v.offhand) && selected == v.selected
-                    && menuId == v.menuId && Arrays.equals(mayBeNone, v.mayBeNone) && Objects.equals(feet, v.feet);
+                    && menuId == v.menuId && Arrays.equals(mayBeNone, v.mayBeNone) && Objects.equals(feet, v.feet)
+                    && Arrays.equals(blockUses, v.blockUses);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(hotbar, offhand, selected, menuId, Arrays.hashCode(mayBeNone), feet);
+            return Objects.hash(hotbar, offhand, selected, menuId, Arrays.hashCode(mayBeNone), feet, Arrays.hashCode(blockUses));
         }
 
         @Override
         public String toString() {
             return "View[hotbar=" + hotbar + ", offhand=" + offhand + ", selected=" + selected + ", menuId=" + menuId + ", mayBeNone="
-                    + Arrays.toString(mayBeNone) + ", feet=" + feet + "]";
+                    + Arrays.toString(mayBeNone) + ", feet=" + feet + ", blockUses=" + Arrays.toString(blockUses) + "]";
         }
     }
 
@@ -865,6 +898,11 @@ public final class ClientInventory {
         Stack feet;
         /** Per hand slot (hotbar 0..8, the off hand): its stack may have been used up or turned into one without attack_range. */
         final boolean[] mayBeNone = new boolean[HOTBAR + 1];
+        /**
+         * Per hand slot: how many uses on a block (and nothing else) may have taken from its stack since it was set, -1 once
+         * something else may have (see {@link View#blockUses}).
+         */
+        final byte[] blockUses = new byte[HOTBAR + 1];
         int selected = UNKNOWN;
         /** The hotbar slots selected at the last client tick end or since (bit k: slot k). */
         int tickSelected = ALL_SLOTS;
@@ -888,6 +926,7 @@ public final class ClientInventory {
             c.offhand = offhand;
             c.feet = feet;
             System.arraycopy(mayBeNone, 0, c.mayBeNone, 0, HOTBAR + 1);
+            System.arraycopy(blockUses, 0, c.blockUses, 0, HOTBAR + 1);
             c.selected = selected;
             c.tickSelected = tickSelected;
             c.menuId = menuId;
@@ -916,6 +955,21 @@ public final class ClientInventory {
                 hotbar[slot] = stack;
             }
             mayBeNone[slot] = false;
+            blockUses[slot] = 0;
+        }
+
+        /** Something may have taken from the slot's stack (or all of it). */
+        void mayTake(int slot) {
+            if (get(slot) != null) {
+                mayBeNone[slot] = true;
+                blockUses[slot] = -1;
+            }
+        }
+
+        /** A use on a block, which may have taken from the slot's stack. */
+        void usedOnBlock(int slot) {
+            mayBeNone[slot] = true;
+            blockUses[slot] = blockUses[slot] < 0 || blockUses[slot] >= Byte.MAX_VALUE ? -1 : (byte) (blockUses[slot] + 1);
         }
 
         /** Inventory.add of a stack not followed: a stack of its own kind grows (same reach), else the first empty slot takes it. */
@@ -953,6 +1007,7 @@ public final class ClientInventory {
             offhand = null;
             feet = null;
             Arrays.fill(mayBeNone, false);
+            Arrays.fill(blockUses, (byte) 0);
         }
 
         /** {@code player.containerMenu} becomes a menu built for this packet (or the inventory menu). */
@@ -981,6 +1036,7 @@ public final class ClientInventory {
             offhand = Stack.EMPTY;
             feet = Stack.EMPTY;
             Arrays.fill(mayBeNone, false);
+            Arrays.fill(blockUses, (byte) 0);
             selected = 0;
             tickSelected |= 1;
             open(0, inventory);
@@ -991,13 +1047,14 @@ public final class ClientInventory {
         public boolean equals(Object o) {
             return o instanceof State s && applied == s.applied && selected == s.selected && tickSelected == s.tickSelected && menuId == s.menuId
                     && creative == s.creative && picker == s.picker && sameLayout(layout, s.layout) && Objects.equals(offhand, s.offhand)
-                    && Objects.equals(feet, s.feet) && Arrays.equals(hotbar, s.hotbar) && Arrays.equals(mayBeNone, s.mayBeNone);
+                    && Objects.equals(feet, s.feet) && Arrays.equals(hotbar, s.hotbar) && Arrays.equals(mayBeNone, s.mayBeNone)
+                    && Arrays.equals(blockUses, s.blockUses);
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(applied, selected, tickSelected, menuId, creative, picker, layout == null ? null : layout.hotbar(), offhand, feet,
-                    Arrays.hashCode(hotbar), Arrays.hashCode(mayBeNone));
+                    Arrays.hashCode(hotbar), Arrays.hashCode(mayBeNone), Arrays.hashCode(blockUses));
         }
 
         private static boolean sameLayout(MenuLayouts.Layout a, MenuLayouts.Layout b) {
