@@ -130,7 +130,7 @@ for c in "forceload add 32 -16 191 16" "gamerule random_tick_speed 0" "gamerule 
   "forceload add -158 -72 -121 -56" "forceload add -158 -100 -121 -73" "fill -147 -61 -67 -136 -61 -62 minecraft:lava" "fill -129 -61 -67 -126 -61 -62 minecraft:air" \
   "fill -129 -61 -67 -129 -61 -62 minecraft:lava" \
   "fill 76 -61 -40 87 -61 -28 minecraft:ice" "fill 88 -61 -40 100 -61 -28 minecraft:blue_ice" "fill 101 -60 -40 101 -59 -28 minecraft:stone" \
-  "fill 76 -61 -26 84 -61 -24 minecraft:slime_block" \
+  "fill 76 -61 -26 84 -61 -24 minecraft:slime_block" "fill 50 -57 38 52 -57 40 minecraft:stone" \
   "execute in minecraft:the_nether run forceload add -16 -16 31 31" \
   "execute in minecraft:the_nether run fill -1 99 -1 21 108 21 minecraft:glass hollow" \
   "execute in minecraft:the_nether run fill 0 100 0 20 102 20 minecraft:glass" \
@@ -444,6 +444,14 @@ for c in "item replace entity $NAME hotbar.6 with minecraft:cobblestone 32" "ite
 echo "tp $NAME 52.5 -60 32.5 0 0" > "$FIFO"; sleep 1.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" e/0.05 -/0.8 move:71:134/0.3 Shift_L,Button1/0.1 -/0.4 move:36:0/0.3 Shift_L,Button1/0.1 -/0.4 \
   move:-252:-116/0.3 Shift_L,Button1/0.1 -/0.4 Escape/0.05 -/0.8; sleep 0.5
+# Sneak bridging (VAL-13, #95): on a stone platform four blocks up (x 50..52, z 38..40), facing south and looking 78
+# degrees down, S, shift and the use button held: the client walks back north, its sneak stops it at the edge (no walking
+# off a ledge while crouching), where its eyes are over the edge and its ray meets the edge block's north face: stone goes
+# there (BlockItem.place on the face's side), the edge moves north and the player with it. Before the edge the ray meets
+# the top of the block below, where the player stands in the way: those uses place nothing.
+echo "item replace entity $NAME weapon.mainhand with minecraft:stone 64" > "$FIFO"; sleep 0.5
+echo "tp $NAME 51.5 -56 39.5 0 78" > "$FIFO"; sleep 1.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" s,Shift_L,Button3/5.0 -/1.0; sleep 0.5
 # Gliding with an elytra in the chest slot, east along z = 45.5 (clear of the course; the ground first, so its chunks
 # arrive): placed 30 blocks up looking 20 degrees down, the player falls, a press of the jump key in the air starts the
 # glide (LocalPlayer.aiStep, tryToStartFallFlying: the client sends START_FALL_FLYING), and it glides down to the

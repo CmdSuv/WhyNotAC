@@ -262,6 +262,12 @@ def main():
     # The tower: stone placed on the top of the block below while jumping with the use button held.
     tower = [p for p in inbound if p["type"] == "UseItemOn" and p["face"] == "UP" and p["position"]["x"] == 46 and p["position"]["z"] == 32]
     check(len(tower) >= 3, f"the use button held while jumping placed stone under the player again and again ({len(tower)} placements)")
+    # Sneak bridging: stone placed on the north face of the platform's edge, then of each block placed so, walking back.
+    bridge = [p for p in inbound if p["type"] == "UseItemOn" and p["face"] == "NORTH" and p["position"]["x"] == 51
+              and p["position"]["y"] == -57 and p["position"]["z"] <= 38]
+    check(len({p["position"]["z"] for p in bridge}) >= 2,
+          f"sneaking back off the platform with the use button held placed stone on the edge's face again and again "
+          f"({len(bridge)} uses on z {sorted({p['position']['z'] for p in bridge})})")
     positions = [p for p in inbound if p["type"] == "MovePlayer" and p["hasPosition"]]
     xs = [float(p["x"]["f64"]) for p in positions]
     ys = [float(p["y"]["f64"]) for p in positions]
