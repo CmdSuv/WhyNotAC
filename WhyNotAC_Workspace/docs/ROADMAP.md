@@ -83,7 +83,16 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   girebilen paketler dışında sayılır (görev #63). Yapıldı. Yerleştirme (`W3`): blok tahminlerinin numaraları client'ın
   kendi sayımıyla (`prediction-sequence`, görev #64; yeni dünyada 1'den) yapıldı. Yerleştirilen bloğun durumunu sunucu
   kendisi hesaplar (`BlockPlaceContext`: tıklama ve oyuncunun sunucudaki dönüşü); ikisi de `use-aim` ile tikin seçimine
-  ve bakışına bağlı, bu yüzden ayrı bir kontrol gerekmez.
+  ve bakışına bağlı, bu yüzden ayrı bir kontrol gerekmez. Hareket kontrolü client'ın kendi koyduğu bloğu da bilir
+  (görev #95): bir bloğa kullanım, sonucu kesinse dünya replikasına işlenir; kesin değilse iddia eskisi gibi biter. Kesin
+  sayılması için tikin her başlangıç durumunda şunların hepsi gerekir: oyuncu inşa edebilir (hayatta kalma ya da
+  yaratıcı); hiç `cooldown` gelmemiş ve olay kaybolmamış; elde, envanterin her durumunda, tek durumlu tam küp koyan düz
+  bir blok eşyası var ve yığın son ayarlanışından beri yapılan kullanımlardan sonra boşalmamış; bloklar yeri belirliyor
+  (tıklanan blok etkileşimsiz ve yer değiştirmiyor, hedef yer değiştirilebilir, komşular tepkisiz: `BlockStates`'in sınıftan
+  okunan dört bayrağı, gerçek client'tan dökülür ve sunucuyla karşılaştırılır); yakında varlık yok; oyuncunun kutusu ya her
+  durumda hücrenin yolunda (kullanım başarısız olur, hiçbir şey değişmez) ya da hiçbirinde (blok konur). Konan durumu client,
+  o kullanımın onayını işleyene kadar tutar, sonrasında sunucununkini. Boş elle ya da etkileşimli bloklara yapılan
+  kullanımlar henüz çözülmez.
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
