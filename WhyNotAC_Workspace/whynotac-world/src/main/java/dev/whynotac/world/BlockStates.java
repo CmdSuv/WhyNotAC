@@ -30,7 +30,7 @@ import java.util.zip.GZIPInputStream;
  *
  * <h2>Text format (inside the gzip resource)</h2>
  * <pre>
- * whynotac-block-states 4
+ * whynotac-block-states 5
  * minecraft &lt;version&gt;
  * shapes &lt;n&gt;
  * &lt;kind&gt; TAB &lt;xs&gt; TAB &lt;ys&gt; TAB &lt;zs&gt; TAB &lt;filled cells, hex longs&gt; TAB &lt;boxes&gt;   (one line per shape)
@@ -43,7 +43,7 @@ import java.util.zip.GZIPInputStream;
 public final class BlockStates {
 
     public static final String RESOURCE = "/dev/whynotac/world/block-states.txt.gz";
-    static final String HEADER = "whynotac-block-states 4";
+    static final String HEADER = "whynotac-block-states 5";
 
     /** {@code isAir()}. */
     public static final int AIR = 1;
@@ -108,9 +108,15 @@ public final class BlockStates {
      * diagonal to it.
      */
     public static final int NEIGHBOUR_REACTIVE = 1 << 17;
+    /**
+     * {@link #NEIGHBOUR_REACTIVE}, and every such method the class declares is one read in the decompiled 1.21.11 source
+     * to leave the block what it is (only its properties may change): {@code SnowyDirtBlock.updateShape} (snowy from the
+     * block above) and {@code FallingBlock.updateShape} (schedules a tick, which the client does not run).
+     */
+    public static final int UPDATE_KEEPS_BLOCK = 1 << 18;
     /** The flags read from the block's class for uses and placements: nothing a state's collision or movement reads. */
-    public static final int PLACEMENT_FLAGS = INTERACTIVE | CUSTOM_REPLACING | CUSTOM_PLACEMENT | NEIGHBOUR_REACTIVE;
-    private static final String FLAG_LETTERS = "adcormtfsNSWEpixPu";
+    public static final int PLACEMENT_FLAGS = INTERACTIVE | CUSTOM_REPLACING | CUSTOM_PLACEMENT | NEIGHBOUR_REACTIVE | UPDATE_KEEPS_BLOCK;
+    private static final String FLAG_LETTERS = "adcormtfsNSWEpixPuk";
 
     private static volatile BlockStates vanilla;
 
@@ -398,6 +404,20 @@ public final class BlockStates {
     /** The lowest state id of {@code block} (for blocks with one state, its only state), or -1. */
     public int firstStateOf(String block) {
         return firstState.getOrDefault(block, -1);
+    }
+
+    /** Every state of the state's block (a block's states have consecutive ids). */
+    public int[] statesOfBlock(int state) {
+        int first = firstStateOf(block[state]);
+        int end = first;
+        while (end < block.length && block[end].equals(block[state])) {
+            end++;
+        }
+        int[] out = new int[end - first];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = first + i;
+        }
+        return out;
     }
 
     /** The state of {@code block} if it has no other (a block's states have consecutive ids), else -1. */

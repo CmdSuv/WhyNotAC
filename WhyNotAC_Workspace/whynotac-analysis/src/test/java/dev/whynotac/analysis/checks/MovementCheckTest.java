@@ -1176,9 +1176,10 @@ class MovementCheckTest {
      */
     private void tower(int levels, int lag, double cheat) throws Colliders.Unknown {
         List<int[]> replies = new ArrayList<>(); // {tick due, y, sequence, placed}
-        int level = 64;
+        int start = (int) Math.round(player.y()); // standing on the column so far
+        int level = start;
         int tick = 0;
-        while (level < 64 + levels || !replies.isEmpty()) {
+        while (level < start + levels || !replies.isEmpty()) {
             for (java.util.Iterator<int[]> it = replies.iterator(); it.hasNext(); ) {
                 int[] r = it.next();
                 if (r[0] <= tick) {
@@ -1188,7 +1189,7 @@ class MovementCheckTest {
                     it.remove();
                 }
             }
-            boolean towering = level < 64 + levels;
+            boolean towering = level < start + levels;
             if (towering && tick % 2 == 0) { // the use repeats while held (rightClickDelay)
                 keybinds.add(useOnTop(level));
                 boolean clear = player.y() >= level + 1 || player.y() + 1.8 <= level; // Level.isUnobstructed: touching is clear
@@ -1229,6 +1230,25 @@ class MovementCheckTest {
         assertTrue(tower.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(tower));
         assertEquals(69.0, player.y(), 1.0E-9, "on top of the fifth block");
         assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void onlyEntitiesThatKeepBlocksOutStopAPlacementFromBeingKnown() throws Exception {
+        holdStone(64);
+        // a dropped item the client moves by itself, its state not known: it never keeps a block out (blocksBuilding)
+        out(ClientboundPacket.AddEntity.received(60, new UUID(0, 60), "minecraft:item", 8.5, 64.0, 8.5, Vec3d.ZERO, (byte) 0, (byte) 0, (byte) 0, 0));
+        sync();
+        ticks(3, NONE, 0.0F, 90.0F);
+        int before = ticks.size();
+        tower(2, 2, 0.0);
+        assertTrue(ticks.subList(before, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(before, ticks.size())));
+        // a villager beside the column may stand where the next block goes
+        villager(61, 1.2, 66.0, 0.5);
+        tower(1, 2, 0.0);
+        assertTrue(ticks.stream().anyMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM
+                && "item use on a block: an entity may be in the way".equals(t.reason())), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
     }
 
     @Test

@@ -88,11 +88,14 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   sayılması için tikin her başlangıç durumunda şunların hepsi gerekir: oyuncu inşa edebilir (hayatta kalma ya da
   yaratıcı); hiç `cooldown` gelmemiş ve olay kaybolmamış; elde, envanterin her durumunda, tek durumlu tam küp koyan düz
   bir blok eşyası var ve yığın son ayarlanışından beri yapılan kullanımlardan sonra boşalmamış; bloklar yeri belirliyor
-  (tıklanan blok etkileşimsiz ve yer değiştirmiyor, hedef yer değiştirilebilir, komşular tepkisiz: `BlockStates`'in sınıftan
-  okunan dört bayrağı, gerçek client'tan dökülür ve sunucuyla karşılaştırılır); yakında varlık yok; oyuncunun kutusu ya her
-  durumda hücrenin yolunda (kullanım başarısız olur, hiçbir şey değişmez) ya da hiçbirinde (blok konur). Konan durumu client,
-  o kullanımın onayını işleyene kadar tutar, sonrasında sunucununkini. Boş elle ya da etkileşimli bloklara yapılan
-  kullanımlar henüz çözülmez.
+  (tıklanan blok etkileşimsiz ve yer değiştirmiyor, hedef yer değiştirilebilir, komşular tepkisiz ya da güncellemeleri
+  bloklarını değiştirmiyor, çim ve kum gibi: `BlockStates`'in sınıftan okunan beş bayrağı, gerçek client'tan dökülür ve
+  sunucuyla karşılaştırılır; bloklar kullanımın geldiği andaki haliyle okunur, sonra gönderilen hiçbir şey client'a ondan
+  önce ulaşamaz); yerleştirmeyi engelleyen bir varlık (`blocksBuilding`: canlılar, tekneler, vagonlar, düşen blok, TNT, end
+  kristali; eşyalar, küreler ve oklar değil) yakında değil; oyuncunun kutusu ya her durumda hücrenin yolunda (kullanım
+  başarısız olur, hiçbir şey değişmez) ya da hiçbirinde (blok konur). Konan durumu client, o kullanımın onayını işleyene
+  kadar tutar, sonrasında sunucununkini. Gerçek client'ın kulesinde 15 kullanımın 15'i çözüldü, CI en az 8'ini ister.
+  Boş elle ya da etkileşimli bloklara yapılan kullanımlar henüz çözülmez.
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi

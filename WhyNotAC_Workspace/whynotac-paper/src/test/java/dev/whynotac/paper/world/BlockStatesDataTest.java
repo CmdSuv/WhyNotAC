@@ -114,6 +114,7 @@ class BlockStatesDataTest {
             flags |= declares(block.getClass(), REPLACING) ? BlockStates.CUSTOM_REPLACING : 0;
             flags |= declares(block.getClass(), PLACEMENT) ? BlockStates.CUSTOM_PLACEMENT : 0;
             flags |= declares(block.getClass(), REACTIVE) ? BlockStates.NEIGHBOUR_REACTIVE : 0;
+            flags |= keepsBlock(block.getClass()) ? BlockStates.UPDATE_KEEPS_BLOCK : 0;
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), shape(outline, (DiscreteVoxelShape) discreteField.get(outline)),
                     flags, block.getFriction(), block.getSpeedFactor(),
@@ -147,6 +148,28 @@ class BlockStatesDataTest {
         java.lang.reflect.Method[] out = java.util.Arrays.copyOf(a, a.length + b.length);
         System.arraycopy(b, 0, out, a.length, b.length);
         return out;
+    }
+
+    /** As {@code BlockDataDump.keepsBlock}: the reactive methods declared are updateShape in SnowyDirtBlock or FallingBlock only. */
+    private static boolean keepsBlock(Class<?> k) {
+        boolean any = false;
+        for (Class<?> c = k; c != Block.class && c != null; c = c.getSuperclass()) {
+            for (java.lang.reflect.Method m : REACTIVE) {
+                try {
+                    if (java.lang.reflect.Modifier.isStatic(c.getDeclaredMethod(m.getName(), m.getParameterTypes()).getModifiers())) {
+                        continue;
+                    }
+                } catch (NoSuchMethodException e) {
+                    continue;
+                }
+                if (!m.getName().equals("updateShape")
+                        || c != net.minecraft.world.level.block.SnowyDirtBlock.class && c != net.minecraft.world.level.block.FallingBlock.class) {
+                    return false;
+                }
+                any = true;
+            }
+        }
+        return any;
     }
 
     /** As {@code BlockDataDump.declares}: a class from {@code k} up to Block's subclass declares one of the methods. */

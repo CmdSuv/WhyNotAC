@@ -273,7 +273,8 @@ class ClientWorldTest {
     private static final int FENCE = STATES.firstStateOf("minecraft:oak_fence");
     private static final int SHORT_GRASS = STATES.firstStateOf("minecraft:short_grass");
     private static final int OAK_LOG = STATES.firstStateOf("minecraft:oak_log");
-    private static final int SAND = STATES.onlyStateOf("minecraft:sand");
+    private static final int CONCRETE_POWDER = STATES.onlyStateOf("minecraft:white_concrete_powder");
+    private static final int GRASS_BLOCK = STATES.firstStateOf("minecraft:grass_block");
 
     private void useOn(int x, int y, int z, BlockFace face, int sequence) {
         in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(x, y, z), face, new Vec3d(x + 0.5, y + 1, z + 0.5), false, false, sequence));
@@ -352,6 +353,15 @@ class ClientWorldTest {
     }
 
     @Test
+    void whatTheServerSendsAfterAUseIsNotWhatTheUseSaw() {
+        stoneInTheAir();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        setBlock(5, 10, 5, STONE); // the server's reply: both positions, the placed block among them
+        setBlock(5, 11, 5, STONE);
+        assertEquals(new BlockPosition(5, 11, 5), world.placement(7, STONE)); // the client used it on air, before those
+    }
+
+    @Test
     void aBlockedUseKeepsEveryPosition() {
         stoneInTheAir();
         useOn(5, 10, 5, BlockFace.UP, 7);
@@ -367,7 +377,7 @@ class ClientWorldTest {
         stoneInTheAir();
         useOn(5, 10, 5, BlockFace.UP, 7);
         assertNull(world.placement(7, OAK_LOG)); // its state depends on the click (CUSTOM_PLACEMENT)
-        assertNull(world.placement(7, SAND)); // reacts to its neighbours (falls on the server, shape updates)
+        assertNull(world.placement(7, CONCRETE_POWDER)); // a shape update may make it concrete
         assertNull(world.placement(99, STONE)); // no such use
         setBlock(4, 10, 4, CHEST);
         sync();
@@ -397,6 +407,25 @@ class ClientWorldTest {
         in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(13, 10, 13), BlockFace.UP, 14));
         useOn(13, 10, 13, BlockFace.UP, 15);
         assertNull(world.placement(15, STONE)); // the clicked block may be the dig's prediction
+    }
+
+    @Test
+    void aNeighbourWhoseUpdateKeepsItsBlockMayHoldAnyOfItsStates() {
+        login(10, OVERWORLD);
+        out(new ClientboundPacket.LevelChunk(0, 0, chunk(24, AIR, -1, 0)));
+        setBlock(5, 10, 5, GRASS_BLOCK); // snowy=true: the block above decides it (SnowyDirtBlock.updateShape)
+        sync();
+        useOn(5, 10, 5, BlockFace.UP, 7);
+        BlockPosition at = world.placement(7, STONE);
+        assertEquals(new BlockPosition(5, 11, 5), at);
+        world.resolveUse(7, at, STONE);
+        assertArrayEquals(STATES.statesOfBlock(GRASS_BLOCK), world.possibleStates(5, 10, 5));
+        assertEquals(2, STATES.statesOfBlock(GRASS_BLOCK).length);
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(5, 11, 5));
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(5, 12, 5));
+        useOn(5, 10, 5, BlockFace.UP, 8); // blocked this time: nothing set, no update
+        world.resolveUse(8, null, 0);
+        assertArrayEquals(STATES.statesOfBlock(GRASS_BLOCK), world.possibleStates(5, 10, 5)); // use 7's still holds
     }
 
     @Test

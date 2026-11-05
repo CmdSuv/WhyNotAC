@@ -48,7 +48,8 @@ public final class BlockDataDump {
             "net.minecraft.world.item.ItemStack", "net.minecraft.world.level.Level", "net.minecraft.world.entity.player.Player",
             "net.minecraft.world.InteractionHand", "net.minecraft.world.phys.BlockHitResult", "net.minecraft.world.item.context.BlockPlaceContext",
             "net.minecraft.world.level.LevelReader", "net.minecraft.world.level.ScheduledTickAccess", "net.minecraft.util.RandomSource",
-            "net.minecraft.world.level.redstone.Orientation", "net.minecraft.world.level.LevelAccessor", "net.minecraft.world.entity.LivingEntity");
+            "net.minecraft.world.level.redstone.Orientation", "net.minecraft.world.level.LevelAccessor", "net.minecraft.world.entity.LivingEntity",
+            "net.minecraft.world.level.block.SnowyDirtBlock", "net.minecraft.world.level.block.FallingBlock");
 
     /**
      * Where the outline is compared with the origin's ({@link BlockStates#MOVING_OUTLINE}): an offset is a hash of the
@@ -133,6 +134,9 @@ public final class BlockDataDump {
                 method(BEHAVIOUR, "neighborChanged(" + BLOCK_STATE + "," + level + "," + POS + "," + BLOCK + ",net.minecraft.world.level.redstone.Orientation,boolean)"),
                 method(BEHAVIOUR, "updateIndirectNeighbourShapes(" + BLOCK_STATE + ",net.minecraft.world.level.LevelAccessor," + POS + ",int,int)")};
         Class<?> blockClass = cls(BLOCK);
+        // BlockStates.UPDATE_KEEPS_BLOCK: the updateShape overrides read to keep the block (reactive[0] is updateShape)
+        java.util.Set<Class<?>> keepingUpdateShape = Set.of(cls("net.minecraft.world.level.block.SnowyDirtBlock"),
+                cls("net.minecraft.world.level.block.FallingBlock"));
         ShapeReader shapes = new ShapeReader(axes);
         Method toAabbs = method(VOXEL, "toAabbs()");
         java.lang.reflect.Constructor<?> newPos = cls(POS).getConstructor(int.class, int.class, int.class);
@@ -174,6 +178,7 @@ public final class BlockDataDump {
             flags |= declares(block.getClass(), blockClass, replacing) ? BlockStates.CUSTOM_REPLACING : 0;
             flags |= declares(block.getClass(), blockClass, placement) ? BlockStates.CUSTOM_PLACEMENT : 0;
             flags |= declares(block.getClass(), blockClass, reactive) ? BlockStates.NEIGHBOUR_REACTIVE : 0;
+            flags |= keepsBlock(block.getClass(), blockClass, reactive, keepingUpdateShape) ? BlockStates.UPDATE_KEEPS_BLOCK : 0;
 
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {
@@ -213,6 +218,30 @@ public final class BlockDataDump {
             }
         }
         return false;
+    }
+
+    /**
+     * True if the class declares one of the reactive methods ({@code reactive[0]}: updateShape) and every declaration from
+     * {@code k} up to Block's subclass is updateShape in one of {@code keeping}.
+     */
+    static boolean keepsBlock(Class<?> k, Class<?> block, Method[] reactive, java.util.Set<Class<?>> keeping) {
+        boolean any = false;
+        for (Class<?> c = k; c != block && c != null; c = c.getSuperclass()) {
+            for (int i = 0; i < reactive.length; i++) {
+                try {
+                    if (java.lang.reflect.Modifier.isStatic(c.getDeclaredMethod(reactive[i].getName(), reactive[i].getParameterTypes()).getModifiers())) {
+                        continue;
+                    }
+                } catch (NoSuchMethodException e) {
+                    continue;
+                }
+                if (i != 0 || !keeping.contains(c)) {
+                    return false;
+                }
+                any = true;
+            }
+        }
+        return any;
     }
 
     private static int[][] movedAt() {

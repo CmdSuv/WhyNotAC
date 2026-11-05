@@ -2212,7 +2212,7 @@ public final class MovementTracker {
      * none sent); the hand holds, in every inventory state, a stack of one block item that places one state of a full
      * cube ({@link ItemPrototypes.Prototype#places}), not made consumable nor given a cooldown by its patch, of which
      * the uses on a block since it was last set (each takes one at most) leave one; the blocks decide where it goes
-     * ({@link ClientWorld#placement}); no entity is near; and the player's box is in the way of the new block in every
+     * ({@link ClientWorld#placement}); no entity that keeps blocks out is near; and the player's box is in the way of the new block in every
      * state or in none ({@code Level.isUnobstructed}: entities with {@code blocksBuilding}, the player too). In the way,
      * nothing is placed and the use fails; else the block is placed. Returns null when every use is resolved, else why
      * not (the ones before stay resolved).
@@ -2288,7 +2288,7 @@ public final class MovementTracker {
             if (at == null) {
                 return "the blocks do not decide where it goes";
             }
-            if (entities.mayHaveEntityNear(selfId, at.x() - ENTITY_MARGIN, at.y() - ENTITY_MARGIN, at.z() - ENTITY_MARGIN, at.x() + 1 + ENTITY_MARGIN,
+            if (entities.mayHaveBuildingBlockerNear(selfId, at.x() - ENTITY_MARGIN, at.y() - ENTITY_MARGIN, at.z() - ENTITY_MARGIN, at.x() + 1 + ENTITY_MARGIN,
                     at.y() + 1 + ENTITY_MARGIN, at.z() + 1 + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)) {
                 return "an entity may be in the way";
             }

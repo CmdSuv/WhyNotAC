@@ -184,7 +184,9 @@ public class MovementTruth {
                 && ((Number) tracker.get("spinAttackExplained")).longValue() > 0
                 && ((Number) tracker.get("lungesFollowed")).longValue() > 0
                 && ((Number) tracker.get("rotationsFollowed")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rotationsUnanswered"))
-                && ((Number) tracker.get("walkTruthFound")).longValue() > 0;
+                && ((Number) tracker.get("walkTruthFound")).longValue() > 0
+                // the tower: its uses resolved for the world replica (#95), each of those ticks then judged as any other
+                && ((Number) tracker.get("blockUseTicksExplained")).longValue() >= 8;
         System.exit(clean ? 0 : 1);
     }
 
@@ -237,8 +239,13 @@ public class MovementTruth {
         int[] self = {-1};
         List<String> examples = new ArrayList<>();
         int[] sentIndex = {0};
+        long[] blockUses = new long[2]; // ticks with a use on a block: all, explained (the use resolved for the world replica)
+        boolean[] useInTick = {false};
         List<TimelineListener> chain = new ArrayList<>(replicas.listeners());
         chain.add((session, event) -> {
+            if (event instanceof TimelineEvent.Inbound in && in.packet() instanceof ServerboundPacket.UseItemOn) {
+                useInTick[0] = true;
+            }
             if (event instanceof TimelineEvent.Outbound out && out.packet() instanceof ClientboundPacket.SetPassengers set
                     && set.passengerIds().length > 0) {
                 mounting.add(set.vehicleId()); // every boat of the session carries the player
@@ -290,6 +297,11 @@ public class MovementTruth {
                 }
             }
             outcomes.merge(tick.outcome().name(), 1L, Long::sum);
+            if (useInTick[0]) {
+                useInTick[0] = false;
+                blockUses[0]++;
+                blockUses[1] += tick.outcome() == MovementTracker.Outcome.EXPLAINED ? 1 : 0;
+            }
             if (walking[0]) {
                 walkOutcomes.merge(tick.outcome().name() + (tick.reason() == null ? "" : ": " + tick.reason().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]|-?\\d+\\.\\d+", "")),
                         1L, Long::sum);
@@ -425,6 +437,8 @@ public class MovementTruth {
         out.put("spinAttackExplained", spins[1]);
         out.put("truthMissing", counts[2]);
         out.put("unexplained", counts[3]);
+        out.put("blockUseTicks", blockUses[0]);
+        out.put("blockUseTicksExplained", blockUses[1]);
         out.put("pushesFollowed", tracker.pushesFollowed());
         out.put("rocketBoosts", tracker.rocketBoosts());
         out.put("rideExplained", tracker.rideExplained());

@@ -2390,6 +2390,23 @@ public final class ClientEntities {
     }
 
     /**
+     * {@link #mayHaveEntityNear} for the entities that keep a block from being placed where they are
+     * ({@code EntityGetter.isUnobstructed}: {@code blocksBuilding}, decompiled 1.21.11: every {@code LivingEntity} (an armor
+     * stand that is a marker not, which counts here anyway), boats and rafts, minecarts, falling blocks, primed TNT and end
+     * crystals; never items, orbs, projectiles or the rest, whatever their state).
+     */
+    public boolean mayHaveBuildingBlockerNear(int self, double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
+            double unknownRadius) {
+        return mayHaveNear(self, NONE, minX, minY, minZ, maxX, maxY, maxZ, unknownRadius, this::blocksBuilding);
+    }
+
+    private boolean blocksBuilding(String type) {
+        return types.kind(type).living() || type.endsWith("_boat") || type.endsWith("_raft") || type.equals("minecraft:minecart")
+                || type.endsWith("_minecart") || type.equals("minecraft:falling_block") || type.equals("minecraft:tnt")
+                || type.equals("minecraft:end_crystal");
+    }
+
+    /**
      * {@link #mayHavePusherNear} for a boat the player steers ({@code vehicle}): the entities it may meet
      * ({@code AbstractBoat.canVehicleCollide}: those it can collide with or that are pushable), but the player and itself.
      */
