@@ -251,9 +251,17 @@ def main():
     slots = [p["slot"] for p in inbound if p["type"] == "SetCarriedItem"]
     check(slots[-5:] == [1, 2, 0, 4, 0], f"hotbar keys 2, 3, 1, 5 (the drive) and 1 (the reach stage) selected slots 1, 2, 0, 4, 0: {slots}")
     clicks = [p for p in inbound if p["type"] == "ContainerClick"]
-    check(len(clicks) == 2 and [c["slot"] for c in clicks] == [37, 40] and all(c["containerId"] == 0 for c in clicks)
+    check(len(clicks) == 5 and [c["slot"] for c in clicks[:2]] == [37, 40] and all(c["containerId"] == 0 for c in clicks)
           and clicks[0]["carried"].get("item") == "minecraft:stick" and clicks[0]["carried"].get("rangeHash") is not None,
-          f"two real clicks in the inventory screen moved the stick, its range hashed by the client: {clicks}")
+          f"two real clicks in the inventory screen moved the stick, its range hashed by the client: {clicks[:2]}")
+    # Shift-clicks (quick move): hotbar 6 and 7 (menu slots 42, 43) to the inventory, its first slot (9) back.
+    quick = clicks[2:]
+    check([c["slot"] for c in quick] == [42, 43, 9] and all(c["clickType"] == "QUICK_MOVE" for c in quick),
+          f"three shift-clicks in the inventory screen quick-moved the cobblestone, the planks and the torches: "
+          f"{[(c['slot'], c['clickType']) for c in quick]}")
+    # The tower: stone placed on the top of the block below while jumping with the use button held.
+    tower = [p for p in inbound if p["type"] == "UseItemOn" and p["face"] == "UP" and p["position"]["x"] == 46 and p["position"]["z"] == 32]
+    check(len(tower) >= 3, f"the use button held while jumping placed stone under the player again and again ({len(tower)} placements)")
     positions = [p for p in inbound if p["type"] == "MovePlayer" and p["hasPosition"]]
     xs = [float(p["x"]["f64"]) for p in positions]
     ys = [float(p["y"]["f64"]) for p in positions]

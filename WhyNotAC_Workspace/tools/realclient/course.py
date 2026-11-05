@@ -5,7 +5,8 @@ course and places the player at the start of each leg (run_realclient.sh); this 
 
 Each step is KEYS/SECONDS: hold the comma-separated keys together for that long, then release them.
 KEYS "-" waits. KEYS/SECONDS/TAP also taps the key TAP every 0.6 s while holding, KEYS/SECONDS/TAP/DELAY the first
-time after DELAY seconds. A key "Button1".."Button3" is a mouse button (Button3: use).
+time after DELAY seconds. A key "Button1".."Button3" is a mouse button (Button3: use); "move:DX:DY" moves the mouse by
+(DX, DY) window pixels when it is pressed (a screen's cursor, or a turn in play).
 
 usage: course.py DISPLAY STEP...     e.g. course.py :99 w/2.0 w,Control_L/1.5/space -/0.5
 """
@@ -40,7 +41,11 @@ def main():
 
 
 def press(i, key, down):
-    if key.startswith("Button"):
+    if key.startswith("move:"):
+        if down:
+            dx, dy = key[len("move:"):].split(":")
+            i.move(int(dx), int(dy))
+    elif key.startswith("Button"):
         i.button(int(key[len("Button"):]), down)
     else:
         i.key(key, down)

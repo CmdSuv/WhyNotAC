@@ -430,6 +430,20 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1/1.6 -/0.5; sleep 0.5
 # Player.getDestroySpeed divides by 5 (break-time counts a fifth where the client's own flag says so; BreakAudit.java).
 echo "tp $NAME 86.5 -60 20.5 0 90" > "$FIFO"; sleep 1.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1,space/10.0 -/0.5; sleep 0.5
+# Allowed repetition (VAL-13): the use button held while looking straight down and jumping (x 46, z 32): the client
+# places stone under its feet at each jump (Minecraft.startUseItem again every four ticks while held), predicts the
+# block before the server confirms it and lands on it, a tower. Then shift-clicks in the inventory screen (quick move):
+# hotbar 6 and 7 to the inventory, the inventory's first slot back to the hotbar. At GUI scale 2 hotbar slot k is at
+# (282 + 36k, 374) in window pixels and inventory slot (row r, column c) at (282 + 36c, 258 + 36r); the screen opens
+# with the cursor at the centre (427, 240).
+echo "item replace entity $NAME weapon.mainhand with minecraft:stone 64" > "$FIFO"; sleep 0.5
+echo "tp $NAME 46.5 -60 32.5 0 90" > "$FIFO"; sleep 1.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" space,Button3/3.0 -/1.5; sleep 0.5
+for c in "item replace entity $NAME hotbar.6 with minecraft:cobblestone 32" "item replace entity $NAME hotbar.7 with minecraft:oak_planks 16" \
+  "item replace entity $NAME inventory.0 with minecraft:torch 8"; do echo "$c" > "$FIFO"; done
+echo "tp $NAME 52.5 -60 32.5 0 0" > "$FIFO"; sleep 1.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" e/0.05 -/0.8 move:71:134/0.3 Shift_L,Button1/0.1 -/0.4 move:36:0/0.3 Shift_L,Button1/0.1 -/0.4 \
+  move:-252:-116/0.3 Shift_L,Button1/0.1 -/0.4 Escape/0.05 -/0.8; sleep 0.5
 # Gliding with an elytra in the chest slot, east along z = 45.5 (clear of the course; the ground first, so its chunks
 # arrive): placed 30 blocks up looking 20 degrees down, the player falls, a press of the jump key in the air starts the
 # glide (LocalPlayer.aiStep, tryToStartFallFlying: the client sends START_FALL_FLYING), and it glides down to the
