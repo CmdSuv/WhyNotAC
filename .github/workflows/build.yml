@@ -22,6 +22,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: Fetch the Gradle distribution (retried; its servers time out and 504 at times)
+        run: for i in 1 2 3 4 5; do ./gradlew --version > /dev/null && exit 0; sleep $((15 * i)); done; exit 1
       - name: Build and run all test suites (unit, Netty, vanilla conformance)
         run: ./gradlew build --stacktrace
       - name: Upload test reports
@@ -57,6 +59,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: Fetch the Gradle distribution (retried; its servers time out and 504 at times)
+        run: for i in 1 2 3 4 5; do ./gradlew --version > /dev/null && exit 0; sleep $((15 * i)); done; exit 1
       - name: Fetch interop plugins (sha512-verified)
         if: matrix.variant == 'interop'
         run: |
@@ -91,6 +95,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: Fetch the Gradle distribution (retried; its servers time out and 504 at times)
+        run: for i in 1 2 3 4 5; do ./gradlew --version > /dev/null && exit 0; sleep $((15 * i)); done; exit 1
       - name: Install a virtual display and software OpenGL
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libxtst6 libxi6 libxrandr2 libxcursor1 libxxf86vm1
       - name: Cache the official client (SHA-1 verified on every run)
