@@ -108,6 +108,8 @@ public final class BlockStates {
      * diagonal to it.
      */
     public static final int NEIGHBOUR_REACTIVE = 1 << 17;
+    /** The flags read from the block's class for uses and placements: nothing a state's collision or movement reads. */
+    public static final int PLACEMENT_FLAGS = INTERACTIVE | CUSTOM_REPLACING | CUSTOM_PLACEMENT | NEIGHBOUR_REACTIVE;
     private static final String FLAG_LETTERS = "adcormtfsNSWEpixPu";
 
     private static volatile BlockStates vanilla;

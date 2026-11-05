@@ -1159,6 +1159,109 @@ class MovementCheckTest {
 
     // --- tests ---
 
+    // --- a tower: blocks placed under the player while jumping (MovementTracker.resolveBlockUses) ---
+
+    private int blockSequence;
+
+    /** The client's use of its main hand on the top of the block below {@code level} (MultiPlayerGameMode.useItemOn). */
+    private ServerboundPacket.UseItemOn useOnTop(int level) {
+        return new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(0, level - 1, 0), BlockFace.UP, new Vec3d(0.5, level, 0.5), false, false,
+                ++blockSequence);
+    }
+
+    /**
+     * Jumps with the use button held on the block below until {@code levels} blocks are placed: each tick the box is clear
+     * of the cell, the client places stone there before its tick (and swings); while the box is in it, the use fails. The
+     * server places it too and acknowledges {@code lag} ticks later. {@code cheat}: moved up this much in the last tick.
+     */
+    private void tower(int levels, int lag, double cheat) throws Colliders.Unknown {
+        List<int[]> replies = new ArrayList<>(); // {tick due, y, sequence, placed}
+        int level = 64;
+        int tick = 0;
+        while (level < 64 + levels || !replies.isEmpty()) {
+            for (java.util.Iterator<int[]> it = replies.iterator(); it.hasNext(); ) {
+                int[] r = it.next();
+                if (r[0] <= tick) {
+                    out(new ClientboundPacket.BlockUpdate(new BlockPosition(0, r[1], 0), r[3] == 1 ? STONE : AIR));
+                    out(new ClientboundPacket.BlockChangedAck(r[2]));
+                    sync();
+                    it.remove();
+                }
+            }
+            boolean towering = level < 64 + levels;
+            if (towering && tick % 2 == 0) { // the use repeats while held (rightClickDelay)
+                keybinds.add(useOnTop(level));
+                boolean clear = player.y() >= level + 1 || player.y() + 1.8 <= level; // Level.isUnobstructed: touching is clear
+                if (clear) {
+                    placed.put(List.of(0, level, 0), STONE); // BlockItem.place, before the player's tick
+                    keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+                }
+                replies.add(new int[] {tick + lag, level, blockSequence, clear ? 1 : 0});
+                if (clear) {
+                    level++;
+                }
+            }
+            boolean last = !towering && replies.isEmpty();
+            tick(towering && player.onGround() ? JUMP : NONE, 0.0F, 90.0F, last ? new Vec3d(0, cheat, 0) : Vec3d.ZERO);
+            tick++;
+        }
+    }
+
+    private void holdStone(int count) {
+        List<Stack> items = new ArrayList<>();
+        for (int i = 0; i < 46; i++) {
+            items.add(Stack.EMPTY);
+        }
+        items.set(36, new Stack("minecraft:stone", count, List.of(), List.of(), null, false));
+        out(new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY));
+        sync();
+    }
+
+    @Test
+    void aTowerOfBlocksPlacedWhileJumpingIsJudged() throws Exception {
+        holdStone(64);
+        ticks(3, NONE, 0.0F, 90.0F);
+        int before = ticks.size();
+        tower(5, 3, 0.0);
+        ticks(5, NONE, 0.0F, 90.0F);
+        List<MovementTracker.Tick> tower = ticks.subList(before, ticks.size());
+        assertTrue(tower.size() > 30, String.valueOf(tower.size()));
+        assertTrue(tower.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(tower));
+        assertEquals(69.0, player.y(), 1.0E-9, "on top of the fifth block");
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void aCheatOnTopOfItsTowerIsCaught() throws Exception {
+        holdStone(64);
+        ticks(3, NONE, 0.0F, 90.0F);
+        tower(3, 2, 0.05);
+        assertEquals(1, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+    }
+
+    @Test
+    void aBlockUseNotKnownExactlyEndsTheClaimAsBefore() throws Exception {
+        holdStone(1); // one block: the second use may find the hand empty
+        ticks(3, NONE, 0.0F, 90.0F);
+        int before = ticks.size();
+        tower(2, 40, 0.0);
+        List<MovementTracker.Tick> tower = ticks.subList(before, ticks.size());
+        assertTrue(tower.stream().anyMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM
+                && "item use on a block: the stack in the hand is not known".equals(t.reason())), String.valueOf(tower));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+    }
+
+    @Test
+    void aCooldownTheServerSentEndsTheClaimAtABlockUse() throws Exception {
+        holdStone(64);
+        out(new ClientboundPacket.Unmodeled("minecraft:cooldown")); // not decoded: any item may be on cooldown
+        ticks(3, NONE, 0.0F, 90.0F);
+        tower(1, 2, 0.0);
+        assertTrue(ticks.stream().anyMatch(t -> t.outcome() == MovementTracker.Outcome.NO_CLAIM
+                && "item use on a block: an item may be on cooldown".equals(t.reason())), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+    }
+
     @Test
     void aVanillaClientsTicksAreExplained() throws Exception {
         walkAround();

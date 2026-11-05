@@ -194,6 +194,16 @@ public final class MovementTracker {
      * change. Taken at every tracked tick: the flags may come ticks after the use they echo.
      */
     private Map<Hand, List<HandItem>> lastHands;
+    /**
+     * The server sent an item cooldown ({@code minecraft:cooldown}, not decoded), or events were lost: a held item may be on
+     * cooldown, and {@code MultiPlayerGameMode.performUseItemOn} then uses no item.
+     */
+    private boolean cooldownMayRun;
+    /** Hand slots (bit k: hotbar slot k, bit 9 the off hand) a use on a block not resolved here used since their stack was set. */
+    private int unresolvedUseSlots;
+    static final String COOLDOWN = "minecraft:cooldown";
+    static final String CONSUMABLE = "minecraft:consumable";
+    static final String USE_COOLDOWN = "minecraft:use_cooldown";
     /** This tick's {@link #handItems}, by hand. */
     private final Map<Hand, List<HandItem>> handsNow = new java.util.EnumMap<>(Hand.class);
     static final String LEATHER_BOOTS = "minecraft:leather_boots";
@@ -403,7 +413,12 @@ public final class MovementTracker {
     public Tick onEvent(TimelineEvent event, ClientWorld world, ClientEntities entities, ClientInventory inventory) {
         this.inventory = inventory;
         switch (event) {
-            case TimelineEvent.Outbound out -> onOutbound(out.sequence(), out.packet());
+            case TimelineEvent.Outbound out -> {
+                if (out.packet() instanceof ClientboundPacket.Unmodeled u && COOLDOWN.equals(u.type())) {
+                    cooldownMayRun = true; // for the session: how long it runs is the client's
+                }
+                onOutbound(out.sequence(), out.packet());
+            }
             case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.transactionId());
             case TimelineEvent.Bound bound -> {
                 if (bound.entityId() >= 0) {
@@ -413,6 +428,8 @@ public final class MovementTracker {
             }
             case TimelineEvent.Gap gap -> {
                 lose("events were lost");
+                cooldownMayRun = true; // one among them
+                unresolvedUseSlots = (1 << ClientInventory.HOTBAR + 1) - 1; // and uses on blocks
                 spinMayRun = OnFoot.SPIN_ATTACK_TICKS; // a release among them
                 if (ride != null) {
                     ride.unclaim("events were lost");
@@ -743,6 +760,11 @@ public final class MovementTracker {
          * since the last one), a click in a menu, a creative edit, a drop, an interaction.
          */
         boolean handsTouched;
+        /** The uses on a block, in order ({@link #resolveBlockUses}); how many of them, from the first, were resolved. */
+        final List<ServerboundPacket.UseItemOn> blockUses = new ArrayList<>(1);
+        int resolvedBlockUses;
+        /** Something that changes the hands came after a use on a block in this tick: the inventory's states are after it. */
+        boolean handsAfterBlockUse;
     }
 
     /**
@@ -762,6 +784,9 @@ public final class MovementTracker {
         TickInput t = new TickInput();
         boolean replyDue = false;
         for (TimelineEvent.Inbound in : inbound) {
+            if (!t.blockUses.isEmpty() && changesHands(in.packet())) {
+                t.handsAfterBlockUse = true;
+            }
             switch (in.packet()) {
                 case ServerboundPacket.AcceptTeleportation ignored -> replyDue = true;
                 case ServerboundPacket.MovePlayer move -> {
@@ -809,7 +834,10 @@ public final class MovementTracker {
                 }
                 case ServerboundPacket.PlayerLoaded ignored -> t.loaded = true;
                 case ServerboundPacket.UseItem use -> t.itemActions.add(use.hand());
-                case ServerboundPacket.UseItemOn ignored -> t.unmodelled = "item use on a block";
+                case ServerboundPacket.UseItemOn use -> {
+                    t.blockUses.add(use); // resolved for the world replica, or the claim ends (resolveBlockUses)
+                    t.handsTouched = true; // a placement may use up the stack in its hand
+                }
                 case ServerboundPacket.PlayerAction action -> {
                     switch (action.action()) {
                         case RELEASE_USE_ITEM -> t.itemActions.add(RELEASE);
@@ -840,6 +868,23 @@ public final class MovementTracker {
         return t;
     }
 
+    /** What the inventory replica follows as a change of the hands (ClientInventory.onInbound). */
+    private static boolean changesHands(ServerboundPacket packet) {
+        return switch (packet) {
+            case ServerboundPacket.ContainerClick ignored -> true;
+            case ServerboundPacket.SetCarriedItem ignored -> true;
+            case ServerboundPacket.SetCreativeModeSlot ignored -> true;
+            case ServerboundPacket.UseItem ignored -> true;
+            case ServerboundPacket.InteractEntity interact -> interact.kind() != ServerboundPacket.InteractEntity.Kind.ATTACK;
+            case ServerboundPacket.PlayerAction action -> action.action() == ServerboundPacket.PlayerAction.Action.DROP_ITEM
+                    || action.action() == ServerboundPacket.PlayerAction.Action.DROP_ALL_ITEMS
+                    || action.action() == ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM;
+            case ServerboundPacket.Unmodeled unmodeled -> "minecraft:select_trade".equals(unmodeled.type());
+            case ServerboundPacket.Untranslatable ignored -> true;
+            default -> false;
+        };
+    }
+
     private Tick closeTick(TimelineEvent.Inbound end, ClientWorld world, ClientEntities entities) {
         long number = ticks++;
         sent = List.of();
@@ -868,13 +913,14 @@ public final class MovementTracker {
         Tick riding = rideTick(number, end, in, w, world, entities, keysBefore, sprintBefore);
         Tick result;
         if (hypotheses != null) {
-            result = tracked(number, end, in, w, world, entities);
+            result = tracked(number, end, in, w, world, entities, riding == null);
         } else {
             result = untracked(number, end, in, w, world, entities);
         }
         if (riding != null) {
             result = riding; // the player rides: its own tick has no claim, the boat's or the horse's may
         }
+        unresolvedUses(in);
         settleBookkeeping(number, end, in);
         base = base.withBorder(base.border().ticked(entities.lastTickRanNormally()));
         prune();
@@ -1235,7 +1281,8 @@ public final class MovementTracker {
         return out;
     }
 
-    private Tick tracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+    private Tick tracked(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities,
+            boolean onFoot) {
         boolean actedWhileUsing = false;
         Set<Hypothesis> next = new LinkedHashSet<>();
         List<PlayerState> predictions = new ArrayList<>();
@@ -1247,8 +1294,17 @@ public final class MovementTracker {
                     starts.add(applyPending(h, k));
                 }
             }
+            if (!in.blockUses.isEmpty()) {
+                // handleKeybinds' uses come before the entities' ticks, from states not using an item (startUseItem)
+                String why = onFoot ? resolveBlockUses(in, starts.stream().filter(a -> a.self().using() == null).toList(), world, entities)
+                        : "riding";
+                if (why != null) {
+                    throw new Lose("item use on a block: " + why);
+                }
+            }
             starts = pushed(starts, true, view); // the entities that tick before the player, after the packets
-            if (in.unmodelled == null && (in.attacks > 0 || in.stabs > 0 || in.interactions > 0 || in.itemActions.stream().anyMatch(Hand.class::isInstance))) {
+            if (in.unmodelled == null && (in.attacks > 0 || in.stabs > 0 || in.interactions > 0 || !in.blockUses.isEmpty()
+                    || in.itemActions.stream().anyMatch(Hand.class::isInstance))) {
                 // Minecraft.handleKeybinds, before the player's tick: while it is using an item it only releases it (the use
                 // key up) and consumes the attack and use keys' clicks; attacks, stabs, interactions and uses come from
                 // startAttack and startUseItem, which only a state not using an item runs
@@ -2145,6 +2201,153 @@ public final class MovementTracker {
         return items;
     }
 
+    // --- uses on a block: what they did to the blocks ------------------------------------------------------------------
+
+    /**
+     * Resolves this tick's uses on a block for the world replica ({@link ClientWorld#resolveUse}), in order, from the states
+     * the tick starts from (not using an item): {@code Minecraft.handleKeybinds} runs {@code startUseItem} before the
+     * player's tick and the entities'. A use is resolved where the client's outcome is certain (decompiled 1.21.11:
+     * {@code MultiPlayerGameMode.useItemOn}, {@code performUseItemOn}, {@code ItemStack.useOn}, {@code BlockItem.place}):
+     * every state may build ({@code mayBuild}: survival or creative); no item may be on cooldown ({@code ItemCooldowns}:
+     * none sent); the hand holds, in every inventory state, a stack of one block item that places one state of a full
+     * cube ({@link ItemPrototypes.Prototype#places}), not made consumable nor given a cooldown by its patch, of which
+     * the uses on a block since it was last set (each takes one at most) leave one; the blocks decide where it goes
+     * ({@link ClientWorld#placement}); no entity is near; and the player's box is in the way of the new block in every
+     * state or in none ({@code Level.isUnobstructed}: entities with {@code blocksBuilding}, the player too). In the way,
+     * nothing is placed and the use fails; else the block is placed. Returns null when every use is resolved, else why
+     * not (the ones before stay resolved).
+     */
+    private String resolveBlockUses(TickInput in, List<Hypothesis> starts, ClientWorld world, ClientEntities entities) {
+        if (cooldownMayRun) {
+            return "an item may be on cooldown";
+        }
+        if (in.handsAfterBlockUse) {
+            return "the hands changed after it in the same tick";
+        }
+        if (inventory == null) {
+            return "held items not followed";
+        }
+        if (starts.isEmpty()) {
+            return "no state that may use an item";
+        }
+        for (Hypothesis h : starts) {
+            if (h.player() == null || !h.self().ticking() || !h.self().positionKnown()) {
+                return "the player's position is not known";
+            }
+            if (h.self().gameMode() != SelfState.SURVIVAL && h.self().gameMode() != SelfState.CREATIVE) {
+                return "game mode " + h.self().gameMode();
+            }
+        }
+        List<ClientInventory.View> views = inventory.views();
+        int selected = views.isEmpty() ? -1 : views.get(0).selected();
+        for (ClientInventory.View v : views) {
+            if (v.selected() != selected) {
+                selected = -1;
+            }
+        }
+        int[] slots = new int[in.blockUses.size()];
+        for (int i = 0; i < slots.length; i++) {
+            slots[i] = in.blockUses.get(i).hand() == Hand.MAIN_HAND ? selected : ClientInventory.HOTBAR;
+        }
+        BlockStates states = world.states();
+        for (int i = 0; i < slots.length; i++) {
+            ServerboundPacket.UseItemOn use = in.blockUses.get(i);
+            int slot = slots[i];
+            if (slot < 0) {
+                return "the selected hotbar slot is not known";
+            }
+            if ((unresolvedUseSlots & 1 << slot) != 0) {
+                return "a use not resolved took from the stack";
+            }
+            int inTick = 0; // this tick's uses with the slot, and those before this one
+            int before = 0;
+            for (int j = 0; j < slots.length; j++) {
+                if (slots[j] == slot) {
+                    inTick++;
+                    before += j < i ? 1 : 0;
+                }
+            }
+            String item = null;
+            for (ClientInventory.View v : views) {
+                Stack stack = slot == ClientInventory.HOTBAR ? v.offhand() : v.hotbar().get(slot);
+                int taken = v.blockUses(slot) - inTick + before; // the uses before this one since the stack was set
+                if (stack == null || stack.isEmpty() || v.blockUses(slot) < 0 || taken < 0 || stack.count() - taken < 1) {
+                    return "the stack in the hand is not known";
+                }
+                if (item != null && !item.equals(stack.item()) || stack.added().contains(CONSUMABLE) || stack.added().contains(USE_COOLDOWN)) {
+                    return "the stack in the hand is not known";
+                }
+                item = stack.item();
+            }
+            ItemPrototypes.Prototype prototype = item == null ? null : PROTOTYPES.get(item);
+            int state = prototype == null || prototype.places() == null ? -1 : states.onlyStateOf(prototype.places());
+            if (state < 0 || !states.has(state, BlockStates.FULL_BLOCK) || states.has(state, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                return "not a block item placing one full block";
+            }
+            dev.whynotac.protocol.packet.BlockPosition at = world.placement(use.sequence(), state);
+            if (at == null) {
+                return "the blocks do not decide where it goes";
+            }
+            if (entities.mayHaveEntityNear(selfId, at.x() - ENTITY_MARGIN, at.y() - ENTITY_MARGIN, at.z() - ENTITY_MARGIN, at.x() + 1 + ENTITY_MARGIN,
+                    at.y() + 1 + ENTITY_MARGIN, at.z() + 1 + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)) {
+                return "an entity may be in the way";
+            }
+            int way = -2;
+            for (Hypothesis h : starts) {
+                int here = inTheWay(h.player().box(), at.x(), at.y(), at.z());
+                if (here < 0 || way != -2 && here != way) {
+                    return "the player may or may not be in the way";
+                }
+                way = here;
+            }
+            world.resolveUse(use.sequence(), way == 1 ? null : at, state);
+            in.resolvedBlockUses = i + 1;
+        }
+        return null;
+    }
+
+    /**
+     * {@code Level.isUnobstructed} for a full cube at the block and the player's box: 1 in the way, 0 not, -1 too close to
+     * tell. The box is only among {@code getEntities}' when it overlaps the cube's bounds ({@code AABB.intersects}, strict),
+     * and {@code Shapes.joinIsNotEmpty} then merges coordinates closer than 1e-7 ({@code IndirectMerger}): an overlap of
+     * 1e-6 on every axis is one, none on some axis is none.
+     */
+    static int inTheWay(Box box, int x, int y, int z) {
+        double ox = Math.min(box.maxX(), x + 1.0) - Math.max(box.minX(), x);
+        double oy = Math.min(box.maxY(), y + 1.0) - Math.max(box.minY(), y);
+        double oz = Math.min(box.maxZ(), z + 1.0) - Math.max(box.minZ(), z);
+        if (!(ox > 0) || !(oy > 0) || !(oz > 0)) {
+            return 0;
+        }
+        return ox >= 1.0E-6 && oy >= 1.0E-6 && oz >= 1.0E-6 ? 1 : -1;
+    }
+
+    /**
+     * After every tick: the uses on a block this tracker did not resolve may take anything from their hand's stack, until
+     * the inventory replica sees the slot set again (no block use since in any state).
+     */
+    private void unresolvedUses(TickInput in) {
+        List<ClientInventory.View> views = inventory == null ? List.of() : inventory.views();
+        for (int slot = 0; slot <= ClientInventory.HOTBAR && unresolvedUseSlots != 0; slot++) {
+            if ((unresolvedUseSlots & 1 << slot) != 0 && !views.isEmpty()) {
+                boolean set = true;
+                for (ClientInventory.View v : views) {
+                    set &= v.blockUses(slot) == 0;
+                }
+                if (set) {
+                    unresolvedUseSlots &= ~(1 << slot);
+                }
+            }
+        }
+        for (int i = in.resolvedBlockUses; i < in.blockUses.size(); i++) {
+            if (in.blockUses.get(i).hand() == Hand.OFF_HAND) {
+                unresolvedUseSlots |= 1 << ClientInventory.HOTBAR;
+            } else {
+                unresolvedUseSlots |= (1 << ClientInventory.HOTBAR) - 1; // whichever hotbar slot was selected
+            }
+        }
+    }
+
     /** The stack's {@code use_effects} ({@code UseEffects.DEFAULT} where its patch removes them) and use kind. */
     /**
      * {@code Player.isHolding(item)}: the item in the main hand or the off hand, in every state the inventory replica
@@ -2427,8 +2630,8 @@ public final class MovementTracker {
     /** The settle anchor (see the class comment) for the tick just sent, or null. */
     private Hypothesis settleAnchor(long number, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         ServerboundPacket.MovePlayer move = in.move;
-        if (move == null || !move.hasPosition() || !base.ticking() || w[0] != w[1] || in.unmodelled != null || in.abilities > 0 || in.attacks > 0
-                || in.moves > 1) {
+        if (move == null || !move.hasPosition() || !base.ticking() || w[0] != w[1] || in.unmodelled != null || !in.blockUses.isEmpty()
+                || in.abilities > 0 || in.attacks > 0 || in.moves > 1) {
             return null;
         }
         PlayerState.Keys now = in.input != null ? keys(in.input) : currentKeys;
@@ -2504,7 +2707,7 @@ public final class MovementTracker {
 
     /** The settle anchor's record of the position packets and of the keys, from what the client sent. */
     private void settleBookkeeping(long number, TimelineEvent.Inbound end, TickInput in) {
-        if (in.unmodelled != null || in.abilities > 0 || in.attacks > 0 || !base.ticking()) {
+        if (in.unmodelled != null || !in.blockUses.isEmpty() || in.abilities > 0 || in.attacks > 0 || !base.ticking()) {
             quietSincePosition = false;
         }
         if (in.input != null) {
@@ -2550,7 +2753,8 @@ public final class MovementTracker {
                 return world.blockState(x, y, z);
             }
             int[] possible = world.possibleStates(x, y, z);
-            return possible != null && OnFoot.sameForMovement(world.states(), possible) ? world.blockState(x, y, z) : ClientWorld.UNKNOWN;
+            // any of them (the client's own placement may hold one the server's state is not yet)
+            return possible != null && OnFoot.sameForMovement(world.states(), possible) ? possible[possible.length - 1] : ClientWorld.UNKNOWN;
         }
 
         @Override

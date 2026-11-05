@@ -46,6 +46,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             "minecraft:sneaking_speed", 0.3,
             "minecraft:water_movement_efficiency", 0.0);
     static final int SURVIVAL = 0;
+    static final int CREATIVE = 1;
     static final int ADVENTURE = 2;
 
     public SelfState {

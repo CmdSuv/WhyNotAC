@@ -333,7 +333,7 @@ public final class OnFoot {
                 continue;
             }
             if (namedInMovement(states.block(first)) || namedInMovement(states.block(id)) || holdsFluid(states, id)
-                    || holdsFluid(states, first) || states.flags(id) != states.flags(first)
+                    || holdsFluid(states, first) || (states.flags(id) & ~BlockStates.PLACEMENT_FLAGS) != (states.flags(first) & ~BlockStates.PLACEMENT_FLAGS)
                     || !states.collisionShape(id).sameGeometry(states.collisionShape(first))
                     || Float.floatToIntBits(states.friction(id)) != Float.floatToIntBits(states.friction(first))
                     || Float.floatToIntBits(states.speedFactor(id)) != Float.floatToIntBits(states.speedFactor(first))
