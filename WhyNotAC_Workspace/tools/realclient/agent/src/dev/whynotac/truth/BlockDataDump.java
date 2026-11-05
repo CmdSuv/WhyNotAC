@@ -37,12 +37,18 @@ public final class BlockDataDump {
     private static final String GETTER = "net.minecraft.world.level.BlockGetter";
     private static final String POS = "net.minecraft.core.BlockPos";
     private static final String CONTEXT = "net.minecraft.world.phys.shapes.CollisionContext";
+    private static final String BEHAVIOUR = "net.minecraft.world.level.block.state.BlockBehaviour";
+    private static final String BLOCK_STATE = "net.minecraft.world.level.block.state.BlockState";
     private static final Set<String> CLASSES = Set.of(BLOCK, STATE, HOLDER, PROPERTY, VOXEL, DISCRETE, AABB, FLUID_STATE, GETTER, POS, CONTEXT,
             "net.minecraft.SharedConstants", "net.minecraft.WorldVersion", "net.minecraft.server.Bootstrap", "net.minecraft.core.IdMapper",
             "net.minecraft.core.registries.BuiltInRegistries", "net.minecraft.core.Registry", "net.minecraft.world.level.EmptyBlockGetter",
             "net.minecraft.core.Direction$Axis", "net.minecraft.core.Direction", "net.minecraft.world.level.material.FlowingFluid", "net.minecraft.world.level.block.LiquidBlock",
             "net.minecraft.world.level.block.PowderSnowBlock", "net.minecraft.world.level.block.ScaffoldingBlock",
-            "net.minecraft.world.phys.shapes.CubeVoxelShape", "net.minecraft.world.phys.shapes.Shapes");
+            "net.minecraft.world.phys.shapes.CubeVoxelShape", "net.minecraft.world.phys.shapes.Shapes", BEHAVIOUR, BLOCK_STATE,
+            "net.minecraft.world.item.ItemStack", "net.minecraft.world.level.Level", "net.minecraft.world.entity.player.Player",
+            "net.minecraft.world.InteractionHand", "net.minecraft.world.phys.BlockHitResult", "net.minecraft.world.item.context.BlockPlaceContext",
+            "net.minecraft.world.level.LevelReader", "net.minecraft.world.level.ScheduledTickAccess", "net.minecraft.util.RandomSource",
+            "net.minecraft.world.level.redstone.Orientation", "net.minecraft.world.level.LevelAccessor", "net.minecraft.world.entity.LivingEntity");
 
     /**
      * Where the outline is compared with the origin's ({@link BlockStates#MOVING_OUTLINE}): an offset is a hash of the
@@ -109,6 +115,24 @@ public final class BlockDataDump {
         Class<?> liquid = cls("net.minecraft.world.level.block.LiquidBlock");
         Class<?> powderSnow = cls("net.minecraft.world.level.block.PowderSnowBlock");
         Class<?> scaffolding = cls("net.minecraft.world.level.block.ScaffoldingBlock");
+        // BlockStates.INTERACTIVE, CUSTOM_REPLACING, CUSTOM_PLACEMENT, NEIGHBOUR_REACTIVE: the methods a class may declare
+        String level = "net.minecraft.world.level.Level";
+        Method[] interactive = {
+                method(BEHAVIOUR, "useItemOn(net.minecraft.world.item.ItemStack," + BLOCK_STATE + "," + level + "," + POS + ",net.minecraft.world.entity.player.Player,"
+                        + "net.minecraft.world.InteractionHand,net.minecraft.world.phys.BlockHitResult)"),
+                method(BEHAVIOUR, "useWithoutItem(" + BLOCK_STATE + "," + level + "," + POS + ",net.minecraft.world.entity.player.Player,"
+                        + "net.minecraft.world.phys.BlockHitResult)")};
+        Method[] replacing = {method(BEHAVIOUR, "canBeReplaced(" + BLOCK_STATE + ",net.minecraft.world.item.context.BlockPlaceContext)")};
+        Method[] placement = {
+                method(BLOCK, "getStateForPlacement(net.minecraft.world.item.context.BlockPlaceContext)"),
+                method(BEHAVIOUR, "canSurvive(" + BLOCK_STATE + ",net.minecraft.world.level.LevelReader," + POS + ")"),
+                method(BLOCK, "setPlacedBy(" + level + "," + POS + "," + BLOCK_STATE + ",net.minecraft.world.entity.LivingEntity,net.minecraft.world.item.ItemStack)")};
+        Method[] reactive = {
+                method(BEHAVIOUR, "updateShape(" + BLOCK_STATE + ",net.minecraft.world.level.LevelReader,net.minecraft.world.level.ScheduledTickAccess," + POS
+                        + ",net.minecraft.core.Direction," + POS + "," + BLOCK_STATE + ",net.minecraft.util.RandomSource)"),
+                method(BEHAVIOUR, "neighborChanged(" + BLOCK_STATE + "," + level + "," + POS + "," + BLOCK + ",net.minecraft.world.level.redstone.Orientation,boolean)"),
+                method(BEHAVIOUR, "updateIndirectNeighbourShapes(" + BLOCK_STATE + ",net.minecraft.world.level.LevelAccessor," + POS + ",int,int)")};
+        Class<?> blockClass = cls(BLOCK);
         ShapeReader shapes = new ShapeReader(axes);
         Method toAabbs = method(VOXEL, "toAabbs()");
         java.lang.reflect.Constructor<?> newPos = cls(POS).getConstructor(int.class, int.class, int.class);
@@ -146,6 +170,11 @@ public final class BlockDataDump {
                 }
             }
 
+            flags |= declares(block.getClass(), blockClass, interactive) ? BlockStates.INTERACTIVE : 0;
+            flags |= declares(block.getClass(), blockClass, replacing) ? BlockStates.CUSTOM_REPLACING : 0;
+            flags |= declares(block.getClass(), blockClass, placement) ? BlockStates.CUSTOM_PLACEMENT : 0;
+            flags |= declares(block.getClass(), blockClass, reactive) ? BlockStates.NEIGHBOUR_REACTIVE : 0;
+
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {
                 if (!properties.isEmpty()) {
@@ -165,6 +194,25 @@ public final class BlockDataDump {
                     (float) speed.invoke(block), (float) jump.invoke(block), (float) destroySpeed.invoke(state, emptyGetter, zero), fluidText);
         }
         return builder.build();
+    }
+
+    /**
+     * True if a class from {@code k} up to {@code Block}'s subclass declares one of the methods (same obfuscated name and
+     * parameter types: what overrides it, and possibly more, which only sets a flag more).
+     */
+    static boolean declares(Class<?> k, Class<?> block, Method[] methods) {
+        for (Class<?> c = k; c != block && c != null; c = c.getSuperclass()) {
+            for (Method m : methods) {
+                try {
+                    if (!java.lang.reflect.Modifier.isStatic(c.getDeclaredMethod(m.getName(), m.getParameterTypes()).getModifiers())) {
+                        return true;
+                    }
+                } catch (NoSuchMethodException e) {
+                    // not declared here
+                }
+            }
+        }
+        return false;
     }
 
     private static int[][] movedAt() {
@@ -254,6 +302,7 @@ public final class BlockDataDump {
         for (int i = 0; i < names.length; i++) {
             types[i] = switch (names[i]) {
                 case "int" -> int.class;
+                case "boolean" -> boolean.class;
                 case "java.lang.Object" -> Object.class;
                 case "java.lang.Comparable" -> Comparable.class;
                 default -> cls(names[i]);

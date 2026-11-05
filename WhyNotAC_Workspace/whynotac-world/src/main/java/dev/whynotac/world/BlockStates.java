@@ -30,7 +30,7 @@ import java.util.zip.GZIPInputStream;
  *
  * <h2>Text format (inside the gzip resource)</h2>
  * <pre>
- * whynotac-block-states 3
+ * whynotac-block-states 4
  * minecraft &lt;version&gt;
  * shapes &lt;n&gt;
  * &lt;kind&gt; TAB &lt;xs&gt; TAB &lt;ys&gt; TAB &lt;zs&gt; TAB &lt;filled cells, hex longs&gt; TAB &lt;boxes&gt;   (one line per shape)
@@ -43,7 +43,7 @@ import java.util.zip.GZIPInputStream;
 public final class BlockStates {
 
     public static final String RESOURCE = "/dev/whynotac/world/block-states.txt.gz";
-    static final String HEADER = "whynotac-block-states 3";
+    static final String HEADER = "whynotac-block-states 4";
 
     /** {@code isAir()}. */
     public static final int AIR = 1;
@@ -87,7 +87,28 @@ public final class BlockStates {
      * positions differs from the one at the origin.
      */
     public static final int MOVING_OUTLINE = 1 << 13;
-    private static final String FLAG_LETTERS = "adcormtfsNSWEp";
+    /*
+     * The four flags below are read from the block's class, not from the state: some class between the block's own and
+     * Block (both included, Block's own defaults and BlockBehaviour's excluded) declares one of the named methods, an
+     * override that happens to do nothing included. What a placement does on the client (decompiled 1.21.11:
+     * MultiPlayerGameMode.performUseItemOn, BlockItem.place, Level.setBlock) depends on nothing else of the blocks.
+     */
+    /** {@code useItemOn} or {@code useWithoutItem}: a use on it may act before (or instead of) the held item's. */
+    public static final int INTERACTIVE = 1 << 14;
+    /** {@code canBeReplaced(BlockState, BlockPlaceContext)}: whether a placement replaces it is not {@link #REPLACEABLE} alone. */
+    public static final int CUSTOM_REPLACING = 1 << 15;
+    /**
+     * {@code getStateForPlacement}, {@code canSurvive} or {@code setPlacedBy}: what its item places may not be its default
+     * state, may not be placed, or may set more blocks.
+     */
+    public static final int CUSTOM_PLACEMENT = 1 << 16;
+    /**
+     * {@code updateShape}, {@code neighborChanged} or {@code updateIndirectNeighbourShapes}: a block set next to it may
+     * change it on the client (shape updates and neighbour updates both run there), or setting it may change blocks
+     * diagonal to it.
+     */
+    public static final int NEIGHBOUR_REACTIVE = 1 << 17;
+    private static final String FLAG_LETTERS = "adcormtfsNSWEpixPu";
 
     private static volatile BlockStates vanilla;
 

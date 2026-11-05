@@ -110,12 +110,59 @@ class BlockStatesDataTest {
             if (moves(state, outline)) {
                 flags |= BlockStates.MOVING_OUTLINE;
             }
+            flags |= declares(block.getClass(), INTERACTIVE) ? BlockStates.INTERACTIVE : 0;
+            flags |= declares(block.getClass(), REPLACING) ? BlockStates.CUSTOM_REPLACING : 0;
+            flags |= declares(block.getClass(), PLACEMENT) ? BlockStates.CUSTOM_PLACEMENT : 0;
+            flags |= declares(block.getClass(), REACTIVE) ? BlockStates.NEIGHBOUR_REACTIVE : 0;
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), shape(outline, (DiscreteVoxelShape) discreteField.get(outline)),
                     flags, block.getFriction(), block.getSpeedFactor(),
                     block.getJumpFactor(), state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO), fluid(state.getFluidState()));
         }
         return builder.build();
+    }
+
+    private static final java.lang.reflect.Method[] INTERACTIVE = methods(net.minecraft.world.level.block.state.BlockBehaviour.class,
+            "useItemOn", "useWithoutItem");
+    private static final java.lang.reflect.Method[] REPLACING = methods(net.minecraft.world.level.block.state.BlockBehaviour.class, "canBeReplaced");
+    private static final java.lang.reflect.Method[] PLACEMENT = concat(methods(Block.class, "getStateForPlacement", "setPlacedBy"),
+            methods(net.minecraft.world.level.block.state.BlockBehaviour.class, "canSurvive"));
+    private static final java.lang.reflect.Method[] REACTIVE = methods(net.minecraft.world.level.block.state.BlockBehaviour.class, "updateShape",
+            "neighborChanged", "updateIndirectNeighbourShapes");
+
+    /** The instance methods {@code owner} declares by these names (canBeReplaced: the BlockPlaceContext one). */
+    private static java.lang.reflect.Method[] methods(Class<?> owner, String... names) {
+        List<java.lang.reflect.Method> out = new java.util.ArrayList<>();
+        for (java.lang.reflect.Method m : owner.getDeclaredMethods()) {
+            if (List.of(names).contains(m.getName()) && !java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                    && (!m.getName().equals("canBeReplaced") || m.getParameterTypes()[1] == net.minecraft.world.item.context.BlockPlaceContext.class)) {
+                out.add(m);
+            }
+        }
+        assertEquals(names.length, out.size(), owner + " " + List.of(names) + ": " + out);
+        return out.toArray(java.lang.reflect.Method[]::new);
+    }
+
+    private static java.lang.reflect.Method[] concat(java.lang.reflect.Method[] a, java.lang.reflect.Method[] b) {
+        java.lang.reflect.Method[] out = java.util.Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
+    }
+
+    /** As {@code BlockDataDump.declares}: a class from {@code k} up to Block's subclass declares one of the methods. */
+    private static boolean declares(Class<?> k, java.lang.reflect.Method[] methods) {
+        for (Class<?> c = k; c != Block.class && c != null; c = c.getSuperclass()) {
+            for (java.lang.reflect.Method m : methods) {
+                try {
+                    if (!java.lang.reflect.Modifier.isStatic(c.getDeclaredMethod(m.getName(), m.getParameterTypes()).getModifiers())) {
+                        return true;
+                    }
+                } catch (NoSuchMethodException e) {
+                    // not declared here
+                }
+            }
+        }
+        return false;
     }
 
     /** Whether the outline somewhere differs from the origin's ({@code BlockDataDump}'s positions: an offset hashes x and z). */

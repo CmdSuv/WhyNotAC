@@ -100,6 +100,19 @@ class ItemPrototypesDataTest {
         return sb.toString();
     }
 
+    /**
+     * The block a use on a block places, where that is all BlockItem.useOn may do: the class is BlockItem itself (its
+     * subclasses move the placement, place more blocks or another state), the item is not consumable (BlockItem.useOn
+     * then eats it when nothing was placed) and has no use cooldown of its own.
+     */
+    private static String places(Item item) {
+        if (item.getClass() != net.minecraft.world.item.BlockItem.class || item.components().has(DataComponents.CONSUMABLE)
+                || item.components().has(DataComponents.USE_COOLDOWN)) {
+            return "-";
+        }
+        return BuiltInRegistries.BLOCK.getKey(((net.minecraft.world.item.BlockItem) item).getBlock()).toString();
+    }
+
     @Test
     void theShippedPrototypesAreTheGamesOwn() throws IOException {
         List<String> lines = new ArrayList<>();
@@ -125,7 +138,7 @@ class ItemPrototypesDataTest {
                     net.minecraft.world.item.component.UseEffects.DEFAULT);
             String useEffects = (use.canSprint() ? "sprint" : "slow") + ":" + use.speedMultiplier();
             lines.add(BuiltInRegistries.ITEM.getKey(item) + "\t" + range + "\t" + into + "\t" + swap + "\t" + piercing + "\t" + stable + "\t" + useEffects
-                    + "\t" + useKind(item) + "\t" + tool(item.components().get(DataComponents.TOOL)));
+                    + "\t" + useKind(item) + "\t" + tool(item.components().get(DataComponents.TOOL)) + "\t" + places(item));
         }
         lines.sort(null);
         String table = String.join("\n", lines) + "\n";

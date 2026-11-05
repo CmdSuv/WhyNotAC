@@ -27,10 +27,12 @@ public final class ItemPrototypes {
      * and whether a use never changes its stack on the client ({@code stable}: no use method of its class
      * changes the inventory client-side, and it is not consumable, has no remainder and swaps with nothing),
      * its {@code minecraft:use_effects} ({@code useCanSprint}, {@code useSpeed}: {@code UseEffects.canSprint} and
-     * {@code speedMultiplier}), and what a use does on the client beyond slowing ({@code useKind}).
+     * {@code speedMultiplier}), and what a use does on the client beyond slowing ({@code useKind}), and the block it places
+     * ({@code places}: a {@code BlockItem} of no subclass, not consumable and without {@code minecraft:use_cooldown}, so
+     * {@code BlockItem.useOn} places that block or nothing; null for every other item).
      */
     public record Prototype(String key, Stack.AttackRange attackRange, String useRemainder, String swapSlot, boolean piercing, boolean stable,
-            boolean useCanSprint, float useSpeed, UseKind useKind, Tool tool) {}
+            boolean useCanSprint, float useSpeed, UseKind useKind, Tool tool, String places) {}
 
     /**
      * {@code net.minecraft.world.item.component.Tool} (null on a prototype without one): the rules in order and the
@@ -92,7 +94,7 @@ public final class ItemPrototypes {
                                 case "release-moves" -> UseKind.RELEASE_MOVES;
                                 case "changes-blocks" -> UseKind.CHANGES_BLOCKS;
                                 default -> UseKind.PLAIN;
-                            }, tool(cells[8])));
+                            }, tool(cells[8]), cells[9].equals("-") ? null : cells[9]));
                 }
             }
             vanilla = table = new ItemPrototypes(Map.copyOf(items));
@@ -128,7 +130,7 @@ public final class ItemPrototypes {
     /**
      * The shipped table: {@code key attackRange(min:max:minCreative:maxCreative:margin:mobFactor | -) useRemainder(item | -)
      * swapSlot(slot | -) piercing(piercing | -) stable(stable | -) useEffects(sprint|slow:speedMultiplier)
-     * useKind(self-ending | release-moves | changes-blocks | -) tool(defaultSpeed|rule|rule... | -)}, a rule being
+     * useKind(self-ending | release-moves | changes-blocks | -) tool(defaultSpeed|rule|rule... | -) places(block | -)}, a rule being
      * {@code blocks=speed=correctForDrops} with {@code blocks} a tag ({@code #key}) or comma-separated block keys and
      * {@code -} for no speed or no drop rule.
      */
