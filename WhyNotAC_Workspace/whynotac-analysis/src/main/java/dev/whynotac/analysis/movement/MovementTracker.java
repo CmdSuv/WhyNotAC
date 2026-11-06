@@ -2805,15 +2805,28 @@ public final class MovementTracker {
             // the motions at the first position whose step ends at the second: [lo, hi] on each axis (the step is monotone);
             // the step moves by the motion plus moveRelative's input (well under half a block), so it is within half a block
             // of the distance between them
-            double[] lo = {p1[0] - p0[0] - 0.5, p1[2] - p0[2] - 0.5};
-            double[] hi = {p1[0] - p0[0] + 0.5, p1[2] - p0[2] + 0.5};
-            double[] lower = bisect(p0, p1, settledY, modifier, conditions, view, lo, hi, true);
-            double[] upper = bisect(p0, p1, settledY, modifier, conditions, view, lo, hi, false);
-            if (lower == null || upper == null) {
+            double dx = p1[0] - p0[0];
+            double dz = p1[2] - p0[2];
+            // LivingEntity.aiStep (a player): a horizontal motion under 0.003 is zeroed whole, both axes together; away from
+            // that disc each axis moves on its own. The faster axis is searched first, the other at its distance; the
+            // slower then at the faster's motion found, which keeps the disc away
+            int first = Math.abs(dx) >= Math.abs(dz) ? 0 : 1;
+            double[] lo = new double[2];
+            double[] hi = new double[2];
+            double[] d = {dx, dz};
+            for (int axis : new int[] {first, 1 - first}) {
+                double other = axis == first ? d[1 - axis] : lo[1 - axis];
+                double low = bisect(axis, other, p0, p1, settledY, modifier, conditions, view, d[axis] - 0.5, d[axis] + 0.5, true);
+                double high = bisect(axis, other, p0, p1, settledY, modifier, conditions, view, d[axis] - 0.5, d[axis] + 0.5, false);
+                if (Double.isNaN(low) || Double.isNaN(high) || low > high) {
+                    return null;
+                }
+                lo[axis] = low;
+                hi[axis] = high;
+            }
+            if (!clearOfZeroing(lo, hi)) {
                 return null;
             }
-            lo = lower;
-            hi = upper;
             for (int k = 1; k < path.size(); k++) {
                 double[] from = path.get(k - 1);
                 double[] to = path.get(k);
@@ -2824,8 +2837,8 @@ public final class MovementTracker {
                 }
                 lo = new double[] {a.deltaMovement().x(), a.deltaMovement().z()};
                 hi = new double[] {b.deltaMovement().x(), b.deltaMovement().z()};
-                if (lo[0] > hi[0] || lo[1] > hi[1]) {
-                    return null; // not monotone after all
+                if (lo[0] > hi[0] || lo[1] > hi[1] || !clearOfZeroing(lo, hi)) {
+                    return null; // not monotone after all, or the axes no longer on their own
                 }
                 if (lo[0] == hi[0] && lo[1] == hi[1]) {
                     // the motion at sent position k is known: the engine from there must give every later one exactly
@@ -2850,48 +2863,50 @@ public final class MovementTracker {
     }
 
     /**
-     * The lowest ({@code lowest}) or highest motion pair in {@code [lo, hi]} whose step from {@code from} ends at
-     * {@code to} on each axis, by bisection over the doubles' order; null where the step ever leaves the ground, collides,
-     * or no motion in the range ends there.
+     * The lowest ({@code lowest}) or highest motion on one axis (0: x, 1: z) in {@code [lo, hi]}, the other axis's motion
+     * {@code other}, whose step from {@code from} ends at {@code to} on that axis, by bisection over the doubles' order
+     * (the step's end only grows with the motion); NaN where a step leaves the ground or collides, or none ends there.
      */
-    private double[] bisect(double[] from, double[] to, double settledY, boolean modifier, OnFoot.Conditions conditions, View view, double[] lo,
-            double[] hi, boolean lowest) throws Colliders.Unknown {
-        long[] a = {ordered(lo[0]), ordered(lo[1])};
-        long[] b = {ordered(hi[0]), ordered(hi[1])};
-        int[] axis = {0, 2};
-        // the answer stays in [a, b] on each axis; the step's end at it is checked last
-        for (int i = 0; i < 70 && (a[0] < b[0] || a[1] < b[1]); i++) {
+    private double bisect(int axis, double other, double[] from, double[] to, double settledY, boolean modifier, OnFoot.Conditions conditions,
+            View view, double lo, double hi, boolean lowest) throws Colliders.Unknown {
+        long a = ordered(lo);
+        long b = ordered(hi);
+        double want = to[axis == 0 ? 0 : 2];
+        for (int i = 0; i < 70 && a < b; i++) {
             // the floor (lowest) or ceiling (highest) of the midpoint, without overflow
-            long mx = lowest ? (a[0] & b[0]) + ((a[0] ^ b[0]) >> 1) : (a[0] | b[0]) - ((a[0] ^ b[0]) >> 1);
-            long mz = lowest ? (a[1] & b[1]) + ((a[1] ^ b[1]) >> 1) : (a[1] | b[1]) - ((a[1] ^ b[1]) >> 1);
-            PlayerState s = runStep(from, unordered(mx), unordered(mz), settledY, modifier, conditions, view);
+            long m = lowest ? (a & b) + ((a ^ b) >> 1) : (a | b) - ((a ^ b) >> 1);
+            double v = unordered(m);
+            PlayerState s = axis == 0 ? runStep(from, v, other, settledY, modifier, conditions, view)
+                    : runStep(from, other, v, settledY, modifier, conditions, view);
             if (s == null) {
-                return null;
+                return Double.NaN;
             }
-            double[] at = {s.x(), s.z()};
-            long[] m = {mx, mz};
-            for (int k = 0; k < 2; k++) {
-                if (a[k] >= b[k]) {
-                    continue;
-                }
-                if (lowest) {
-                    if (at[k] >= to[axis[k]]) {
-                        b[k] = m[k];
-                    } else {
-                        a[k] = m[k] + 1;
-                    }
+            double at = axis == 0 ? s.x() : s.z();
+            if (lowest) {
+                if (at >= want) {
+                    b = m;
                 } else {
-                    if (at[k] <= to[axis[k]]) {
-                        a[k] = m[k];
-                    } else {
-                        b[k] = m[k] - 1;
-                    }
+                    a = m + 1;
+                }
+            } else {
+                if (at <= want) {
+                    a = m;
+                } else {
+                    b = m - 1;
                 }
             }
         }
-        double[] found = {unordered(lowest ? a[0] : b[0]), unordered(lowest ? a[1] : b[1])};
-        PlayerState s = runStep(from, found[0], found[1], settledY, modifier, conditions, view);
-        return s != null && s.x() == to[0] && s.z() == to[2] ? found : null;
+        double found = unordered(lowest ? a : b);
+        PlayerState s = axis == 0 ? runStep(from, found, other, settledY, modifier, conditions, view)
+                : runStep(from, other, found, settledY, modifier, conditions, view);
+        return s != null && (axis == 0 ? s.x() : s.z()) == want ? found : Double.NaN;
+    }
+
+    /** No horizontal motion in the box {@code [lo, hi]} is one the client zeroes ({@code horizontalDistanceSqr() < 9.0E-6}). */
+    static boolean clearOfZeroing(double[] lo, double[] hi) {
+        double nx = lo[0] > 0 ? lo[0] : hi[0] < 0 ? -hi[0] : 0.0; // the nearest to zero on each axis
+        double nz = lo[1] > 0 ? lo[1] : hi[1] < 0 ? -hi[1] : 0.0;
+        return nx * nx + nz * nz >= 9.0E-6 * 1.001;
     }
 
     /** The engine's tick from a sent position with this motion; null where it leaves the ground, collides or changes height. */

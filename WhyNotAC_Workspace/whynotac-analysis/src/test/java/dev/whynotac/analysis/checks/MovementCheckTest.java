@@ -1199,6 +1199,17 @@ class MovementCheckTest {
     }
 
     @Test
+    void aRunAlongAnAxisIsNotTakenUp() throws Exception {
+        // facing south exactly: moveRelative's input across the run is zero, and the motion across it only halves towards
+        // zero (never one double), so no motion is known exactly
+        ticks(10, FORWARD, 0.0F);
+        loseTheClaim(FORWARD, 0.0F);
+        ticks(60, FORWARD, 0.0F);
+        assertTrue(ticks.stream().noneMatch(t -> "anchored: running steadily".equals(t.reason())), String.valueOf(ticks));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+    }
+
+    @Test
     void aSpeedCheatOnlyRunningIsNotTakenUpOrIsCaught() throws Exception {
         ticks(10, FORWARD, 30.0F);
         loseTheClaim(FORWARD, 30.0F);

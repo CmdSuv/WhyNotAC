@@ -444,12 +444,13 @@ for c in "item replace entity $NAME hotbar.6 with minecraft:cobblestone 32" "ite
 echo "tp $NAME 52.5 -60 32.5 0 0" > "$FIFO"; sleep 1.5
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" e/0.05 -/0.8 move:71:134/0.3 Shift_L,Button1/0.1 -/0.4 move:36:0/0.3 Shift_L,Button1/0.1 -/0.4 \
   move:-252:-116/0.3 Shift_L,Button1/0.1 -/0.4 Escape/0.05 -/0.8; sleep 0.5
-# Running on after the claim was lost (#102), along z = 90.5 eastwards from x 40, looking 50 degrees down: walking, an
+# Running on after the claim was lost (#102), from x 40.5, z 88.5 east by a little south (yaw -80: off the axes, where the
+# motion along the one the run does not follow would only halve towards zero), looking 50 degrees down: walking, an
 # empty-handed use on the ground ahead (a use the movement check does not resolve: it ends the claim), walking on for four
 # seconds; then the same sprinting. The movement check takes the player up again while it runs (MovementTracker's run
 # anchor: the motion of a steady run on even ground is known exactly within a second), never waiting for it to stand still.
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; echo "item replace entity $NAME weapon.offhand with minecraft:air" > "$FIFO"
-sleep 0.5; echo "tp $NAME 40.5 -60 90.5 -90 50" > "$FIFO"; sleep 2.0
+sleep 0.5; echo "tp $NAME 40.5 -60 88.5 -80 50" > "$FIFO"; sleep 2.0
 python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/1.0 w,Button3/0.1 w/4.0 -/1.0 w,Control_L/1.0 w,Control_L,Button3/0.1 w,Control_L/4.0 -/1.0; sleep 0.5
 # Sneak bridging (VAL-13, #95): on a stone platform four blocks up (x 50..52, z 38..40), facing south and looking 78
 # degrees down, S, shift and the use button held: the client walks back north, its sneak stops it at the edge (no walking
