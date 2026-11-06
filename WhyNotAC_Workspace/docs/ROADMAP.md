@@ -96,12 +96,17 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   başarısız olur, hiçbir şey değişmez) ya da hiçbirinde (blok konur). Konan durumu client, o kullanımın onayını işleyene
   kadar tutar, sonrasında sunucununkini. Gerçek client'ın kulesinde 15 kullanımın 15'i çözüldü, CI en az 8'ini ister.
   Boş elle ya da etkileşimli bloklara yapılan kullanımlar henüz çözülmez.
-- **Kapsamın asıl kaldıracı (ölçüldü, 2026-11-05):** iddia kaybedildikten sonra hareket kontrolü yalnızca oyuncu durunca
-  yeniden tutunur (`settleAnchor`: 12 tik tuşsuz, konum aynı, yerde; hızın tam sıfıra indiğinin kanıtı bu). Regresyon
-  kümesinin gerçek client oturumlarında her kayıptan sonra tipik boşluk 23 tik; oyuncu durmadan devam ederse çok daha uzun
-  (zıplayarak kazarken 230, suda 121 tik). Tek tek çekilme nedenleri (bilinmeyen blok 12 tik, kazma bunun 3'ü) bu
-  boşlukların yanında küçüktür. Hareket eden oyuncuya kesin bir çapa ayrı bir iştir: konum farkından hızı geri çıkarmak
-  toplamanın yuvarlanmasıyla tek bir değere inmez (konum 100 civarında, hız 0,2 civarında: yüzlerce aday).
+- **Kapsamın asıl kaldıracı, koşarken yeniden tutunmak (görev #102):** iddia kaybedildikten sonra hareket kontrolü
+  eskiden yalnızca oyuncu durunca yeniden tutunurdu (`settleAnchor`: 12 tik tuşsuz, konum aynı, yerde); her kayıptan sonra
+  tipik boşluk 23 tik, oyuncu durmadan devam edince çok daha uzundu. Koşma çapası (`runAnchor`) düz zeminde aynı tuşlarla,
+  dönüşle ve koşma durumuyla 20 tik koşan oyuncuyu durmasını beklemeden yakalar. Client'ın tiki yatay hızı
+  `v -> (v + a) * g` ile değiştirir; bu, yuvarlamanın monoton tuttuğu ve her aralığı daraltan bir eşlemedir. İlk iki
+  gönderilen konumu veren hızların aralığı motorun kendi adımıyla ikiye bölünerek bulunur. Uçlar her gönderilen konumdan
+  adımlanır, her adım bir sonraki konumla tutarlı olmalıdır; uçlar tek bir double'da buluşunca hız client'ınkidir.
+  Ardından motor en az üç gönderilen konumu bit bit vermelidir. Eksenler ayrı ayrı aranır: client oyuncunun 0,003'ün
+  altındaki yatay hızını iki ekseniyle birlikte sıfırlar, aralık bu bölgeye değerse çapa kurulmaz. Tam bir eksen boyunca
+  koşu çapa vermez (karşı eksendeki hız sıfıra doğru yarılanır, tek bir double'a inmez). Gerçek client'ta iki çapa
+  kuruldu (yürüyüş ve koşu); ardından 573 tik açıklandı, client'ın kendi durumu her açıklanan tikte hipotezlerdeydi.
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
