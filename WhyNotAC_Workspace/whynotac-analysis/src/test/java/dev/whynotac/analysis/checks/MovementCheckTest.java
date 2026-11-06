@@ -1159,6 +1159,65 @@ class MovementCheckTest {
 
     // --- tests ---
 
+    // --- the run anchor: a lost claim taken up again while the player runs on (MovementTracker.runAnchor) ---
+
+    /** A packet WhyNotAC cannot read, in the next tick: the claim ends there. */
+    private void loseTheClaim(PlayerState.Keys keys, float yRot) throws Colliders.Unknown {
+        keybinds.add(new ServerboundPacket.Untranslatable("minecraft:unknown_test_packet"));
+        tick(keys, yRot, 0.0F, Vec3d.ZERO);
+    }
+
+    private long count(int from, MovementTracker.Outcome outcome) {
+        return ticks.subList(from, ticks.size()).stream().filter(t -> t.outcome() == outcome).count();
+    }
+
+    @ParameterizedTest
+    @EnumSource(names = {"FORWARD", "SPRINT", "DIAGONAL"})
+    void aPlayerRunningOnIsTakenUpAgainWithoutStopping(Run run) throws Exception {
+        ticks(10, run.keys, 30.0F);
+        int from = ticks.size();
+        loseTheClaim(run.keys, 30.0F);
+        ticks(60, run.keys, 30.0F); // on, never still
+        List<MovementTracker.Tick> after = ticks.subList(from, ticks.size());
+        assertTrue(after.stream().anyMatch(t -> "anchored: running steadily".equals(t.reason())), String.valueOf(after));
+        long explained = count(from, MovementTracker.Outcome.EXPLAINED);
+        assertTrue(explained >= 25, explained + " of " + after.size() + ": " + after);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(List.of(), evidence);
+    }
+
+    enum Run {
+        FORWARD(new PlayerState.Keys(true, false, false, false, false, false, false)),
+        SPRINT(new PlayerState.Keys(true, false, false, false, false, false, true)),
+        DIAGONAL(new PlayerState.Keys(true, false, true, false, false, false, false));
+
+        final PlayerState.Keys keys;
+
+        Run(PlayerState.Keys keys) {
+            this.keys = keys;
+        }
+    }
+
+    @Test
+    void aSpeedCheatOnlyRunningIsNotTakenUpOrIsCaught() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        loseTheClaim(FORWARD, 30.0F);
+        for (int i = 0; i < 60; i++) {
+            tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.001, 0.0, 0.0)); // a thousandth of a block a tick more than vanilla
+        }
+        assertTrue(ticks.stream().noneMatch(t -> "anchored: running steadily".equals(t.reason())), "no run of a cheat's fits the vanilla one: " + ticks);
+    }
+
+    @Test
+    void aCheatAfterTheRunAnchorIsCaught() throws Exception {
+        ticks(10, FORWARD, 30.0F);
+        loseTheClaim(FORWARD, 30.0F);
+        ticks(40, FORWARD, 30.0F);
+        assertTrue(ticks.stream().anyMatch(t -> "anchored: running steadily".equals(t.reason())), String.valueOf(ticks));
+        tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.01));
+        assertEquals(1, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+    }
+
     // --- a tower: blocks placed under the player while jumping (MovementTracker.resolveBlockUses) ---
 
     private int blockSequence;

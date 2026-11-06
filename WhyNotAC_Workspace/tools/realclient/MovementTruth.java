@@ -186,7 +186,9 @@ public class MovementTruth {
                 && ((Number) tracker.get("rotationsFollowed")).longValue() > 0 && Long.valueOf(0).equals(tracker.get("rotationsUnanswered"))
                 && ((Number) tracker.get("walkTruthFound")).longValue() > 0
                 // the tower: its uses resolved for the world replica (#95), each of those ticks then judged as any other
-                && ((Number) tracker.get("blockUseTicksExplained")).longValue() >= 8;
+                && ((Number) tracker.get("blockUseTicksExplained")).longValue() >= 8
+                // the run anchor (#102): taken up again while running, the following ticks judged as any other
+                && ((Number) tracker.get("runAnchors")).longValue() >= 1 && ((Number) tracker.get("runAnchorExplained")).longValue() >= 20;
         System.exit(clean ? 0 : 1);
     }
 
@@ -240,6 +242,8 @@ public class MovementTruth {
         List<String> examples = new ArrayList<>();
         int[] sentIndex = {0};
         long[] blockUses = new long[2]; // ticks with a use on a block: all, explained (the use resolved for the world replica)
+        long[] runs = new long[2]; // run anchors (#102), the explained ticks that followed one before the claim ended
+        boolean[] afterRun = {false};
         boolean[] useInTick = {false};
         List<TimelineListener> chain = new ArrayList<>(replicas.listeners());
         chain.add((session, event) -> {
@@ -371,6 +375,14 @@ public class MovementTruth {
             if (tick.outcome() == MovementTracker.Outcome.NO_CLAIM && examples.size() < 40) {
                 examples.add("no claim at tick " + tick.number() + ": " + tick.reason());
             }
+            if ("anchored: running steadily".equals(tick.reason())) {
+                runs[0]++;
+                afterRun[0] = true;
+            } else if (tick.outcome() == MovementTracker.Outcome.EXPLAINED) {
+                runs[1] += afterRun[0] ? 1 : 0;
+            } else {
+                afterRun[0] = false;
+            }
             if (tick.reason() != null) {
                 reasons.merge(tick.reason().replaceAll(" at -?\\d+ -?\\d+ -?\\d+| at BlockPos\\[.*\\]|-?\\d+\\.\\d+", ""), 1L, Long::sum);
             }
@@ -439,6 +451,8 @@ public class MovementTruth {
         out.put("unexplained", counts[3]);
         out.put("blockUseTicks", blockUses[0]);
         out.put("blockUseTicksExplained", blockUses[1]);
+        out.put("runAnchors", runs[0]);
+        out.put("runAnchorExplained", runs[1]);
         out.put("pushesFollowed", tracker.pushesFollowed());
         out.put("rocketBoosts", tracker.rocketBoosts());
         out.put("rideExplained", tracker.rideExplained());

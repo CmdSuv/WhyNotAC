@@ -130,6 +130,11 @@ public final class MovementTracker {
     static final int MAX_PINGS = 4096;
     static final int SETTLE_KEYLESS_TICKS = 12;
     static final int SETTLE_MIN_TICKS = 3;
+    /** The run anchor tries once this many steady ticks are on record, and again every this many ticks while they last. */
+    static final int RUN_MIN_TICKS = 20;
+    static final int RUN_MAX_TICKS = 40;
+    /** After the velocity is known exactly, the ticks the engine must still give the sent positions of, bit for bit. */
+    static final int RUN_CONFIRM_TICKS = 3;
     /** Entities whose position the client simulates count as near within this of the server's position for them. */
     static final double UNKNOWN_ENTITY_RADIUS = 64.0;
     /**
@@ -297,6 +302,16 @@ public final class MovementTracker {
     private double lastY;
     private double lastZ;
     private boolean quietSincePosition;
+    /**
+     * The run anchor's record ({@link #runAnchor}): the positions the client sent at the ends of its last steady ticks
+     * (oldest first, at most {@link #RUN_MAX_TICKS} + 1), and the keys, rotation and sprinting they all had.
+     */
+    private final ArrayDeque<double[]> runPositions = new ArrayDeque<>();
+    private PlayerState.Keys runKeys = PlayerState.Keys.NONE;
+    private float runYRot;
+    private float runXRot;
+    private boolean runSprinting;
+    private long runLastAttempt = Long.MIN_VALUE;
 
     public MovementTracker() {}
 
@@ -2466,6 +2481,14 @@ public final class MovementTracker {
             since = end.sequence();
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: standing still", hypotheses.size(), since, null, null);
         }
+        List<Hypothesis> running = baseReliable ? runAnchor(number, in, w, world, entities) : null;
+        if (running != null) {
+            hypotheses = List.copyOf(borderTicked(running, entities.lastTickRanNormally())); // the state after this tick
+            lastHands = hands();
+            since = end.sequence();
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: running steadily", hypotheses.size(), since, null,
+                    null);
+        }
         return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, lostReason, 0, since, null, null);
     }
 
@@ -2691,6 +2714,210 @@ public final class MovementTracker {
     }
 
     /**
+     * Whether this tick continues the run on record ({@link #runAnchor}): one position packet from the ground without a
+     * horizontal collision at the run's height, sent the tick after the last one with nothing in between that the
+     * client may have been moved or changed by (no server packet that ends the settle anchor's quiet, no action of its
+     * own), the same keys (no jump, no shift), rotation and sprinting as the run, the player ticking.
+     */
+    private boolean steadyStep(long number, TickInput in) {
+        ServerboundPacket.MovePlayer move = in.move;
+        if (runPositions.isEmpty() || move == null || !move.hasPosition() || in.moves != 1 || !move.onGround() || move.horizontalCollision()
+                || lastPositionTick != number - 1 || !quietSincePosition || !base.ticking() || in.unmodelled != null || !in.blockUses.isEmpty()
+                || in.abilities > 0 || in.attacks > 0 || in.stabs > 0 || in.interactions > 0 || !in.itemActions.isEmpty() || in.handsTouched
+                || in.sprint != null || in.glideStarts > 0 || in.loaded) {
+            return false;
+        }
+        PlayerState.Keys now = in.input != null ? keys(in.input) : currentKeys;
+        return now.equals(runKeys) && !now.jump() && !now.shift() && move.y() == runPositions.peekLast()[1]
+                && Float.floatToIntBits(baseSent.yRot()) == Float.floatToIntBits(runYRot) && Float.floatToIntBits(baseSent.xRot()) == Float.floatToIntBits(runXRot)
+                && baseSent.sprinting() == runSprinting;
+    }
+
+    /**
+     * The run anchor: a player that ran on the ground with the same keys, rotation and sprinting for {@link #RUN_MIN_TICKS}
+     * ticks or more, nothing in its way. There the client's tick changes the horizontal motion by {@code v -> (v + a) * g}
+     * (moveRelative's input {@code a}, the block's friction {@code g}, decompiled 1.21.11 {@code LivingEntity.travel}),
+     * whatever the position: a map of doubles that rounding keeps monotone, which shrinks every interval by {@code g}. The
+     * motions that take the first sent position to the second are an interval (found by bisection on the engine's own
+     * step); its two ends, stepped from each sent position (each of them consistent with the next one), become one double
+     * when every motion in between does, and that is the client's. From there the engine must give the next
+     * {@link #RUN_CONFIRM_TICKS} or more sent positions bit for bit; the state after this tick is the anchor, once for
+     * each place the sprinting modifier may have in the client's attributes that fits. Null where any of that fails.
+     */
+    private List<Hypothesis> runAnchor(long number, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+        if (runPositions.size() < RUN_MIN_TICKS || !steadyStep(number, in) || w[0] != w[1] || base.outOfScope() != null || baseMayGlide
+                || lastGlideStart != Long.MIN_VALUE && lastBaseFlags < lastGlideStart || spinMayRun > 0 || sentUnsure
+                || !base.speed().sprintLayoutCanonical() || runLastAttempt != Long.MIN_VALUE && number - runLastAttempt < RUN_MIN_TICKS) {
+            return null;
+        }
+        runLastAttempt = number;
+        double settled = settledYMotion(base.effects());
+        if (Double.isNaN(settled)) {
+            return null;
+        }
+        List<double[]> path = new ArrayList<>(runPositions);
+        path.add(new double[] {in.move.x(), in.move.y(), in.move.z(), Double.NaN});
+        View view = new View(world, entities, selfId);
+        double minX = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double minZ = Double.POSITIVE_INFINITY;
+        double maxZ = Double.NEGATIVE_INFINITY;
+        double y = path.get(0)[1];
+        for (double[] p : path) {
+            minX = Math.min(minX, p[0]);
+            maxX = Math.max(maxX, p[0]);
+            minZ = Math.min(minZ, p[2]);
+            maxZ = Math.max(maxZ, p[2]);
+        }
+        try {
+            if (!base.border().known() && !base.border().farFrom(minX - 0.3, minZ - 0.3, maxX + 0.3, maxZ + 0.3, BORDER_MARGIN)) {
+                return null;
+            }
+            view.check(minX - 0.3, y, minZ - 0.3, maxX + 0.3, y + 1.8, maxZ + 0.3, true);
+        } catch (Lose e) {
+            return null;
+        }
+        if (world.mayMoveEntitiesIn((int) Math.floor(minX) - MOVER_MARGIN, (int) Math.floor(y) - MOVER_MARGIN, (int) Math.floor(minZ) - MOVER_MARGIN,
+                (int) Math.floor(maxX) + MOVER_MARGIN, (int) Math.floor(y + 1.8) + MOVER_MARGIN, (int) Math.floor(maxZ) + MOVER_MARGIN,
+                (long) path.get(0)[3])) {
+            return null;
+        }
+        boolean present = base.speed().holdsSprinting();
+        List<Hypothesis> out = new ArrayList<>();
+        for (boolean modifier : new boolean[] {present, !present}) {
+            SelfState self = modifier == present ? base : base.withSpeed(base.speed().setSprinting(!present));
+            OnFoot.Conditions conditions = new OnFoot.Conditions(self.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, self.speed(),
+                    self.effects(), null, false, PlatformCos.X86_64, self.border().collision(), leatherBoots).withSpinAttack(self.spinAttack());
+            PlayerState anchor = runFrom(path, settled, modifier, conditions, view);
+            if (anchor != null) {
+                out.add(new Hypothesis(anchor, self, baseSent, Hypothesis.ALL_WINDOWS, self.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY,
+                        Hypothesis.ALL_COSINES, baseApplied));
+            }
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    /** {@link #runAnchor} for one place of the sprinting modifier: the state after the last sent position's tick, or null. */
+    private PlayerState runFrom(List<double[]> path, double settledY, boolean modifier, OnFoot.Conditions conditions, View view) {
+        try {
+            double[] p0 = path.get(0);
+            double[] p1 = path.get(1);
+            // the motions at the first position whose step ends at the second: [lo, hi] on each axis (the step is monotone);
+            // the step moves by the motion plus moveRelative's input (well under half a block), so it is within half a block
+            // of the distance between them
+            double[] lo = {p1[0] - p0[0] - 0.5, p1[2] - p0[2] - 0.5};
+            double[] hi = {p1[0] - p0[0] + 0.5, p1[2] - p0[2] + 0.5};
+            double[] lower = bisect(p0, p1, settledY, modifier, conditions, view, lo, hi, true);
+            double[] upper = bisect(p0, p1, settledY, modifier, conditions, view, lo, hi, false);
+            if (lower == null || upper == null) {
+                return null;
+            }
+            lo = lower;
+            hi = upper;
+            for (int k = 1; k < path.size(); k++) {
+                double[] from = path.get(k - 1);
+                double[] to = path.get(k);
+                PlayerState a = runStep(from, lo[0], lo[1], settledY, modifier, conditions, view);
+                PlayerState b = runStep(from, hi[0], hi[1], settledY, modifier, conditions, view);
+                if (a == null || b == null || a.x() > to[0] || b.x() < to[0] || a.z() > to[2] || b.z() < to[2]) {
+                    return null; // no motion in the interval sends this position
+                }
+                lo = new double[] {a.deltaMovement().x(), a.deltaMovement().z()};
+                hi = new double[] {b.deltaMovement().x(), b.deltaMovement().z()};
+                if (lo[0] > hi[0] || lo[1] > hi[1]) {
+                    return null; // not monotone after all
+                }
+                if (lo[0] == hi[0] && lo[1] == hi[1]) {
+                    // the motion at sent position k is known: the engine from there must give every later one exactly
+                    if (path.size() - 1 - k < RUN_CONFIRM_TICKS) {
+                        return null;
+                    }
+                    PlayerState state = runGuess(to, lo[0], lo[1], settledY, modifier);
+                    for (int j = k + 1; j < path.size(); j++) {
+                        state = OnFoot.tick(state, runKeys, view, conditions);
+                        double[] sent = path.get(j);
+                        if (state.x() != sent[0] || state.y() != sent[1] || state.z() != sent[2] || !state.onGround() || state.horizontalCollision()) {
+                            return null;
+                        }
+                    }
+                    return state;
+                }
+            }
+            return null; // not narrowed to one motion within the run
+        } catch (Colliders.Unknown e) {
+            return null;
+        }
+    }
+
+    /**
+     * The lowest ({@code lowest}) or highest motion pair in {@code [lo, hi]} whose step from {@code from} ends at
+     * {@code to} on each axis, by bisection over the doubles' order; null where the step ever leaves the ground, collides,
+     * or no motion in the range ends there.
+     */
+    private double[] bisect(double[] from, double[] to, double settledY, boolean modifier, OnFoot.Conditions conditions, View view, double[] lo,
+            double[] hi, boolean lowest) throws Colliders.Unknown {
+        long[] a = {ordered(lo[0]), ordered(lo[1])};
+        long[] b = {ordered(hi[0]), ordered(hi[1])};
+        int[] axis = {0, 2};
+        // the answer stays in [a, b] on each axis; the step's end at it is checked last
+        for (int i = 0; i < 70 && (a[0] < b[0] || a[1] < b[1]); i++) {
+            // the floor (lowest) or ceiling (highest) of the midpoint, without overflow
+            long mx = lowest ? (a[0] & b[0]) + ((a[0] ^ b[0]) >> 1) : (a[0] | b[0]) - ((a[0] ^ b[0]) >> 1);
+            long mz = lowest ? (a[1] & b[1]) + ((a[1] ^ b[1]) >> 1) : (a[1] | b[1]) - ((a[1] ^ b[1]) >> 1);
+            PlayerState s = runStep(from, unordered(mx), unordered(mz), settledY, modifier, conditions, view);
+            if (s == null) {
+                return null;
+            }
+            double[] at = {s.x(), s.z()};
+            long[] m = {mx, mz};
+            for (int k = 0; k < 2; k++) {
+                if (a[k] >= b[k]) {
+                    continue;
+                }
+                if (lowest) {
+                    if (at[k] >= to[axis[k]]) {
+                        b[k] = m[k];
+                    } else {
+                        a[k] = m[k] + 1;
+                    }
+                } else {
+                    if (at[k] <= to[axis[k]]) {
+                        a[k] = m[k];
+                    } else {
+                        b[k] = m[k] - 1;
+                    }
+                }
+            }
+        }
+        double[] found = {unordered(lowest ? a[0] : b[0]), unordered(lowest ? a[1] : b[1])};
+        PlayerState s = runStep(from, found[0], found[1], settledY, modifier, conditions, view);
+        return s != null && s.x() == to[0] && s.z() == to[2] ? found : null;
+    }
+
+    /** The engine's tick from a sent position with this motion; null where it leaves the ground, collides or changes height. */
+    private PlayerState runStep(double[] from, double vx, double vz, double settledY, boolean modifier, OnFoot.Conditions conditions, View view)
+            throws Colliders.Unknown {
+        PlayerState s = OnFoot.tick(runGuess(from, vx, vz, settledY, modifier), runKeys, view, conditions);
+        return s.onGround() && !s.horizontalCollision() && s.y() == from[1] && s.sprinting() == runSprinting ? s : null;
+    }
+
+    /** A state at a sent position, on the ground, with this motion and the run's keys, rotation and sprinting (the step finds the rest). */
+    private PlayerState runGuess(double[] at, double vx, double vz, double settledY, boolean modifier) {
+        return new PlayerState(at[0], at[1], at[2], new Vec3d(vx, settledY, vz), runYRot, runXRot, true, false, false, true, true, 0.0, runSprinting,
+                modifier, false, PlayerState.Pose.STANDING, runKeys, 0, 0, 0, null, false, Vec3d.ZERO, false, false, false, false, null, 0);
+    }
+
+    /** Doubles in their numeric order as longs (and back): bisection over every double between two. */
+    static long ordered(double d) {
+        long bits = Double.doubleToRawLongBits(d == 0.0 ? 0.0 : d);
+        return bits < 0 ? Long.MIN_VALUE - bits : bits;
+    }
+
+    static double unordered(long o) {
+        return Double.longBitsToDouble(o < 0 ? Long.MIN_VALUE - o : o);
+    }
+
+    /**
      * The vertical motion of a player standing on the ground at the end of a tick: gravity (slow falling's while not
      * rising) after the landing cleared it, times the drag. NaN under levitation, which lifts the player off.
      */
@@ -2707,11 +2934,31 @@ public final class MovementTracker {
 
     /** The settle anchor's record of the position packets and of the keys, from what the client sent. */
     private void settleBookkeeping(long number, TimelineEvent.Inbound end, TickInput in) {
+        boolean steady = steadyStep(number, in); // before this tick's flags and keys are taken in
         if (in.unmodelled != null || !in.blockUses.isEmpty() || in.abilities > 0 || in.attacks > 0 || !base.ticking()) {
             quietSincePosition = false;
         }
         if (in.input != null) {
             currentKeys = keys(in.input);
+        }
+        ServerboundPacket.MovePlayer sentMove = in.move;
+        if (!steady) {
+            runPositions.clear();
+            runLastAttempt = Long.MIN_VALUE;
+        }
+        if (sentMove != null && sentMove.hasPosition()) {
+            if (runPositions.isEmpty()) {
+                runKeys = currentKeys;
+                runYRot = baseSent.yRot();
+                runXRot = baseSent.xRot();
+                runSprinting = baseSent.sprinting();
+            }
+            runPositions.addLast(new double[] {sentMove.x(), sentMove.y(), sentMove.z(), end.sequence()}); // a sequence fits a double
+            while (runPositions.size() > RUN_MAX_TICKS + 1) {
+                runPositions.pollFirst();
+            }
+        } else {
+            runPositions.clear();
         }
         keylessTicks = currentKeys.equals(PlayerState.Keys.NONE) ? keylessTicks + 1 : 0;
         ServerboundPacket.MovePlayer move = in.move;
