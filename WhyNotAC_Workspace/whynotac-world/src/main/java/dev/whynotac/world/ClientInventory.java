@@ -751,6 +751,16 @@ public final class ClientInventory {
         return out;
     }
 
+    /** Whether the client's {@code abilities.instabuild} may be true now, or WhyNotAC does not know. */
+    public boolean mayInstabuild() {
+        for (State s : possible()) {
+            if (s.creative != NO) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private List<State> possible() {
         int applicable = applicable(windowEnd());
         List<State> all = new ArrayList<>();

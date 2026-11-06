@@ -1,6 +1,7 @@
 package dev.whynotac.world;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import dev.whynotac.protocol.packet.BlockFace;
@@ -23,11 +24,12 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link DigStarts} through the replicas as registered: a {@code START_DESTROY_BLOCK} that certainly only starts the dig
+ * {@link DigPredictions} through the replicas as registered: a {@code START_DESTROY_BLOCK} that certainly only starts the dig
  * leaves the client's world as the server's; one that may break at once, in creative, or of a block with an
- * {@code attack} of its own stays the client's prediction.
+ * {@code attack} of its own stays the client's prediction. A survival {@code STOP_DESTROY_BLOCK} leaves the block's fluid;
+ * in adventure, with instabuild, with a debug stick, or of a block with hooks of its own it stays the prediction.
  */
-class DigStartsTest {
+class DigPredictionsTest {
 
     private static final BlockStates STATES = BlockStates.vanilla();
     private static final ClientboundPacket.Dimension OVERWORLD = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384);
@@ -106,6 +108,11 @@ class DigStartsTest {
                 BlockFace.WEST, ++actionSequence));
     }
 
+    private void stop() {
+        in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, new BlockPosition(2, 65, 0),
+                BlockFace.WEST, ++actionSequence));
+    }
+
     private ClientWorld world() {
         return replicas.world().world(session);
     }
@@ -156,6 +163,73 @@ class DigStartsTest {
         start();
         assertNull(world().possibleStates(2, 65, 0));
         assertNull(world().possibleStates(2, 65, 1), "nor its neighbours");
+    }
+
+    @Test
+    void aFinishInSurvivalLeavesAirUntilTheServersStatesCount() {
+        open(0);
+        int dirt = put("minecraft:dirt");
+        stop();
+        assertArrayEquals(new int[] {AIR}, world().possibleStates(2, 65, 0));
+        assertArrayEquals(new int[] {STATES.firstStateOf("minecraft:stone")}, world().possibleStates(2, 65, 1), "its neighbour kept");
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 65, 0), dirt)); // the server refused it
+        out(new ClientboundPacket.BlockChangedAck(actionSequence));
+        assertArrayEquals(new int[] {dirt, AIR}, world().possibleStates(2, 65, 0), "the ack may have reached the client");
+        sync();
+        assertArrayEquals(new int[] {dirt}, world().possibleStates(2, 65, 0));
+    }
+
+    @Test
+    void aWaterloggedBlockLeavesAWaterSource() {
+        open(0);
+        int slab = -1;
+        for (int s : STATES.statesOfBlock(STATES.firstStateOf("minecraft:oak_slab"))) {
+            if (STATES.properties(s).equals("type=bottom,waterlogged=true")) {
+                slab = s;
+            }
+        }
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 65, 0), slab));
+        sync();
+        stop();
+        int water = STATES.firstStateOf("minecraft:water");
+        assertEquals("level=0", STATES.properties(water));
+        assertArrayEquals(new int[] {water}, world().possibleStates(2, 65, 0));
+    }
+
+    @Test
+    void aFinishThatMayBreakNothingIsNotKnown() {
+        open(2); // adventure: blockActionRestricted
+        put("minecraft:dirt");
+        stop();
+        assertNull(world().possibleStates(2, 65, 0));
+    }
+
+    @Test
+    void aFinishWithInstabuildOrADebugStickIsNotKnown() {
+        open(0);
+        put("minecraft:dirt");
+        out(new ClientboundPacket.PlayerAbilities(false, false, false, true, 0.05F, 0.1F));
+        sync();
+        stop();
+        assertNull(world().possibleStates(2, 65, 0), "instabuild: a tool that cannot break in creative breaks nothing");
+        out(new ClientboundPacket.PlayerAbilities(false, false, false, false, 0.05F, 0.1F));
+        out(new ClientboundPacket.BlockChangedAck(actionSequence));
+        hold(new Stack("minecraft:debug_stick", 1, List.of(), List.of(), null, false));
+        sync();
+        stop();
+        assertNull(world().possibleStates(2, 65, 0), "the debug stick's canDestroyBlock refuses");
+    }
+
+    @Test
+    void aFinishOfABlockWithHooksOrUnbreakableIsNotKnown() {
+        open(0);
+        put("minecraft:oak_door");
+        stop();
+        assertNull(world().possibleStates(2, 65, 0));
+        out(new ClientboundPacket.BlockChangedAck(actionSequence));
+        put("minecraft:bedrock");
+        stop();
+        assertNull(world().possibleStates(2, 65, 0));
     }
 
     private static byte[] chunk(int sections, int state) {

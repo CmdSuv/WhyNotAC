@@ -113,6 +113,25 @@ class ItemPrototypesDataTest {
         return BuiltInRegistries.BLOCK.getKey(((net.minecraft.world.item.BlockItem) item).getBlock()).toString();
     }
 
+    /**
+     * The items with a canDestroyBlock of their own are {@code Digging.REFUSING_ITEMS}: with any other in hand
+     * {@code Item.canDestroyBlock} decides, which passes unless instabuild is true.
+     */
+    @Test
+    void theItemsThatMayRefuseABreakAreKnown() {
+        java.util.Set<String> refusing = new java.util.TreeSet<>();
+        for (Item item : BuiltInRegistries.ITEM) {
+            for (Class<?> k = item.getClass(); k != Item.class; k = k.getSuperclass()) {
+                for (java.lang.reflect.Method m : k.getDeclaredMethods()) {
+                    if (m.getName().equals("canDestroyBlock") && !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                        refusing.add(BuiltInRegistries.ITEM.getKey(item).toString());
+                    }
+                }
+            }
+        }
+        assertEquals(new java.util.TreeSet<>(dev.whynotac.world.Digging.REFUSING_ITEMS), refusing);
+    }
+
     @Test
     void theShippedPrototypesAreTheGamesOwn() throws IOException {
         List<String> lines = new ArrayList<>();

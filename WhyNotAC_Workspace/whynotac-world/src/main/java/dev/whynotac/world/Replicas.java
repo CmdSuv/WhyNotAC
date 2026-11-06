@@ -16,7 +16,7 @@ public final class Replicas {
     private final ClientInventoryTracker inventory;
     private final ClientSelfTracker self;
     private final ClientTagsTracker tags;
-    private final DigStarts digStarts;
+    private final DigPredictions digPredictions;
 
     public Replicas(ClientWorldTracker world, ClientEntitiesTracker entities, ClientInventoryTracker inventory, ClientSelfTracker self,
             ClientTagsTracker tags) {
@@ -25,7 +25,7 @@ public final class Replicas {
         this.inventory = inventory;
         this.self = self;
         this.tags = tags;
-        this.digStarts = new DigStarts(world, inventory, self, tags);
+        this.digPredictions = new DigPredictions(world, inventory, self, tags);
     }
 
     /** The 1.21.11 replicas. */
@@ -36,7 +36,7 @@ public final class Replicas {
 
     /** The trackers, in the order to register them: last, what resolves the world's dig predictions from the others. */
     public List<TimelineListener> listeners() {
-        return List.of(world, entities, inventory, self, tags, digStarts);
+        return List.of(world, entities, inventory, self, tags, digPredictions);
     }
 
     public ClientWorldTracker world() {

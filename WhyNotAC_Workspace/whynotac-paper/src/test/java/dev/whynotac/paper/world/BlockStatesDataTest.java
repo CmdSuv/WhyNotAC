@@ -252,6 +252,22 @@ class BlockStatesDataTest {
         return BuiltInRegistries.FLUID.getKey(fluid.getType()) + "/" + fluid.getAmount() + "/" + (falling ? 1 : 0);
     }
 
+    /** {@code Digging.brokenTo}: a block the client's destroyBlock refuses to break (GameMasterBlock) is never finished. */
+    @Test
+    void everyGameMasterBlockIsUnbreakable() {
+        BlockStates shipped = BlockStates.vanilla();
+        int seen = 0;
+        for (Block block : BuiltInRegistries.BLOCK) {
+            if (block instanceof net.minecraft.world.level.block.GameMasterBlock) {
+                for (int s : shipped.statesOfBlock(shipped.firstStateOf(BuiltInRegistries.BLOCK.getKey(block).toString()))) {
+                    assertEquals(-1.0F, shipped.destroySpeed(s), shipped.block(s));
+                }
+                seen++;
+            }
+        }
+        assertTrue(seen >= 5, "game-master blocks: " + seen);
+    }
+
     @Test
     void shippedDataMatchesTheServerRegistry() throws Exception {
         BlockStates server = generate();

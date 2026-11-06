@@ -105,6 +105,7 @@ public final class ClientSelf {
     public static final int MODE_NONE = -1;
     public static final int MODE_UNKNOWN = -2;
     static final int CREATIVE = 1;
+    static final int ADVENTURE = 2;
     static final int SPECTATOR = 3;
     private static final int NONE = -1;
     private static final int UNKNOWN = -2;
@@ -805,6 +806,14 @@ public final class ClientSelf {
         long end = windowEnd();
         return listMode.mayBeAnyOf(certain, end, CREATIVE, SPECTATOR, MODE_UNKNOWN)
                 || localMode.mayBeAnyOf(certain, end, CREATIVE, SPECTATOR, UNKNOWN);
+    }
+
+    /**
+     * Whether the client's own game mode ({@code MultiPlayerGameMode.localPlayerMode}) may restrict block actions now
+     * ({@code GameType.isBlockPlacingRestricted}: adventure or spectator), may be creative, or WhyNotAC does not know.
+     */
+    public boolean mayRestrictBlockActionsOrBeCreative() {
+        return localMode.mayBeAnyOf(certain, windowEnd(), ADVENTURE, SPECTATOR, CREATIVE, UNKNOWN);
     }
 
     /**

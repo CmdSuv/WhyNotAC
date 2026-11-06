@@ -15,6 +15,12 @@ import java.util.Set;
 public final class Digging {
 
     static final String TOOL = "minecraft:tool";
+    /**
+     * The items whose class declares {@code canDestroyBlock} ({@code ItemPrototypesDataTest}): with one in hand the
+     * client's {@code destroyBlock} may set nothing. {@code Item.canDestroyBlock} itself passes unless the stack has a tool
+     * that cannot break in creative and the player's {@code abilities.instabuild} is true.
+     */
+    public static final Set<String> REFUSING_ITEMS = Set.of("minecraft:debug_stick");
 
     private Digging() {}
 
@@ -151,6 +157,58 @@ public final class Digging {
             }
         }
         return true;
+    }
+
+    /**
+     * The state the client's {@code STOP_DESTROY_BLOCK} set at the dug position, or -1 where that is not certain
+     * (decompiled 1.21.11 {@code MultiPlayerGameMode.destroyBlock}: {@code setBlock(pos, getFluidState(pos).createLegacyBlock(), 11)}).
+     * {@code continueDestroyBlock} sends it only for a block that is not air, so the air ones among the states the client
+     * may hold there are left out; every other one must be breakable (a vanilla client never finishes an unbreakable one,
+     * and every {@code GameMasterBlock}, which it may not break, is unbreakable), without hooks of its own
+     * ({@link BlockStates#DIG_HOOKED}: {@code playerWillDestroy}, {@code destroy}), and leave the same: air where it holds
+     * no fluid, a water source where it holds water (waterlogged: {@code WaterFluid.createLegacyBlock} of a source is level
+     * 0). No stack the main hand may hold is one of {@link #REFUSING_ITEMS}. That the client may not be in adventure,
+     * spectator or creative ({@code blockActionRestricted}) and that its {@code instabuild} is false
+     * ({@code Item.canDestroyBlock}) is the caller's to know.
+     */
+    public static int brokenTo(BlockStates table, int[] states, Set<Stack> stacks) {
+        if (states == null || stacks == null || stacks.isEmpty()) {
+            return -1;
+        }
+        for (Stack stack : stacks) {
+            if (!stack.isEmpty() && REFUSING_ITEMS.contains(stack.item())) {
+                return -1;
+            }
+        }
+        int out = -1;
+        for (int state : states) {
+            if (!table.isValid(state)) {
+                return -1;
+            }
+            if (table.isAir(state)) {
+                continue;
+            }
+            if (table.has(state, BlockStates.DIG_HOOKED) || table.destroySpeed(state) == -1.0F) {
+                return -1;
+            }
+            String fluid = table.fluid(state);
+            int left;
+            if (fluid == null || fluid.isEmpty()) {
+                left = table.firstStateOf("minecraft:air");
+            } else if (fluid.startsWith("minecraft:water/")) {
+                left = table.firstStateOf("minecraft:water");
+                if (!table.properties(left).equals("level=0")) {
+                    return -1;
+                }
+            } else {
+                return -1;
+            }
+            if (out != -1 && out != left) {
+                return -1;
+            }
+            out = left;
+        }
+        return out;
     }
 
     /** The client's block tags for one block ({@link ClientTags#holds}). */

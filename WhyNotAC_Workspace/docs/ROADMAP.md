@@ -118,6 +118,11 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   hava değilse ve `getDestroyProgress` 1'e ulaşırsa bloğu hemen kırar; aksi hâlde yalnızca kazıyı başlatır. İlerleme,
   `break-time` kontrolünün en büyük çarpanlarla hesapladığı üst sınırla (`Digging`) 1'in altındaysa, o başlangıç hiçbir
   bloğu değiştirmemiş sayılır. Saldırı tuşu basılı yürüyen oyuncu artık her başlattığı kazıda izini kaybetmiyor.
+  Kazıyı bitiren `STOP_DESTROY_BLOCK` (görev #105) hayatta kalma modunda (macera ve izleyici `blockActionRestricted`
+  ile, yaratıcı başka yoldan kırar), `instabuild` kapalıyken (`Item.canDestroyBlock` geçer) ve elde hata ayıklama çubuğu
+  yokken (kendi `canDestroyBlock`'u olan tek eşya) bloğu sıvısının bloğuna çevirir: hava ya da su kaynağı. Bloğun kendi
+  kancası olmamalı ve kırılabilir olmalı (her `GameMasterBlock` kırılamaz; ikisi de Paper verisiyle sınandı). Client bu
+  durumu onaya kadar tutar, sonra sunucununkini alır. Tünel kazan oyuncu kazdığı boşluğa yürürken de izleniyor.
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi

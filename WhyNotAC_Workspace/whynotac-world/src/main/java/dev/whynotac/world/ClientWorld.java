@@ -648,6 +648,22 @@ public final class ClientWorld {
         resolvedUses.put(sequence, cells);
     }
 
+    /**
+     * Resolves the dug position of the client's {@code STOP_DESTROY_BLOCK} {@code sequence}: its {@code destroyBlock} set
+     * {@code state} there ({@link Digging#brokenTo}; the game mode and instabuild are the caller's to know). The client
+     * holds it until it processes an ack of the dig, the server's states after. Ignored for a start, for a dig the replica
+     * did not see or has seen acknowledged, and where its neighbours are not resolved ({@link #digNeighbours}).
+     */
+    public void resolveDigBroken(int sequence, int state) {
+        Dig dig = digs.get(sequence);
+        Map<Long, Integer> cells = resolvedUses.get(sequence);
+        if (dig == null || dig.start || dig.before == null || cells == null || !states.isValid(state)) {
+            return;
+        }
+        BlockPosition p = dig.position;
+        cells.put(blockKey(p.x(), p.y(), p.z()), state);
+    }
+
     /** The sequences above {@code acked}, in their order (some are: the position still has a prediction). */
     private static int[] after(int[] sequences, int acked) {
         return Arrays.stream(sequences).filter(q -> q > acked).toArray();

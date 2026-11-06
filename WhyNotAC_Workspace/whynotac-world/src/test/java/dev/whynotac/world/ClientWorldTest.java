@@ -800,8 +800,8 @@ class ClientWorldTest {
         put(3, 66, 0, grass);
         sync();
         in(dig(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, 3, 65, 0, 4));
-        int[] above = world.possibleStates(3, 66, 0);
-        assertEquals(STATES.statesOfBlock(STATES.blockId(grass)).length, above.length, "snowy or not");
+        assertArrayEquals(STATES.statesOfBlock(grass), world.possibleStates(3, 66, 0), "snowy or not");
+        assertEquals(2, STATES.statesOfBlock(grass).length);
     }
 
     @Test
