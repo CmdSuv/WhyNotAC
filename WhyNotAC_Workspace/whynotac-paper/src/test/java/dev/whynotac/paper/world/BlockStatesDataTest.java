@@ -115,6 +115,7 @@ class BlockStatesDataTest {
             flags |= declares(block.getClass(), PLACEMENT) ? BlockStates.CUSTOM_PLACEMENT : 0;
             flags |= declares(block.getClass(), REACTIVE) ? BlockStates.NEIGHBOUR_REACTIVE : 0;
             flags |= keepsBlock(block.getClass()) ? BlockStates.UPDATE_KEEPS_BLOCK : 0;
+            flags |= declares(block.getClass(), DIG_HOOKS) ? BlockStates.DIG_HOOKED : 0;
             builder.add(BuiltInRegistries.BLOCK.getKey(block).toString(), properties(state),
                     shape(collision, (DiscreteVoxelShape) discreteField.get(collision)), shape(outline, (DiscreteVoxelShape) discreteField.get(outline)),
                     flags, block.getFriction(), block.getSpeedFactor(),
@@ -130,6 +131,8 @@ class BlockStatesDataTest {
             methods(net.minecraft.world.level.block.state.BlockBehaviour.class, "canSurvive"));
     private static final java.lang.reflect.Method[] REACTIVE = methods(net.minecraft.world.level.block.state.BlockBehaviour.class, "updateShape",
             "neighborChanged", "updateIndirectNeighbourShapes");
+    private static final java.lang.reflect.Method[] DIG_HOOKS = concat(methods(net.minecraft.world.level.block.state.BlockBehaviour.class, "attack"),
+            methods(Block.class, "playerWillDestroy", "destroy"));
 
     /** The instance methods {@code owner} declares by these names (canBeReplaced: the BlockPlaceContext one). */
     private static java.lang.reflect.Method[] methods(Class<?> owner, String... names) {

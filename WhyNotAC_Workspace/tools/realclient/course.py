@@ -20,6 +20,11 @@ from xinput import Input  # noqa: E402
 
 def main():
     i = Input(sys.argv[1])
+    # No button left down from an earlier step: once, the attack button stayed held after a reach click, and the client
+    # dug at every block the crosshair met in the legs after it (breaking ladders, vines and cobwebs of the course). The
+    # release of a button that is not down changes nothing: the X server drops it, or the client's key is up already.
+    for button in (1, 2, 3):
+        i.button(button, False)
     for step in sys.argv[2:]:
         parts = step.split("/")
         keys = [] if parts[0] == "-" else parts[0].split(",")

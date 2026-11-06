@@ -30,7 +30,7 @@ import java.util.zip.GZIPInputStream;
  *
  * <h2>Text format (inside the gzip resource)</h2>
  * <pre>
- * whynotac-block-states 5
+ * whynotac-block-states 6
  * minecraft &lt;version&gt;
  * shapes &lt;n&gt;
  * &lt;kind&gt; TAB &lt;xs&gt; TAB &lt;ys&gt; TAB &lt;zs&gt; TAB &lt;filled cells, hex longs&gt; TAB &lt;boxes&gt;   (one line per shape)
@@ -43,7 +43,7 @@ import java.util.zip.GZIPInputStream;
 public final class BlockStates {
 
     public static final String RESOURCE = "/dev/whynotac/world/block-states.txt.gz";
-    static final String HEADER = "whynotac-block-states 5";
+    static final String HEADER = "whynotac-block-states 6";
 
     /** {@code isAir()}. */
     public static final int AIR = 1;
@@ -114,9 +114,15 @@ public final class BlockStates {
      * block above) and {@code FallingBlock.updateShape} (schedules a tick, which the client does not run).
      */
     public static final int UPDATE_KEEPS_BLOCK = 1 << 18;
-    /** The flags read from the block's class for uses and placements: nothing a state's collision or movement reads. */
-    public static final int PLACEMENT_FLAGS = INTERACTIVE | CUSTOM_REPLACING | CUSTOM_PLACEMENT | NEIGHBOUR_REACTIVE | UPDATE_KEEPS_BLOCK;
-    private static final String FLAG_LETTERS = "adcormtfsNSWEpixPuk";
+    /**
+     * {@code attack}, {@code playerWillDestroy} or {@code destroy}: the client's own dig of it may do more than set its
+     * position to its fluid ({@code MultiPlayerGameMode.startDestroyBlock} calls {@code attack} within its prediction, and
+     * {@code destroyBlock} the other two around its {@code setBlock}).
+     */
+    public static final int DIG_HOOKED = 1 << 19;
+    /** The flags read from the block's class for uses, placements and digs: nothing a state's collision or movement reads. */
+    public static final int PLACEMENT_FLAGS = INTERACTIVE | CUSTOM_REPLACING | CUSTOM_PLACEMENT | NEIGHBOUR_REACTIVE | UPDATE_KEEPS_BLOCK | DIG_HOOKED;
+    private static final String FLAG_LETTERS = "adcormtfsNSWEpixPukh";
 
     private static volatile BlockStates vanilla;
 

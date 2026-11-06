@@ -133,6 +133,11 @@ public final class BlockDataDump {
                         + ",net.minecraft.core.Direction," + POS + "," + BLOCK_STATE + ",net.minecraft.util.RandomSource)"),
                 method(BEHAVIOUR, "neighborChanged(" + BLOCK_STATE + "," + level + "," + POS + "," + BLOCK + ",net.minecraft.world.level.redstone.Orientation,boolean)"),
                 method(BEHAVIOUR, "updateIndirectNeighbourShapes(" + BLOCK_STATE + ",net.minecraft.world.level.LevelAccessor," + POS + ",int,int)")};
+        // BlockStates.DIG_HOOKED: what the client's own dig calls besides setBlock
+        Method[] digHooks = {
+                method(BEHAVIOUR, "attack(" + BLOCK_STATE + "," + level + "," + POS + ",net.minecraft.world.entity.player.Player)"),
+                method(BLOCK, "playerWillDestroy(" + level + "," + POS + "," + BLOCK_STATE + ",net.minecraft.world.entity.player.Player)"),
+                method(BLOCK, "destroy(net.minecraft.world.level.LevelAccessor," + POS + "," + BLOCK_STATE + ")")};
         Class<?> blockClass = cls(BLOCK);
         // BlockStates.UPDATE_KEEPS_BLOCK: the updateShape overrides read to keep the block (reactive[0] is updateShape)
         java.util.Set<Class<?>> keepingUpdateShape = Set.of(cls("net.minecraft.world.level.block.SnowyDirtBlock"),
@@ -179,6 +184,7 @@ public final class BlockDataDump {
             flags |= declares(block.getClass(), blockClass, placement) ? BlockStates.CUSTOM_PLACEMENT : 0;
             flags |= declares(block.getClass(), blockClass, reactive) ? BlockStates.NEIGHBOUR_REACTIVE : 0;
             flags |= keepsBlock(block.getClass(), blockClass, reactive, keepingUpdateShape) ? BlockStates.UPDATE_KEEPS_BLOCK : 0;
+            flags |= declares(block.getClass(), blockClass, digHooks) ? BlockStates.DIG_HOOKED : 0;
 
             StringBuilder properties = new StringBuilder();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) values.invoke(state)).entrySet()) {

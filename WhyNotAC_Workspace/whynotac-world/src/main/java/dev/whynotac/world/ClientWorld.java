@@ -99,6 +99,14 @@ public final class ClientWorld {
      * {@link #KEPT} where it set none.
      */
     private final Map<Integer, Map<Long, Integer>> resolvedUses = new HashMap<>();
+    /**
+     * The digs ({@code START_DESTROY_BLOCK}, {@code STOP_DESTROY_BLOCK}) not yet seen acknowledged, by block-action
+     * sequence: whether it started one, and what the client may have held at the dug position before it, taken when it
+     * came (null: not known).
+     */
+    private final Map<Integer, Dig> digs = new HashMap<>();
+
+    private record Dig(boolean start, BlockPosition position, int[] before) {}
     /** Block-action sequences of item uses whose block changes (if any) WhyNotAC cannot locate. */
     private final ArrayDeque<Integer> unlocatedPredictions = new ArrayDeque<>();
     /** block_changed_ack values the client may not have processed yet: [outbound sequence, acked sequence]. */
@@ -329,10 +337,21 @@ public final class ClientWorld {
                 predict(eventSequence, p.x() + face.stepX(), p.y() + face.stepY(), p.z() + face.stepZ(), use.sequence(), true);
             }
             // ABORT_DESTROY_BLOCK predicts nothing: MultiPlayerGameMode sends it outside startPrediction and changes no block
-            // (only the crack overlay), and the server's handleBlockBreakAction changes none either.
+            // (only the crack overlay), and the server's handleBlockBreakAction changes none either. A dig that breaks the block
+            // (destroyBlock: setBlock(pos, fluid.createLegacyBlock(), 11)) runs the neighbour and shape updates on the client
+            // too, inside the prediction: what that changes next to it the client holds until the ack, like the block itself.
             case ServerboundPacket.PlayerAction action when action.action() == ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK
-                    || action.action() == ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK ->
-                    predict(eventSequence, action.position().x(), action.position().y(), action.position().z(), action.sequence(), false);
+                    || action.action() == ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK -> {
+                BlockPosition p = action.position();
+                int[][] before = around(p.x(), p.y(), p.z(), action.sequence());
+                predict(eventSequence, p.x(), p.y(), p.z(), action.sequence(), true);
+                digs.put(action.sequence(), new Dig(action.action() == ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, p,
+                        before == null ? null : before[0]));
+                Map<Long, Integer> cells = digNeighbours(p, action.sequence(), before);
+                if (cells != null) {
+                    resolvedUses.put(action.sequence(), cells);
+                }
+            }
             // A plain item use (buckets, lily pads...) may place a block where the client's ray hits, which only physics can locate.
             case ServerboundPacket.UseItem use -> {
                 unlocatedPredictions.add(use.sequence());
@@ -379,6 +398,7 @@ public final class ClientWorld {
             uses.keySet().removeIf(sequence -> sequence <= acked);
             useBefore.keySet().removeIf(sequence -> sequence <= acked);
             resolvedUses.keySet().removeIf(sequence -> sequence <= acked);
+            digs.keySet().removeIf(sequence -> sequence <= acked);
             earliestPredictions.replaceAll((key, sequence) -> sequence <= acked ? acked + 1 : sequence); // some later one is left
             while (!unlocatedPredictions.isEmpty() && unlocatedPredictions.peekFirst() <= acked) {
                 unlocatedPredictions.pollFirst();
@@ -413,6 +433,7 @@ public final class ClientWorld {
         uses.clear();
         useBefore.clear();
         resolvedUses.clear();
+        digs.clear();
         unlocatedPredictions.clear();
         pendingBlockAcks.clear();
         confirmedBlockAck = Integer.MIN_VALUE;
@@ -543,6 +564,88 @@ public final class ClientWorld {
             out[i + 1] = possibleStatesBefore(c.x() + face.stepX() + o[0], c.y() + face.stepY() + o[1], c.z() + face.stepZ() + o[2], use.sequence());
         }
         return out;
+    }
+
+    /** What the client may hold before block action {@code sequence} at a position and its neighbours ({@link #PREDICTION_NEIGHBOURS}). */
+    private int[][] around(int x, int y, int z, int sequence) {
+        if (storage == null) {
+            return null;
+        }
+        int[][] out = new int[PREDICTION_NEIGHBOURS.length][];
+        for (int i = 0; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] o = PREDICTION_NEIGHBOURS[i];
+            out[i] = possibleStatesBefore(x + o[0], y + o[1], z + o[2], sequence);
+        }
+        return out;
+    }
+
+    /**
+     * What a dig at {@code p} did next to it, as far as the blocks there decide it: the dug block's own {@code setBlock}
+     * updates its neighbours ({@code updateNeighborsAt}, {@code updateNeighbourShapes}), so one keeps its state
+     * ({@link #KEPT}) unless a state it may hold reacts ({@link #reacts}: not resolved there) or keeps its block
+     * ({@link #SAME_BLOCK}). The dug position itself is not resolved here ({@link #resolveDigStartedOnly}). Null where the
+     * dug block may run code of its own around the break ({@link BlockStates#DIG_HOOKED}: a door's other half, a bed's), is
+     * not known, or a use the replica cannot locate comes before.
+     */
+    private Map<Long, Integer> digNeighbours(BlockPosition p, int sequence, int[][] before) {
+        if (before == null || before[0] == null || hasUnlocatedPredictionBefore(sequence)) {
+            return null;
+        }
+        for (int s : before[0]) {
+            if (states.has(s, BlockStates.DIG_HOOKED)) {
+                return null;
+            }
+        }
+        Map<Long, Integer> cells = new HashMap<>();
+        neighbours:
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] beside = before[i];
+            if (beside == null) {
+                continue;
+            }
+            int set = KEPT;
+            for (int s : beside) {
+                if (reacts(s)) {
+                    continue neighbours;
+                }
+                if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE)) {
+                    set = SAME_BLOCK;
+                }
+            }
+            int[] o = PREDICTION_NEIGHBOURS[i];
+            cells.put(blockKey(p.x() + o[0], p.y() + o[1], p.z() + o[2]), set);
+        }
+        return cells;
+    }
+
+    /**
+     * What the client may have held at the position of its dig {@code sequence} before it, as the replica held it when
+     * the dig came ({@link #possibleStatesBefore} then); null where that is not known, or for a dig the replica did not
+     * see or has seen acknowledged.
+     */
+    public int[] digBefore(int sequence) {
+        Dig dig = digs.get(sequence);
+        return dig == null ? null : dig.before;
+    }
+
+    /**
+     * Resolves the client's dig {@code sequence} as one that set no block anywhere: a {@code START_DESTROY_BLOCK} whose
+     * {@code startDestroyBlock} only started the dig ({@link Digging#certainlyStartsOnly}; whether the client was in
+     * creative, which breaks at once, is the caller's to know). Ignored for a {@code STOP_DESTROY_BLOCK} and for a dig the
+     * replica did not see or has seen acknowledged.
+     */
+    public void resolveDigStartedOnly(int sequence) {
+        Dig dig = digs.get(sequence);
+        if (dig == null || !dig.start || dig.before == null) {
+            return;
+        }
+        // the dug position and every neighbour: nothing was set, so no update came (a reacting neighbour kept its state too)
+        Map<Long, Integer> cells = new HashMap<>();
+        BlockPosition p = dig.position;
+        for (int[] o : PREDICTION_NEIGHBOURS) {
+            cells.put(blockKey(p.x() + o[0], p.y() + o[1], p.z() + o[2]), KEPT);
+        }
+        resolvedUses.put(sequence, cells);
     }
 
     /** The sequences above {@code acked}, in their order (some are: the position still has a prediction). */

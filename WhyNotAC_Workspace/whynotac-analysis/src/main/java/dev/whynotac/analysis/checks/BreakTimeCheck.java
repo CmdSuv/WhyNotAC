@@ -16,6 +16,7 @@ import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientSelf;
 import dev.whynotac.world.ClientTags;
 import dev.whynotac.world.ClientWorld;
+import dev.whynotac.world.Digging;
 import dev.whynotac.world.ItemPrototypes;
 import dev.whynotac.world.Replicas;
 import java.util.Locale;
@@ -230,7 +231,7 @@ public final class BreakTimeCheck implements TimelineListener {
             }
             String block = table.block(state);
             int blockId = table.blockId(state);
-            TagLookup lookup = tag -> tags.holds(ClientTags.BLOCK, tag, blockId);
+            Digging.TagLookup lookup = tag -> tags.holds(ClientTags.BLOCK, tag, blockId);
             boolean required = table.has(state, BlockStates.TOOL_REQUIRED);
             for (Stack stack : stacks) {
                 ItemPrototypes.Tool tool;
@@ -256,84 +257,22 @@ public final class BreakTimeCheck implements TimelineListener {
         return largest != null ? largest : new Bound(0.0F, "air", Float.NaN, "-", Float.NaN, false, mining, offGround);
     }
 
-    /** {@code BlockBehaviour.getDestroyProgress} with {@code Player.getDestroySpeed} at the largest factors, in its float order. */
+    /** {@link Digging#increment}. */
     static float increment(float toolSpeed, float hardness, boolean correct, ClientSelf.MiningBounds mining, boolean offGround) {
-        float f = toolSpeed;
-        if (f > 1.0F) {
-            f += (float) mining.maxMiningEfficiency();
-        }
-        if (mining.maxDigSpeedAmplifier() >= 0) {
-            f *= 1.0F + (mining.maxDigSpeedAmplifier() + 1) * 0.2F;
-        }
-        if (mining.minFatigueAmplifier() >= 0) {
-            f *= switch (mining.minFatigueAmplifier()) {
-                case 0 -> 0.3F;
-                case 1 -> 0.09F;
-                case 2 -> 0.0027F;
-                default -> 8.1E-4F;
-            };
-        }
-        f *= (float) mining.maxBlockBreakSpeed();
-        float submerged = (float) mining.maxSubmergedMiningSpeed();
-        if (submerged > 1.0F) {
-            f *= submerged; // the eye may be in water
-        }
-        if (offGround) {
-            f /= 5.0F;
-        }
-        return f / hardness / (float) (correct ? 30 : 100);
+        return Digging.increment(toolSpeed, hardness, correct, mining, offGround);
     }
 
-    /** Whether a tag holds the block in what the client may hold: TRUE, FALSE, or null (either). */
-    interface TagLookup {
-        Boolean holds(String tag);
+    /** {@link Digging.TagLookup}. */
+    interface TagLookup extends Digging.TagLookup {}
+
+    /** {@link Digging#maxSpeed}. */
+    static float maxSpeed(ItemPrototypes.Tool tool, String block, Digging.TagLookup tags) {
+        return Digging.maxSpeed(tool, block, tags);
     }
 
-    /**
-     * The largest speed {@code Tool.getMiningSpeed} may give the block: the first rule with a speed whose blocks hold it,
-     * every rule up to it whose tag may hold it, else the default.
-     */
-    static float maxSpeed(ItemPrototypes.Tool tool, String block, TagLookup tags) {
-        float max = Float.NEGATIVE_INFINITY;
-        for (ItemPrototypes.Rule rule : tool.rules()) {
-            if (rule.speed() == null) {
-                continue;
-            }
-            Boolean holds = holds(rule, block, tags);
-            if (Boolean.FALSE.equals(holds)) {
-                continue;
-            }
-            max = Math.max(max, rule.speed());
-            if (Boolean.TRUE.equals(holds)) {
-                return max; // the first rule that holds it decides
-            }
-        }
-        return Math.max(max, tool.defaultMiningSpeed());
-    }
-
-    /** Whether {@code Tool.isCorrectForDrops} may be true for the block, the same way. */
-    static boolean mayBeCorrect(ItemPrototypes.Tool tool, String block, TagLookup tags) {
-        for (ItemPrototypes.Rule rule : tool.rules()) {
-            if (rule.correctForDrops() == null) {
-                continue;
-            }
-            Boolean holds = holds(rule, block, tags);
-            if (Boolean.FALSE.equals(holds)) {
-                continue;
-            }
-            if (rule.correctForDrops()) {
-                return true;
-            }
-            if (Boolean.TRUE.equals(holds)) {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    /** Whether the rule's blocks hold the block: a list says, a tag as the client's tags say. */
-    private static Boolean holds(ItemPrototypes.Rule rule, String block, TagLookup tags) {
-        return rule.tag() == null ? Boolean.valueOf(rule.blocks().contains(block)) : tags.holds(rule.tag()); // boxed: null stays null
+    /** {@link Digging#mayBeCorrect}. */
+    static boolean mayBeCorrect(ItemPrototypes.Tool tool, String block, Digging.TagLookup tags) {
+        return Digging.mayBeCorrect(tool, block, tags);
     }
 
     private void report(PlayerSession session, State state, Dig dig, Bound bound, float progress, TimelineEvent.Inbound at) {

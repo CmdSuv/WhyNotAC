@@ -229,12 +229,12 @@ class ClientWorldTest {
         // the client's own prediction: not known which state it holds
         in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(6, 10, 5), BlockFace.UP, 3));
         assertEquals(null, world.possibleStates(6, 10, 5));
-        // a change in a chunk sent again later: the chunk decides
-        out(new ClientboundPacket.BlockUpdate(new BlockPosition(7, 10, 5), DIRT));
+        // a change in a chunk sent again later (away from the dig and its neighbours): the chunk decides
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(9, 10, 5), DIRT));
         loadStone(0, 0);
-        assertEquals(null, world.possibleStates(7, 10, 5));
+        assertEquals(null, world.possibleStates(9, 10, 5));
         sync();
-        assertArrayEquals(new int[] {STONE}, world.possibleStates(7, 10, 5));
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(9, 10, 5));
     }
 
     @Test
@@ -764,6 +764,79 @@ class ClientWorldTest {
         sync();
         assertArrayEquals(new int[] {STONE}, world.possibleStatesBefore(5, 10, 5, 8), "acknowledged: only the later one is left");
         assertEquals(null, world.possibleStates(5, 10, 5));
+    }
+
+    private static ServerboundPacket.PlayerAction dig(ServerboundPacket.PlayerAction.Action action, int x, int y, int z, int sequence) {
+        return new ServerboundPacket.PlayerAction(action, new BlockPosition(x, y, z), BlockFace.UP, sequence);
+    }
+
+    @Test
+    void aBreakMayChangeTheBlocksNextToItThatReactUntilItsAck() {
+        // destroyBlock's setBlock(pos, air, 11) shape-updates the neighbours on the client, inside the prediction: a fence
+        // next to the broken block loses its side there until the ack; a stone next to it keeps its state
+        int fence = STATES.firstStateOf("minecraft:oak_fence");
+        airWorld();
+        put(3, 65, 0, STONE);
+        put(4, 65, 0, fence);
+        put(3, 65, 1, STONE);
+        sync();
+        in(dig(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, 3, 65, 0, 4));
+        assertNull(world.possibleStates(3, 65, 0), "the broken block: the client's prediction");
+        assertNull(world.possibleStates(4, 65, 0), "a neighbour that reacts");
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(3, 65, 1), "a neighbour that does not: it keeps its state");
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(2, 65, 0));
+        assertFalse(world.settled(3, 65, 1), "still the prediction's position");
+        out(new ClientboundPacket.BlockChangedAck(4));
+        sync();
+        assertArrayEquals(new int[] {fence}, world.possibleStates(4, 65, 0), "acknowledged: the server's");
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(3, 65, 0));
+    }
+
+    @Test
+    void aBreakNextToABlockThatKeepsItsBlockMayGiveItAnyOfItsStates() {
+        int grass = STATES.firstStateOf("minecraft:grass_block");
+        airWorld();
+        put(3, 65, 0, STONE);
+        put(3, 66, 0, grass);
+        sync();
+        in(dig(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, 3, 65, 0, 4));
+        int[] above = world.possibleStates(3, 66, 0);
+        assertEquals(STATES.statesOfBlock(STATES.blockId(grass)).length, above.length, "snowy or not");
+    }
+
+    @Test
+    void aBreakOfABlockWithHooksOfItsOwnLeavesItsNeighboursUnknown() {
+        // a door's playerWillDestroy, a redstone ore's attack: code of their own around the client's break
+        airWorld();
+        put(3, 65, 0, STATES.firstStateOf("minecraft:oak_door"));
+        put(3, 65, 1, STONE);
+        sync();
+        in(dig(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, 3, 65, 0, 4));
+        assertNull(world.possibleStates(3, 65, 1));
+    }
+
+    @Test
+    void aStartResolvedAsOnlyStartingTheDigSetNothing() {
+        int fence = STATES.firstStateOf("minecraft:oak_fence");
+        airWorld();
+        put(3, 65, 0, STONE);
+        put(4, 65, 0, fence);
+        sync();
+        in(dig(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, 3, 65, 0, 4));
+        assertArrayEquals(new int[] {STONE}, world.digBefore(4));
+        assertNull(world.possibleStates(3, 65, 0));
+        world.resolveDigStartedOnly(4);
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(3, 65, 0));
+        assertArrayEquals(new int[] {fence}, world.possibleStates(4, 65, 0), "no update came: the fence too");
+        // a finish breaks it: never resolved so
+        in(dig(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, 3, 65, 0, 5));
+        world.resolveDigStartedOnly(5);
+        assertNull(world.possibleStates(3, 65, 0));
+        out(new ClientboundPacket.BlockChangedAck(5));
+        sync();
+        assertNull(world.digBefore(4), "acknowledged: forgotten");
+        world.resolveDigStartedOnly(4);
+        assertArrayEquals(new int[] {STONE}, world.possibleStates(3, 65, 0));
     }
 
     @Test

@@ -110,6 +110,14 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   client'ın yüksekliğini ve zemin bayrağını vermelidir; havada aralık tik başına 0,91 küçüldüğü için sprint-zıplayan bir
   koşu iki üç saniye sürer (pencere 80 tik). Gerçek client'ta yürüyüş, koşu ve sprint-zıplama bölümlerinin üçünde de çapa
   kuruldu; client'ın kendi durumu her açıklanan tikte hipotezlerdeydi.
+  Kazı tahminleri (görev #104): client bir bloğu kırınca (`destroyBlock`: `setBlock(pos, sıvısı, 11)`) komşularına da
+  şekil ve komşu güncellemesi yapar ve değişenleri onaya kadar tutar; replika bu yüzden kazılan konumla birlikte altı
+  komşusunu da client'ın tahmini sayar. Tepki vermeyen komşu durumunu korur, bloğunu koruyan (çimen) kendi
+  durumlarından birini alır; kendi kodu olan bloklarda (`BlockStates.DIG_HOOKED`: `attack`, `playerWillDestroy`,
+  `destroy`; kapılar, yataklar, kızıltaş cevheri) komşular bilinmez. Hayatta kalma modunda `START_DESTROY_BLOCK`, blok
+  hava değilse ve `getDestroyProgress` 1'e ulaşırsa bloğu hemen kırar; aksi hâlde yalnızca kazıyı başlatır. İlerleme,
+  `break-time` kontrolünün en büyük çarpanlarla hesapladığı üst sınırla (`Digging`) 1'in altındaysa, o başlangıç hiçbir
+  bloğu değiştirmemiş sayılır. Saldırı tuşu basılı yürüyen oyuncu artık her başlattığı kazıda izini kaybetmiyor.
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
