@@ -1172,12 +1172,12 @@ class MovementCheckTest {
     }
 
     @ParameterizedTest
-    @EnumSource(names = {"FORWARD", "SPRINT", "DIAGONAL"})
+    @EnumSource(names = {"FORWARD", "SPRINT", "DIAGONAL", "SPRINT_JUMP", "JUMP"})
     void aPlayerRunningOnIsTakenUpAgainWithoutStopping(Run run) throws Exception {
         ticks(10, run.keys, 30.0F);
         int from = ticks.size();
         loseTheClaim(run.keys, 30.0F);
-        ticks(60, run.keys, 30.0F); // on, never still
+        ticks(run.keys.jump() ? 140 : 60, run.keys, 30.0F); // on, never still
         List<MovementTracker.Tick> after = ticks.subList(from, ticks.size());
         assertTrue(after.stream().anyMatch(t -> "anchored: running steadily".equals(t.reason())), String.valueOf(after));
         long explained = count(from, MovementTracker.Outcome.EXPLAINED);
@@ -1189,7 +1189,9 @@ class MovementCheckTest {
     enum Run {
         FORWARD(new PlayerState.Keys(true, false, false, false, false, false, false)),
         SPRINT(new PlayerState.Keys(true, false, false, false, false, false, true)),
-        DIAGONAL(new PlayerState.Keys(true, false, true, false, false, false, false));
+        DIAGONAL(new PlayerState.Keys(true, false, true, false, false, false, false)),
+        SPRINT_JUMP(new PlayerState.Keys(true, false, false, false, true, false, true)),
+        JUMP(new PlayerState.Keys(true, false, false, false, true, false, false));
 
         final PlayerState.Keys keys;
 
@@ -1217,6 +1219,26 @@ class MovementCheckTest {
             tick(FORWARD, 30.0F, 0.0F, new Vec3d(0.001, 0.0, 0.0)); // a thousandth of a block a tick more than vanilla
         }
         assertTrue(ticks.stream().noneMatch(t -> "anchored: running steadily".equals(t.reason())), "no run of a cheat's fits the vanilla one: " + ticks);
+    }
+
+    @Test
+    void aSpeedCheatSprintJumpingIsNotTakenUp() throws Exception {
+        ticks(10, SPRINT_JUMP, 30.0F);
+        loseTheClaim(SPRINT_JUMP, 30.0F);
+        for (int i = 0; i < 140; i++) {
+            tick(SPRINT_JUMP, 30.0F, 0.0F, new Vec3d(0.0, 0.0, 0.001));
+        }
+        assertTrue(ticks.stream().noneMatch(t -> "anchored: running steadily".equals(t.reason())), "no run of a cheat's fits the vanilla one: " + ticks);
+    }
+
+    @Test
+    void aJumpCheatAfterTheRunAnchorIsCaught() throws Exception {
+        ticks(10, SPRINT_JUMP, 30.0F);
+        loseTheClaim(SPRINT_JUMP, 30.0F);
+        ticks(110, SPRINT_JUMP, 30.0F); // (the loaded chunks end about 150 ticks of sprint-jumping on)
+        assertTrue(ticks.stream().anyMatch(t -> "anchored: running steadily".equals(t.reason())), String.valueOf(ticks));
+        tick(SPRINT_JUMP, 30.0F, 0.0F, new Vec3d(0.0, 0.02, 0.0));
+        assertEquals(1, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
     }
 
     @Test

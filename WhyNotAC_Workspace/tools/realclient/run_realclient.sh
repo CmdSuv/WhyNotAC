@@ -447,11 +447,13 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" e/0.05 -/0.8 move:71:134/0.3 Shift_L
 # Running on after the claim was lost (#102), from x 40.5, z 88.5 east by a little south (yaw -80: off the axes, where the
 # motion along the one the run does not follow would only halve towards zero), looking 50 degrees down: walking, an
 # empty-handed use on the ground ahead (a use the movement check does not resolve: it ends the claim), walking on for four
-# seconds; then the same sprinting. The movement check takes the player up again while it runs (MovementTracker's run
-# anchor: the motion of a steady run on even ground is known exactly within a second), never waiting for it to stand still.
+# seconds; then the same sprinting, then sprint-jumping. The movement check takes the player up again while it runs
+# (MovementTracker's run anchor: the motion of a steady run on even ground is known exactly within one to three seconds,
+# jumps included), never waiting for it to stand still.
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; echo "item replace entity $NAME weapon.offhand with minecraft:air" > "$FIFO"
 sleep 0.5; echo "tp $NAME 40.5 -60 88.5 -80 50" > "$FIFO"; sleep 2.0
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/1.0 w,Button3/0.1 w/4.0 -/1.0 w,Control_L/1.0 w,Control_L,Button3/0.1 w,Control_L/4.0 -/1.0; sleep 0.5
+python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/1.0 w,Button3/0.1 w/4.0 -/1.0 w,Control_L/1.0 w,Control_L,Button3/0.1 w,Control_L/4.0 -/1.0 \
+  w,Control_L,space/1.0 w,Control_L,space,Button3/0.1 w,Control_L,space/6.0 -/1.0; sleep 0.5
 # Sneak bridging (VAL-13, #95): on a stone platform four blocks up (x 50..52, z 38..40), facing south and looking 78
 # degrees down, S, shift and the use button held: the client walks back north, its sneak stops it at the edge (no walking
 # off a ledge while crouching), where its eyes are over the edge and its ray meets the edge block's north face: stone goes
