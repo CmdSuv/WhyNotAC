@@ -105,8 +105,11 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   adımlanır, her adım bir sonraki konumla tutarlı olmalıdır; uçlar tek bir double'da buluşunca hız client'ınkidir.
   Ardından motor en az üç gönderilen konumu bit bit vermelidir. Eksenler ayrı ayrı aranır: client oyuncunun 0,003'ün
   altındaki yatay hızını iki ekseniyle birlikte sıfırlar, aralık bu bölgeye değerse çapa kurulmaz. Tam bir eksen boyunca
-  koşu çapa vermez (karşı eksendeki hız sıfıra doğru yarılanır, tek bir double'a inmez). Gerçek client'ta iki çapa
-  kuruldu (yürüyüş ve koşu); ardından 573 tik açıklandı, client'ın kendi durumu her açıklanan tikte hipotezlerdeydi.
+  koşu çapa vermez (karşı eksendeki hız sıfıra doğru yarılanır, tek bir double'a inmez). Zıplamalar da kapsanır (görev
+  #103): pencere client'ın yerde durduğu bir tikte başlar, iki uç kendi dikey durumlarıyla adımlanır ve her tikte
+  client'ın yüksekliğini ve zemin bayrağını vermelidir; havada aralık tik başına 0,91 küçüldüğü için sprint-zıplayan bir
+  koşu iki üç saniye sürer (pencere 80 tik). Gerçek client'ta yürüyüş, koşu ve sprint-zıplama bölümlerinin üçünde de çapa
+  kuruldu; client'ın kendi durumu her açıklanan tikte hipotezlerdeydi.
 - Fiziğe dayananlar: kritik vuruş (`C7`), topuz (`C8`). İkisini de sunucu kendi oyuncu durumundan hesaplar
   (`Player.canCriticalAttack`: `fallDistance > 0`, yerde değil, koşmuyor...; topuzun hasarı `fallDistance`'tan); o durum
   client'ın hareket paketlerinden gelir. Sahte kritik ya da sahte düşüş, ya aynı tikte fazladan hareket paketi
