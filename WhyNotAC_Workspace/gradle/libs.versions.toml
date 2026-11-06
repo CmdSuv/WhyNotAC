@@ -1,0 +1,28 @@
+[versions]
+minecraft = "1.21.11"
+# Reproducible builds: "-SNAPSHOT" means "whatever was published last", so every snapshot is pinned to
+# one timestamped build (see maven-metadata.xml in the repository). build-logic rejects unpinned ones.
+# These three come from the same Paper build (91, 2026-05-11); update them together.
+paper-dev-bundle = "1.21.11-R0.1-20260511.115010-91"
+pinned-paper-api = "1.21.11-R0.1-20260511.115010-91"
+pinned-velocity-native = "3.4.0-20260121.190037-118"
+paperweight = "2.0.0-beta.24"
+junit = "6.1.3"
+jmh = "1.37"
+packetevents = "2.14.0"
+# The client's own fastutil (1.21.11): the movement check replicates its hash order and is tested against it.
+fastutil = "8.5.18"
+
+[libraries]
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
+jmh-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
+
+packetevents-api = { module = "com.github.retrooper:packetevents-api", version.ref = "packetevents" }
+fastutil = { module = "it.unimi.dsi:fastutil", version.ref = "fastutil" }
+
+[plugins]
+paperweight-userdev = { id = "io.papermc.paperweight.userdev", version.ref = "paperweight" }

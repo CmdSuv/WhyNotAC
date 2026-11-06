@@ -1,0 +1,35 @@
+# WhyNotAC configuration
+
+recording:
+  # Records the timeline of every logged-in player to plugins/WhyNotAC/recordings/.
+  # Recordings are pseudonymised: no IP address, no player name, and the UUID is replaced by an
+  # HMAC pseudonym keyed with plugins/WhyNotAC/recording-secret.key (keep that file private;
+  # deleting it unlinks all past recordings from future ones).
+  # Tell your players before enabling this on a public server: a notice template and the
+  # find/forget tool for access and erasure requests are described in docs/privacy/.
+  enabled: false
+  # Recordings older than this are deleted.
+  max-age-days: 14
+  # Oldest recordings are deleted while the directory is larger than this.
+  max-total-megabytes: 2048
+  # Memory budget for blocks waiting to be written; beyond it blocks are dropped (and marked as gaps)
+  # rather than ever slowing the server down.
+  max-queued-megabytes: 64
+
+observation:
+  # Record the timeline from the bytes at the network edge (true) or from the game's own view of the
+  # packets (false). The edge also sees what other plugins add, cancel or rewrite. Leave it on.
+  edge: true
+  # One transaction (ping) per player per server tick: a continuous latency trace. Physics-changing
+  # packets are always bracketed with transactions either way. Leave it on.
+  per-tick-transactions: true
+  # A transaction before and after every flush to the client (at the network edge): the client's answers
+  # then tell, for every packet, which of its ticks came before and after it handled the packet. The
+  # entity replica is exact with them; without, it keeps every possible order. Leave it on.
+  flush-transactions: true
+
+cases:
+  # Every finding opens a case: a row in plugins/WhyNotAC/cases.db and a dossier in plugins/WhyNotAC/cases/
+  # (re-verifiable offline: java -jar WhyNotAC.jar verify <dossier>). Cases name the player: they are
+  # personal data, kept for this many days.
+  retention-days: 90

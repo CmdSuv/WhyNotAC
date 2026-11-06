@@ -1,0 +1,87 @@
+package dev.whynotac.world;
+
+import java.util.Set;
+
+/**
+ * Entity types whose position the 1.21.11 client does not take from the packets alone, for an entity it
+ * does not control: {@link ClientEntities} does not claim to know where they are. Read from the decompiled
+ * client (every tick, aiStep and baseTick override, and what they call), with these results:
+ * <ul>
+ *   <li>Every other living entity moves on the client only by interpolation: {@code LivingEntity.aiStep}
+ *       interpolates, and travel, AI, goals, navigation and the brain run only for an entity the client
+ *       controls ({@code canSimulateMovement}, {@code isEffectiveAi}, {@code Mob.serverAiStep});
+ *       {@code RemotePlayer.aiStep} only interpolates. Fluids and pushing change velocity only.</li>
+ *   <li>Most non-living entities run their own physics on the client (items, experience orbs, TNT,
+ *       falling blocks, arrows, tridents, thrown items, fireballs, fireworks, fishing hooks, eyes of ender,
+ *       llama spit, shulker bullets); minecarts also depend on who controls them and on feature flags. Only
+ *       the types in {@link #STATIC} never move.</li>
+ *   <li>Boats and rafts ({@link #interpolatesOnly}) move on the client only by interpolation unless its own player
+ *       controls them: {@code AbstractBoat.tick} interpolates, then runs its physics only where
+ *       {@code isLocalInstanceAuthoritative} (its controlling passenger is the client's own player) and otherwise
+ *       sets the motion to zero without moving; nothing else in its tick moves it.</li>
+ * </ul>
+ * Not followed yet, and therefore never to be relied on near them: a moving piston
+ * ({@code PistonMovingBlockEntity} moves every entity on the client) and a peeking shulker
+ * ({@code Shulker.onPeekAmountChange} moves entities next to it).
+ */
+final class ClientMotion {
+
+    private ClientMotion() {}
+
+    /** Living entities that the client moves besides interpolating. */
+    static final Set<String> LIVING = Set.of(
+            "minecraft:bat",          // Bat.tick: a resting bat is put under the block above it (setPosRaw), on both sides
+            "minecraft:ender_dragon", // EnderDragon.tickDeath: moves up while dying; its parts are placed in aiStep
+            "minecraft:shulker");     // Shulker.setPos: snapped to the block centre; no interpolation; and a shulker box opening
+                                      // next to it teleports it up to 8 blocks on the client (move SHULKER_BOX: teleportSomewhere)
+
+    /** Non-living entities whose client tick never moves them and whose position is the packet's. */
+    static final Set<String> STATIC = Set.of(
+            "minecraft:interaction", "minecraft:marker", "minecraft:end_crystal", "minecraft:area_effect_cloud", "minecraft:evoker_fangs",
+            "minecraft:lightning_bolt", "minecraft:ominous_item_spawner");
+
+    static boolean movesItself(String type, EntityTypes.Kind kind) {
+        return kind.living() ? LIVING.contains(type) : !STATIC.contains(type) && !interpolatesOnly(type);
+    }
+
+    /** Every boat, chest boat and raft ({@code AbstractBoat}): moved by interpolation alone unless the client's own player controls it. */
+    static boolean interpolatesOnly(String type) {
+        return type.endsWith("_boat") || type.endsWith("_raft");
+    }
+
+    /**
+     * The horses the client's own player steers with a saddle ({@code AbstractHorse} but the llamas and the camels):
+     * like any living entity they move by interpolation alone until then, and the replica keeps what their first ride
+     * tick reads ({@link ClientEntities#horseMounted}).
+     */
+    static final Set<String> HORSES = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
+            "minecraft:zombie_horse");
+
+    /** The pig, which its player steers with a carrot on a stick ({@code Pig.getControllingPassenger}), kept as a horse is. */
+    static final String PIG = "minecraft:pig";
+
+    /** The strider, which its player steers with a warped fungus on a stick ({@code Strider.getControllingPassenger}), kept as a pig is. */
+    static final String STRIDER = "minecraft:strider";
+
+    /** The happy ghast, which its player steers in a harness ({@code HappyGhast.getControllingPassenger}), kept as a horse is. */
+    static final String HAPPY_GHAST = "minecraft:happy_ghast";
+
+    /** The nautilus and the zombie nautilus, which their player steers saddled ({@code AbstractNautilus.getControllingPassenger}), kept as a horse is. */
+    static final Set<String> NAUTILUSES = Set.of("minecraft:nautilus", "minecraft:zombie_nautilus");
+
+    /** The camel and the camel husk, which their player steers saddled ({@code AbstractHorse.getControllingPassenger}), kept as a horse is. */
+    static final Set<String> CAMELS = Set.of("minecraft:camel", "minecraft:camel_husk");
+
+    /**
+     * The living vehicles the replica keeps for their player's mount ({@link ClientEntities#horseMounted}): the horses, the
+     * camels, the pig, the strider, the happy ghast and the nautiluses.
+     */
+    static final Set<String> RIDDEN = Set.of("minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:skeleton_horse",
+            "minecraft:zombie_horse", "minecraft:camel", "minecraft:camel_husk", PIG, STRIDER, HAPPY_GHAST, "minecraft:nautilus",
+            "minecraft:zombie_nautilus");
+
+    /** A vehicle whose client state the replica keeps for its player's mount: a boat, a horse, a camel, a pig, a strider, a happy ghast or a nautilus. */
+    static boolean keptAtMount(String type) {
+        return type != null && (interpolatesOnly(type) || RIDDEN.contains(type));
+    }
+}
