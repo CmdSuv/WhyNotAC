@@ -1,6 +1,7 @@
 package dev.whynotac.ai;
 
 import dev.whynotac.analysis.evidence.EvidenceClass;
+import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.math.stats.RunningMoments;
 import dev.whynotac.protocol.network.NetworkEnvelope;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -44,12 +45,25 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
     private final BehavioralFeatureExtractor extractor = new BehavioralFeatureExtractor();
     private final AccountBaselineModel baselineModel = new AccountBaselineModel();
     private final ProbeScheduler probeScheduler = new ProbeScheduler();
+    private final DesignProbeEngine designProbeEngine;
     private final Map<String, CasePriority> prioritizedCases = new ConcurrentHashMap<>();
     private final Map<String, UUID> caseSubjects = new ConcurrentHashMap<>();
     private final Set<Long> flaggedConnections = ConcurrentHashMap.newKeySet();
     private final Set<Long> mergedConnections = ConcurrentHashMap.newKeySet();
     private final Map<Long, Identity> authenticatedConnections = new ConcurrentHashMap<>();
     private final List<CleanSessionObserver> cleanObservers = new CopyOnWriteArrayList<>();
+
+    public AiAdvisor() {
+        this((s, e) -> { });
+    }
+
+    public AiAdvisor(EvidenceSink sink) {
+        this.designProbeEngine = new DesignProbeEngine(probeScheduler, sink);
+    }
+
+    public DesignProbeEngine designProbeEngine() {
+        return designProbeEngine;
+    }
 
     public void addCleanSessionObserver(CleanSessionObserver observer) {
         if (observer != null) {
@@ -77,6 +91,7 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         extractor.onEvent(session, event);
+        designProbeEngine.onEvent(session, event);
         if (event instanceof ClientFact fact && fact.fact() == Fact.IDENTITY && fact.trust() == Trust.AUTHENTIC) {
             try {
                 Identity parsed = Identity.valueOf(fact.value());

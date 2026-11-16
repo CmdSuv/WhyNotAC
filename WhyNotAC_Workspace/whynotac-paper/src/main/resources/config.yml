@@ -39,6 +39,8 @@ verdict:
   armed-checks: []
   # Soft mitigations (setback / cancelling impossible hits or block actions) when an ARMED deterministic check triggers.
   mitigations: false
+  # Soft Anti-ESP occlusion hiding distant out-of-sight targets for ARMED P-A / P-M / D checks.
+  hide-information: false
   # Automatic kicks when correlated score reaches threshold (OPERATOR_OPT_IN for ARMED P-A / P-M).
   auto-kick: false
   # Automatic temporary bans (OPERATOR_OPT_IN for ARMED P-A + authenticated identity + corroboration only).
@@ -77,3 +79,9 @@ network-bridge:
   enabled: false
   secret-file: "network-secret.key"
   max-clock-skew-seconds: 60
+
+ai:
+  active-probes:
+    # Spawns invisible behind-FOV phantom decoy targets during combat (DESIGN_STATISTIC / D class only).
+    enabled: false
+    ttl-ticks: 10

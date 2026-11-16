@@ -30,7 +30,8 @@ public enum DependencyGroup {
             Map.entry("action-grammar", PACKET_GRAMMAR),
             Map.entry("prediction-sequence", PACKET_GRAMMAR),
             Map.entry("click-pattern", STATISTICAL_SIGNALS),
-            Map.entry("aim-pattern", STATISTICAL_SIGNALS));
+            Map.entry("aim-pattern", STATISTICAL_SIGNALS),
+            Map.entry("design-probe", STATISTICAL_SIGNALS));
 
     private final String id;
 

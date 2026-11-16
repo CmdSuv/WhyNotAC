@@ -4,6 +4,7 @@ import dev.whynotac.ai.AiAdvisor;
 import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.ServerClock;
 import dev.whynotac.math.stats.RunningMoments;
+import dev.whynotac.paper.ai.LiveProbeDriver;
 import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
@@ -122,7 +123,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         VerdictConfig verdictConfig = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
         verdict = new VerdictEngine(verdictConfig, SecondVerifier.ReplaySource.fromRecordingPaths(
                 session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session)));
-        aiAdvisor = new AiAdvisor();
+        aiAdvisor = new AiAdvisor(verdict);
         registry.addListener(aiAdvisor);
         verdict.addCaseListener(cases);
         verdict.addCaseListener(alerts);
@@ -139,8 +140,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             getLogger().log(Level.SEVERE, "WhyNotAC immutable storage audit ledger failed to initialize; suppressing active enforcement to SHADOW", e);
             verdict.circuitBreaker().setKillSwitch(true, "storage ledger error: " + e.getMessage());
         }
-        if (verdictConfig.mitigationsEnabled()) {
+        if (verdictConfig.mitigationsEnabled() || verdictConfig.hidesInformationEnabled()) {
             getServer().getPluginManager().registerEvents(verdictBridge, this);
+        }
+        if (verdictConfig.hidesInformationEnabled()) {
+            Bukkit.getScheduler().runTaskTimer(this, verdictBridge::tickOcclusionVisibility, 10L, 10L);
         }
         // The client's world, before every check that reads it (listeners see an event in registration order).
         Replicas replicas = Replicas.vanilla();
@@ -252,6 +256,12 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         networkBridge.sendProfileSummary(playerId, identity, name, moments, 0));
             }
         });
+
+        if (getConfig().getBoolean("ai.active-probes.enabled", false)) {
+            long probeTtl = Math.max(4L, getConfig().getLong("ai.active-probes.ttl-ticks", 10L));
+            Bukkit.getScheduler().runTaskTimer(this, new LiveProbeDriver(this, interceptor, aiAdvisor, probeTtl), 5L, 5L);
+            getLogger().info("WhyNotAC active behind-FOV design probes enabled (ttl=" + probeTtl + " ticks, DESIGN_STATISTIC)");
+        }
 
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, this::health,

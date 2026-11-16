@@ -159,4 +159,33 @@ class VerdictPolicyTest {
             assertTrue(bans.stream().allMatch(b -> b.certificate().verifyIntegrity()));
         }
     }
+
+    @Test
+    void armedHideInformationActivatesOcclusionWithoutPunishmentForDesignAndModificationClasses() {
+        VerdictConfig cfg = VerdictConfig.builder()
+                .armedChecks(Set.of("design-probe", "movement"))
+                .hidesInformationEnabled(true)
+                .mitigationsEnabled(false)
+                .autoKickEnabled(false)
+                .autoBanEnabled(false)
+                .build();
+        try (VerdictEngine engine = new VerdictEngine(cfg, SecondVerifier.ReplaySource.none())) {
+            AtomicInteger hides = new AtomicInteger();
+            AtomicInteger punishes = new AtomicInteger();
+            engine.addEnforcementListener(new VerdictEngine.EnforcementListener() {
+                @Override public void hideInformation(VerdictDecision d) { hides.incrementAndGet(); }
+                @Override public void mitigate(VerdictDecision d) { punishes.incrementAndGet(); }
+                @Override public void kick(VerdictDecision d) { punishes.incrementAndGet(); }
+                @Override public void tempBan(VerdictDecision d) { punishes.incrementAndGet(); }
+            });
+            SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (s, e, err) -> {});
+            PlayerSession session = registry.openReplay("hide-info");
+
+            engine.accept(session, ev("design-probe", EvidenceClass.DESIGN_STATISTIC, IdentityTier.AUTHENTICATED, 1_000L));
+            engine.accept(session, ev("movement", EvidenceClass.MODIFICATION_PROOF, IdentityTier.AUTHENTICATED, 2_000L));
+
+            assertEquals(2, hides.get());
+            assertEquals(0, punishes.get());
+        }
+    }
 }

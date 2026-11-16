@@ -38,6 +38,8 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
 
     /** Receives authorized enforcement actions and async second-verification outcomes. */
     public interface EnforcementListener {
+        default void hideInformation(VerdictDecision decision) {}
+
         default void mitigate(VerdictDecision decision) {}
 
         default void kick(VerdictDecision decision) {}
@@ -175,41 +177,47 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
         boolean pendingAsyncTempBanVerification = false;
         boolean newlyEnforced = false;
 
-        if (effectiveLifecycle == Lifecycle.ARMED && !suppressed && isDeterministic(evidenceClass)) {
-            if (ActionPolicy.enabled(evidenceClass, Action.NEUTRALIZE, identity, effectiveLifecycle, false)
-                    && config.mitigationsEnabled()
-                    && correlatedScore >= config.minScoreForMitigation()) {
-                MitigationKind candidateMitigation = MitigationKind.forCheck(evidence.check(), evidenceClass);
-                if (candidateMitigation != MitigationKind.NONE) {
-                    chosen = Action.NEUTRALIZE;
-                    mitigation = candidateMitigation;
+        if (effectiveLifecycle == Lifecycle.ARMED && !suppressed) {
+            if (config.hidesInformationEnabled()
+                    && ActionPolicy.enabled(evidenceClass, Action.HIDE_INFORMATION, identity, effectiveLifecycle, false)) {
+                chosen = Action.HIDE_INFORMATION;
+            }
+            if (isDeterministic(evidenceClass)) {
+                if (ActionPolicy.enabled(evidenceClass, Action.NEUTRALIZE, identity, effectiveLifecycle, false)
+                        && config.mitigationsEnabled()
+                        && correlatedScore >= config.minScoreForMitigation()) {
+                    MitigationKind candidateMitigation = MitigationKind.forCheck(evidence.check(), evidenceClass);
+                    if (candidateMitigation != MitigationKind.NONE) {
+                        chosen = Action.NEUTRALIZE;
+                        mitigation = candidateMitigation;
+                        newlyEnforced = true;
+                    }
+                }
+                if (ActionPolicy.enabled(evidenceClass, Action.KICK, identity, effectiveLifecycle, config.autoKickEnabled())
+                        && config.autoKickEnabled()
+                        && correlatedScore >= config.minScoreForKick()) {
+                    chosen = Action.KICK;
                     newlyEnforced = true;
                 }
-            }
-            if (ActionPolicy.enabled(evidenceClass, Action.KICK, identity, effectiveLifecycle, config.autoKickEnabled())
-                    && config.autoKickEnabled()
-                    && correlatedScore >= config.minScoreForKick()) {
-                chosen = Action.KICK;
-                newlyEnforced = true;
-            }
-            if (evidenceClass == EvidenceClass.ADVANTAGE_PROOF
-                    && config.autoBanEnabled()
-                    && !falseBanBudget.isLocked()
-                    && ActionPolicy.enabled(evidenceClass, Action.TEMP_BAN, identity, effectiveLifecycle, true)) {
-                boolean hasMultipleAdvantageGroups = distinctAdvantageGroups >= 2;
-                if (!config.requireCorroborationForTempBan() || hasMultipleAdvantageGroups) {
-                    chosen = Action.TEMP_BAN;
-                    newlyEnforced = true;
-                    verificationStatus = hasMultipleAdvantageGroups ? VerificationStatus.NOT_NEEDED : VerificationStatus.NOT_NEEDED;
-                    verificationDetails = hasMultipleAdvantageGroups
-                            ? "corroborated by " + distinctAdvantageGroups + " independent P-A groups"
-                            : "corroboration waived by config";
-                } else if (config.secondVerifierEnabled()) {
-                    synchronized (state) {
-                        if (!state.banDispatchedOrPending) {
-                            pendingAsyncTempBanVerification = true;
-                            verificationStatus = VerificationStatus.PENDING;
-                            verificationDetails = "queued for independent second verification";
+                if (evidenceClass == EvidenceClass.ADVANTAGE_PROOF
+                        && config.autoBanEnabled()
+                        && !falseBanBudget.isLocked()
+                        && ActionPolicy.enabled(evidenceClass, Action.TEMP_BAN, identity, effectiveLifecycle, true)) {
+                    boolean hasMultipleAdvantageGroups = distinctAdvantageGroups >= 2;
+                    if (!config.requireCorroborationForTempBan() || hasMultipleAdvantageGroups) {
+                        chosen = Action.TEMP_BAN;
+                        newlyEnforced = true;
+                        verificationStatus = VerificationStatus.NOT_NEEDED;
+                        verificationDetails = hasMultipleAdvantageGroups
+                                ? "corroborated by " + distinctAdvantageGroups + " independent P-A groups"
+                                : "corroboration waived by config";
+                    } else if (config.secondVerifierEnabled()) {
+                        synchronized (state) {
+                            if (!state.banDispatchedOrPending) {
+                                pendingAsyncTempBanVerification = true;
+                                verificationStatus = VerificationStatus.PENDING;
+                                verificationDetails = "queued for independent second verification";
+                            }
                         }
                     }
                 }
@@ -278,6 +286,13 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
     private void dispatchEnforcement(VerdictCase verdictCase, PlayerSession session, Evidence evidence,
             Action chosen, MitigationKind mitigation, EvidenceCertificate certificate) {
         switch (chosen) {
+            case HIDE_INFORMATION -> {
+                VerdictDecision d = new VerdictDecision(verdictCase, session, evidence, Action.HIDE_INFORMATION,
+                        MitigationKind.NONE, 0L, certificate, "soft anti-ESP occlusion");
+                for (EnforcementListener l : enforcementListeners) {
+                    l.hideInformation(d);
+                }
+            }
             case NEUTRALIZE -> {
                 VerdictDecision d = new VerdictDecision(verdictCase, session, evidence, Action.NEUTRALIZE,
                         mitigation, 0L, certificate, "deterministic violation mitigation");

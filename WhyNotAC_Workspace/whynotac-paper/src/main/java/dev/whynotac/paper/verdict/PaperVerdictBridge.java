@@ -40,20 +40,26 @@ import org.bukkit.plugin.Plugin;
 public final class PaperVerdictBridge implements VerdictEngine.EnforcementListener, Listener {
 
     private static final long MITIGATION_TTL_NANOS = TimeUnit.MILLISECONDS.toNanos(350);
+    private static final long HIDE_INFORMATION_TTL_NANOS = TimeUnit.SECONDS.toNanos(15);
+    private static final double HIDE_INFORMATION_DISTANCE_SQ = 16.0 * 16.0;
 
     private final Plugin plugin;
     private final Logger logger;
     private final boolean mitigationsEnabled;
+    private final boolean hidesInformationEnabled;
 
     private final Map<UUID, Long> cancelAttackUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> cancelBlockUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> setbackCooldownUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Location> safeLocations = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> hideInfoUntilNanos = new ConcurrentHashMap<>();
+    private final Map<UUID, Set<UUID>> hiddenTargetsByObserver = new ConcurrentHashMap<>();
 
     public PaperVerdictBridge(Plugin plugin, VerdictConfig config) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.mitigationsEnabled = config.mitigationsEnabled();
+        this.hidesInformationEnabled = config.hidesInformationEnabled();
     }
 
     public static VerdictConfig loadConfig(ConfigurationSection section, Logger logger) {
@@ -62,7 +68,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         }
         Set<String> armed = new LinkedHashSet<>();
         for (String id : section.getStringList("armed-checks")) {
-            if (Checks.version(id) < 0) {
+            if (!"design-probe".equals(id) && Checks.version(id) < 0) {
                 logger.warning("WhyNotAC config verdict.armed-checks ignores unknown check '" + id + "'");
                 continue;
             }
@@ -79,6 +85,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         return VerdictConfig.builder()
                 .armedChecks(armed)
                 .mitigationsEnabled(section.getBoolean("mitigations", false))
+                .hidesInformationEnabled(section.getBoolean("hide-information", false))
                 .autoKickEnabled(section.getBoolean("auto-kick", false))
                 .autoBanEnabled(section.getBoolean("auto-ban", false))
                 .secondVerifierEnabled(section.getBoolean("second-verifier", true))
@@ -92,6 +99,86 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
                 .minScoreForKick(minKick)
                 .banWaveDelayMillis(TimeUnit.SECONDS.toMillis(banWaveDelaySeconds))
                 .build();
+    }
+
+    @Override
+    public void hideInformation(VerdictDecision decision) {
+        if (!hidesInformationEnabled) {
+            return;
+        }
+        UUID uuid = decision.session().identity() != null ? decision.session().identity().playerId() : null;
+        if (uuid == null) {
+            return;
+        }
+        long deadline = System.nanoTime() + HIDE_INFORMATION_TTL_NANOS;
+        hideInfoUntilNanos.put(uuid, deadline);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player observer = Bukkit.getPlayer(uuid);
+            if (observer != null && observer.isOnline()) {
+                refreshOccludedVisibility(observer, deadline);
+            }
+        });
+    }
+
+    /** Called periodically (e.g. every 10 ticks) to update or restore occluded ESP visibility safely on main thread. */
+    public void tickOcclusionVisibility() {
+        if (!hidesInformationEnabled || hideInfoUntilNanos.isEmpty()) {
+            return;
+        }
+        long now = System.nanoTime();
+        for (Map.Entry<UUID, Long> entry : hideInfoUntilNanos.entrySet()) {
+            UUID observerId = entry.getKey();
+            Player observer = Bukkit.getPlayer(observerId);
+            if (observer == null || !observer.isOnline()) {
+                hideInfoUntilNanos.remove(observerId);
+                hiddenTargetsByObserver.remove(observerId);
+                continue;
+            }
+            if (now > entry.getValue()) {
+                hideInfoUntilNanos.remove(observerId);
+                restoreAllHidden(observer);
+            } else {
+                refreshOccludedVisibility(observer, entry.getValue());
+            }
+        }
+    }
+
+    private void refreshOccludedVisibility(Player observer, long deadlineNanos) {
+        if (System.nanoTime() > deadlineNanos) {
+            restoreAllHidden(observer);
+            return;
+        }
+        Set<UUID> hidden = hiddenTargetsByObserver.computeIfAbsent(observer.getUniqueId(), k -> ConcurrentHashMap.newKeySet());
+        Location eye = observer.getEyeLocation();
+        for (Player target : Bukkit.getOnlinePlayers()) {
+            if (target.getUniqueId().equals(observer.getUniqueId())) {
+                continue;
+            }
+            boolean sameWorld = target.getWorld().equals(observer.getWorld());
+            boolean shouldHide = sameWorld
+                    && eye.distanceSquared(target.getLocation()) > HIDE_INFORMATION_DISTANCE_SQ
+                    && !observer.hasLineOfSight(target);
+            if (shouldHide) {
+                if (hidden.add(target.getUniqueId())) {
+                    observer.hidePlayer(plugin, target);
+                }
+            } else if (hidden.remove(target.getUniqueId())) {
+                observer.showPlayer(plugin, target);
+            }
+        }
+    }
+
+    private void restoreAllHidden(Player observer) {
+        Set<UUID> hidden = hiddenTargetsByObserver.remove(observer.getUniqueId());
+        if (hidden == null) {
+            return;
+        }
+        for (UUID targetId : hidden) {
+            Player target = Bukkit.getPlayer(targetId);
+            if (target != null && target.isOnline()) {
+                observer.showPlayer(plugin, target);
+            }
+        }
     }
 
     @Override
@@ -235,5 +322,8 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         cancelBlockUntilNanos.remove(uuid);
         setbackCooldownUntilNanos.remove(uuid);
         safeLocations.remove(uuid);
+        hideInfoUntilNanos.remove(uuid);
+        hiddenTargetsByObserver.remove(uuid);
+        hiddenTargetsByObserver.values().forEach(set -> set.remove(uuid));
     }
 }
