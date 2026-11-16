@@ -2,11 +2,11 @@ package dev.whynotac.analysis.checks;
 
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,12 +39,8 @@ final class MoveReplies {
 
     private final ArrayDeque<Token> rotationTokens = new ArrayDeque<>();
     private final ArrayDeque<Token> vehicleTokens = new ArrayDeque<>();
-    private final Map<Integer, Long> pingSequence = new LinkedHashMap<>(16, 0.75f, false) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<Integer, Long> eldest) {
-            return size() > MAX_TRACKED_PINGS;
-        }
-    };
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
     /** Teleport ids the server sent and the client has not accepted yet. */
     private final Set<Integer> pendingTeleports = new java.util.LinkedHashSet<>();
     private int selfId = -1;
@@ -60,6 +56,15 @@ final class MoveReplies {
      * can land between the accept and its reply (both queued by the main thread).
      */
     private boolean afterAccept;
+
+    MoveReplies() {
+        this(null);
+    }
+
+    MoveReplies(PingLedger sharedLedger) {
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+    }
 
     void onBound(int entityId) {
         if (entityId > 0) {
@@ -87,7 +92,11 @@ final class MoveReplies {
                     addToken(vehicleTokens, out.sequence());
                 }
             }
-            case ClientboundPacket.Ping ping -> pingSequence.put(ping.id(), out.sequence());
+            case ClientboundPacket.Ping ping -> {
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), out.sequence());
+                }
+            }
             default -> { }
         }
     }
@@ -128,15 +137,18 @@ final class MoveReplies {
     }
 
     void onAcknowledged(TimelineEvent.Acknowledged ack) {
-        Long ping = pingSequence.remove(ack.transactionId());
-        if (ping == null) {
+        long ping = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(ack.transactionId());
+        if (ping == Long.MIN_VALUE) {
             return;
         }
-        for (ArrayDeque<Token> tokens : List.of(rotationTokens, vehicleTokens)) {
-            for (Token token : tokens) {
-                if (token.sequence < ping) {
-                    token.expiring = true; // the client handled it before this ping: its reply is in this interval or earlier
-                }
+        markExpiring(rotationTokens, ping);
+        markExpiring(vehicleTokens, ping);
+    }
+
+    private static void markExpiring(ArrayDeque<Token> tokens, long ping) {
+        for (Token token : tokens) {
+            if (token.sequence < ping) {
+                token.expiring = true; // the client handled it before this ping: its reply is in this interval or earlier
             }
         }
     }

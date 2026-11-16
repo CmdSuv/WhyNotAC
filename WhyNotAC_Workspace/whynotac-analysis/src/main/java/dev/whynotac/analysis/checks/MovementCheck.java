@@ -11,6 +11,7 @@ import dev.whynotac.physics.BoatState;
 import dev.whynotac.physics.HorseState;
 import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -76,18 +77,26 @@ public final class MovementCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
-        final MovementTracker tracker = new MovementTracker();
+        final MovementTracker tracker;
         long lastReportNanos = Long.MIN_VALUE;
         long unexplainedSinceReport;
         /** {@link EngineTags#mayDiffer} for the tags' revision it was asked at; the last sequence at which it was not null. */
         long tagsRevision = Long.MIN_VALUE;
         String tagsDiffer = "not asked";
         long lastTagsDiffer = Long.MIN_VALUE;
+
+        State(PingLedger ledger) {
+            this.tracker = new MovementTracker(ledger);
+        }
+
+        static State fromSession(PlayerSession session) {
+            return new State(session.pingLedger());
+        }
     }
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        State state = session.attachment(STATE, State::new);
+        State state = session.attachment(STATE, State::fromSession);
         state.admissibility.onEvent(event);
         dev.whynotac.world.ClientTags tags = replicas.tags().tags(session);
         if (tags.revision() != state.tagsRevision) {

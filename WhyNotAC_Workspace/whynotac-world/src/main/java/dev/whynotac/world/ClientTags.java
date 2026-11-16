@@ -1,8 +1,9 @@
 package dev.whynotac.world;
 
 import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
+import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -31,7 +32,6 @@ public final class ClientTags {
     public static final String FLUID = "minecraft:fluid";
     public static final String ENTITY_TYPE = "minecraft:entity_type";
     static final Set<String> FOLLOWED = Set.of(BLOCK, FLUID, ENTITY_TYPE);
-    private static final int MAX_TRACKED_PINGS = 4096;
     /** Versions kept per registry while the client does not answer pings; beyond, its tags are not claimed until it does. */
     static final int MAX_VERSIONS = 64;
     private static final int INTERNED = 16;
@@ -46,13 +46,27 @@ public final class ClientTags {
     /** One registry's tags from a sequence on: each tag's ids sorted; null when not known. */
     private record Version(long seq, Map<String, int[]> tags) {}
 
-    private final ArrayDeque<long[]> pings = new ArrayDeque<>();
-    private long certain = Long.MIN_VALUE;
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
+    private long lastWindowEnd = Long.MAX_VALUE;
     private final Map<String, List<Version>> registries = new HashMap<>();
     /** The followed registries the configuration phase before the coming login sent. */
     private final Set<String> sentSinceLogin = new HashSet<>();
     /** Counts every change of what {@link #possible} may answer. */
     private long revision;
+
+    public ClientTags() {
+        this(null);
+    }
+
+    ClientTags(PingLedger sharedLedger) {
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+    }
+
+    static ClientTags fromSession(PlayerSession session) {
+        return new ClientTags(session.pingLedger());
+    }
 
     /** Applies one timeline event, in sequence order. */
     public void onEvent(TimelineEvent event) {
@@ -64,7 +78,12 @@ public final class ClientTags {
                     add(registry, new Version(gap.sequence(), null));
                 }
             }
-            case TimelineEvent.Disconnected ignored -> pings.clear();
+            case TimelineEvent.Disconnected ignored -> {
+                if (!sharedLedger) {
+                    ledger.clear();
+                }
+                lastWindowEnd = ledger.firstPending();
+            }
             default -> { }
         }
     }
@@ -72,10 +91,10 @@ public final class ClientTags {
     private void onOutbound(long seq, ClientboundPacket packet) {
         switch (packet) {
             case ClientboundPacket.Ping ping -> {
-                pings.add(new long[] {ping.id(), seq});
-                if (pings.size() > MAX_TRACKED_PINGS) {
-                    pings.pollFirst(); // a later window end: wider, still sound
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), seq);
                 }
+                lastWindowEnd = ledger.firstPending();
             }
             case ClientboundPacket.UpdateTags update -> {
                 for (ClientboundPacket.UpdateTags.RegistryTags registry : update.registries()) {
@@ -132,22 +151,14 @@ public final class ClientTags {
     }
 
     private void onAcknowledged(int id) {
-        long seq = Long.MIN_VALUE;
-        for (long[] ping : pings) {
-            if (ping[0] == id) {
-                seq = ping[1];
-                break;
-            }
-        }
+        long seq = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(id);
         if (seq == Long.MIN_VALUE) {
             return;
         }
-        long oldEnd = windowEnd();
-        while (!pings.isEmpty() && pings.peekFirst()[1] <= seq) {
-            pings.pollFirst();
-        }
-        certain = Math.max(certain, seq);
-        long newEnd = windowEnd();
+        long oldEnd = lastWindowEnd;
+        long newEnd = ledger.firstPending();
+        lastWindowEnd = newEnd;
+        long certain = ledger.certain();
         boolean changed = false;
         for (List<Version> versions : registries.values()) {
             // what possible() answers moves only with a version the window's end passed, or with the certain one among several
@@ -170,8 +181,7 @@ public final class ClientTags {
     }
 
     private long windowEnd() {
-        long[] first = pings.peekFirst();
-        return first == null ? Long.MAX_VALUE : first[1];
+        return ledger.firstPending();
     }
 
     // --- queries ----------------------------------------------------------------------------------------------------
@@ -185,6 +195,7 @@ public final class ClientTags {
         if (versions == null || versions.isEmpty()) {
             return null;
         }
+        long certain = ledger.certain();
         long end = windowEnd();
         List<int[]> out = new ArrayList<>(1);
         for (int i = 0; i < versions.size(); i++) {

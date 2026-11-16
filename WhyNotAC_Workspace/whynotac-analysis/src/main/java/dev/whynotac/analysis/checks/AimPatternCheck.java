@@ -11,6 +11,7 @@ import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.packet.Stack;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -90,7 +91,15 @@ public final class AimPatternCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
-        final TickLook look = new TickLook();
+        final TickLook look;
+
+        State(PingLedger ledger) {
+            this.look = new TickLook(ledger);
+        }
+
+        static State fromSession(PlayerSession session) {
+            return new State(session.pingLedger());
+        }
 
         long tickNumber;
         long lastReportNanos = Long.MIN_VALUE;
@@ -137,7 +146,7 @@ public final class AimPatternCheck implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        State state = session.attachment(STATE, State::new);
+        State state = session.attachment(STATE, State::fromSession);
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Bound bound -> state.look.onBound(bound.entityId());

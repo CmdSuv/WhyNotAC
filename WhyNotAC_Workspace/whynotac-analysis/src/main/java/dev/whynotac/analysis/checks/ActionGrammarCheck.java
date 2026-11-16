@@ -8,11 +8,11 @@ import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.world.Replicas;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -81,7 +81,7 @@ public final class ActionGrammarCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
-        final MoveReplies replies = new MoveReplies();
+        final MoveReplies replies;
         /** The last ClientTickEnd: the current tick started after it (none seen: unknown). */
         long tickStart = Long.MIN_VALUE;
         long tickStartNanos;
@@ -92,9 +92,18 @@ public final class ActionGrammarCheck implements TimelineListener {
         long swingDueNanos;
         String swingFor;
         long lastReportNanos = Long.MIN_VALUE;
-        final MenuScreen menu = new MenuScreen();
+        final MenuScreen menu;
         long withoutSwing;
         long afterMovement;
+
+        State(PingLedger ledger) {
+            this.replies = new MoveReplies(ledger);
+            this.menu = new MenuScreen(ledger);
+        }
+
+        static State fromSession(PlayerSession session) {
+            return new State(session.pingLedger());
+        }
         long inMenu;
     }
 
@@ -106,7 +115,7 @@ public final class ActionGrammarCheck implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        State state = session.attachment(STATE, State::new);
+        State state = session.attachment(STATE, State::fromSession);
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Bound bound -> state.replies.onBound(bound.entityId());
@@ -253,16 +262,17 @@ public final class ActionGrammarCheck implements TimelineListener {
         static final int WIN_GAME = 4;
         static final int DEMO_EVENT = 5;
 
-        private final Map<Integer, Long> pings = new LinkedHashMap<>(16, 0.75f, false) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<Integer, Long> eldest) {
-                return size() > MoveReplies.MAX_TRACKED_PINGS;
-            }
-        };
+        private final PingLedger ledger;
+        private final boolean sharedLedger;
         /** The OpenScreen, while nothing that may close or cover its screen was sent since. */
         private long sent = Long.MIN_VALUE;
         private long sentNanos;
         private boolean open;
+
+        MenuScreen(PingLedger sharedLedger) {
+            this.sharedLedger = sharedLedger != null;
+            this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+        }
 
         void onOutbound(TimelineEvent.Outbound out) {
             switch (out.packet()) {
@@ -273,7 +283,11 @@ public final class ActionGrammarCheck implements TimelineListener {
                         sentNanos = out.nanoTime();
                     }
                 }
-                case ClientboundPacket.Ping ping -> pings.put(ping.id(), out.sequence());
+                case ClientboundPacket.Ping ping -> {
+                    if (!sharedLedger) {
+                        ledger.onPing(ping.id(), out.sequence());
+                    }
+                }
                 case ClientboundPacket.MountScreenOpen ignored -> forget();
                 case ClientboundPacket.ContainerClose ignored -> forget();
                 case ClientboundPacket.Respawn ignored -> forget();
@@ -285,8 +299,8 @@ public final class ActionGrammarCheck implements TimelineListener {
         }
 
         void onAcknowledged(TimelineEvent.Acknowledged ack) {
-            Long ping = pings.remove(ack.transactionId());
-            if (ping != null && sent != Long.MIN_VALUE && ping > sent) {
+            long ping = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(ack.transactionId());
+            if (ping != Long.MIN_VALUE && sent != Long.MIN_VALUE && ping > sent) {
                 open = true; // the client handled the OpenScreen before this transaction
             }
         }

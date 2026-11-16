@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
 
@@ -57,6 +58,7 @@ public final class PlayerSession {
 
     // analysis-thread confined
     private Object[] attachments = new Object[AttachmentKey.count()];
+    private final PingLedger pingLedger = new PingLedger();
 
     PlayerSession(long connectionId, String remoteAddress, SessionRegistry registry, int mailboxCapacity, boolean replay) {
         this.connectionId = connectionId;
@@ -333,6 +335,11 @@ public final class PlayerSession {
 
     // --- analysis side ---------------------------------------------------------------------------
 
+    /** Shared per-session ping ledger, maintained on the analysis thread by {@link SessionRegistry}. */
+    public PingLedger pingLedger() {
+        return pingLedger;
+    }
+
     /**
      * Per-session state owned by a listener. Only call this from {@link TimelineListener#onEvent}:
      * it is unsynchronised by design (calls for a session never overlap).
@@ -343,6 +350,21 @@ public final class PlayerSession {
         Object value = index < attachments.length ? attachments[index] : null;
         if (value == null) {
             value = factory.get();
+            if (index >= attachments.length) {
+                attachments = Arrays.copyOf(attachments, Math.max(index + 1, AttachmentKey.count()));
+            }
+            attachments[index] = value;
+        }
+        return (T) value;
+    }
+
+    /** Non-capturing variant of {@link #attachment(AttachmentKey, Supplier)} when construction needs the session. */
+    @SuppressWarnings("unchecked")
+    public <T> T attachment(AttachmentKey key, Function<PlayerSession, T> factory) {
+        int index = key.index;
+        Object value = index < attachments.length ? attachments[index] : null;
+        if (value == null) {
+            value = factory.apply(this);
             if (index >= attachments.length) {
                 attachments = Arrays.copyOf(attachments, Math.max(index + 1, AttachmentKey.count()));
             }

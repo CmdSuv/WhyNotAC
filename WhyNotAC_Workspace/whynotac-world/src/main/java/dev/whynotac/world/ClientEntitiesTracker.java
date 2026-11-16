@@ -19,12 +19,12 @@ public final class ClientEntitiesTracker implements TimelineListener {
 
     private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
-    private final Supplier<ClientEntities> factory;
+    private final Function<PlayerSession, ClientEntities> factory;
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();
     private final ClientEntities.Totals totals = new ClientEntities.Totals();
 
     public ClientEntitiesTracker(EntityTypes types) {
-        this.factory = () -> new ClientEntities(types, totals);
+        this.factory = s -> new ClientEntities(types, totals, s.pingLedger());
     }
 
     /** Counters summed over every session. Any thread. */

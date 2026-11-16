@@ -2,6 +2,7 @@ package dev.whynotac.analysis.checks;
 
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,7 +37,15 @@ final class TickLook {
         }
     }
 
-    private final MoveReplies replies = new MoveReplies();
+    private final MoveReplies replies;
+
+    TickLook() {
+        this(null);
+    }
+
+    TickLook(PingLedger sharedLedger) {
+        this.replies = new MoveReplies(sharedLedger);
+    }
     /** The client said it loaded the level since the last login or respawn sent. */
     private boolean loaded;
     /** The rotations {@code yRotLast} may be; null: not known. */

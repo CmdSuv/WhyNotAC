@@ -6,6 +6,7 @@ import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -199,10 +200,8 @@ public final class ClientEntities {
     private boolean stepSeen;
 
     // --- client order ---------------------------------------------------------------------------------
-    /** Pings not answered yet, in order: {id, sequence}. */
-    private final ArrayDeque<long[]> pings = new ArrayDeque<>();
-    /** The sequence of the last answered ping: the client processed it and everything before it. */
-    private long certain = Long.MIN_VALUE;
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
     /** The prefixes the client's last tick could fall in ({@link #lastTickRanNormally}). */
     private long lastTickLower = Long.MIN_VALUE;
     private long lastTickUpper = Long.MAX_VALUE;
@@ -294,18 +293,24 @@ public final class ClientEntities {
 
     /** {@code totals}: where this replica's counters are summed with every other's (null: nowhere). */
     public ClientEntities(EntityTypes types, Totals totals) {
-        this(types, totals, true);
+        this(types, totals, true, null);
     }
 
-    private ClientEntities(EntityTypes types, Totals totals, boolean restingAllowed) {
+    ClientEntities(EntityTypes types, Totals totals, PingLedger sharedLedger) {
+        this(types, totals, true, sharedLedger);
+    }
+
+    private ClientEntities(EntityTypes types, Totals totals, boolean restingAllowed, PingLedger sharedLedger) {
         this.types = types;
         this.totals = totals;
         this.restingAllowed = restingAllowed;
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
     }
 
     /** A replica whose every track steps at every tick, as before resting tracks (for tests: the two must agree). */
     static ClientEntities steppingEveryTrack(EntityTypes types) {
-        return new ClientEntities(types, null, false);
+        return new ClientEntities(types, null, false, null);
     }
 
     /** How many tracks rest now (for tests). */
@@ -362,7 +367,9 @@ public final class ClientEntities {
         clearTracks();
         pendingTracks.clear();
         heads.clear();
-        pings.clear();
+        if (!sharedLedger) {
+            ledger.clear();
+        }
         level = false;
         complete = false;
     }
@@ -373,9 +380,8 @@ public final class ClientEntities {
         }
         switch (packet) {
             case ClientboundPacket.Ping ping -> {
-                pings.add(new long[] {ping.id(), seq});
-                if (pings.size() > MAX_TRACKED_PINGS) {
-                    pings.pollFirst(); // a later window end: wider, still sound
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), seq);
                 }
             }
             case ClientboundPacket.Login login -> {
@@ -1135,26 +1141,15 @@ public final class ClientEntities {
 
     /** The end of the first unanswered ping's prefix: the client cannot have processed it or anything after it. */
     private long windowEnd() {
-        long[] first = pings.peekFirst();
-        return first == null ? Long.MAX_VALUE : first[1];
+        return ledger.firstPending();
     }
 
     private void onAcknowledged(int id) {
-        long seq = Long.MIN_VALUE;
-        for (Iterator<long[]> it = pings.iterator(); it.hasNext(); ) {
-            long[] ping = it.next();
-            if (ping[0] == id) {
-                seq = ping[1];
-                break;
-            }
-        }
+        long seq = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(id);
         if (seq == Long.MIN_VALUE) {
             return; // not ours, or forgotten: nothing becomes certain
         }
-        while (!pings.isEmpty() && pings.peekFirst()[1] <= seq) {
-            pings.pollFirst(); // skipped ones too: the client processed them before this one
-        }
-        certain = seq;
+        long certain = ledger.certain();
         for (Iterator<Track> it = pendingTracks.iterator(); it.hasNext(); ) {
             Track track = it.next();
             int done = 0;
@@ -1206,6 +1201,7 @@ public final class ClientEntities {
     private void onTick() {
         ticks++;
         long end = windowEnd();
+        long certain = ledger.certain();
         lastTickLower = certain;
         lastTickUpper = end;
         selfDuring = selfBox(end);
@@ -1288,7 +1284,7 @@ public final class ClientEntities {
 
     /** With {@code applied} of the track's pending ops processed, the client's prefix X satisfies lower < X. */
     private long lower(Track track, int applied) {
-        return applied == 0 ? certain : Math.max(certain, track.pending.get(applied - 1).seq());
+        return applied == 0 ? ledger.certain() : Math.max(ledger.certain(), track.pending.get(applied - 1).seq());
     }
 
     /** ... and X <= upper. */
@@ -1830,7 +1826,7 @@ public final class ClientEntities {
      * the packet that put it on a vehicle (before {@code end}) and not the one that took it off (a passenger sends no position).
      */
     private double[] selfBox(long end) {
-        if (self.vehicle != NONE ? selfMountedAt < end : certain <= selfRodeUntil) {
+        if (self.vehicle != NONE ? selfMountedAt < end : ledger.certain() <= selfRodeUntil) {
             selfSent = null; // sent before the ride: not where it is
             selfSentAtTick = null;
             return null;
@@ -2627,7 +2623,7 @@ public final class ClientEntities {
         if (st.lostAll) {
             throw new NotKnown("a firework rocket attached to the player WhyNotAC lost track of");
         }
-        if (selfCreated >= certain || st.addedSeq <= selfCreated) {
+        if (selfCreated >= ledger.certain() || st.addedSeq <= selfCreated) {
             throw new NotKnown("a firework rocket attached to the player from before the player was made");
         }
         if (!st.tickedKnown) {
@@ -2697,7 +2693,7 @@ public final class ClientEntities {
         if (st.player && st.spectator != 0) {
             throw new NotKnown("a player that may be a spectator");
         }
-        if (selfCreated >= certain) {
+        if (selfCreated >= ledger.certain()) {
             throw new NotKnown("the player itself may have been made again"); // since the last certain point
         }
         // Its place in the tick list against the player's.

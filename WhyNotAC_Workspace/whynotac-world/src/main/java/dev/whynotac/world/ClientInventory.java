@@ -4,6 +4,7 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.packet.Stack;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -97,8 +98,8 @@ public final class ClientInventory {
     private final MenuLayouts layouts;
     private final UseEffects uses;
 
-    /** Pings not answered yet, in order: {id, sequence}. */
-    private final ArrayDeque<long[]> pings = new ArrayDeque<>();
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
     private final List<Pending> pending = new ArrayList<>();
     /** Every attack range a full stack showed, by the client's hash of it: what a hashed stack's range is. */
     private final java.util.Map<Integer, Stack.AttackRange> rangesByHash = new java.util.HashMap<>();
@@ -112,9 +113,15 @@ public final class ClientInventory {
     private long overflows;
 
     public ClientInventory(ItemPrototypes prototypes, MenuLayouts layouts, UseEffects uses) {
+        this(prototypes, layouts, uses, null);
+    }
+
+    ClientInventory(ItemPrototypes prototypes, MenuLayouts layouts, UseEffects uses, PingLedger sharedLedger) {
         this.prototypes = prototypes;
         this.layouts = layouts;
         this.uses = uses;
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
         candidates = new ArrayList<>(List.of(State.unknown()));
     }
 
@@ -132,7 +139,9 @@ public final class ClientInventory {
             }
             case TimelineEvent.Disconnected ignored -> {
                 lose();
-                pings.clear();
+                if (!sharedLedger) {
+                    ledger.clear();
+                }
             }
             default -> { }
         }
@@ -141,9 +150,8 @@ public final class ClientInventory {
     private void onOutbound(long seq, ClientboundPacket packet) {
         Op op = switch (packet) {
             case ClientboundPacket.Ping ping -> {
-                pings.add(new long[] {ping.id(), seq});
-                if (pings.size() > MAX_TRACKED_PINGS) {
-                    pings.pollFirst(); // a later window end: wider, still sound
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), seq);
                 }
                 yield null;
             }
@@ -266,18 +274,9 @@ public final class ClientInventory {
     }
 
     private void onAcknowledged(int id) {
-        long seq = Long.MIN_VALUE;
-        for (long[] ping : pings) {
-            if (ping[0] == id) {
-                seq = ping[1];
-                break;
-            }
-        }
+        long seq = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(id);
         if (seq == Long.MIN_VALUE) {
             return; // not ours, or forgotten
-        }
-        while (!pings.isEmpty() && pings.peekFirst()[1] <= seq) {
-            pings.pollFirst(); // skipped ones too: the client processed them before this one
         }
         int done = 0;
         while (done < pending.size() && pending.get(done).seq() < seq) {
@@ -302,8 +301,7 @@ public final class ClientInventory {
     }
 
     private long windowEnd() {
-        long[] first = pings.peekFirst();
-        return first == null ? Long.MAX_VALUE : first[1];
+        return ledger.firstPending();
     }
 
     /** How many pending ops the client may have processed: those before the first unanswered ping. */

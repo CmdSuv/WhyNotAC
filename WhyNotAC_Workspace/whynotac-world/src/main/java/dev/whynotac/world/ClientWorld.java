@@ -4,6 +4,7 @@ import dev.whynotac.protocol.packet.BlockFace;
 import dev.whynotac.protocol.packet.BlockPosition;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -68,12 +69,8 @@ public final class ClientWorld {
     private Storage storage;
 
     // --- what the client may not have applied yet ---
-    private final Map<Integer, Long> pingSequence = new LinkedHashMap<>(16, 0.75f, false) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<Integer, Long> eldest) {
-            return size() > MAX_TRACKED_PINGS;
-        }
-    };
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final Map<Long, Integer> unsettledBlocks = new HashMap<>();
     /** For each unsettled block, the state before each of its pending changes, oldest first (INVALID: not known). */
@@ -147,10 +144,16 @@ public final class ClientWorld {
 
     /** {@code pool} is shared with the other worlds, so identical sections are stored once. */
     public ClientWorld(BlockStates states, SectionPool pool) {
+        this(states, pool, null);
+    }
+
+    ClientWorld(BlockStates states, SectionPool pool, PingLedger sharedLedger) {
         this.states = states;
         this.voidAir = states.firstStateOf("minecraft:void_air");
         this.pool = pool;
         this.movers = movers(states);
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
     }
 
     /**
@@ -226,6 +229,9 @@ public final class ClientWorld {
     private void release() {
         dropAll();
         storage = null;
+        if (!sharedLedger) {
+            ledger.clear();
+        }
     }
 
     /** Gives back every column's sections (also columns outside the view kept in their slots). */
@@ -252,7 +258,11 @@ public final class ClientWorld {
 
     private void onOutbound(long sequence, ClientboundPacket packet) {
         switch (packet) {
-            case ClientboundPacket.Ping ping -> pingSequence.put(ping.id(), sequence);
+            case ClientboundPacket.Ping ping -> {
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), sequence);
+                }
+            }
             case ClientboundPacket.Login login -> {
                 newLevel(login.dimension(), login.chunkRadius());
                 dropChanges(sequence);
@@ -362,8 +372,8 @@ public final class ClientWorld {
     }
 
     private void onAcknowledged(long eventSequence, int transactionId) {
-        Long pingSeq = pingSequence.remove(transactionId);
-        if (pingSeq == null) {
+        long pingSeq = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(transactionId);
+        if (pingSeq == Long.MIN_VALUE) {
             return;
         }
         // The client processed everything sent before that ping.

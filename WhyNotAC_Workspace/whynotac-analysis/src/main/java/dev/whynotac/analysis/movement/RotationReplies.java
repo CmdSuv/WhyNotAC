@@ -2,6 +2,7 @@ package dev.whynotac.analysis.movement;
 
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import java.util.ArrayDeque;
 
 /**
@@ -30,29 +31,34 @@ public final class RotationReplies {
     }
 
     static final int MAX_ROTATIONS = 64;
-    static final int MAX_PINGS = 4_096;
 
     /** The reply's yaw and pitch, NaN where not known (relative, or a value the client discards). */
     private record Rotation(long sequence, long pingBefore, float yaw, float pitch, boolean maybeAnswered) {}
 
     private final ArrayDeque<Rotation> rotations = new ArrayDeque<>();
-    /** {id, sequence} of the pings not answered yet, in the order sent. */
-    private final ArrayDeque<long[]> pings = new ArrayDeque<>();
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
     private long lastPing = Long.MIN_VALUE;
-    /** The sequence of the last ping the client answered. */
-    private long certain = Long.MIN_VALUE;
     /** A movement packet shaped as the first rotation's reply is held. */
     private boolean held;
     /** A teleport was accepted and no movement packet has followed yet: the next is its reply. */
     private boolean afterAccept;
 
+    public RotationReplies() {
+        this(null);
+    }
+
+    public RotationReplies(PingLedger sharedLedger) {
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+    }
+
     public Outcome onOutbound(long sequence, ClientboundPacket packet) {
         switch (packet) {
             case ClientboundPacket.Ping ping -> {
                 lastPing = sequence;
-                pings.addLast(new long[] {ping.id(), sequence});
-                if (pings.size() > MAX_PINGS) {
-                    pings.pollFirst(); // the client stopped answering: an answer to it is ignored
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), sequence);
                 }
             }
             case ClientboundPacket.PlayerRotation rotation -> {
@@ -88,20 +94,11 @@ public final class RotationReplies {
     }
 
     public Outcome onAcknowledged(int id) {
-        long sequence = Long.MIN_VALUE;
-        for (long[] ping : pings) {
-            if (ping[0] == id) {
-                sequence = ping[1];
-                break;
-            }
-        }
+        long sequence = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(id);
         if (sequence == Long.MIN_VALUE) {
             return Outcome.NONE;
         }
-        while (!pings.isEmpty() && pings.peekFirst()[1] <= sequence) {
-            pings.pollFirst();
-        }
-        certain = Math.max(certain, sequence);
+        long certain = ledger.certain();
         Outcome outcome = Outcome.NONE;
         while (!rotations.isEmpty() && rotations.peekFirst().sequence() < certain) {
             Rotation r = rotations.pollFirst(); // the client answered a ping sent after it: it handled it, and replied before this answer
@@ -132,7 +129,7 @@ public final class RotationReplies {
             rotations.pollFirst();
         }
         Rotation r = rotations.peekFirst();
-        if (r == null || certain < r.pingBefore() || !replyShaped(move, r)) {
+        if (r == null || ledger.certain() < r.pingBefore() || !replyShaped(move, r)) {
             return false;
         }
         held = true;
@@ -160,7 +157,9 @@ public final class RotationReplies {
     /** Events were lost or the connection ended: nothing waits any more. */
     public void clear() {
         rotations.clear();
-        pings.clear();
+        if (!sharedLedger) {
+            ledger.clear();
+        }
         held = false;
         afterAccept = false;
     }

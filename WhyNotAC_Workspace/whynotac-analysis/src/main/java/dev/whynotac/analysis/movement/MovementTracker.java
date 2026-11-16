@@ -15,6 +15,7 @@ import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.RelativeFlag;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.packet.Stack;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.ClientEntities;
@@ -127,7 +128,6 @@ public final class MovementTracker {
     public static final String ABILITIES_WITHOUT_FLIGHT = "sent its flight abilities while it could not fly";
     static final int MAX_HYPOTHESES = 64;
     static final int MAX_PENDING = 4096;
-    static final int MAX_PINGS = 4096;
     static final int SETTLE_KEYLESS_TICKS = 12;
     static final int SETTLE_MIN_TICKS = 3;
     /** The run anchor tries once this many steady ticks are on record, and again every this many ticks while they last. */
@@ -152,11 +152,11 @@ public final class MovementTracker {
     static final double SETTLED_Y_MOTION = (0.0 - 0.08) * 0.98F;
 
     // --- transactions (client order) ----------------------------------------------------------------------------
-    private final ArrayDeque<long[]> pings = new ArrayDeque<>();
-    private long certain = Long.MIN_VALUE;
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
 
     // --- the server's rotations and the client's replies, kept out of the ticks -------------------------------------
-    private final RotationReplies rotationReplies = new RotationReplies();
+    private final RotationReplies rotationReplies;
     /** A rotation's reply may have been taken for the tick's own packet or the other way: the last sent rotation and flags are not known. */
     private boolean sentUnsure;
     /** Whether the last tick sent a movement packet of its own (not a reply to a teleport or a rotation). */
@@ -174,7 +174,7 @@ public final class MovementTracker {
     /** The player's scoreboard name (its profile name), from the session's binding; null: not known. */
     private String selfName;
     private ClientTeams teamsBase = ClientTeams.NONE;
-    /** {sequence, teams after it}, ascending, from {@link #certain} on. */
+    /** {sequence, teams after it}, ascending, from {@code ledger.certain()} on. */
     private final ArrayDeque<Object[]> teamChanges = new ArrayDeque<>();
 
     // --- the tick being collected ------------------------------------------------------------------------------------
@@ -313,7 +313,15 @@ public final class MovementTracker {
     private boolean runSprinting;
     private long runLastAttempt = Long.MIN_VALUE;
 
-    public MovementTracker() {}
+    public MovementTracker() {
+        this(null);
+    }
+
+    public MovementTracker(PingLedger sharedLedger) {
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+        this.rotationReplies = new RotationReplies(this.ledger);
+    }
 
     /** The current hypotheses (empty while untracked), for audits. */
     public List<Hypothesis> hypotheses() {
@@ -454,12 +462,16 @@ public final class MovementTracker {
                 clientVehicles = null; // until a new player
                 teamChange(gap.sequence(), ClientTeams.LOST); // until a login
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
-                pings.clear();
+                if (!sharedLedger) {
+                    ledger.clear();
+                }
                 inbound.clear();
                 rotationReplies.clear();
             }
             case TimelineEvent.Disconnected ignored -> {
-                pings.clear();
+                if (!sharedLedger) {
+                    ledger.clear();
+                }
                 rotationReplies.clear();
             }
             case TimelineEvent.Inbound in -> {
@@ -488,15 +500,15 @@ public final class MovementTracker {
     // --- outbound ------------------------------------------------------------------------------------------------
 
     private void onOutbound(long seq, ClientboundPacket packet) {
+        if (packet instanceof ClientboundPacket.Ping ping) {
+            if (!sharedLedger) {
+                ledger.onPing(ping.id(), seq);
+            }
+            rotationReplies.onOutbound(seq, packet);
+            return;
+        }
         if (rotationReplies.onOutbound(seq, packet) == RotationReplies.Outcome.OVERFLOW) {
             rotationUnsure("too many rotations set by the server waiting for the client's reply");
-        }
-        if (packet instanceof ClientboundPacket.Ping ping) {
-            pings.add(new long[] {ping.id(), seq});
-            if (pings.size() > MAX_PINGS) {
-                pings.pollFirst(); // a later window end: wider, still sound
-            }
-            return;
         }
         if (packet instanceof ClientboundPacket.Login login) {
             selfId = login.entityId();
@@ -625,23 +637,14 @@ public final class MovementTracker {
     }
 
     private void onAcknowledged(int id) {
+        long seq = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(id);
         if (rotationReplies.onAcknowledged(id) == RotationReplies.Outcome.UNANSWERED) {
             rotationUnsure("a rotation set by the server the client did not answer");
-        }
-        long seq = Long.MIN_VALUE;
-        for (long[] ping : pings) {
-            if (ping[0] == id) {
-                seq = ping[1];
-                break;
-            }
         }
         if (seq == Long.MIN_VALUE) {
             return;
         }
-        while (!pings.isEmpty() && pings.peekFirst()[1] <= seq) {
-            pings.pollFirst();
-        }
-        certain = Math.max(certain, seq);
+        long certain = ledger.certain();
         while (!teamChanges.isEmpty() && (long) teamChanges.peekFirst()[0] < certain) {
             teamsBase = (ClientTeams) teamChanges.pollFirst()[1];
         }
@@ -681,7 +684,7 @@ public final class MovementTracker {
      * do not know.
      */
     private Boolean teamsLetPush(String pusher) {
-        long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
+        long windowEnd = ledger.firstPending();
         Boolean answer = teamsBase.pushes(pusher, selfName);
         if (answer == null) {
             return null;
@@ -699,7 +702,8 @@ public final class MovementTracker {
 
     /** Queue indices: packets before {@code must} were handled before this tick, those from {@code may} on were not. */
     private long[] window() {
-        long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
+        long certain = ledger.certain();
+        long windowEnd = ledger.firstPending();
         long must = queueBase;
         long may = queueBase;
         for (Pending p : pending) {
@@ -950,7 +954,8 @@ public final class MovementTracker {
      */
     private Tick rideTick(long number, TimelineEvent.Inbound end, TickInput in, long[] w, ClientWorld world, ClientEntities entities,
             PlayerState.Keys keysBefore, boolean sprintBefore) {
-        long windowEnd = pings.isEmpty() ? Long.MAX_VALUE : pings.peekFirst()[1];
+        long certain = ledger.certain();
+        long windowEnd = ledger.firstPending();
         View view = new View(world, entities, selfId);
         // the rider's isSprinting at a mount now: what it sent in its last tick on foot (on a vehicle it may not have sent it)
         mountSprint = clientVehicles != null && clientVehicles.isEmpty() ? sprintBefore : null;

@@ -6,6 +6,7 @@ import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -91,7 +92,7 @@ public final class UseAimCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
-        final TickLook look = new TickLook();
+        final TickLook look;
         final List<Pending> pending = new ArrayList<>();
         final List<Click> clicks = new ArrayList<>();
         /** The lowest block-action sequence of the tick: its pick saw the world before it. */
@@ -101,6 +102,14 @@ public final class UseAimCheck implements TimelineListener {
         long lastReportNanos = Long.MIN_VALUE;
         long rotationSinceReport;
         long clicksSinceReport;
+
+        State(PingLedger ledger) {
+            this.look = new TickLook(ledger);
+        }
+
+        static State fromSession(PlayerSession session) {
+            return new State(session.pingLedger());
+        }
     }
 
     /** It reads no entity motion: the entity replica follows the entities. */
@@ -111,7 +120,7 @@ public final class UseAimCheck implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        State state = session.attachment(STATE, State::new);
+        State state = session.attachment(STATE, State::fromSession);
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Bound bound -> state.look.onBound(bound.entityId());

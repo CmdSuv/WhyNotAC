@@ -22,7 +22,7 @@ public final class ClientSelfTracker implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        ClientSelf self = session.attachment(KEY, ClientSelf::new);
+        ClientSelf self = session.attachment(KEY, ClientSelf::fromSession);
         self.onEvent(event);
         if (!queries.isEmpty()) {
             Query<?> query = queries.remove(session);
@@ -34,7 +34,7 @@ public final class ClientSelfTracker implements TimelineListener {
 
     /** The session's own player. Only from a listener's {@code onEvent} (the session's analysis thread). */
     public ClientSelf self(PlayerSession session) {
-        return session.attachment(KEY, ClientSelf::new);
+        return session.attachment(KEY, ClientSelf::fromSession);
     }
 
     /** Computes {@code function} on the session's own player on its analysis thread, after its next event. */

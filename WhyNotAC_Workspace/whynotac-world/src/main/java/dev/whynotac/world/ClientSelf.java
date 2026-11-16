@@ -3,6 +3,8 @@ package dev.whynotac.world;
 import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
+import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -109,7 +111,6 @@ public final class ClientSelf {
     static final int SPECTATOR = 3;
     private static final int NONE = -1;
     private static final int UNKNOWN = -2;
-    private static final int MAX_TRACKED_PINGS = 4096;
     private static final int MAX_RESETS = 4096;
     /** Changes kept per value while the client does not answer pings; beyond, the value is not claimed until it does. */
     static final int MAX_CHANGES = 1024;
@@ -118,9 +119,8 @@ public final class ClientSelf {
     public record Eye(double x, double z, double y0, double y1, double radius) {}
 
     // --- client order ---------------------------------------------------------------------------------
-    private final ArrayDeque<long[]> pings = new ArrayDeque<>();
-    /** The client processed every op before this sequence. */
-    private long certain = Long.MIN_VALUE;
+    private final PingLedger ledger;
+    private final boolean sharedLedger;
 
     // --- server order, with history ---------------------------------------------------------------------
     private int selfId = NONE;
@@ -166,14 +166,14 @@ public final class ClientSelf {
     private double sentZ;
     private long sentSequence;
     private long sentNanoTime;
-    /** {@link #certain} when the position was sent: ops before it are in the position. */
+    /** {@code ledger.certain()} when the position was sent: ops before it are in the position. */
     private long sentCertain;
     /** Sequences of ops after which the position is not the one sent (ascending). */
     private final ArrayDeque<Long> resets = new ArrayDeque<>();
     // --- the player's onGround ---------------------------------------------------------------------------------
     private boolean groundSent;
     private boolean groundFlag;
-    /** {@link #certain} when the flag was sent: ops before it are in it. */
+    /** {@code ledger.certain()} when the flag was sent: ops before it are in it. */
     private long groundCertain;
     /** The last op after which a flag sent may not be the client's {@code onGround}. */
     private long lastGroundReset = Long.MIN_VALUE;
@@ -196,6 +196,19 @@ public final class ClientSelf {
     private long lastNewPlayer = Long.MIN_VALUE;
     private boolean loaded;
 
+    public ClientSelf() {
+        this(null);
+    }
+
+    ClientSelf(PingLedger sharedLedger) {
+        this.sharedLedger = sharedLedger != null;
+        this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+    }
+
+    static ClientSelf fromSession(PlayerSession session) {
+        return new ClientSelf(session.pingLedger());
+    }
+
     /** Applies one timeline event, in sequence order. */
     public void onEvent(TimelineEvent event) {
         switch (event) {
@@ -204,7 +217,11 @@ public final class ClientSelf {
             case TimelineEvent.Acknowledged ack -> onAcknowledged(ack.transactionId());
             case TimelineEvent.Bound bound -> bind(bound.sequence(), bound.playerId());
             case TimelineEvent.Gap gap -> lose(gap.sequence());
-            case TimelineEvent.Disconnected ignored -> pings.clear();
+            case TimelineEvent.Disconnected ignored -> {
+                if (!sharedLedger) {
+                    ledger.clear();
+                }
+            }
             default -> { }
         }
     }
@@ -212,9 +229,8 @@ public final class ClientSelf {
     private void onOutbound(long seq, ClientboundPacket packet) {
         switch (packet) {
             case ClientboundPacket.Ping ping -> {
-                pings.add(new long[] {ping.id(), seq});
-                if (pings.size() > MAX_TRACKED_PINGS) {
-                    pings.pollFirst(); // a later window end: wider, still sound
+                if (!sharedLedger) {
+                    ledger.onPing(ping.id(), seq);
                 }
             }
             case ClientboundPacket.Login login -> {
@@ -543,6 +559,7 @@ public final class ClientSelf {
     private void onInbound(long seq, long nanoTime, ServerboundPacket packet) {
         switch (packet) {
             case ServerboundPacket.MovePlayer move -> {
+                long certain = certain();
                 groundSent = true; // every shape carries onGround
                 groundFlag = move.onGround();
                 groundCertain = certain;
@@ -559,12 +576,12 @@ public final class ClientSelf {
                     }
                 }
             }
-            case ServerboundPacket.PlayerLoaded ignored -> loaded = certain > lastNewPlayer;
+            case ServerboundPacket.PlayerLoaded ignored -> loaded = certain() > lastNewPlayer;
             case ServerboundPacket.ClientTickEnd ignored -> {
                 // The tick that just ended refreshed the cached dimensions with the scale of everything the
                 // client processed before it: at least what was certain then (LocalPlayer.tick runs only once loaded).
                 if (loaded) {
-                    scale.settle(certain);
+                    scale.settle(certain());
                 }
             }
             default -> { }
@@ -572,20 +589,11 @@ public final class ClientSelf {
     }
 
     private void onAcknowledged(int id) {
-        long seq = Long.MIN_VALUE;
-        for (long[] ping : pings) {
-            if (ping[0] == id) {
-                seq = ping[1];
-                break;
-            }
-        }
+        long seq = sharedLedger ? ledger.lastMatched() : ledger.onAcknowledged(id);
         if (seq == Long.MIN_VALUE) {
             return; // not ours, or forgotten
         }
-        while (!pings.isEmpty() && pings.peekFirst()[1] <= seq) {
-            pings.pollFirst();
-        }
-        certain = Math.max(certain, seq);
+        long certain = ledger.certain();
         while (!levelChanges.isEmpty() && levelChanges.peekFirst()[0] < certain) {
             long[] change = levelChanges.pollFirst();
             levelsCertain += change[1];
@@ -605,9 +613,12 @@ public final class ClientSelf {
         miningFatigue.prune(certain);
     }
 
+    private long certain() {
+        return ledger.certain();
+    }
+
     private long windowEnd() {
-        long[] first = pings.peekFirst();
-        return first == null ? Long.MAX_VALUE : first[1];
+        return ledger.firstPending();
     }
 
     // --- queries ----------------------------------------------------------------------------------------------------
@@ -622,7 +633,7 @@ public final class ClientSelf {
             return null;
         }
         long end = windowEnd();
-        double[] s = scale.hull(certain, end);
+        double[] s = scale.hull(certain(), end);
         float low = (float) s[0];
         float high = (float) s[1];
         // EntityDimensions.scale: float products of the unscaled eye heights
@@ -640,7 +651,7 @@ public final class ClientSelf {
         if (!eyeState().equals("known")) {
             return null;
         }
-        double[] s = scale.hull(certain, windowEnd());
+        double[] s = scale.hull(certain(), windowEnd());
         float low = (float) s[0];
         float high = (float) s[1];
         java.util.List<Eye> out = new java.util.ArrayList<>(5);
@@ -659,6 +670,7 @@ public final class ClientSelf {
      * after the position it sent).
      */
     public String eyeState() {
+        long certain = certain();
         long end = windowEnd();
         if (!sent) {
             return "no position";
@@ -677,7 +689,7 @@ public final class ClientSelf {
         return "known";
     }
 
-    /** The last {@code onGround} flag the client sent and {@link #certain} when it did. */
+    /** The last {@code onGround} flag the client sent and {@code ledger.certain()} when it did. */
     public record Ground(boolean onGround, long certain) {}
 
     /**
@@ -694,6 +706,7 @@ public final class ClientSelf {
      * may neither ride nor watch another entity.
      */
     public boolean certainlyOffGround(Ground ground) {
+        long certain = certain();
         long end = windowEnd();
         return ground != null && !ground.onGround() && lastGroundReset < ground.certain()
                 && !vehicle.mayBeOtherThan(certain, end, NONE) && !camera.mayBeOtherThan(certain, end, 1);
@@ -716,17 +729,17 @@ public final class ClientSelf {
 
     /** Whether the player may be riding now (a passenger's rotation and position follow its vehicle). */
     public boolean mayRide() {
-        return vehicle.mayBeOtherThan(certain, windowEnd(), NONE);
+        return vehicle.mayBeOtherThan(certain(), windowEnd(), NONE);
     }
 
     /** {@code [low, high]} of the {@code block_interaction_range} the client may have now ({@code Player.blockInteractionRange}). */
     public double[] blockRangeBounds() {
-        return blockRange.hull(certain, windowEnd());
+        return blockRange.hull(certain(), windowEnd());
     }
 
     /** {@code [low, high]} of the {@code entity_interaction_range} the client may have now. */
     public double[] interactionRangeBounds() {
-        return interactionRange.hull(certain, windowEnd());
+        return interactionRange.hull(certain(), windowEnd());
     }
 
     /**
@@ -740,6 +753,7 @@ public final class ClientSelf {
 
     /** {@link MiningBounds} over everything the client may hold now. */
     public MiningBounds miningBounds() {
+        long certain = certain();
         long end = windowEnd();
         int dig = -1;
         for (Versioned v : new Versioned[] {haste, conduitPower}) {
@@ -767,7 +781,7 @@ public final class ClientSelf {
 
     /** {@code [low, high]} of the scales the player's cached dimensions may have now. */
     public double[] scaleBounds() {
-        return scale.hull(certain, windowEnd());
+        return scale.hull(certain(), windowEnd());
     }
 
     /** The sequence of the position {@link #eye()} is based on. */
@@ -790,12 +804,12 @@ public final class ClientSelf {
 
     /** The largest scale the player's cached dimensions may have now (its box is 0.6 by 1.8 times it). */
     public double maxScale() {
-        return scale.hull(certain, windowEnd())[1];
+        return scale.hull(certain(), windowEnd())[1];
     }
 
     /** The largest {@code entity_interaction_range} the client may have now. */
     public double maxInteractionRange() {
-        return interactionRange.hull(certain, windowEnd())[1];
+        return interactionRange.hull(certain(), windowEnd())[1];
     }
 
     /**
@@ -803,6 +817,7 @@ public final class ClientSelf {
      * {@code isSpectator()}, or the game mode's own), or WhyNotAC does not know.
      */
     public boolean mayBeCreativeOrSpectator() {
+        long certain = certain();
         long end = windowEnd();
         return listMode.mayBeAnyOf(certain, end, CREATIVE, SPECTATOR, MODE_UNKNOWN)
                 || localMode.mayBeAnyOf(certain, end, CREATIVE, SPECTATOR, UNKNOWN);
@@ -813,7 +828,7 @@ public final class ClientSelf {
      * ({@code GameType.isBlockPlacingRestricted}: adventure or spectator), may be creative, or WhyNotAC does not know.
      */
     public boolean mayRestrictBlockActionsOrBeCreative() {
-        return localMode.mayBeAnyOf(certain, windowEnd(), ADVENTURE, SPECTATOR, CREATIVE, UNKNOWN);
+        return localMode.mayBeAnyOf(certain(), windowEnd(), ADVENTURE, SPECTATOR, CREATIVE, UNKNOWN);
     }
 
     /**
@@ -821,7 +836,7 @@ public final class ClientSelf {
      * WhyNotAC does not know.
      */
     public boolean mayBeSpectator() {
-        return listMode.mayBeAnyOf(certain, windowEnd(), SPECTATOR, MODE_UNKNOWN);
+        return listMode.mayBeAnyOf(certain(), windowEnd(), SPECTATOR, MODE_UNKNOWN);
     }
 
     /** The player's entity id, or -1 before the login. */

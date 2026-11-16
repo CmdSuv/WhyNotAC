@@ -6,6 +6,7 @@ import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -64,7 +65,15 @@ public final class TickFramingCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
-        final MoveReplies replies = new MoveReplies();
+        final MoveReplies replies;
+
+        State(PingLedger ledger) {
+            this.replies = new MoveReplies(ledger);
+        }
+
+        static State fromSession(PlayerSession session) {
+            return new State(session.pingLedger());
+        }
         long intervalStart = Long.MIN_VALUE;
         long intervalStartNanos;
         final List<Long> moves = new ArrayList<>();
@@ -82,7 +91,7 @@ public final class TickFramingCheck implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        State state = session.attachment(STATE, State::new);
+        State state = session.attachment(STATE, State::fromSession);
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Bound bound -> state.replies.onBound(bound.entityId());

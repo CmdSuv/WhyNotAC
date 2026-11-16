@@ -23,15 +23,15 @@ public final class ClientWorldTracker implements TimelineListener {
 
     private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
-    private final Supplier<ClientWorld> factory;
+    private final Function<PlayerSession, ClientWorld> factory;
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();
     private final SectionPool pool = new SectionPool();
     private final LongAdder worlds = new LongAdder();
 
     public ClientWorldTracker(BlockStates states) {
-        this.factory = () -> { // one capturing lambda, not one per event
+        this.factory = s -> { // one allocating function per tracker, not per event
             worlds.increment();
-            return new ClientWorld(states, pool);
+            return new ClientWorld(states, pool, s.pingLedger());
         };
     }
 

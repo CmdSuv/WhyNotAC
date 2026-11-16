@@ -116,6 +116,13 @@ public final class SessionRegistry {
     void dispatch(PlayerSession session, TimelineEvent event) {
         if (event instanceof TimelineEvent.Bound bound) {
             byPlayer.put(bound.playerId(), session);
+        } else if (event instanceof TimelineEvent.Outbound out
+                && out.packet() instanceof dev.whynotac.protocol.packet.ClientboundPacket.Ping ping) {
+            session.pingLedger().onPing(ping.id(), out.sequence());
+        } else if (event instanceof TimelineEvent.Acknowledged ack) {
+            session.pingLedger().onAcknowledged(ack.transactionId());
+        } else if (event instanceof TimelineEvent.Gap || event instanceof TimelineEvent.Disconnected) {
+            session.pingLedger().clear();
         }
         for (TimelineListener listener : TimelineListener.entityMotion(event) ? motionListeners : listeners) {
             try {

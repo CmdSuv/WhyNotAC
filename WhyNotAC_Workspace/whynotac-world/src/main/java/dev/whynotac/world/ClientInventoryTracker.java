@@ -19,12 +19,12 @@ public final class ClientInventoryTracker implements TimelineListener {
 
     private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
 
-    private final Supplier<ClientInventory> factory;
+    private final Function<PlayerSession, ClientInventory> factory;
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();
 
     public ClientInventoryTracker(ItemPrototypes prototypes, MenuLayouts layouts) {
         ClientInventory.UseEffects uses = new VanillaUseEffects(prototypes);
-        this.factory = () -> new ClientInventory(prototypes, layouts, uses);
+        this.factory = s -> new ClientInventory(prototypes, layouts, uses, s.pingLedger());
     }
 
     /** It reads no entity motion: the entity replica follows the entities. */

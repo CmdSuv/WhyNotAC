@@ -20,11 +20,11 @@ public final class ClientTagsTracker implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        session.attachment(KEY, ClientTags::new).onEvent(event);
+        session.attachment(KEY, ClientTags::fromSession).onEvent(event);
     }
 
     /** The session's tags. Only from a listener's {@code onEvent} (the session's analysis thread). */
     public ClientTags tags(PlayerSession session) {
-        return session.attachment(KEY, ClientTags::new);
+        return session.attachment(KEY, ClientTags::fromSession);
     }
 }
