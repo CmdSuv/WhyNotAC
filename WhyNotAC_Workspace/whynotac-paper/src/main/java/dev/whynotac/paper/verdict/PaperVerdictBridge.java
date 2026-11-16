@@ -75,6 +75,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         int halfLifeSec = Math.max(1, section.getInt("correlation-half-life-seconds", 120));
         double minMitigate = Math.max(0.1, section.getDouble("min-score-for-mitigation", 1.0));
         double minKick = Math.max(0.1, section.getDouble("min-score-for-kick", 3.0));
+        long banWaveDelaySeconds = Math.max(0L, section.getLong("ban-wave-delay-seconds", 0L));
         return VerdictConfig.builder()
                 .armedChecks(armed)
                 .mitigationsEnabled(section.getBoolean("mitigations", false))
@@ -89,6 +90,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
                 .correlationHalfLifeNanos(TimeUnit.SECONDS.toNanos(halfLifeSec))
                 .minScoreForMitigation(minMitigate)
                 .minScoreForKick(minKick)
+                .banWaveDelayMillis(TimeUnit.SECONDS.toMillis(banWaveDelaySeconds))
                 .build();
     }
 

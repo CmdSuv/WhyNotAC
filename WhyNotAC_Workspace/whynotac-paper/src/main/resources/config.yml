@@ -58,3 +58,10 @@ verdict:
   correlation-half-life-seconds: 120
   min-score-for-mitigation: 1.0
   min-score-for-kick: 3.0
+  # Optional jittered ban-wave delay (seconds) for automatic TEMP_BAN decisions; 0 dispatches immediately.
+  ban-wave-delay-seconds: 0
+
+identity:
+  # When running in offline mode alongside AuthMe, nLogin, LibreLogin, or OpeNLogin,
+  # upgrade a session's identity to AUTH_PLUGIN_CONFIRMED strictly after login completes.
+  trust-auth-plugins: true

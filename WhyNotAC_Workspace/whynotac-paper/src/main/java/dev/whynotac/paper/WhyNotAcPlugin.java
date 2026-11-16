@@ -7,7 +7,10 @@ import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
+import dev.whynotac.paper.diagnostics.HealthModel;
 import dev.whynotac.paper.diagnostics.TickCost;
+import dev.whynotac.paper.identity.AuthPluginHook;
+import dev.whynotac.paper.identity.ClientFacts;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.verdict.PaperVerdictBridge;
@@ -61,6 +64,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private VerdictEngine verdict;
     private StorageManager storage;
     private AiAdvisor aiAdvisor;
+    private AuthPluginHook authPluginHook;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
@@ -169,11 +173,30 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             }
         }, 100L, 100L);
 
+        boolean trustAuthPlugins = getConfig().getBoolean("identity.trust-auth-plugins", true);
+        authPluginHook = new AuthPluginHook(trustAuthPlugins);
+        List<String> authPlugins = AuthPluginHook.installedPluginNames();
+        if (trustAuthPlugins && !authPlugins.isEmpty() && !ClientFacts.policy().authenticated()) {
+            getLogger().info("WhyNotAC offline auth plugin integration active (" + String.join(", ", authPlugins)
+                    + "): sessions upgrade to AUTH_PLUGIN_CONFIRMED strictly after login confirmation");
+            Bukkit.getScheduler().runTaskTimer(this, () -> {
+                long nanoNow = System.nanoTime();
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    interceptor.session(player).ifPresent(session ->
+                            authPluginHook.checkAndUpgrade(session, player.getUniqueId(), player.getName(), nanoNow));
+                }
+            }, 20L, 20L);
+        }
+
         getServer().getPluginManager().registerEvents(this, this);
-        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
+        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, this::health, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
                 new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, tagsTracker, this),
-                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage, aiAdvisor::forget, this),
+                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage,
+                        subject -> {
+                            aiAdvisor.forget(subject);
+                            verdict.banWaveQueue().cancelSubject(subject, System.currentTimeMillis());
+                        }, this),
                 verdict, storage, aiAdvisor, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
@@ -242,13 +265,15 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         for (Map.Entry<?, Long> entry : totals.anomalies().entrySet()) {
             anomalies.append(anomalies.isEmpty() ? "" : ",").append('"').append(entry.getKey()).append("\":").append(entry.getValue());
         }
+        HealthModel.Evaluation healthEval = health();
         return String.format(Locale.ROOT, "{\"sessionsLive\":%d,\"queuedEvents\":%d,\"sessions\":%d,\"ended\":%d,\"inbound\":%d,"
                         + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
                         + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
                         + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
                         + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},\"margins\":{%s},\"serverClock\":{\"divergence\":%s,\"trusted\":%b},"
                         + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d},"
-                        + "\"entities\":{\"ticks\":%d,\"branches\":%d,\"merges\":%d,\"overflows\":%d,\"losses\":%d}}",
+                        + "\"entities\":{\"ticks\":%d,\"branches\":%d,\"merges\":%d,\"overflows\":%d,\"losses\":%d},"
+                        + "\"banWavePending\":%d,\"health\":%s}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
                 totals.outbound(), totals.lostEvents(), totals.inboundDivergences(), totals.outboundDivergences(), anomalies,
                 pendingMax, withheld, listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
@@ -261,7 +286,28 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 worldTracker == null ? 0 : worldTracker.sharedSections(), worldTracker == null ? 0 : worldTracker.worldsCreated(),
                 entitiesTracker == null ? 0 : entitiesTracker.totals().ticks(), entitiesTracker == null ? 0 : entitiesTracker.totals().branches(),
                 entitiesTracker == null ? 0 : entitiesTracker.totals().merges(), entitiesTracker == null ? 0 : entitiesTracker.totals().overflows(),
-                entitiesTracker == null ? 0 : entitiesTracker.totals().losses());
+                entitiesTracker == null ? 0 : entitiesTracker.totals().losses(),
+                verdict.banWaveQueue().pendingCount(), healthEval.toJson());
+    }
+
+    /** Operational health evaluation (OBS-01) for {@code /whynotac health} and {@code /whynotac stats}. */
+    private HealthModel.Evaluation health() {
+        Diagnostics.Totals totals = diagnostics.totals();
+        long nowMs = System.currentTimeMillis();
+        var cb = verdict.circuitBreaker().status(nowMs);
+        var fb = verdict.falseBanBudget().snapshot(nowMs);
+        return HealthModel.evaluate(new HealthModel.Inputs(
+                registry.queuedEvents(),
+                SessionRegistry.DEFAULT_GLOBAL_QUEUE_CAPACITY,
+                totals.lostEvents(),
+                listenerErrors.get(),
+                recordings == null ? 0L : recordings.failedRecordings(),
+                recordings == null ? 0L : recordings.rejectedBlocks(),
+                cb.tripped(),
+                cb.killSwitchActive(),
+                fb.locked(),
+                transactionLoop.maxWallMicros(),
+                storage != null));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -269,12 +315,18 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (alerts != null) {
             alerts.forget(event.getPlayer().getName());
         }
+        if (interceptor != null && authPluginHook != null) {
+            interceptor.session(event.getPlayer()).ifPresent(s -> authPluginHook.forgetConnection(s.connectionId()));
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
-        if (interceptor.bind(event.getPlayer()).isEmpty()) {
+        var bound = interceptor.bind(event.getPlayer());
+        if (bound.isEmpty()) {
             getLogger().warning("No WhyNotAC session on " + event.getPlayer().getName() + "'s connection; they are not observed");
+        } else if (authPluginHook != null) {
+            authPluginHook.checkAndUpgrade(bound.get(), event.getPlayer().getUniqueId(), event.getPlayer().getName(), System.nanoTime());
         }
     }
 

@@ -69,6 +69,7 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
     private final CircuitBreaker circuitBreaker;
     private final FalseBanBudget falseBanBudget;
     private final SecondVerifier secondVerifier;
+    private final BanWaveQueue banWaveQueue;
     private final LongSupplier wallClockMillis;
     private final List<CaseListener> caseListeners = new CopyOnWriteArrayList<>();
     private final List<EnforcementListener> enforcementListeners = new CopyOnWriteArrayList<>();
@@ -86,6 +87,7 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
         this.circuitBreaker = new CircuitBreaker(config.maxUniquePenalizedPlayersPerMinute());
         this.falseBanBudget = new FalseBanBudget(config.maxFalseBanBudgetPerWindow(), config.falseBanBudgetWindowMillis());
         this.secondVerifier = new SecondVerifier(replaySource, config.secondVerifierWorkers());
+        this.banWaveQueue = new BanWaveQueue(config, circuitBreaker, falseBanBudget);
         this.wallClockMillis = Objects.requireNonNull(wallClockMillis, "wallClockMillis");
     }
 
@@ -99,6 +101,10 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
 
     public FalseBanBudget falseBanBudget() {
         return falseBanBudget;
+    }
+
+    public BanWaveQueue banWaveQueue() {
+        return banWaveQueue;
     }
 
     public void addCaseListener(CaseListener listener) {
@@ -287,12 +293,13 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
                 }
             }
             case TEMP_BAN -> {
-                falseBanBudget.recordAutoBanIssued();
                 VerdictDecision d = new VerdictDecision(verdictCase, session, evidence, Action.TEMP_BAN,
                         mitigation, config.tempBanDurationMillis(), certificate, certificate.verificationDetails());
-                for (EnforcementListener l : enforcementListeners) {
-                    l.tempBan(d);
-                }
+                banWaveQueue.enqueue(d, approved -> {
+                    for (EnforcementListener l : enforcementListeners) {
+                        l.tempBan(approved);
+                    }
+                });
             }
             default -> { }
         }
@@ -342,12 +349,13 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
                         Lifecycle.ARMED, evidence.admissibility().identity(), evidence.fingerprint(),
                         fingerprintsSnapshot, groupNames, VerificationStatus.VERIFIED,
                         result.details(), Action.TEMP_BAN, initialCase.mitigation());
-                falseBanBudget.recordAutoBanIssued();
                 VerdictDecision decision = new VerdictDecision(initialCase, session, evidence, Action.TEMP_BAN,
                         initialCase.mitigation(), config.tempBanDurationMillis(), verifiedCert, result.details());
-                for (EnforcementListener l : enforcementListeners) {
-                    l.tempBan(decision);
-                }
+                banWaveQueue.enqueue(decision, approved -> {
+                    for (EnforcementListener l : enforcementListeners) {
+                        l.tempBan(approved);
+                    }
+                });
             } else if (result.status() == VerificationStatus.MISMATCH) {
                 synchronized (state) {
                     state.banDispatchedOrPending = false;
@@ -468,6 +476,7 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
 
     @Override
     public void close() {
+        banWaveQueue.close();
         secondVerifier.close();
     }
 }

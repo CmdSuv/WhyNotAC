@@ -33,7 +33,9 @@ public final class ClientFacts {
     public record Policy(Identity identity, String topology, String detail) {
         /** True if long-lived state (profiles, bans) may be keyed by the identities this server sees. */
         public boolean authenticated() {
-            return identity == Identity.AUTHENTICATED_MOJANG || identity == Identity.AUTHENTICATED_BY_PROXY;
+            return identity == Identity.AUTHENTICATED_MOJANG
+                    || identity == Identity.AUTHENTICATED_BY_PROXY
+                    || identity == Identity.AUTH_PLUGIN_CONFIRMED;
         }
     }
 

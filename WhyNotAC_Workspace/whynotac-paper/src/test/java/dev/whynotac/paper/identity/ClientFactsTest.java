@@ -26,6 +26,7 @@ class ClientFactsTest {
         assertEquals(Identity.UNAUTHENTICATED, policy(false, true, false, false, false).identity());
         assertFalse(policy(false, true, true, false, false).authenticated());
         assertTrue(policy(true, false, false, false, false).authenticated());
+        assertTrue(new ClientFacts.Policy(Identity.AUTH_PLUGIN_CONFIRMED, "DIRECT", "auth plugin").authenticated());
     }
 
     @Test

@@ -26,6 +26,7 @@ public final class AdmissibilityTracker {
     private String topology;
     private boolean bedrock;
     private String identity;
+    private long identitySequence = Long.MIN_VALUE;
     private long lastLossSequence = Long.MIN_VALUE;
 
     public void onEvent(TimelineEvent event) {
@@ -51,7 +52,15 @@ public final class AdmissibilityTracker {
             case TRANSACTION_ORIGIN -> transactionOrigin = bound ? f.value() : null;
             case TOPOLOGY -> topology = f.value();
             case BEDROCK -> bedrock |= !"false".equalsIgnoreCase(f.value());
-            case IDENTITY -> identity = f.value();
+            case IDENTITY -> {
+                String resolved = bound
+                        ? f.value()
+                        : ("CLAIMED_BY_PROXY".equals(f.value()) ? "CLAIMED_BY_PROXY" : "UNAUTHENTICATED");
+                if (!resolved.equals(identity)) {
+                    identity = resolved;
+                    identitySequence = f.sequence();
+                }
+            }
         }
     }
 
@@ -79,12 +88,16 @@ public final class AdmissibilityTracker {
         if (lastLossSequence >= fromSequence) {
             reasons.add("lost or untranslatable events inside the window");
         }
-        return new Admissibility(reasons.isEmpty(), reasons, tier());
+        return new Admissibility(reasons.isEmpty(), reasons, tier(fromSequence));
     }
 
-    private IdentityTier tier() {
+    private IdentityTier tier(long fromSequence) {
         if ("AUTHENTICATED_MOJANG".equals(identity) || "AUTHENTICATED_BY_PROXY".equals(identity)) {
             return IdentityTier.AUTHENTICATED;
+        }
+        // POLICY.md: offline auth-plugin confirmation starts strictly from after the login event.
+        if ("AUTH_PLUGIN_CONFIRMED".equals(identity) && fromSequence >= identitySequence) {
+            return IdentityTier.AUTH_PLUGIN_CONFIRMED;
         }
         return IdentityTier.UNAUTHENTICATED;
     }

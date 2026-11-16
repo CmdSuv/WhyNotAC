@@ -10,7 +10,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Katman | Durum | Ayrıntı |
 |---|---|---|
 | Ağ kenarı: bayt düzeyinde dinleme, uzlaştırma, transaction sandviçi | Tamam | [Faz 2b-1](phases/PHASE-2B-1-REPORT.md) |
-| Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | Çevrilmiş client'lar için ikinci kenar katmanı yok (`NET-01`) |
+| Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | `AUTHENTICATED_*`, `CLAIMED_BY_PROXY`, `UNAUTHENTICATED` + offline `AUTH_PLUGIN_CONFIRMED` (`AuthPluginHook`); çevrilmiş client'lar için ikinci kenar katmanı henüz yok (`NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
 | Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `prediction-sequence` (P-M), `action-grammar` (P-M), `movement` (P-M), `click-pattern` (S), `aim-pattern` (S), `transaction-order` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
@@ -160,9 +160,10 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   ve taze replika üzerinden `P-A` bulgularını asenkron olarak yeniden oynatır; iki bağımsız `P-A` grubu
   yoksa otomatik geçici ban öncesinde doğrulama zorunludur.
 - **Kanıt sertifikaları** (`VER-07`, tamam) ve **yanlış ban bütçesi defteri** (`VER-08`, tamam).
-- **Uygulama hattı** (`VER-12`, `CFG-01`, temel çekirdek tamam): `CircuitBreaker`, `/whynotac killswitch|circuit`,
-  doğrulanmış `VerdictConfig` (`verdict:` ayar bloğu) ve `PaperVerdictBridge` (`NEUTRALIZE`, `KICK`, `TEMP_BAN`)
-  `ActionPolicy` altında çalışır; gecikmeli/dağıtılmış ban dalgası sırası sonraki aşamadadır.
+- **Uygulama hattı** (`VER-12`, `CFG-01`, tamam): `CircuitBreaker`, `/whynotac killswitch|circuit`,
+  doğrulanmış `VerdictConfig` (`verdict:` ayar bloğu), titreşimli/gecikmeli `BanWaveQueue` (`verdict.ban-wave-delay-seconds`,
+  çalıştırma zamanı sertifika ve güvenlik kapısı yeniden doğrulamasıyla) ve `PaperVerdictBridge` (`NEUTRALIZE`, `KICK`, `TEMP_BAN`)
+  `ActionPolicy` altında çalışır; ağ/proxy dağıtımı sonraki aşamadadır.
 - **Depolama** (`STO-01`–`STO-03`, `PROD-13`, tamam): değiştirilemez hash zincirli + HMAC-SHA256
   `AuditLedger`, `buildTag` bağlamı, atomik `SubjectProfileStore` (GDPR `forget` uyumlu) ve yeniden başlatmalar
   arası `FalseBanBudget` kalıcılığı (`StorageManager`).
@@ -180,7 +181,8 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
     kapsamıyordu (CI bağımlılıkları indirirken doğrulama başarısız olur); bundle'ın imzalı sağlama toplamları
     eklenebildiğinde açılacak.
   - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`).
-- **Gözlemlenebilirlik:** metrikler ve sağlık modeli (`OBS-01`). Performans hedefi gerçek arazide
+- **Gözlemlenebilirlik** (`OBS-01`, temel çekirdek tamam): `HealthModel` (`GREEN`/`DEGRADED`/`CRITICAL`),
+  `/whynotac health` komutu ve `/whynotac stats` JSON sağlık özeti eklendi. Performans hedefi gerçek arazide
   oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 2,5-2,9 ms/s (analiz 1,6-1,8, ağ kenarı 0,8-1,0, kayıt 0,2; 2026-10-30'da 3,2; tek koşu ±%10-15 oynar).
   Paylaşılan `PingLedger`, `ClientWorld.settledBlockState` + `LongCounterMap`, `Colliders.blocks` statik hızlı yolu + `BlockStates.collisionInCell`, `ClientEntities` sıfır-tahsis yakınlık/itme taraması ve `ClientInventory.views()` revizyon önbelleği ile iç içe tekrar oynatma (`ReplayCost interleaved`, 42.908 tick, tüm 12 kontrol + replikalar) ~40.019 ns/tick'ten **26.062 ns/tick**'e (20 tick/sn = oyuncu başına ~0,52 ms/s analiz) düştü.
   Yeniden gönderilen chunk'ların kayda başvuruyla yazılması, tekrar yazılan kayıtlarda kaydın sıkıştırmasını

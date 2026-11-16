@@ -26,7 +26,32 @@ public record VerdictConfig(
         double minScoreForKick,
         long correlationHalfLifeNanos,
         double sameGroupCapMultiplier,
-        int secondVerifierWorkers) {
+        int secondVerifierWorkers,
+        long banWaveDelayMillis) {
+
+    public VerdictConfig(
+            Set<String> armedChecks,
+            boolean mitigationsEnabled,
+            boolean hidesInformationEnabled,
+            boolean autoKickEnabled,
+            boolean autoBanEnabled,
+            boolean secondVerifierEnabled,
+            boolean requireCorroborationForTempBan,
+            int maxUniquePenalizedPlayersPerMinute,
+            int maxFalseBanBudgetPerWindow,
+            long falseBanBudgetWindowMillis,
+            long tempBanDurationMillis,
+            double minScoreForMitigation,
+            double minScoreForKick,
+            long correlationHalfLifeNanos,
+            double sameGroupCapMultiplier,
+            int secondVerifierWorkers) {
+        this(armedChecks, mitigationsEnabled, hidesInformationEnabled, autoKickEnabled, autoBanEnabled,
+                secondVerifierEnabled, requireCorroborationForTempBan, maxUniquePenalizedPlayersPerMinute,
+                maxFalseBanBudgetPerWindow, falseBanBudgetWindowMillis, tempBanDurationMillis,
+                minScoreForMitigation, minScoreForKick, correlationHalfLifeNanos, sameGroupCapMultiplier,
+                secondVerifierWorkers, 0L);
+    }
 
     public VerdictConfig {
         Objects.requireNonNull(armedChecks, "armedChecks");
@@ -65,6 +90,9 @@ public record VerdictConfig(
         if (secondVerifierWorkers < 1) {
             throw new IllegalArgumentException("secondVerifierWorkers must be >= 1");
         }
+        if (banWaveDelayMillis < 0L) {
+            throw new IllegalArgumentException("banWaveDelayMillis must be >= 0");
+        }
     }
 
     /** Conservative default configuration: every check stays SHADOW, zero player actions enabled. */
@@ -93,6 +121,7 @@ public record VerdictConfig(
         private long correlationHalfLifeNanos = TimeUnit.SECONDS.toNanos(120);
         private double sameGroupCapMultiplier = 1.5;
         private int secondVerifierWorkers = 1;
+        private long banWaveDelayMillis = 0L;
 
         public Builder armedChecks(Set<String> armedChecks) {
             this.armedChecks = armedChecks;
@@ -174,6 +203,11 @@ public record VerdictConfig(
             return this;
         }
 
+        public Builder banWaveDelayMillis(long banWaveDelayMillis) {
+            this.banWaveDelayMillis = banWaveDelayMillis;
+            return this;
+        }
+
         public VerdictConfig build() {
             return new VerdictConfig(
                     armedChecks,
@@ -191,7 +225,8 @@ public record VerdictConfig(
                     minScoreForKick,
                     correlationHalfLifeNanos,
                     sameGroupCapMultiplier,
-                    secondVerifierWorkers);
+                    secondVerifierWorkers,
+                    banWaveDelayMillis);
         }
     }
 }

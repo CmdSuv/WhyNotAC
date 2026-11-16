@@ -63,7 +63,7 @@ incelemeye düşer. Uyarısı yalnızca `whynotac.alerts.shadow` yetkisi olanlar
 | Katman | Kaynak | Uzun ömürlü profil | Otomatik geçici ban |
 |---|---|---|---|
 | `AUTHENTICATED_MOJANG`, `AUTHENTICATED_BY_PROXY` | Online mode, Velocity modern forwarding, Floodgate | ✔ | ⚙ (P-A koşullarıyla) |
-| `AUTH_PLUGIN_CONFIRMED` | Offline mode + AuthMe/nLogin/LibreLogin girişi (planlı) | ✔ (giriş sonrasından itibaren) | ⚙ (P-A koşullarıyla) |
+| `AUTH_PLUGIN_CONFIRMED` | Offline mode + AuthMe/nLogin/LibreLogin/OpeNLogin girişi (`identity.trust-auth-plugins`) | ✔ (giriş sonrasından itibaren) | ⚙ (P-A koşullarıyla) |
 | `CLAIMED_BY_PROXY`, `UNAUTHENTICATED` | Bungee legacy, offline mode, giriş öncesi | ✘ yalnızca oturum | ✘ yalnızca yetkili kararıyla |
 
 Doğrulanmamış bir kimliğin kanıtı oturumla sınırlıdır. Başkasının adıyla girip onu banlatmak bu

@@ -6,6 +6,7 @@ import dev.whynotac.ai.BehavioralFeatureExtractor;
 import dev.whynotac.ai.EValueProcess;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.diagnostics.Diagnostics;
+import dev.whynotac.paper.diagnostics.HealthModel;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.world.EntityVerifier;
@@ -50,6 +51,7 @@ public final class WhyNotCommand implements BasicCommand {
     private final SessionRegistry registry;
     private final Diagnostics diagnostics;
     private final Supplier<String> stats;
+    private final Supplier<HealthModel.Evaluation> health;
     private final CaseStore cases;
     private final WorldVerifier world;
     private final EntityVerifier entities;
@@ -62,12 +64,13 @@ public final class WhyNotCommand implements BasicCommand {
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
-            CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, SelfVerifier self, SubjectRequests privacy,
-            VerdictEngine verdict, StorageManager storage, AiAdvisor aiAdvisor, org.bukkit.plugin.Plugin plugin) {
+            Supplier<HealthModel.Evaluation> health, CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory,
+            SelfVerifier self, SubjectRequests privacy, VerdictEngine verdict, StorageManager storage, AiAdvisor aiAdvisor, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
         this.stats = stats;
+        this.health = health;
         this.cases = cases;
         this.world = world;
         this.entities = entities;
@@ -189,6 +192,24 @@ public final class WhyNotCommand implements BasicCommand {
             privacy.handle(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
         } else if (args.length == 1 && args[0].equalsIgnoreCase("stats")) {
             sender.sendMessage(Component.text("WhyNotAC stats " + stats.get(), NamedTextColor.GRAY));
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("health")) {
+            HealthModel.Evaluation eval = health.get();
+            NamedTextColor color = switch (eval.status()) {
+                case GREEN -> NamedTextColor.GREEN;
+                case DEGRADED -> NamedTextColor.YELLOW;
+                case CRITICAL -> NamedTextColor.RED;
+            };
+            sender.sendMessage(Component.text("WhyNotAC health: " + eval.status().name()
+                    + " (sessions=" + registry.sessions().size()
+                    + ", queued=" + registry.queuedEvents()
+                    + ", banWavePending=" + verdict.banWaveQueue().pendingCount() + ")", color));
+            if (eval.reasons().isEmpty()) {
+                sender.sendMessage(Component.text("  all subsystems nominal", NamedTextColor.GRAY));
+            } else {
+                for (String reason : eval.reasons()) {
+                    sender.sendMessage(Component.text("  - " + reason, NamedTextColor.GRAY));
+                }
+            }
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
             sender.sendMessage(Component.text("WhyNotAC sessions: " + registry.sessions().size(), NamedTextColor.GOLD));
             for (PlayerSession session : registry.sessions()) {
@@ -208,7 +229,9 @@ public final class WhyNotCommand implements BasicCommand {
             sender.sendMessage(Component.text("  falseBanBudget issued=" + fb.totalAutoBansIssued() + " incidents=" + fb.recentIncidents()
                     + "/" + fb.budgetLimit() + " locked=" + fb.locked()
                     + (fb.lockReason().isEmpty() ? "" : " reason=" + fb.lockReason()), NamedTextColor.GRAY));
-            sender.sendMessage(Component.text("  accepted=" + verdict.acceptedCount() + " rejected=" + verdict.rejectedCount(), NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("  accepted=" + verdict.acceptedCount() + " rejected=" + verdict.rejectedCount()
+                    + " banWavePending=" + verdict.banWaveQueue().pendingCount()
+                    + " banWaveDelayMs=" + cfg.banWaveDelayMillis(), NamedTextColor.GRAY));
         } else if (args.length >= 1 && args[0].equalsIgnoreCase("killswitch")) {
             if (args.length == 2 && args[1].equalsIgnoreCase("on")) {
                 verdict.circuitBreaker().setKillSwitch(true, "operator command");
@@ -275,7 +298,9 @@ public final class WhyNotCommand implements BasicCommand {
                             verdict.falseBanBudget().recordIncident(caseId, "overturned by " + reviewer + ": " + notes, now);
                             if (found.get().playerId() != null) {
                                 try {
-                                    storage.profiles().recordFalseBanIncident(UUID.fromString(found.get().playerId()), now);
+                                    UUID subjectId = UUID.fromString(found.get().playerId());
+                                    verdict.banWaveQueue().cancelSubject(subjectId, now);
+                                    storage.profiles().recordFalseBanIncident(subjectId, now);
                                 } catch (Exception ignored) { }
                             }
                             yield r;
@@ -297,7 +322,7 @@ public final class WhyNotCommand implements BasicCommand {
             }
             inspectAi(sender, target);
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
         }
     }
@@ -383,8 +408,8 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "ai", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "cases", "case",
-                    "review", "audit", "verdict", "killswitch", "circuit");
+            return List.of("inspect", "ai", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "health",
+                    "cases", "case", "review", "audit", "verdict", "killswitch", "circuit");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("review")) {
             return List.of("status", "pass1", "confirm", "appeal", "uphold", "overturn");

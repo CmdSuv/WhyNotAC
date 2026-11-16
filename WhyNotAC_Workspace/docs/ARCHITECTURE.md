@@ -123,10 +123,11 @@ affettiremez, çünkü bir hile her şeyi beyan edebilir. Fizik modelini yalnız
 `FORMAT_BOUND` bilgiler seçebilir.
 
 **Kimlik:** `IDENTITY` olgusu sunucu yapılandırmasından belirlenir: `AUTHENTICATED_MOJANG`,
-`AUTHENTICATED_BY_PROXY` (Velocity modern + çevrimiçi proxy, ya da Floodgate), `CLAIMED_BY_PROXY`
-(legacy BungeeCord: düz metin, port korunmuyorsa herkes her UUID'yi iddia edebilir) ve
-`UNAUTHENTICATED` (offline mode). Uzun ömürlü durum (profil, ceza) **yalnızca** `AUTHENTICATED_*`
-kimliklere bağlanabilir. Diğerlerinde kanıt oturumla sınırlıdır ve hiçbir hesaba otomatik işlem
+`AUTHENTICATED_BY_PROXY` (Velocity modern + çevrimiçi proxy, ya da Floodgate), `AUTH_PLUGIN_CONFIRMED`
+(offline mode + `AuthMe`/`nLogin`/`LibreLogin`/`OpeNLogin` girişi tamamlandıktan sonraki pencereler),
+`CLAIMED_BY_PROXY` (legacy BungeeCord: düz metin, port korunmuyorsa herkes her UUID'yi iddia edebilir)
+ve `UNAUTHENTICATED` (offline mode / giriş öncesi). Uzun ömürlü durum (profil, ceza) **yalnızca**
+`AUTHENTICATED_*` veya giriş sonrası `AUTH_PLUGIN_CONFIRMED` kimliklere bağlanabilir. Diğerlerinde kanıt oturumla sınırlıdır ve hiçbir hesaba otomatik işlem
 yapılmaz. Böyle bir sunucuda eklenti başlangıçta açıkça uyarır.
 
 **Transaction kökeni:** 1.17 öncesi client'larda ping paketi yoktur. ViaBackwards onların yerine

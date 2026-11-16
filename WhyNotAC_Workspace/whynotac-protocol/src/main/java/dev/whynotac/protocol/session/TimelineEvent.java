@@ -138,9 +138,10 @@ public sealed interface TimelineEvent {
 
         /**
          * Values of {@link Fact#IDENTITY}. Long-lived state (profiles, bans) may only ever be keyed by an
-         * {@code AUTHENTICATED_*} identity; anything else is session-scoped and never acted on automatically.
+         * {@code AUTHENTICATED_*} or {@code AUTH_PLUGIN_CONFIRMED} identity (the latter only after login confirmation);
+         * anything else is session-scoped and never acted on automatically.
          */
-        public enum Identity { AUTHENTICATED_MOJANG, AUTHENTICATED_BY_PROXY, CLAIMED_BY_PROXY, UNAUTHENTICATED }
+        public enum Identity { AUTHENTICATED_MOJANG, AUTHENTICATED_BY_PROXY, CLAIMED_BY_PROXY, UNAUTHENTICATED, AUTH_PLUGIN_CONFIRMED }
     }
 
     /** The connection closed. This is always the last event of a session. */
