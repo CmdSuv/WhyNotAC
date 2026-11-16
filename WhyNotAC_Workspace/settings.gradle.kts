@@ -9,13 +9,11 @@
  *   whynotac-analysis ──► whynotac-protocol, whynotac-world, whynotac-physics, whynotac-recording
  *   whynotac-verdict ──► whynotac-analysis, whynotac-recording (correlation, certificates, second verifier, ActionPolicy gate)
  *   whynotac-storage ──► whynotac-verdict, whynotac-recording (hash-chained audit ledger, profile persistence, four-eyes review)
- *   whynotac-paper ──► whynotac-storage, whynotac-verdict, whynotac-analysis, whynotac-world, whynotac-recording, whynotac-protocol
+ *   whynotac-ai ──► whynotac-analysis, whynotac-verdict, whynotac-math (S/D baselines, e-value probes, triage; non-punitive)
+ *   whynotac-paper ──► whynotac-ai, whynotac-storage, whynotac-verdict, whynotac-analysis, whynotac-world, whynotac-recording, whynotac-protocol
  *   whynotac-conformance ──► whynotac-math (+ vanilla 1.21.11 server code, test-only)
  *   whynotac-bench ──► everything (JMH micro-benchmarks, never shipped)
  *   whynotac-interop-probe: test-only Paper plugin for the live interop E2E (never shipped)
- *
- * Planned layers (folders exist with a README describing their contract; they are added to the
- * build when their phase starts): whynotac-ai.
  */
 pluginManagement {
     includeBuild("build-logic")
@@ -50,6 +48,7 @@ include(
     "whynotac-analysis",
     "whynotac-verdict",
     "whynotac-storage",
+    "whynotac-ai",
     "whynotac-paper",
     "whynotac-conformance",
     "whynotac-bench",

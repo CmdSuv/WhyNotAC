@@ -1,5 +1,6 @@
 package dev.whynotac.paper;
 
+import dev.whynotac.ai.AiAdvisor;
 import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.ServerClock;
 import dev.whynotac.paper.cases.Alerts;
@@ -59,6 +60,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private RecordingStore recordings;
     private VerdictEngine verdict;
     private StorageManager storage;
+    private AiAdvisor aiAdvisor;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
@@ -105,8 +107,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         VerdictConfig verdictConfig = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
         verdict = new VerdictEngine(verdictConfig, SecondVerifier.ReplaySource.fromRecordingPaths(
                 session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session)));
+        aiAdvisor = new AiAdvisor();
+        registry.addListener(aiAdvisor);
         verdict.addCaseListener(cases);
         verdict.addCaseListener(alerts);
+        verdict.addCaseListener(aiAdvisor);
         PaperVerdictBridge verdictBridge = new PaperVerdictBridge(this, verdictConfig);
         verdict.addEnforcementListener(verdictBridge);
         try {
@@ -168,7 +173,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
                 new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, tagsTracker, this),
-                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage, this), verdict, storage, this);
+                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage, aiAdvisor::forget, this),
+                verdict, storage, aiAdvisor, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");

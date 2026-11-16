@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -32,18 +33,24 @@ public final class SubjectRequests {
     private final Path secret;
     private final CaseStore cases;
     private final StorageManager storage;
+    private final Consumer<UUID> extraErasure;
     private final Plugin plugin;
     private final AtomicBoolean busy = new AtomicBoolean();
 
     public SubjectRequests(Path recordings, Path secret, CaseStore cases, Plugin plugin) {
-        this(recordings, secret, cases, null, plugin);
+        this(recordings, secret, cases, null, null, plugin);
     }
 
     public SubjectRequests(Path recordings, Path secret, CaseStore cases, StorageManager storage, Plugin plugin) {
+        this(recordings, secret, cases, storage, null, plugin);
+    }
+
+    public SubjectRequests(Path recordings, Path secret, CaseStore cases, StorageManager storage, Consumer<UUID> extraErasure, Plugin plugin) {
         this.recordings = recordings;
         this.secret = secret;
         this.cases = cases;
         this.storage = storage;
+        this.extraErasure = extraErasure;
         this.plugin = plugin;
     }
 
@@ -119,6 +126,9 @@ public final class SubjectRequests {
                         storageClean = false;
                         lines.add("storage: failed: " + e.getMessage());
                     }
+                }
+                if (delete && extraErasure != null) {
+                    extraErasure.accept(subject);
                 }
                 boolean ok = recordingsClean && storageClean && result.failures().isEmpty();
                 Bukkit.getScheduler().runTask(plugin, () -> {
