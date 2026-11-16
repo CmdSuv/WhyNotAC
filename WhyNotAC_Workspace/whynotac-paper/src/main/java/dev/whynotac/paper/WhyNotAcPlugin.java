@@ -388,7 +388,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 cb.tripped(),
                 cb.killSwitchActive(),
                 fb.locked(),
-                transactionLoop.maxWallMicros(),
+                transactionLoop.recentWallMicros(),
                 storage != null));
     }
 

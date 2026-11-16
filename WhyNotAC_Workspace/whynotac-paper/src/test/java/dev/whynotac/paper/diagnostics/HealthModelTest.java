@@ -23,6 +23,7 @@ final class HealthModelTest {
                 300_000, 524_288, 0, 0, 0, 12, false, false, false, 6_200.0, true));
         assertEquals(Status.DEGRADED, degraded.status());
         assertEquals(3, degraded.reasons().size());
+        assertTrue(degraded.reasons().stream().anyMatch(r -> r.contains("sustained transaction tick wall")));
 
         Evaluation critical = HealthModel.evaluate(new Inputs(
                 10, 524_288, 2, 0, 0, 0, true, false, false, 100.0, false));
@@ -31,5 +32,28 @@ final class HealthModelTest {
         assertTrue(critical.reasons().stream().anyMatch(r -> r.contains("circuit breaker")));
         assertTrue(critical.reasons().stream().anyMatch(r -> r.contains("lost timeline events")));
         assertTrue(critical.reasons().stream().anyMatch(r -> r.contains("audit ledger")));
+    }
+
+    @Test
+    void tickCostRecentWallDecaysAfterTransientWarmupSpike() {
+        TickCost cost = new TickCost();
+        long[] spike = cost.begin();
+        spike[0] -= 12_000_000L; // 12 ms transient warmup/GC spike
+        cost.end(spike);
+
+        assertTrue(cost.maxWallMicros() >= 12_000.0);
+        Evaluation duringSpike = HealthModel.evaluate(new Inputs(
+                10, 524_288, 0, 0, 0, 0, false, false, false, cost.recentWallMicros(), true));
+        assertEquals(Status.DEGRADED, duringSpike.status());
+
+        for (int i = 0; i < 60; i++) {
+            cost.end(cost.begin());
+        }
+
+        assertTrue(cost.maxWallMicros() >= 12_000.0);
+        assertTrue(cost.recentWallMicros() < 5_000.0, "expected EWMA to decay, got " + cost.recentWallMicros());
+        Evaluation recovered = HealthModel.evaluate(new Inputs(
+                10, 524_288, 0, 0, 0, 0, false, false, false, cost.recentWallMicros(), true));
+        assertEquals(Status.GREEN, recovered.status());
     }
 }

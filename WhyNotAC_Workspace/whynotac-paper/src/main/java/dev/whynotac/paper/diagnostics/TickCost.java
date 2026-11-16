@@ -20,6 +20,7 @@ public final class TickCost {
     private volatile long wallNanos;
     private volatile long cpuNanos;
     private volatile long maxWallNanos;
+    private volatile double ewmaWallNanos;
 
     /** A run that is about to start: returns the token to pass to {@link #end}. */
     public long[] begin() {
@@ -36,6 +37,7 @@ public final class TickCost {
         if (wall > maxWallNanos) {
             maxWallNanos = wall;
         }
+        ewmaWallNanos = runs == 1 ? wall : (0.95 * ewmaWallNanos + 0.05 * wall);
     }
 
     public long runs() {
@@ -55,5 +57,10 @@ public final class TickCost {
 
     public double maxWallMicros() {
         return maxWallNanos / 1e3;
+    }
+
+    /** Exponentially weighted moving average wall time per tick (decays transient startup/GC spikes). */
+    public double recentWallMicros() {
+        return ewmaWallNanos / 1e3;
     }
 }

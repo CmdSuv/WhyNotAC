@@ -75,7 +75,7 @@ public final class HealthModel {
                     + " rejectedBlocks=" + in.recordingRejectedBlocks());
         }
         if (in.transactionMaxWallMicros() > 5_000.0) {
-            degraded.add(String.format(Locale.ROOT, "high transaction tick wall=%.1f us",
+            degraded.add(String.format(Locale.ROOT, "sustained transaction tick wall=%.1f us",
                     in.transactionMaxWallMicros()));
         }
 

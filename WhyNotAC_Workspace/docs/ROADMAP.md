@@ -149,10 +149,10 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
 - **Saat varsayımı** (`VAL-3`): sunucu saatinin kayması izlenir. Yapıldı: monoton saat, son on dakikada duvar saatiyle
   karşılaştırılır (`ServerClock`). Fark %0,5'i aşınca `client-clock`'un bulguları reddedilir; değer `/whynotac stats`'ta
   raporlanır. Aynı makinenin iki saatinin birlikte yanılması görülmez.
-- **Test teknikleri** (`TEST-01`, `TEST-02`, `TEST-04`, tamam): `ValidationSuiteTest` (rastgele IEEE-754/paket fuzzing,
-  240 durumluk özellik tabanlı `ActionPolicy` & `Margins` yasaları, temiz/hileli deterministik simülasyon) ve
-  `AiRegressionCalibrationTest` (`AI-03`: gerçek `regression/*.wnrec` oturumlarıyla baz çizgi kalibrasyonu). Mutasyon testi
-  (`TEST-03`: PIT gibi dış araçla periyodik denetim) sonraki sertleştirmede çalıştırılabilir.
+- **Test teknikleri** (`TEST-01`–`TEST-04`, tamam): `ValidationSuiteTest` (rastgele IEEE-754/paket fuzzing,
+  240 durumluk özellik tabanlı `ActionPolicy` & `Margins` yasaları, temiz/hileli deterministik simülasyon),
+  `MutationResilienceTest` (`TEST-03`: güvenlik eşiklerinde sınır/operatör mutasyon direnci) ve
+  `AiRegressionCalibrationTest` (`AI-03`: gerçek `regression/*.wnrec` oturumlarıyla baz çizgi kalibrasyonu).
 - **Hile verisi** (`DATA-02`): yalnızca sahibin onayıyla, izole bir sanal makinede, açık kaynak
   client'larla kaydedilir.
 
@@ -164,16 +164,16 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
 - **Kanıt sertifikaları** (`VER-07`, tamam) ve **yanlış ban bütçesi defteri** (`VER-08`, tamam).
 - **Uygulama hattı** (`VER-12`, `CFG-01`, tamam): `CircuitBreaker`, `/whynotac killswitch|circuit`,
   doğrulanmış `VerdictConfig` (`verdict:` ayar bloğu), titreşimli/gecikmeli `BanWaveQueue` (`verdict.ban-wave-delay-seconds`,
-  çalıştırma zamanı sertifika ve güvenlik kapısı yeniden doğrulamasıyla) ve `PaperVerdictBridge` (`NEUTRALIZE`, `KICK`, `TEMP_BAN`)
-  `ActionPolicy` altında çalışır; ağ/proxy dağıtımı sonraki aşamadadır.
+  çalıştırma zamanı sertifika ve güvenlik kapısı yeniden doğrulamasıyla) ve `PaperVerdictBridge`
+  (`HIDE_INFORMATION` Anti-ESP gizleme, `NEUTRALIZE`, `KICK`, `TEMP_BAN`) `ActionPolicy` altında çalışır.
 - **Depolama** (`STO-01`–`STO-03`, `PROD-13`, tamam): değiştirilemez hash zincirli + HMAC-SHA256
-  `AuditLedger`, `buildTag` bağlamı, atomik `SubjectProfileStore` (GDPR `forget` uyumlu) ve yeniden başlatmalar
-  arası `FalseBanBudget` kalıcılığı (`StorageManager`).
+  `AuditLedger`, `buildTag` bağlamı, atomik `SubjectProfileStore` (GDPR `forget` uyumlu), kalıcı AI baz
+  çizgisi ve yeniden başlatmalar arası `FalseBanBudget` kalıcılığı (`StorageManager`).
 - **İnceleme ve itiraz** (`ADM-02`, `VER-15`, tamam): `ReviewWorkflow` iki farklı inceleyici gerektiren
-  dört-göz onay/itiraz akışı, `/whynotac review|audit` ve sade dilde açıklamalar.
-- **Yapay zekâ** (`AI-00`, `AI-05`, çekirdek tamam): `whynotac-ai` yalnızca vaka önceliği seçer (`0..100`)
-  ve savaş sırasında randomize sonda planlar (`EValueProcess` ile Ville eşitsizliği altında). Hiçbir
-  zaman eylem tetiklemez (`POLICY`), işaretli oturumlarla profil zehirlemez ve `/whynotac privacy forget` ile silinir.
+  dört-göz onay/itiraz akışı, `/whynotac review|audit` ve çevrimdışı `WhyNotAC.jar audit|explain` araçları.
+- **Yapay zekâ** (`AI-00`–`AI-05`, tamam): `whynotac-ai` (`BehavioralFeatureExtractor`, `AccountBaselineModel`,
+  `DesignProbeEngine` + canlı `LiveProbeDriver` yem sondaları `DESIGN_STATISTIC`/`D`, `EValueProcess` Ville
+  eşitsizliği altında) yalnızca vaka önceliği ve cezasız sonda yürütür; doğrulanmış temiz oturumları diske ve ağa eşitler.
 
 ## Faz 6 — İşletme ve dağıtım
 
@@ -182,21 +182,20 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   - Gradle bağımlılıkları doğrulanır (`REL-02`). Ertelendi: çevrimdışı doğrulama meta verisi Paper'ın dev bundle'ını
     kapsamıyordu (CI bağımlılıkları indirirken doğrulama başarısız olur); bundle'ın imzalı sağlama toplamları
     eklenebildiğinde açılacak.
-  - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`, çekirdek tamam): zaman damgasız deterministik arşivler
-    ve `generateSbom` göreviyle kanonik SHA-256 CycloneDX 1.5 SBOM (`whynotac-paper/build/reports/whynotac-sbom.cdx.json`) üretilir;
-    GPG/Cosign imza dağıtımı yayın boru hattında çalıştırılır.
-- **Gözlemlenebilirlik** (`OBS-01`, tamam): `HealthModel` (`GREEN`/`DEGRADED`/`CRITICAL`),
+  - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`, tamam): zaman damgasız deterministik arşivler,
+    `generateSbom` (CycloneDX 1.5 SHA-256 SBOM) ve `.github/workflows/release.yml` üzerinde SLSA build provenance attestation.
+- **Gözlemlenebilirlik** (`OBS-01`, tamam): `HealthModel` (`GREEN`/`DEGRADED`/`CRITICAL`, EWMA `TickCost.recentWallMicros`),
   `MetricsExporter` (OpenMetrics/Prometheus `/whynotac metrics` + opsiyonel loopback HTTP `/metrics` & `/health`),
-  durum geçişi bekçisi (`HealthWatchdog`) ve `/whynotac health` / `/whynotac stats` sağlık özeti devrede. Performans hedefi gerçek arazide
-  oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 2,5-2,9 ms/s (analiz 1,6-1,8, ağ kenarı 0,8-1,0, kayıt 0,2; 2026-10-30'da 3,2; tek koşu ±%10-15 oynar).
-  Paylaşılan `PingLedger`, `ClientWorld.settledBlockState` + `LongCounterMap`, `Colliders.blocks` statik hızlı yolu + `BlockStates.collisionInCell`, `ClientEntities` sıfır-tahsis yakınlık/itme taraması ve `ClientInventory.views()` revizyon önbelleği ile iç içe tekrar oynatma (`ReplayCost interleaved`, 42.908 tick, tüm 12 kontrol + replikalar) ~40.019 ns/tick'ten **26.062 ns/tick**'e (20 tick/sn = oyuncu başına ~0,52 ms/s analiz) düştü.
-  Yeniden gönderilen chunk'ların kayda başvuruyla yazılması, tekrar yazılan kayıtlarda kaydın sıkıştırmasını
-  yarıya indirdi (oyuncu başına net yaklaşık 0,23 ms/s) ve diski %43 küçülttü; canlı 40 bot koşusunda toplam 2,8 ms/s
-  (kayıt 0,28'den 0,15'e). Ağ kenarının dökümü ve iç içe tekrar oynatma: docs/benchmarks/2026-10-31-edge-and-tick.md.
-  Kalanın yapısal nedenleri [ölçümde](benchmarks/2026-10-30-world/README.md) yazılı.
-- **Ağ** (`NET-01`, `NET-22`, temel çekirdek tamam): `whynotac-velocity` eşlik eklentisi + `NetworkEnvelope` /
+  durum geçişi bekçisi (`HealthWatchdog`) ve `/whynotac health` / `/whynotac stats` devrede.
+  Performans hedefi gerçek arazide oyuncu başına < 1 ms/s (görev #27): paylaşılan `PingLedger`, `settledBlockState`,
+  `Colliders.blocks` statik hızlı yolu ve önbelleklerle iç içe tekrar oynatma (`ReplayCost interleaved`, 42.908 tick)
+  **26.225 ns/tick** (~0,52 ms/s analiz) düzeyinde; 20 botluk güncel canlı Paper + JFR testinde `whynotac` analiz CPU payı
+  0,0512 çekirdek (toplam CPU payı %6,3), `600 KB` heap, `0` dinleyici hatası, `0` kayıp olay, `0` yanlış vaka ve
+  `GREEN` sağlık durumu doğrulandı.
+- **Ağ** (`NET-01`, `NET-22`, tamam): `whynotac-velocity` eşlik eklentisi + `NetworkEnvelope` /
   `PaperNetworkBridge` (`whynotac:bridge` HMAC-SHA256 imzalı proxy-arka uç kenar beyanı ve yalnızca doğrulanmış
-  kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek Velocity+Paper E2E senaryosu CI'ya eklenecek.
+  kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek çok-süreçli Velocity 3.4.0 + Paper 1.21.11 E2E testleri
+  `tools/e2e/run_proxy_e2e.sh` ve CI `e2e-proxy` işiyle doğrulanır.
 
 ## Sahibin kararını bekleyenler
 
