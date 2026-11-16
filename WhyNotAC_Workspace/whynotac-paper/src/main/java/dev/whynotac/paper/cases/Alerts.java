@@ -2,8 +2,9 @@ package dev.whynotac.paper.cases;
 
 import dev.whynotac.analysis.policy.ActionPolicy.Action;
 import dev.whynotac.analysis.policy.ActionPolicy.Lifecycle;
-import dev.whynotac.analysis.verdict.ShadowVerdict;
 import dev.whynotac.protocol.session.PlayerSession;
+import dev.whynotac.verdict.VerdictCase;
+import dev.whynotac.verdict.VerdictEngine;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import net.kyori.adventure.text.Component;
@@ -17,7 +18,7 @@ import org.bukkit.plugin.Plugin;
  * {@value #SHADOW_PERMISSION} (and the console); an armed check's to {@value #PERMISSION}. At most one
  * alert per player and check every {@link #MIN_INTERVAL_MILLIS} ms; the rest are counted into the next.
  */
-public final class Alerts implements ShadowVerdict.CaseListener {
+public final class Alerts implements VerdictEngine.CaseListener {
 
     public static final String PERMISSION = "whynotac.alerts";
     public static final String SHADOW_PERMISSION = "whynotac.alerts.shadow";
@@ -31,7 +32,7 @@ public final class Alerts implements ShadowVerdict.CaseListener {
     }
 
     @Override
-    public void opened(ShadowVerdict.Case c) {
+    public void opened(VerdictCase c) {
         if (!c.permittedActions().contains(Action.ALERT)) {
             return;
         }

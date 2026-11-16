@@ -12,6 +12,10 @@ import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
+import dev.whynotac.verdict.CircuitBreaker;
+import dev.whynotac.verdict.FalseBanBudget;
+import dev.whynotac.verdict.VerdictConfig;
+import dev.whynotac.verdict.VerdictEngine;
 import io.papermc.paper.command.brigadier.BasicCommand;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.ArrayList;
@@ -44,11 +48,12 @@ public final class WhyNotCommand implements BasicCommand {
     private final InventoryVerifier inventory;
     private final SelfVerifier self;
     private final SubjectRequests privacy;
+    private final VerdictEngine verdict;
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
             CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, SelfVerifier self, SubjectRequests privacy,
-            org.bukkit.plugin.Plugin plugin) {
+            VerdictEngine verdict, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
@@ -59,6 +64,7 @@ public final class WhyNotCommand implements BasicCommand {
         this.inventory = inventory;
         this.self = self;
         this.privacy = privacy;
+        this.verdict = verdict;
         this.plugin = plugin;
     }
 
@@ -174,8 +180,44 @@ public final class WhyNotCommand implements BasicCommand {
             for (PlayerSession session : registry.sessions()) {
                 sender.sendMessage(Component.text(" " + session + " ticks=" + session.clientTicks(), NamedTextColor.GRAY));
             }
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("verdict")) {
+            VerdictConfig cfg = verdict.config();
+            CircuitBreaker.Status cb = verdict.circuitBreaker().status(System.currentTimeMillis());
+            FalseBanBudget.Snapshot fb = verdict.falseBanBudget().snapshot(System.currentTimeMillis());
+            sender.sendMessage(Component.text("WhyNotAC verdict:", NamedTextColor.GOLD));
+            sender.sendMessage(Component.text("  armedChecks=" + cfg.armedChecks() + " mitigations=" + cfg.mitigationsEnabled()
+                    + " autoKick=" + cfg.autoKickEnabled() + " autoBan=" + cfg.autoBanEnabled()
+                    + " secondVerifier=" + cfg.secondVerifierEnabled(), NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("  circuitBreaker killSwitch=" + cb.killSwitchActive() + " tripped=" + cb.tripped()
+                    + " recentEnforced=" + cb.recentEnforcedSubjects()
+                    + (cb.reason().isEmpty() ? "" : " reason=" + cb.reason()), NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("  falseBanBudget issued=" + fb.totalAutoBansIssued() + " incidents=" + fb.recentIncidents()
+                    + "/" + fb.budgetLimit() + " locked=" + fb.locked()
+                    + (fb.lockReason().isEmpty() ? "" : " reason=" + fb.lockReason()), NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("  accepted=" + verdict.acceptedCount() + " rejected=" + verdict.rejectedCount(), NamedTextColor.GRAY));
+        } else if (args.length >= 1 && args[0].equalsIgnoreCase("killswitch")) {
+            if (args.length == 2 && args[1].equalsIgnoreCase("on")) {
+                verdict.circuitBreaker().setKillSwitch(true, "operator command");
+                sender.sendMessage(Component.text("WhyNotAC kill switch ON (all enforcement suppressed to SHADOW)", NamedTextColor.YELLOW));
+            } else if (args.length == 2 && args[1].equalsIgnoreCase("off")) {
+                verdict.circuitBreaker().setKillSwitch(false, "");
+                sender.sendMessage(Component.text("WhyNotAC kill switch OFF", NamedTextColor.GREEN));
+            } else {
+                CircuitBreaker.Status cb = verdict.circuitBreaker().status(System.currentTimeMillis());
+                sender.sendMessage(Component.text("WhyNotAC killSwitch=" + cb.killSwitchActive() + " tripped=" + cb.tripped(), NamedTextColor.GRAY));
+            }
+        } else if (args.length >= 1 && args[0].equalsIgnoreCase("circuit")) {
+            if (args.length == 2 && args[1].equalsIgnoreCase("reset")) {
+                verdict.circuitBreaker().resetAutomaticTrip();
+                verdict.falseBanBudget().reset();
+                sender.sendMessage(Component.text("WhyNotAC circuit breaker and false-ban budget reset", NamedTextColor.GREEN));
+            } else {
+                CircuitBreaker.Status cb = verdict.circuitBreaker().status(System.currentTimeMillis());
+                sender.sendMessage(Component.text("WhyNotAC circuit tripped=" + cb.tripped() + " killSwitch=" + cb.killSwitchActive()
+                        + " recentEnforced=" + cb.recentEnforcedSubjects(), NamedTextColor.GRAY));
+            }
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id> | /whynotac privacy find|forget <uuid> [--yes]",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id> | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
         }
     }
@@ -236,11 +278,18 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "cases", "case");
+            return List.of("inspect", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "cases", "case",
+                    "verdict", "killswitch", "circuit");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("pipeline") || args[0].equalsIgnoreCase("world")
                 || args[0].equalsIgnoreCase("entities") || args[0].equalsIgnoreCase("inventory") || args[0].equalsIgnoreCase("self"))) {
             return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("killswitch")) {
+            return List.of("on", "off", "status");
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("circuit")) {
+            return List.of("status", "reset");
         }
         return List.of();
     }

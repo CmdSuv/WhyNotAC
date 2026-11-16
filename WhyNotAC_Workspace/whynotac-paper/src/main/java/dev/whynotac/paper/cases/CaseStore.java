@@ -2,8 +2,9 @@ package dev.whynotac.paper.cases;
 
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.policy.ActionPolicy.Action;
-import dev.whynotac.analysis.verdict.ShadowVerdict;
 import dev.whynotac.protocol.session.PlayerSession;
+import dev.whynotac.verdict.VerdictCase;
+import dev.whynotac.verdict.VerdictEngine;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,7 +43,7 @@ import java.util.stream.Collectors;
  * <p>A case names its player (name and UUID): staff review it. {@link #subject} finds and deletes one
  * player's cases for a data-subject request, {@link #retain} deletes old ones.
  */
-public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseable {
+public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseable {
 
     /** A case as stored. */
     public record StoredCase(String id, long createdEpochMillis, String check, int checkVersion, String evidenceClass, String lifecycle,
@@ -80,7 +81,7 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
     }
 
     @Override
-    public void opened(ShadowVerdict.Case c) {
+    public void opened(VerdictCase c) {
         // Read everything that belongs to the live session now, on its analysis thread.
         PlayerSession.Identity player = c.session().identity();
         Optional<Path> recording = recordingOf.apply(c.session());
@@ -348,7 +349,7 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
         return connection;
     }
 
-    private String dossierJson(StoredCase row, ShadowVerdict.Case c, Evidence e) {
+    private String dossierJson(StoredCase row, VerdictCase c, Evidence e) {
         StringBuilder json = new StringBuilder("{\n");
         field(json, "id", row.id());
         field(json, "created", Instant.ofEpochMilli(row.createdEpochMillis()).toString());
@@ -377,6 +378,12 @@ public final class CaseStore implements ShadowVerdict.CaseListener, AutoCloseabl
         field(json, "recording", row.recording() == null ? null
                 : dossiers.toAbsolutePath().normalize().relativize(Path.of(row.recording())).toString());
         field(json, "recordingAbsolute", row.recording());
+        field(json, "dependencyGroup", c.dependencyGroup().id());
+        field(json, "authorizedAction", c.authorizedAction().name());
+        field(json, "mitigation", c.mitigation().name());
+        field(json, "verificationStatus", c.certificate().verificationStatus().name());
+        field(json, "certificateId", c.certificate().certificateId());
+        field(json, "certificateSha256", c.certificate().sha256Digest());
         json.append("  \"whynotacVersion\": \"").append(escape(whynotacVersion)).append("\"\n}\n");
         return json.toString();
     }

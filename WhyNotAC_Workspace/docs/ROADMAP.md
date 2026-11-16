@@ -17,7 +17,8 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
 | Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
 | Hareket fiziği (`whynotac-physics`) | Yaya, süzülme ve binekler tamam | Çarpışma çekirdeği resmi client'ın koduyla; yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu, toz kar), lav (Nether'in hızlı lavı dahil), iskele, dünya sınırı, suda riptide ve dönme saldırısı), elytra ile süzülme ve roket, tekne, at, domuz, strider, happy ghast, nautilus ve deve gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü (sürülen binekler dahil) SHADOW'da, canlıların itmesini takımlarıyla (görev #33), client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50), sunucunun hızını (savrulma, patlama, mızrak hamlesi) ve koyduğu dönüşü (yanıtıyla, görev #93) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
-| Kalıcı depolama, karar, yapay zekâ modülleri | Planlı | `whynotac-storage`, `whynotac-verdict`, `whynotac-ai` |
+| Karar modülü (`whynotac-verdict`) | Temel çekirdek tamam | `DependencyGroup`, `VerdictConfig` (`CFG-01`), `CircuitBreaker` / kill-switch (`VER-12`), `FalseBanBudget` (`VER-08`), SHA-256 `EvidenceCertificate` (`VER-07`), asenkron `SecondVerifier` (`VER-05`/`VER-06`), `ActionPolicy` ve Paper yumuşak hafifletme (`PaperVerdictBridge`) devrede; varsayılan profil `SHADOW` |
+| Kalıcı depolama, yapay zekâ modülleri | Planlı | `whynotac-storage`, `whynotac-ai` |
 
 ## Kapı kuralı
 
@@ -155,11 +156,13 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
 
 ## Faz 5 — Karar ve uygulama
 
-- **Bağımsız yeniden doğrulama** (`VER-05`, `VER-06`): ikinci bir motor ve vanilla kodunda yeniden
-  çalıştırma. Bir P-A kanıtı, eylem tetiklemeden önce bunlardan geçer.
-- **Kanıt sertifikaları** (`VER-07`) ve **yanlış ban bütçesi defteri** (`VER-08`).
-- **Uygulama hattı** (`VER-12`, `CFG-01`): eylemler gecikmeli ve dağıtılmış gelir. Yürütme anında
-  yeniden doğrulanır. Devre kesici, genel kapatma anahtarı ve tipli, doğrulanmış yapılandırma vardır.
+- **Bağımsız yeniden doğrulama** (`VER-05`, `VER-06`, tamam): `SecondVerifier` izole bir `SessionRegistry`
+  ve taze replika üzerinden `P-A` bulgularını asenkron olarak yeniden oynatır; iki bağımsız `P-A` grubu
+  yoksa otomatik geçici ban öncesinde doğrulama zorunludur.
+- **Kanıt sertifikaları** (`VER-07`, tamam) ve **yanlış ban bütçesi defteri** (`VER-08`, tamam).
+- **Uygulama hattı** (`VER-12`, `CFG-01`, temel çekirdek tamam): `CircuitBreaker`, `/whynotac killswitch|circuit`,
+  doğrulanmış `VerdictConfig` (`verdict:` ayar bloğu) ve `PaperVerdictBridge` (`NEUTRALIZE`, `KICK`, `TEMP_BAN`)
+  `ActionPolicy` altında çalışır; gecikmeli/dağıtılmış ban dalgası sırası sonraki aşamadadır.
 - **Depolama** (`STO-01`–`STO-03`): sabit vaka deposu, değiştirilemez dosyalar (hash zinciri ve
   imza). Dosyalar derlemeye bağlanır (`PROD-13`).
 - **İnceleme ve itiraz** (`ADM-02`, `VER-15`): dört göz, itiraz akışı, sade dilde açıklama.

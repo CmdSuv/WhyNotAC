@@ -1,7 +1,6 @@
 package dev.whynotac.paper;
 
 import dev.whynotac.analysis.checks.Checks;
-import dev.whynotac.analysis.verdict.ShadowVerdict;
 import dev.whynotac.analysis.evidence.ServerClock;
 import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
@@ -10,6 +9,7 @@ import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.TickCost;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.paper.privacy.SubjectRequests;
+import dev.whynotac.paper.verdict.PaperVerdictBridge;
 import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.InventoryVerifier;
 import dev.whynotac.paper.world.SelfVerifier;
@@ -18,6 +18,9 @@ import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
+import dev.whynotac.verdict.SecondVerifier;
+import dev.whynotac.verdict.VerdictConfig;
+import dev.whynotac.verdict.VerdictEngine;
 import dev.whynotac.world.ClientEntitiesTracker;
 import dev.whynotac.world.ClientInventoryTracker;
 import dev.whynotac.world.ClientSelfTracker;
@@ -52,7 +55,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private SessionRegistry registry;
     private PacketInterceptor interceptor;
     private RecordingStore recordings;
-    private final ShadowVerdict verdict = new ShadowVerdict();
+    private VerdictEngine verdict;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
@@ -96,8 +99,16 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         // VAL-3: the server's monotonic clock against its wall clock, which client-clock's claims rest on
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> ServerClock.SERVER.sample(System.nanoTime(), System.currentTimeMillis()), 20L, 20L);
         alerts = new Alerts(this);
-        verdict.addListener(cases);
-        verdict.addListener(alerts);
+        VerdictConfig verdictConfig = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
+        verdict = new VerdictEngine(verdictConfig, SecondVerifier.ReplaySource.fromRecordingPaths(
+                session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session)));
+        verdict.addCaseListener(cases);
+        verdict.addCaseListener(alerts);
+        PaperVerdictBridge verdictBridge = new PaperVerdictBridge(this, verdictConfig);
+        verdict.addEnforcementListener(verdictBridge);
+        if (verdictConfig.mitigationsEnabled()) {
+            getServer().getPluginManager().registerEvents(verdictBridge, this);
+        }
         // The client's world, before every check that reads it (listeners see an event in registration order).
         Replicas replicas = Replicas.vanilla();
         replicas.listeners().forEach(registry::addListener);
@@ -144,7 +155,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
                 new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, tagsTracker, this),
-                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, this), this);
+                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, this), verdict, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -182,6 +193,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }
         if (recordings != null) {
             recordings.close(); // drains queued blocks (bounded) and finalises files
+        }
+        if (verdict != null) {
+            verdict.close();
         }
         if (cases != null) {
             cases.close();

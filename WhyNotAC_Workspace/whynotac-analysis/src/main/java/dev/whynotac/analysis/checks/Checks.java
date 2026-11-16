@@ -8,6 +8,7 @@ import dev.whynotac.world.Replicas;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 
 /**
@@ -75,5 +76,10 @@ public final class Checks {
     /** The version this build runs of the check with this id, or -1. */
     public static int version(String id) {
         return VERSIONS.getOrDefault(id, -1);
+    }
+
+    /** Registered check ids (unmodifiable). */
+    public static Set<String> ids() {
+        return VERSIONS.keySet();
     }
 }

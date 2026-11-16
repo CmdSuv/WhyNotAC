@@ -337,7 +337,7 @@ menziliyle vurur. İsabet tikin başında `getActiveItem()` ile, kontrol saldır
 | `whynotac-physics` | **Faz 3 (yaya) ✔** | Client'ın çarpışma kodu ve yaya hareket adımı, bit bit (bkz. modül README) |
 | `whynotac-analysis` | **Slice 0 ✔ · 2b-8 ✔ · Faz 3 ✔** | Kontroller (tick framing, client saati, saldırı mesafesi, yaya hareket), kanıt ve kabul edilebilirlik, eylem politikası, SHADOW karar, `verify` aracı. Aim/tıklama/zamanlama dedektörleri planlı |
 | `whynotac-ai` | Faz 3–4 (planlı) | Kişisel profil, hesap ele geçirme / makro tespiti |
-| `whynotac-verdict` | Faz 4 (planlı) | Kanıt birleştirme ve ARMED karar (Slice 0'ın SHADOW kararı şimdilik `whynotac-analysis`'te) |
+| `whynotac-verdict` | **Faz 4/5 ✔ (SHADOW varsayılan)** | Bağımlılık-gruplu birleştirme, `SecondVerifier`, SHA-256 `EvidenceCertificate`, `CircuitBreaker`, `FalseBanBudget` ve `ActionPolicy` uygulama kapısı |
 | `whynotac-storage` | Faz 4 (planlı) | Profil ve kanıt kalıcılığı |
 
 ## Bilinen sınırlar

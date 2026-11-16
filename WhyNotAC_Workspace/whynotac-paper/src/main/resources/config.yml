@@ -33,3 +33,28 @@ cases:
   # (re-verifiable offline: java -jar WhyNotAC.jar verify <dossier>). Cases name the player: they are
   # personal data, kept for this many days.
   retention-days: 90
+
+verdict:
+  # Checks listed here move from SHADOW to ARMED. Leave empty ([]) for observation/alerts/dossiers only.
+  armed-checks: []
+  # Soft mitigations (setback / cancelling impossible hits or block actions) when an ARMED deterministic check triggers.
+  mitigations: false
+  # Automatic kicks when correlated score reaches threshold (OPERATOR_OPT_IN for ARMED P-A / P-M).
+  auto-kick: false
+  # Automatic temporary bans (OPERATOR_OPT_IN for ARMED P-A + authenticated identity + corroboration only).
+  auto-ban: false
+  # Independent deterministic re-verification on a background thread before confirming auto-bans.
+  second-verifier: true
+  # Require >= 2 independent P-A groups or successful SecondVerifier confirmation before auto-banning.
+  require-corroboration-for-ban: true
+  # Temporary ban duration in hours (manual permanent bans remain staff-only).
+  temp-ban-hours: 24
+  # Circuit breaker: suppress active enforcement if more than this many unique players are penalized within 60s.
+  max-enforced-players-per-minute: 5
+  # False-ban budget: lock automatic temporary bans if overturned/mismatch incidents within window reach this limit.
+  max-false-ban-budget: 1
+  false-ban-window-days: 7
+  # Exponential decay half-life (seconds) and correlation thresholds.
+  correlation-half-life-seconds: 120
+  min-score-for-mitigation: 1.0
+  min-score-for-kick: 3.0
