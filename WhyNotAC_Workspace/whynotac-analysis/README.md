@@ -696,6 +696,17 @@ saati birlikte yanlışsa bu görülmez. Değer `/whynotac stats`'ta `serverCloc
   zaten kapsam dışıdır (iddia yok); öteki durumlar bu paketi gönderemez, hepsi elenirse tik kanıttır ("sent its flight
   abilities while it could not fly"). `MovementCheckTest`: hayatta kalma modunda bulgu, sunucu uçmaya izin verince iddia yok.
 
+### Diğer mevcut kontrollerin kısa soundness özeti (`tick-framing`, `client-clock`, `attack-reach`, `transaction-order`, `click-pattern`, `aim-pattern`)
+
+Tüm 12 kontrol + `design-probe` için normatif **varsayımlar, bilgi sınırları (`NO_CLAIM`) ve atlatma sınırları** [docs/SOUNDNESS.md](../docs/SOUNDNESS.md) dosyasında bir araya getirilmiştir:
+
+- **`tick-framing` (`TickFramingCheck`):** İki `ClientTickEnd` arasında 1 normal hareket paketi + eşlenmiş `AcceptTeleportation` / `PlayerRotation` / araç ışınlanma yanıt token'ı (`MoveReplies`); `ClientTickEnd` kesildiğinde bile paket varışında yargılanır.
+- **`client-clock` (`ClientClockCheck`):** `Minecraft.runTick(true)` + `DeltaTracker.advanceTime` gereği iki ping cevabı arasında `((r_j - s_i) * 1.01 / 50 ms) + 22` tik sınırı (`SLACK_TICKS = 22.0`); `ServerClock` > %0,5 kayarsa reddedilir.
+- **`attack-reach` (`AttackReachCheck` / `AttackReach`):** Decompile `GameRenderer.pick` + `startAttack`; tüm olası göz, poz ve hedef kutu çiftleri için `EPSILON = 1e-4` blok ile sınır aşımında `P-A` üretir, piston/shulker itmelerinde ve creative/spectator ihtimalinde iddiadan çekilir.
+- **`transaction-order` (`TransactionOrderCheck`):** `PacketProcessor` sırası gereği `AcceptTeleportation` sonrasına kalan önceki `Ping` cevabını (`ping-after-later-teleport-accept`) ve `KeepAlive` yanıtından sonra `12` tick geciktirilen `Ping`'i (`ping-delayed-past-keepalive`) yakalar.
+- **`click-pattern` (`ClickPatternCheck`):** `ClientTickEnd` çerçeveli `sustained-cps` (40 tik ≥ 50/80), `constant-interval` (`stdDev ≤ 0,14`) ve `macro-periodicity` (periyot 2/3) `S` sinyalleri; kazı/kullanım/dürtme hariç, asla cezalandırmaz.
+- **`aim-pattern` (`AimPatternCheck`):** Dürbün, büyük `|yaw|`, `±90°` pitch, binek/teleport ve sinematik/gamepad muafiyetleri sonrası `hit-and-snapback`, `robotic-tracking` ve `combat-lattice-break` `S` sinyalleri; asla cezalandırmaz.
+
 ## Planlanan aileler
 
 - **Aim (devam):** çok-kareli entropi / otokorelasyon / spektral düzlük ve aşırı-düzeltme imzaları (`aim-pattern` içinde temel kafes bozulması, sabit açısal hız ve vur-geri-dön ilk sürüm olarak SHADOW'da açıldı).

@@ -7,4 +7,5 @@ description = "Dependency-grouped correlation, independent P-A second verificati
 dependencies {
     api(project(":whynotac-analysis"))
     implementation(project(":whynotac-recording"))
+    testImplementation(project(":whynotac-physics"))
 }

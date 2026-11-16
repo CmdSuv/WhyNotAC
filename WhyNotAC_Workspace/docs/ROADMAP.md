@@ -151,8 +151,12 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   raporlanır. Aynı makinenin iki saatinin birlikte yanılması görülmez.
 - **Test teknikleri** (`TEST-01`–`TEST-04`, tamam): `ValidationSuiteTest` (rastgele IEEE-754/paket fuzzing,
   240 durumluk özellik tabanlı `ActionPolicy` & `Margins` yasaları, temiz/hileli deterministik simülasyon),
+  `CheatDetectionAndBypassTest` (tüm 12 kontrol için sentetik hile tespiti, atlatma/Gap sınırları,
+  etkisizleştirme/`SecondVerifier` akışı ve 240 FPS / 10s donma / toggle-sprint uç meşru davranışları),
   `MutationResilienceTest` (`TEST-03`: güvenlik eşiklerinde sınır/operatör mutasyon direnci) ve
   `AiRegressionCalibrationTest` (`AI-03`: gerçek `regression/*.wnrec` oturumlarıyla baz çizgi kalibrasyonu).
+- **Soundness notları** (`POLICY.md`, tamam): tüm 12 kontrol + `design-probe` için normatif bilgi sınırları,
+  varsayımlar, muafiyetler ve atlatma sınırları [SOUNDNESS.md](SOUNDNESS.md) dosyasında belgelendi.
 - **Hile verisi** (`DATA-02`): yalnızca sahibin onayıyla, izole bir sanal makinede, açık kaynak
   client'larla kaydedilir.
 
@@ -189,9 +193,9 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   durum geçişi bekçisi (`HealthWatchdog`) ve `/whynotac health` / `/whynotac stats` devrede.
   Performans hedefi gerçek arazide oyuncu başına < 1 ms/s (görev #27): paylaşılan `PingLedger`, `settledBlockState`,
   `Colliders.blocks` statik hızlı yolu ve önbelleklerle iç içe tekrar oynatma (`ReplayCost interleaved`, 42.908 tick)
-  **26.225 ns/tick** (~0,52 ms/s analiz) düzeyinde; 20 botluk güncel canlı Paper + JFR testinde `whynotac` analiz CPU payı
-  0,0512 çekirdek (toplam CPU payı %6,3), `600 KB` heap, `0` dinleyici hatası, `0` kayıp olay, `0` yanlış vaka ve
-  `GREEN` sağlık durumu doğrulandı.
+  **26.225 ns/tick** (~0,52 ms/s analiz) düzeyinde; 20 ve **100 botluk** güncel canlı Paper + JFR yük testlerinde (`100/100`
+  bot bağlı, 4.809/4.809 `IN_REACH`, `0` dinleyici hatası, `0` kayıp olay, `casesOpened=0`) analiz CPU payı
+  0,0512 (20 bot) / 0,345 çekirdek (100 bot), heap `600 KB` / `3,40 MB` (çıkış sonrası `0`) ve **`GREEN`** sağlık doğrulandı.
 - **Ağ** (`NET-01`, `NET-22`, tamam): `whynotac-velocity` eşlik eklentisi + `NetworkEnvelope` /
   `PaperNetworkBridge` (`whynotac:bridge` HMAC-SHA256 imzalı proxy-arka uç kenar beyanı ve yalnızca doğrulanmış
   kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek çok-süreçli Velocity 3.4.0 + Paper 1.21.11 E2E testleri
