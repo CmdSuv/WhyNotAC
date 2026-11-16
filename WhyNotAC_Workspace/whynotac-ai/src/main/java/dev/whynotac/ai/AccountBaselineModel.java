@@ -84,6 +84,22 @@ public final class AccountBaselineModel {
         }));
     }
 
+    /** Seeds persisted baseline moments once (no-op if this subject already has a loaded baseline in memory). */
+    public void seedBaselineIfEmpty(UUID subject, Map<String, RunningMoments> persisted) {
+        if (subject == null || persisted == null || persisted.isEmpty()) {
+            return;
+        }
+        baselines.computeIfAbsent(subject, id -> {
+            Map<String, RunningMoments> map = new ConcurrentHashMap<>();
+            persisted.forEach((k, v) -> {
+                if (v != null && v.count() > 0) {
+                    map.put(k, v.copy());
+                }
+            });
+            return map;
+        });
+    }
+
     public Map<String, RunningMoments> baselineSnapshot(UUID subject) {
         Map<String, RunningMoments> history = baselines.get(subject);
         if (history == null) {

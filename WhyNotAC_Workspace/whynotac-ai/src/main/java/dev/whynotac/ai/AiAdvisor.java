@@ -1,26 +1,45 @@
 package dev.whynotac.ai;
 
 import dev.whynotac.analysis.evidence.EvidenceClass;
+import dev.whynotac.math.stats.RunningMoments;
+import dev.whynotac.protocol.network.NetworkEnvelope;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Fact;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Identity;
+import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Trust;
 import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.verdict.VerdictCase;
 import dev.whynotac.verdict.VerdictEngine;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Advisory AI facade uniting {@link BehavioralFeatureExtractor}, {@link AccountBaselineModel},
  * {@link ProbeScheduler}, and review queue triage scoring (AI-00..AI-05).
  *
  * <p>Strictly non-punitive per {@code docs/POLICY.md}: computes priority scores and schedules probe experiments
- * only; never issues mitigations, kicks, or bans.
+ * only; never issues mitigations, kicks, or bans. Long-lived persistence/sync hooks only fire for verified
+ * ({@code AUTHENTICATED_*} / {@code AUTH_PLUGIN_CONFIRMED}) clean sessions.
  */
 public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseListener {
 
     public record CasePriority(String caseId, double score0To100, AccountBaselineModel.ShiftAssessment shift, double eValueWealth) {}
+
+    /** Notified on clean disconnect of an authenticated session so baseline moments can persist and sync. */
+    @FunctionalInterface
+    public interface CleanSessionObserver {
+        void onCleanAuthenticatedSession(
+                UUID playerId,
+                Identity identity,
+                BehavioralFeatureExtractor.Snapshot sessionSnapshot,
+                Map<String, RunningMoments> updatedBaseline);
+    }
 
     private final BehavioralFeatureExtractor extractor = new BehavioralFeatureExtractor();
     private final AccountBaselineModel baselineModel = new AccountBaselineModel();
@@ -29,6 +48,14 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
     private final Map<String, UUID> caseSubjects = new ConcurrentHashMap<>();
     private final Set<Long> flaggedConnections = ConcurrentHashMap.newKeySet();
     private final Set<Long> mergedConnections = ConcurrentHashMap.newKeySet();
+    private final Map<Long, Identity> authenticatedConnections = new ConcurrentHashMap<>();
+    private final List<CleanSessionObserver> cleanObservers = new CopyOnWriteArrayList<>();
+
+    public void addCleanSessionObserver(CleanSessionObserver observer) {
+        if (observer != null) {
+            cleanObservers.add(observer);
+        }
+    }
 
     public BehavioralFeatureExtractor extractor() {
         return extractor;
@@ -50,12 +77,27 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
         extractor.onEvent(session, event);
-        if (event instanceof TimelineEvent.Disconnected) {
+        if (event instanceof ClientFact fact && fact.fact() == Fact.IDENTITY && fact.trust() == Trust.AUTHENTIC) {
+            try {
+                Identity parsed = Identity.valueOf(fact.value());
+                if (NetworkEnvelope.isLongLivedAuthenticated(parsed)) {
+                    authenticatedConnections.put(session.connectionId(), parsed);
+                }
+            } catch (IllegalArgumentException ignored) { }
+        } else if (event instanceof TimelineEvent.Disconnected) {
             long connId = session.connectionId();
             boolean flagged = flaggedConnections.remove(connId);
+            Identity authedIdentity = authenticatedConnections.remove(connId);
             PlayerSession.Identity id = session.identity();
             if (!flagged && id != null && mergedConnections.add(connId)) {
-                baselineModel.mergeSession(id.playerId(), extractor.snapshot(session));
+                BehavioralFeatureExtractor.Snapshot snap = extractor.snapshot(session);
+                baselineModel.mergeSession(id.playerId(), snap);
+                if (authedIdentity != null && NetworkEnvelope.isLongLivedAuthenticated(authedIdentity)) {
+                    Map<String, RunningMoments> updated = baselineModel.baselineSnapshot(id.playerId());
+                    for (CleanSessionObserver obs : cleanObservers) {
+                        obs.onCleanAuthenticatedSession(id.playerId(), authedIdentity, snap, updated);
+                    }
+                }
             }
             mergedConnections.remove(connId);
         }

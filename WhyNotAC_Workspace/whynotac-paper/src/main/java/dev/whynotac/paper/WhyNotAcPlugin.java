@@ -3,6 +3,7 @@ package dev.whynotac.paper;
 import dev.whynotac.ai.AiAdvisor;
 import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.ServerClock;
+import dev.whynotac.math.stats.RunningMoments;
 import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
@@ -27,6 +28,7 @@ import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
 import dev.whynotac.storage.StorageManager;
+import dev.whynotac.storage.SubjectProfileStore;
 import dev.whynotac.verdict.SecondVerifier;
 import dev.whynotac.verdict.VerdictConfig;
 import dev.whynotac.verdict.VerdictEngine;
@@ -39,9 +41,12 @@ import dev.whynotac.world.ItemPrototypes;
 import dev.whynotac.world.ClientWorldTracker;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -189,7 +194,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 long nanoNow = System.nanoTime();
                 for (Player player : Bukkit.getOnlinePlayers()) {
                     interceptor.session(player).ifPresent(session ->
-                            authPluginHook.checkAndUpgrade(session, player.getUniqueId(), player.getName(), nanoNow));
+                            authPluginHook.checkAndUpgrade(session, player.getUniqueId(), player.getName(), nanoNow)
+                                    .ifPresent(provider -> warmBaselineAsync(player.getUniqueId())));
                 }
             }, 20L, 20L);
         }
@@ -229,6 +235,23 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 getLogger().log(Level.WARNING, "WhyNotAC failed to initialize network bridge secret", e);
             }
         }
+
+        aiAdvisor.addCleanSessionObserver((playerId, identity, sessionSnapshot, updatedBaseline) -> {
+            if (storage != null && !updatedBaseline.isEmpty()) {
+                Map<String, SubjectProfileStore.FeatureSummary> summaries = new TreeMap<>();
+                updatedBaseline.forEach((k, m) -> {
+                    if (m.count() > 0 && Double.isFinite(m.mean())) {
+                        double var = Double.isFinite(m.sampleVariance()) ? m.sampleVariance() : 0.0;
+                        summaries.put(k, new SubjectProfileStore.FeatureSummary(m.count(), m.mean(), var));
+                    }
+                });
+                storage.saveBehavioralBaselineAsync(playerId, summaries, System.currentTimeMillis());
+            }
+            if (networkBridge != null) {
+                sessionSnapshot.features().forEach((name, moments) ->
+                        networkBridge.sendProfileSummary(playerId, identity, name, moments, 0));
+            }
+        });
 
         getServer().getPluginManager().registerEvents(this, this);
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, this::health,
@@ -398,9 +421,35 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         var bound = interceptor.bind(event.getPlayer());
         if (bound.isEmpty()) {
             getLogger().warning("No WhyNotAC session on " + event.getPlayer().getName() + "'s connection; they are not observed");
-        } else if (authPluginHook != null) {
-            authPluginHook.checkAndUpgrade(bound.get(), event.getPlayer().getUniqueId(), event.getPlayer().getName(), System.nanoTime());
+            return;
         }
+        UUID uuid = event.getPlayer().getUniqueId();
+        if (ClientFacts.policy().authenticated()) {
+            warmBaselineAsync(uuid);
+        } else if (authPluginHook != null) {
+            authPluginHook.checkAndUpgrade(bound.get(), uuid, event.getPlayer().getName(), System.nanoTime())
+                    .ifPresent(provider -> warmBaselineAsync(uuid));
+        }
+    }
+
+    private void warmBaselineAsync(UUID playerId) {
+        if (storage == null || aiAdvisor == null || playerId == null) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            try {
+                storage.profiles().find(playerId).ifPresent(profile -> {
+                    if (!profile.baselineFeatures().isEmpty()) {
+                        Map<String, RunningMoments> restored = new LinkedHashMap<>();
+                        profile.baselineFeatures().forEach((name, fs) ->
+                                restored.put(name, RunningMoments.fromSummary(fs.count(), fs.mean(), fs.sampleVariance())));
+                        aiAdvisor.baselineModel().seedBaselineIfEmpty(playerId, restored);
+                    }
+                });
+            } catch (IOException e) {
+                getLogger().log(Level.WARNING, "WhyNotAC could not load persisted baseline for " + playerId, e);
+            }
+        });
     }
 
     private static ThreadFactory daemonThreads(String prefix) {

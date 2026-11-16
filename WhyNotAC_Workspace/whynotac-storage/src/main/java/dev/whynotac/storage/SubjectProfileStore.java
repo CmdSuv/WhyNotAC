@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,6 +24,8 @@ import java.util.regex.Pattern;
  */
 public final class SubjectProfileStore {
 
+    public record FeatureSummary(long count, double mean, double sampleVariance) {}
+
     public record SubjectProfile(
             UUID playerId,
             long lastSeenEpochMillis,
@@ -30,12 +33,26 @@ public final class SubjectProfileStore {
             long autoBansIssued,
             long overturnedCount,
             Map<String, Long> casesByCheck,
-            List<Long> falseBanIncidentTimestamps) {
+            List<Long> falseBanIncidentTimestamps,
+            Map<String, FeatureSummary> baselineFeatures) {
+
+        public SubjectProfile(
+                UUID playerId,
+                long lastSeenEpochMillis,
+                long totalCases,
+                long autoBansIssued,
+                long overturnedCount,
+                Map<String, Long> casesByCheck,
+                List<Long> falseBanIncidentTimestamps) {
+            this(playerId, lastSeenEpochMillis, totalCases, autoBansIssued, overturnedCount,
+                    casesByCheck, falseBanIncidentTimestamps, Map.of());
+        }
 
         public SubjectProfile {
             Objects.requireNonNull(playerId, "playerId");
             casesByCheck = Collections.unmodifiableMap(new TreeMap<>(casesByCheck));
             falseBanIncidentTimestamps = List.copyOf(falseBanIncidentTimestamps);
+            baselineFeatures = Collections.unmodifiableMap(new TreeMap<>(baselineFeatures));
         }
     }
 
@@ -47,7 +64,7 @@ public final class SubjectProfileStore {
 
     public synchronized SubjectProfile recordCase(UUID playerId, String checkId, long epochMillis) throws IOException {
         SubjectProfile current = find(playerId).orElseGet(() ->
-                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of()));
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
         Map<String, Long> byCheck = new TreeMap<>(current.casesByCheck());
         byCheck.merge(checkId, 1L, Long::sum);
         SubjectProfile updated = new SubjectProfile(
@@ -57,14 +74,15 @@ public final class SubjectProfileStore {
                 current.autoBansIssued(),
                 current.overturnedCount(),
                 byCheck,
-                current.falseBanIncidentTimestamps());
+                current.falseBanIncidentTimestamps(),
+                current.baselineFeatures());
         write(updated);
         return updated;
     }
 
     public synchronized SubjectProfile recordAutoBan(UUID playerId, long epochMillis) throws IOException {
         SubjectProfile current = find(playerId).orElseGet(() ->
-                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of()));
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
         SubjectProfile updated = new SubjectProfile(
                 playerId,
                 Math.max(current.lastSeenEpochMillis(), epochMillis),
@@ -72,14 +90,15 @@ public final class SubjectProfileStore {
                 current.autoBansIssued() + 1L,
                 current.overturnedCount(),
                 current.casesByCheck(),
-                current.falseBanIncidentTimestamps());
+                current.falseBanIncidentTimestamps(),
+                current.baselineFeatures());
         write(updated);
         return updated;
     }
 
     public synchronized SubjectProfile recordFalseBanIncident(UUID playerId, long epochMillis) throws IOException {
         SubjectProfile current = find(playerId).orElseGet(() ->
-                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of()));
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
         List<Long> incidents = new ArrayList<>(current.falseBanIncidentTimestamps());
         incidents.add(epochMillis);
         SubjectProfile updated = new SubjectProfile(
@@ -89,7 +108,26 @@ public final class SubjectProfileStore {
                 current.autoBansIssued(),
                 current.overturnedCount() + 1L,
                 current.casesByCheck(),
-                incidents);
+                incidents,
+                current.baselineFeatures());
+        write(updated);
+        return updated;
+    }
+
+    /** Atomically updates persisted per-feature baseline moments for an authenticated account (AI-02 / STO-03). */
+    public synchronized SubjectProfile saveBaselineFeatures(
+            UUID playerId, Map<String, FeatureSummary> baselineFeatures, long epochMillis) throws IOException {
+        SubjectProfile current = find(playerId).orElseGet(() ->
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
+        SubjectProfile updated = new SubjectProfile(
+                playerId,
+                Math.max(current.lastSeenEpochMillis(), epochMillis),
+                current.totalCases(),
+                current.autoBansIssued(),
+                current.overturnedCount(),
+                current.casesByCheck(),
+                current.falseBanIncidentTimestamps(),
+                baselineFeatures);
         write(updated);
         return updated;
     }
@@ -180,7 +218,21 @@ public final class SubjectProfileStore {
             }
             sb.append(inc.get(i));
         }
-        sb.append("]\n}\n");
+        sb.append("],\n  \"baselineFeatures\": {");
+        boolean firstFeat = true;
+        for (Map.Entry<String, FeatureSummary> fe : p.baselineFeatures().entrySet()) {
+            if (fe.getValue().count() <= 0 || !Double.isFinite(fe.getValue().mean())) {
+                continue;
+            }
+            if (!firstFeat) {
+                sb.append(", ");
+            }
+            double var = Double.isFinite(fe.getValue().sampleVariance()) ? fe.getValue().sampleVariance() : 0.0;
+            sb.append(String.format(Locale.ROOT, "\"%s\": {\"count\": %d, \"mean\": %.12g, \"var\": %.12g}",
+                    escape(fe.getKey()), fe.getValue().count(), fe.getValue().mean(), var));
+            firstFeat = false;
+        }
+        sb.append("}\n}\n");
         return sb.toString();
     }
 
@@ -205,7 +257,24 @@ public final class SubjectProfileStore {
                 incidents.add(Long.parseLong(num.group()));
             }
         }
-        return new SubjectProfile(expectedId, lastSeen, totalCases, autoBans, overturned, byCheck, incidents);
+        Map<String, FeatureSummary> baseline = new TreeMap<>();
+        int bfStart = json.indexOf("\"baselineFeatures\"");
+        if (bfStart >= 0) {
+            Matcher feat = Pattern.compile(
+                    "\"((?:[^\"\\\\]|\\\\.)*)\"\\s*:\\s*\\{\\s*\"count\"\\s*:\\s*(\\d+)\\s*,\\s*\"mean\"\\s*:\\s*([^,\\s}]+)\\s*,\\s*\"var\"\\s*:\\s*([^}\\s]+)\\s*}")
+                    .matcher(json.substring(bfStart));
+            while (feat.find()) {
+                try {
+                    long count = Long.parseLong(feat.group(2));
+                    double mean = Double.parseDouble(feat.group(3));
+                    double var = Double.parseDouble(feat.group(4));
+                    if (count > 0 && Double.isFinite(mean) && Double.isFinite(var) && var >= 0.0) {
+                        baseline.put(feat.group(1), new FeatureSummary(count, mean, var));
+                    }
+                } catch (NumberFormatException ignored) { }
+            }
+        }
+        return new SubjectProfile(expectedId, lastSeen, totalCases, autoBans, overturned, byCheck, incidents, baseline);
     }
 
     private static long parseLong(String json, String field) {

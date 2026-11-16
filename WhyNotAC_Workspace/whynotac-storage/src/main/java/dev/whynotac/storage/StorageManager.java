@@ -143,6 +143,20 @@ public final class StorageManager implements VerdictEngine.CaseListener, Verdict
         });
     }
 
+    /** Persists updated behavioral baseline moments asynchronously for an authenticated account. */
+    public void saveBehavioralBaselineAsync(UUID playerId, java.util.Map<String, SubjectProfileStore.FeatureSummary> features, long epochMillis) {
+        if (playerId == null || features == null || features.isEmpty()) {
+            return;
+        }
+        writer.execute(() -> {
+            try {
+                profiles.saveBaselineFeatures(playerId, features, epochMillis);
+            } catch (IOException e) {
+                logger.log(Level.WARNING, "WhyNotAC failed to persist behavioral baseline", e);
+            }
+        });
+    }
+
     /** Removes persisted subject profile and appends a pseudonym-free erasure marker to the immutable ledger. */
     public boolean forgetSubject(UUID playerId, long epochMillis) throws IOException {
         try {
