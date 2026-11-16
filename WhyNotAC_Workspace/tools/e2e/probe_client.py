@@ -156,6 +156,7 @@ class Client:
         self.lock = threading.Lock()
         self.buffer = b""
         self.state = "login"
+        self.config_announced = False
         self.entity_id = None
         self.position = None
         self.alive = True
@@ -223,6 +224,15 @@ class Client:
         return r.varint(), r
 
     # --- protocol ------------------------------------------------------------------------------
+    def _announce_config(self):
+        if self.config_announced:
+            return
+        self.config_announced = True
+        # What a vanilla client announces (the brand) and what a modded one adds (channel registrations).
+        # Deferred until backend configuration starts so Velocity proxies have a live backend connection.
+        self.send(CFG_S_CUSTOM_PAYLOAD, mc_string("minecraft:brand") + mc_string(BRAND))
+        self.send(CFG_S_CUSTOM_PAYLOAD, mc_string("minecraft:register") + "\x00".join(CHANNELS).encode("utf-8"))
+
     def login(self):
         self.send(0x00, varint(PROTOCOL) + mc_string(self.host) + struct.pack(">H", self.port) + varint(2))
         # Same as Java's UUID.nameUUIDFromBytes("OfflinePlayer:" + name), the vanilla offline-mode id.
@@ -237,21 +247,20 @@ class Client:
                 self.send(LOGIN_S_ACK)
                 self.state = "configuration"
                 self.send(CFG_S_CLIENT_INFO, mc_string("en_us") + bytes([3]) + varint(0) + b"\x01" + b"\x7f" + varint(1) + b"\x00" + b"\x01" + varint(0))
-                # What a vanilla client announces (the brand) and what a modded one adds (channel registrations).
-                self.send(CFG_S_CUSTOM_PAYLOAD, mc_string("minecraft:brand") + mc_string(BRAND))
-                self.send(CFG_S_CUSTOM_PAYLOAD, mc_string("minecraft:register") + "\x00".join(CHANNELS).encode("utf-8"))
             elif packet_id == LOGIN_C_CUSTOM_QUERY:
                 self.send(LOGIN_S_CUSTOM_QUERY_ANSWER, varint(r.varint()) + b"\x00")
             elif packet_id == LOGIN_C_DISCONNECT:
                 raise RuntimeError("login rejected: " + r.rest().decode("utf-8", "replace"))
         elif self.state == "configuration":
             if packet_id == CFG_C_KNOWN_PACKS:
+                self._announce_config()
                 self.send(CFG_S_KNOWN_PACKS, varint(1) + mc_string("minecraft") + mc_string("core") + mc_string("1.21.11"))
             elif packet_id == CFG_C_KEEP_ALIVE:
                 self.send(CFG_S_KEEP_ALIVE, struct.pack(">q", r.unpack("q")))
             elif packet_id == CFG_C_PING:
                 self.send(CFG_S_PONG, struct.pack(">i", r.unpack("i")))
             elif packet_id == CFG_C_FINISH:
+                self._announce_config()
                 self.send(CFG_S_FINISH)
                 self.state = "play"
             elif packet_id == CFG_C_DISCONNECT:
