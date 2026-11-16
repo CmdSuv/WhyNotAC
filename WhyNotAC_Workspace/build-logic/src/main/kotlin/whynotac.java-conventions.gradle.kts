@@ -32,6 +32,8 @@ tasks.withType<Javadoc>().configureEach {
 val pinnedSnapshots = mapOf(
     "io.papermc.paper:paper-api" to libs.findVersion("pinned-paper-api").get().requiredVersion,
     "com.velocitypowered:velocity-native" to libs.findVersion("pinned-velocity-native").get().requiredVersion,
+    "com.velocitypowered:velocity-api" to libs.findVersion("pinned-velocity-api").get().requiredVersion,
+    "com.velocitypowered:velocity-brigadier" to libs.findVersion("pinned-velocity-brigadier").get().requiredVersion,
 )
 configurations.configureEach {
     resolutionStrategy.eachDependency {
@@ -49,6 +51,11 @@ dependencies {
     "testImplementation"(platform(libs.findLibrary("junit-bom").get()))
     "testImplementation"(libs.findLibrary("junit-jupiter").get())
     "testRuntimeOnly"(libs.findLibrary("junit-platform-launcher").get())
+}
+
+tasks.withType<AbstractArchiveTask>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
 }
 
 tasks.withType<Test>().configureEach {

@@ -1,4 +1,12 @@
 import io.papermc.paperweight.userdev.ReobfArtifactConfiguration
+import java.security.MessageDigest
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.MapProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     id("whynotac.java-conventions")
@@ -37,4 +45,72 @@ tasks.jar {
         cp.filter { it.name.startsWith("whynotac-") }.map { zipTree(it) }
     })
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+abstract class GenerateCycloneDxSbom : DefaultTask() {
+    @get:Input abstract val componentName: Property<String>
+    @get:Input abstract val componentVersion: Property<String>
+    @get:Input abstract val artifactsMap: MapProperty<String, String>
+    @get:OutputFile abstract val outputFile: RegularFileProperty
+
+    @TaskAction
+    fun generate() {
+        val out = outputFile.get().asFile
+        out.parentFile.mkdirs()
+        val sorted = artifactsMap.get().toSortedMap()
+        val sb = StringBuilder()
+        sb.append("{\n")
+        sb.append("  \"bomFormat\": \"CycloneDX\",\n")
+        sb.append("  \"specVersion\": \"1.5\",\n")
+        sb.append("  \"version\": 1,\n")
+        sb.append("  \"metadata\": {\n")
+        sb.append("    \"component\": {\n")
+        sb.append("      \"type\": \"application\",\n")
+        sb.append("      \"name\": \"").append(componentName.get()).append("\",\n")
+        sb.append("      \"version\": \"").append(componentVersion.get()).append("\"\n")
+        sb.append("    }\n")
+        sb.append("  },\n")
+        sb.append("  \"components\": [\n")
+        var first = true
+        for ((coord, sha256) in sorted) {
+            val parts = coord.split(":")
+            val grp = parts.getOrElse(0) { "" }
+            val name = parts.getOrElse(1) { coord }
+            val ver = parts.getOrElse(2) { "" }
+            if (!first) sb.append(",\n")
+            first = false
+            sb.append("    {\n")
+            sb.append("      \"type\": \"library\",\n")
+            sb.append("      \"group\": \"").append(grp).append("\",\n")
+            sb.append("      \"name\": \"").append(name).append("\",\n")
+            sb.append("      \"version\": \"").append(ver).append("\",\n")
+            sb.append("      \"hashes\": [{ \"alg\": \"SHA-256\", \"content\": \"").append(sha256).append("\" }]\n")
+            sb.append("    }")
+        }
+        sb.append("\n  ]\n}\n")
+        out.writeText(sb.toString())
+    }
+}
+
+val generateSbom = tasks.register<GenerateCycloneDxSbom>("generateSbom") {
+    description = "Generates a canonical CycloneDX 1.5 SBOM with SHA-256 checksums for reproducible releases (REL-03)."
+    group = "verification"
+    dependsOn(tasks.jar)
+    componentName.set("whynotac-paper")
+    componentVersion.set(project.version.toString())
+    artifactsMap.set(provider {
+        val md = MessageDigest.getInstance("SHA-256")
+        val map = linkedMapOf<String, String>()
+        configurations.runtimeClasspath.get().resolvedConfiguration.resolvedArtifacts.forEach { art ->
+            val id = art.moduleVersion.id
+            val hash = md.digest(art.file.readBytes()).joinToString("") { "%02x".format(it) }
+            map["${id.group}:${id.name}:${id.version}"] = hash
+        }
+        map
+    })
+    outputFile.set(layout.buildDirectory.file("reports/whynotac-sbom.cdx.json"))
+}
+
+tasks.check {
+    dependsOn(generateSbom)
 }

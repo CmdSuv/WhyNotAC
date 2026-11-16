@@ -340,6 +340,7 @@ menziliyle vurur. İsabet tikin başında `getActiveItem()` ile, kontrol saldır
 | `whynotac-ai` | **Faz 3–5 ✔ (cezasız)** | `BehavioralFeatureExtractor`, `RunningMoments#merge` tabanlı `AccountBaselineModel`, `EValueProcess` / `ProbeScheduler` ve `AiAdvisor` vaka önceliklendirme |
 | `whynotac-verdict` | **Faz 4/5 ✔ (SHADOW varsayılan)** | Bağımlılık-gruplu birleştirme, `SecondVerifier`, SHA-256 `EvidenceCertificate`, `CircuitBreaker`, `FalseBanBudget` ve `ActionPolicy` uygulama kapısı |
 | `whynotac-storage` | **Faz 5 ✔** | Hash zincirli + HMAC-SHA256 `AuditLedger`, kalıcı `SubjectProfileStore` ve dört-göz `ReviewWorkflow` |
+| `whynotac-velocity` | **Faz 6 ✔** | Velocity 3.x eşlik eklentisi (`NET-01`/`NET-22`: HMAC-SHA256 imzalı proxy-arka uç köprüsü, `NetworkEnvelope`) |
 
 ## Bilinen sınırlar
 

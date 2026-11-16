@@ -129,8 +129,12 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 | `whynotac-recording` | Kayıpsız, çökmeye dayanıklı oturum kaydı, takma adlandırma, replay, inspect/dump aracı |
 | `whynotac-world` | Client'ın dünyası: blok durumu verisi (resmi client'tan), chunk decoder, client'ın chunk deposunun kopyası ve belirsizliği |
 | `whynotac-physics` | Client'ın kendi hareketi, decompile edilmiş koddan bit bit: çarpışma çekirdeği (resmi client'ın koduyla rastgele vakalarda karşılaştırılır) ve yaya hareket adımı, otomatik zıplama dahil (gerçek client'ın parkurdaki her tikiyle karşılaştırılır); `movement` kontrolü bunun üzerinde |
-| `whynotac-analysis` | Kontroller, kanıt ve kabul edilebilirlik, eylem politikası (POLICY.md), karar katmanı, `verify` aracı |
-| `whynotac-paper` | Paper 1.21.11 eklentisi: NMS/Netty paket yakalayıcı, kayıt entegrasyonu, vakalar ve uyarılar |
+| `whynotac-analysis` | Kontroller (`tick-framing`, `client-clock`, `attack-reach`, `attack-aim`, `use-aim`, `break-time`, `prediction-sequence`, `action-grammar`, `movement`, `click-pattern`, `aim-pattern`, `transaction-order`), kanıt ve kabul edilebilirlik, eylem politikası (POLICY.md), `verify` aracı |
+| `whynotac-verdict` | Bağımlılık-gruplu birleştirme, `CircuitBreaker`, `FalseBanBudget`, `SecondVerifier`, SHA-256 `EvidenceCertificate` ve `BanWaveQueue` |
+| `whynotac-storage` | Hash zincirli + HMAC-SHA256 `AuditLedger`, atomik `SubjectProfileStore` (GDPR `forget`) ve dört-göz `ReviewWorkflow` |
+| `whynotac-ai` | `BehavioralFeatureExtractor`, `AccountBaselineModel`, `EValueProcess`/`ProbeScheduler` ve cezasız `AiAdvisor` vaka puanlama |
+| `whynotac-velocity` | Velocity 3.x proxy eşlik eklentisi: HMAC imzalı istemci kenarı beyanı (`NET-01`) ve sunucular arası doğrulama/profil rölesi (`NET-22`) |
+| `whynotac-paper` | Paper 1.21.11 eklentisi: NMS/Netty paket yakalayıcı, kayıt entegrasyonu, vakalar, sağlık/OpenMetrics gözlemlenebilirliği ve uygulama köprüsü |
 | `whynotac-conformance` | Gerçek oyun sınıflarına karşı diferansiyel testler (dağıtılmaz) |
 | `whynotac-bench` | JMH performans ölçümleri (dağıtılmaz) |
 

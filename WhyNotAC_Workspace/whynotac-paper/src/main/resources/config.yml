@@ -65,3 +65,15 @@ identity:
   # When running in offline mode alongside AuthMe, nLogin, LibreLogin, or OpeNLogin,
   # upgrade a session's identity to AUTH_PLUGIN_CONFIRMED strictly after login completes.
   trust-auth-plugins: true
+
+observability:
+  # Log warning/recovery notices when WhyNotAC HealthModel transitions between GREEN, DEGRADED, and CRITICAL.
+  health-watchdog: true
+  # Optional loopback HTTP exporter (/metrics OpenMetrics + /health JSON). 0 disables the HTTP listener.
+  metrics-http-port: 0
+
+network-bridge:
+  # Authenticated Velocity companion bridge (whynotac:bridge) for NET-01 / NET-22.
+  enabled: false
+  secret-file: "network-secret.key"
+  max-clock-skew-seconds: 60

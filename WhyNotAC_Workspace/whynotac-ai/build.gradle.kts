@@ -8,4 +8,5 @@ dependencies {
     api(project(":whynotac-analysis"))
     api(project(":whynotac-verdict"))
     api(project(":whynotac-math"))
+    testImplementation(project(":whynotac-recording"))
 }

@@ -10,7 +10,7 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Katman | Durum | Ayrıntı |
 |---|---|---|
 | Ağ kenarı: bayt düzeyinde dinleme, uzlaştırma, transaction sandviçi | Tamam | [Faz 2b-1](phases/PHASE-2B-1-REPORT.md) |
-| Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Kısmen | `AUTHENTICATED_*`, `CLAIMED_BY_PROXY`, `UNAUTHENTICATED` + offline `AUTH_PLUGIN_CONFIRMED` (`AuthPluginHook`); çevrilmiş client'lar için ikinci kenar katmanı henüz yok (`NET-01`) |
+| Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Tamam | `AUTHENTICATED_*`, `CLAIMED_BY_PROXY`, `UNAUTHENTICATED`, offline `AUTH_PLUGIN_CONFIRMED` (`AuthPluginHook`) ve imzalı Velocity kenar kanalı (`whynotac-velocity`, `NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
 | Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `prediction-sequence` (P-M), `action-grammar` (P-M), `movement` (P-M), `click-pattern` (S), `aim-pattern` (S), `transaction-order` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
@@ -149,8 +149,10 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
 - **Saat varsayımı** (`VAL-3`): sunucu saatinin kayması izlenir. Yapıldı: monoton saat, son on dakikada duvar saatiyle
   karşılaştırılır (`ServerClock`). Fark %0,5'i aşınca `client-clock`'un bulguları reddedilir; değer `/whynotac stats`'ta
   raporlanır. Aynı makinenin iki saatinin birlikte yanılması görülmez.
-- **Test teknikleri:** fuzz (`TEST-01`), özellik tabanlı testler (`TEST-02`), mutasyon (`TEST-03`),
-  deterministik simülasyon (`TEST-04`).
+- **Test teknikleri** (`TEST-01`, `TEST-02`, `TEST-04`, tamam): `ValidationSuiteTest` (rastgele IEEE-754/paket fuzzing,
+  240 durumluk özellik tabanlı `ActionPolicy` & `Margins` yasaları, temiz/hileli deterministik simülasyon) ve
+  `AiRegressionCalibrationTest` (`AI-03`: gerçek `regression/*.wnrec` oturumlarıyla baz çizgi kalibrasyonu). Mutasyon testi
+  (`TEST-03`: PIT gibi dış araçla periyodik denetim) sonraki sertleştirmede çalıştırılabilir.
 - **Hile verisi** (`DATA-02`): yalnızca sahibin onayıyla, izole bir sanal makinede, açık kaynak
   client'larla kaydedilir.
 
@@ -180,17 +182,21 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   - Gradle bağımlılıkları doğrulanır (`REL-02`). Ertelendi: çevrimdışı doğrulama meta verisi Paper'ın dev bundle'ını
     kapsamıyordu (CI bağımlılıkları indirirken doğrulama başarısız olur); bundle'ın imzalı sağlama toplamları
     eklenebildiğinde açılacak.
-  - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`).
-- **Gözlemlenebilirlik** (`OBS-01`, temel çekirdek tamam): `HealthModel` (`GREEN`/`DEGRADED`/`CRITICAL`),
-  `/whynotac health` komutu ve `/whynotac stats` JSON sağlık özeti eklendi. Performans hedefi gerçek arazide
+  - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`, çekirdek tamam): zaman damgasız deterministik arşivler
+    ve `generateSbom` göreviyle kanonik SHA-256 CycloneDX 1.5 SBOM (`whynotac-paper/build/reports/whynotac-sbom.cdx.json`) üretilir;
+    GPG/Cosign imza dağıtımı yayın boru hattında çalıştırılır.
+- **Gözlemlenebilirlik** (`OBS-01`, tamam): `HealthModel` (`GREEN`/`DEGRADED`/`CRITICAL`),
+  `MetricsExporter` (OpenMetrics/Prometheus `/whynotac metrics` + opsiyonel loopback HTTP `/metrics` & `/health`),
+  durum geçişi bekçisi (`HealthWatchdog`) ve `/whynotac health` / `/whynotac stats` sağlık özeti devrede. Performans hedefi gerçek arazide
   oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 2,5-2,9 ms/s (analiz 1,6-1,8, ağ kenarı 0,8-1,0, kayıt 0,2; 2026-10-30'da 3,2; tek koşu ±%10-15 oynar).
   Paylaşılan `PingLedger`, `ClientWorld.settledBlockState` + `LongCounterMap`, `Colliders.blocks` statik hızlı yolu + `BlockStates.collisionInCell`, `ClientEntities` sıfır-tahsis yakınlık/itme taraması ve `ClientInventory.views()` revizyon önbelleği ile iç içe tekrar oynatma (`ReplayCost interleaved`, 42.908 tick, tüm 12 kontrol + replikalar) ~40.019 ns/tick'ten **26.062 ns/tick**'e (20 tick/sn = oyuncu başına ~0,52 ms/s analiz) düştü.
   Yeniden gönderilen chunk'ların kayda başvuruyla yazılması, tekrar yazılan kayıtlarda kaydın sıkıştırmasını
   yarıya indirdi (oyuncu başına net yaklaşık 0,23 ms/s) ve diski %43 küçülttü; canlı 40 bot koşusunda toplam 2,8 ms/s
   (kayıt 0,28'den 0,15'e). Ağ kenarının dökümü ve iç içe tekrar oynatma: docs/benchmarks/2026-10-31-edge-and-tick.md.
   Kalanın yapısal nedenleri [ölçümde](benchmarks/2026-10-30-world/README.md) yazılı.
-- **Ağ:** çevrilmiş client'lar için ikinci kenar katmanı (`NET-01`), Velocity eşlik eklentisi
-  (`NET-22`), ağ çapında profiller yalnızca doğrulanmış kimliklerle.
+- **Ağ** (`NET-01`, `NET-22`, temel çekirdek tamam): `whynotac-velocity` eşlik eklentisi + `NetworkEnvelope` /
+  `PaperNetworkBridge` (`whynotac:bridge` HMAC-SHA256 imzalı proxy-arka uç kenar beyanı ve yalnızca doğrulanmış
+  kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek Velocity+Paper E2E senaryosu CI'ya eklenecek.
 
 ## Sahibin kararını bekleyenler
 

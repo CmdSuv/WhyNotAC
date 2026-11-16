@@ -150,4 +150,21 @@ public final class RunningMoments {
     public RunningMoments copy() {
         return new RunningMoments().merge(this);
     }
+
+    /** Restores a second-order summary accumulator for cross-server profile synchronization. */
+    public static RunningMoments fromSummary(long count, double mean, double sampleVariance) {
+        RunningMoments rm = new RunningMoments();
+        if (count <= 0 || !Double.isFinite(mean)) {
+            return rm;
+        }
+        rm.count = count;
+        rm.shift = mean;
+        rm.mean = 0.0;
+        rm.m2 = (count >= 2 && Double.isFinite(sampleVariance) && sampleVariance >= 0.0)
+                ? sampleVariance * (count - 1)
+                : 0.0;
+        rm.min = mean;
+        rm.max = mean;
+        return rm;
+    }
 }

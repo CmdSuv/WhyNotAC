@@ -8,6 +8,7 @@ import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.HealthModel;
 import dev.whynotac.paper.network.PacketInterceptor;
+import dev.whynotac.paper.network.PaperNetworkBridge;
 import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.world.EntityVerifier;
 import dev.whynotac.paper.world.InventoryVerifier;
@@ -52,6 +53,7 @@ public final class WhyNotCommand implements BasicCommand {
     private final Diagnostics diagnostics;
     private final Supplier<String> stats;
     private final Supplier<HealthModel.Evaluation> health;
+    private final Supplier<String> metrics;
     private final CaseStore cases;
     private final WorldVerifier world;
     private final EntityVerifier entities;
@@ -61,16 +63,19 @@ public final class WhyNotCommand implements BasicCommand {
     private final VerdictEngine verdict;
     private final StorageManager storage;
     private final AiAdvisor aiAdvisor;
+    private final PaperNetworkBridge networkBridge;
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
-            Supplier<HealthModel.Evaluation> health, CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory,
-            SelfVerifier self, SubjectRequests privacy, VerdictEngine verdict, StorageManager storage, AiAdvisor aiAdvisor, org.bukkit.plugin.Plugin plugin) {
+            Supplier<HealthModel.Evaluation> health, Supplier<String> metrics, CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory,
+            SelfVerifier self, SubjectRequests privacy, VerdictEngine verdict, StorageManager storage, AiAdvisor aiAdvisor,
+            PaperNetworkBridge networkBridge, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
         this.stats = stats;
         this.health = health;
+        this.metrics = metrics;
         this.cases = cases;
         this.world = world;
         this.entities = entities;
@@ -80,6 +85,7 @@ public final class WhyNotCommand implements BasicCommand {
         this.verdict = verdict;
         this.storage = storage;
         this.aiAdvisor = aiAdvisor;
+        this.networkBridge = networkBridge;
         this.plugin = plugin;
     }
 
@@ -210,6 +216,19 @@ public final class WhyNotCommand implements BasicCommand {
                     sender.sendMessage(Component.text("  - " + reason, NamedTextColor.GRAY));
                 }
             }
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("metrics")) {
+            for (String line : metrics.get().split("\n")) {
+                if (!line.startsWith("#") && !line.isEmpty()) {
+                    sender.sendMessage(Component.text(" " + line, NamedTextColor.GRAY));
+                }
+            }
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("network")) {
+            if (networkBridge == null) {
+                sender.sendMessage(Component.text("WhyNotAC network bridge disabled (network-bridge.enabled=false)", NamedTextColor.GRAY));
+            } else {
+                sender.sendMessage(Component.text("WhyNotAC network bridge active: valid=" + networkBridge.receivedValid()
+                        + " rejected=" + networkBridge.rejectedInvalid() + " sent=" + networkBridge.sentFrames(), NamedTextColor.GREEN));
+            }
         } else if (args.length == 1 && args[0].equalsIgnoreCase("sessions")) {
             sender.sendMessage(Component.text("WhyNotAC sessions: " + registry.sessions().size(), NamedTextColor.GOLD));
             for (PlayerSession session : registry.sessions()) {
@@ -296,13 +315,16 @@ public final class WhyNotCommand implements BasicCommand {
                         case "overturn" -> {
                             ReviewWorkflow.ReviewRecord r = storage.reviews().resolveAppeal(caseId, reviewer, false, notes, now);
                             verdict.falseBanBudget().recordIncident(caseId, "overturned by " + reviewer + ": " + notes, now);
-                            if (found.get().playerId() != null) {
-                                try {
-                                    UUID subjectId = UUID.fromString(found.get().playerId());
-                                    verdict.banWaveQueue().cancelSubject(subjectId, now);
-                                    storage.profiles().recordFalseBanIncident(subjectId, now);
-                                } catch (Exception ignored) { }
-                            }
+                                if (found.get().playerId() != null) {
+                                    try {
+                                        UUID subjectId = UUID.fromString(found.get().playerId());
+                                        verdict.banWaveQueue().cancelSubject(subjectId, now);
+                                        storage.profiles().recordFalseBanIncident(subjectId, now);
+                                        if (networkBridge != null) {
+                                            networkBridge.sendEnforcementNotice(subjectId, "OVERTURN", caseId, "", 0L, notes);
+                                        }
+                                    } catch (Exception ignored) { }
+                                }
                             yield r;
                         }
                         default -> storage.reviews().status(caseId).orElseGet(() -> storage.reviews().open(caseId, now));
@@ -322,7 +344,7 @@ public final class WhyNotCommand implements BasicCommand {
             }
             inspectAi(sender, target);
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac metrics | /whynotac network | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
         }
     }
@@ -409,7 +431,7 @@ public final class WhyNotCommand implements BasicCommand {
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
             return List.of("inspect", "ai", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "health",
-                    "cases", "case", "review", "audit", "verdict", "killswitch", "circuit");
+                    "metrics", "network", "cases", "case", "review", "audit", "verdict", "killswitch", "circuit");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("review")) {
             return List.of("status", "pass1", "confirm", "appeal", "uphold", "overturn");

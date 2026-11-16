@@ -8,10 +8,12 @@ import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.HealthModel;
+import dev.whynotac.paper.diagnostics.MetricsExporter;
 import dev.whynotac.paper.diagnostics.TickCost;
 import dev.whynotac.paper.identity.AuthPluginHook;
 import dev.whynotac.paper.identity.ClientFacts;
 import dev.whynotac.paper.network.PacketInterceptor;
+import dev.whynotac.paper.network.PaperNetworkBridge;
 import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.verdict.PaperVerdictBridge;
 import dev.whynotac.paper.world.EntityVerifier;
@@ -19,6 +21,8 @@ import dev.whynotac.paper.world.InventoryVerifier;
 import dev.whynotac.paper.world.SelfVerifier;
 import dev.whynotac.paper.world.WorldVerifier;
 import dev.whynotac.protocol.latency.LatencySnapshot;
+import dev.whynotac.protocol.network.NetworkEnvelope;
+import dev.whynotac.protocol.network.NetworkSecret;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
@@ -65,6 +69,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private StorageManager storage;
     private AiAdvisor aiAdvisor;
     private AuthPluginHook authPluginHook;
+    private MetricsExporter metricsExporter;
+    private PaperNetworkBridge networkBridge;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
@@ -188,16 +194,56 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             }, 20L, 20L);
         }
 
+        boolean healthWatchdog = getConfig().getBoolean("observability.health-watchdog", true);
+        if (healthWatchdog) {
+            MetricsExporter.HealthWatchdog watchdog = new MetricsExporter.HealthWatchdog();
+            Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> watchdog.evaluateTransition(health()).ifPresent(msg -> {
+                if (msg.contains("RECOVERED")) {
+                    getLogger().info(msg);
+                } else {
+                    getLogger().warning(msg);
+                }
+            }), 100L, 100L);
+        }
+        int metricsPort = getConfig().getInt("observability.metrics-http-port", 0);
+        if (metricsPort > 0) {
+            try {
+                metricsExporter = MetricsExporter.startLocalHttp("127.0.0.1", metricsPort, this::metricsSnapshot);
+                getLogger().info("WhyNotAC OpenMetrics endpoint listening on http://127.0.0.1:" + metricsExporter.boundPort() + "/metrics");
+            } catch (IOException e) {
+                getLogger().log(Level.WARNING, "WhyNotAC failed to bind metrics HTTP port " + metricsPort, e);
+            }
+        }
+        if (getConfig().getBoolean("network-bridge.enabled", false)) {
+            String secretName = getConfig().getString("network-bridge.secret-file", "network-secret.key");
+            long maxSkewMs = Math.max(1L, getConfig().getLong("network-bridge.max-clock-skew-seconds", 60L)) * 1000L;
+            try {
+                byte[] secret = NetworkSecret.loadOrCreate(getDataPath().resolve(secretName));
+                networkBridge = new PaperNetworkBridge(
+                        secret, maxSkewMs, registry::byPlayer, aiAdvisor.baselineModel(), verdict.banWaveQueue(),
+                        frame -> getServer().sendPluginMessage(this, NetworkEnvelope.CHANNEL, frame),
+                        System::currentTimeMillis, getLogger());
+                PaperNetworkBridge.registerBukkitChannels(this, networkBridge);
+                getLogger().info("WhyNotAC Velocity companion network bridge enabled (" + NetworkEnvelope.CHANNEL + ")");
+            } catch (IOException e) {
+                getLogger().log(Level.WARNING, "WhyNotAC failed to initialize network bridge secret", e);
+            }
+        }
+
         getServer().getPluginManager().registerEvents(this, this);
-        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, this::health, cases,
+        WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, this::health,
+                () -> MetricsExporter.formatOpenMetrics(metricsSnapshot()), cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
                 new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, tagsTracker, this),
                 new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage,
                         subject -> {
                             aiAdvisor.forget(subject);
                             verdict.banWaveQueue().cancelSubject(subject, System.currentTimeMillis());
+                            if (networkBridge != null) {
+                                networkBridge.sendEnforcementNotice(subject, "GDPR_FORGET", "", "", 0L, "gdpr erasure");
+                            }
                         }, this),
-                verdict, storage, aiAdvisor, this);
+                verdict, storage, aiAdvisor, networkBridge, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -244,6 +290,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }
         if (cases != null) {
             cases.close();
+        }
+        if (metricsExporter != null) {
+            metricsExporter.close();
         }
     }
 
@@ -308,6 +357,30 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 fb.locked(),
                 transactionLoop.maxWallMicros(),
                 storage != null));
+    }
+
+    private MetricsExporter.Snapshot metricsSnapshot() {
+        Diagnostics.Totals totals = diagnostics.totals();
+        return new MetricsExporter.Snapshot(
+                registry.sessions().size(),
+                totals.sessions(),
+                registry.queuedEvents(),
+                totals.inbound(),
+                totals.outbound(),
+                totals.lostEvents(),
+                totals.inboundDivergences(),
+                totals.outboundDivergences(),
+                listenerErrors.get(),
+                verdict.cases(),
+                cases == null ? 0L : cases.storedCount(),
+                cases == null ? 0L : cases.droppedCount(),
+                recordings == null ? 0L : recordings.failedRecordings(),
+                recordings == null ? 0L : recordings.rejectedBlocks(),
+                verdict.banWaveQueue().pendingCount(),
+                transactionLoop.meanWallMicros(),
+                transactionLoop.maxWallMicros(),
+                verdict.margins(),
+                health());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

@@ -11,6 +11,7 @@
  *   whynotac-storage ──► whynotac-verdict, whynotac-recording (hash-chained audit ledger, profile persistence, four-eyes review)
  *   whynotac-ai ──► whynotac-analysis, whynotac-verdict, whynotac-math (S/D baselines, e-value probes, triage; non-punitive)
  *   whynotac-paper ──► whynotac-ai, whynotac-storage, whynotac-verdict, whynotac-analysis, whynotac-world, whynotac-recording, whynotac-protocol
+ *   whynotac-velocity ──► whynotac-protocol, whynotac-math (Velocity 3.x proxy companion, NET-01 / NET-22)
  *   whynotac-conformance ──► whynotac-math (+ vanilla 1.21.11 server code, test-only)
  *   whynotac-bench ──► everything (JMH micro-benchmarks, never shipped)
  *   whynotac-interop-probe: test-only Paper plugin for the live interop E2E (never shipped)
@@ -50,6 +51,7 @@ include(
     "whynotac-storage",
     "whynotac-ai",
     "whynotac-paper",
+    "whynotac-velocity",
     "whynotac-conformance",
     "whynotac-bench",
     "whynotac-interop-probe",
