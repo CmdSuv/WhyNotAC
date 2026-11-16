@@ -142,7 +142,7 @@ def verify_subject_requests(work_dir, recording, dump_path, check):
 
 def verify_console_privacy(log, work_dir, recording, check):
     """/whynotac privacy on the live server: the player's recording and cases are found, then deleted."""
-    log = re.sub(r"\x1b\[[0-9;]*m", "", log)
+    log = re.sub(r"(?m)^(?:> *| +)\n", "", re.sub(r"\x1b\[[0-9;]*m|\r", "", log))
     player = str(uuid.UUID(bytes=hashlib.md5(b"OfflinePlayer:WhyNotProbe").digest(), version=3))
     results = re.findall(r"WhyNotAC privacy (find|forget) (\S+)(.*)\n.*?INFO\]: recordings: (.*)\n.*?INFO\]: cases: (\d+) (.*)", log)
     check([(a, u) for a, u, *_ in results] == [("find", player), ("forget", player), ("find", player)],

@@ -48,6 +48,10 @@ final class TickLook {
     /** An action of the tick was sent in this interval: movement packets after it are the tick's own. */
     private boolean acted;
 
+    void onBound(int entityId) {
+        replies.onBound(entityId);
+    }
+
     void onOutbound(TimelineEvent.Outbound out) {
         replies.onOutbound(out);
         if (out.packet() instanceof ClientboundPacket.Login || out.packet() instanceof ClientboundPacket.Respawn) {

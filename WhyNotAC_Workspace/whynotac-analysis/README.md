@@ -18,6 +18,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
 | `click-pattern` | S | Savaş tıklama istatistikleri (`RunningMoments`, `ClientTickEnd` çerçevelemesi): kazı/kullanım/dürtme hariç sürekli yüksek CPS (`sustained-cps`), sıfıra yakın tik varyansı (`constant-interval`), sabit milisaniyeli dönem-2/3 donanım makrosu (`macro-periodicity`); ceza vermez |
 | `aim-pattern` | S | Savaş nişan istatistikleri (`TickLook`, `MouseTurnModel`): dürbün, büyük `|yaw|` çözünürlük kaybı, ±90° sıkıştırması, binek/teleport ve sinematik/kesirli fare muafiyetleri dışlandıktan sonra tekrarlayan vur-geri-dön (`hit-and-snapback`), sabit açısal hızlı takip (`robotic-tracking`) ve yalnızca savaşta bozulan fare kafesi (`combat-lattice-break`); ceza vermez |
+| `transaction-order` | P-M | Seçici transaction tutma/geciktirme (`ping-after-later-teleport-accept`: kendisinden sonra gönderilen bir teleport onaylandıktan sonra yanıtlanan transaction; `ping-delayed-past-keepalive`: kendisinden sonraki bir `KeepAlive` yanıtı döndükten sonra 12 tik geçmesine rağmen yanıtlanmayan transaction) |
 
 ### Paylar (`VAL-4`)
 

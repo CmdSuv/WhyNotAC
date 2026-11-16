@@ -85,6 +85,7 @@ public final class TickFramingCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
+            case TimelineEvent.Bound bound -> state.replies.onBound(bound.entityId());
             case TimelineEvent.Outbound out -> state.replies.onOutbound(out);
             case TimelineEvent.Acknowledged ack -> state.replies.onAcknowledged(ack);
             case TimelineEvent.Inbound in -> onInbound(session, state, in);

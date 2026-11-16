@@ -109,6 +109,7 @@ public final class ActionGrammarCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
+            case TimelineEvent.Bound bound -> state.replies.onBound(bound.entityId());
             case TimelineEvent.Outbound out -> {
                 state.replies.onOutbound(out);
                 state.menu.onOutbound(out);

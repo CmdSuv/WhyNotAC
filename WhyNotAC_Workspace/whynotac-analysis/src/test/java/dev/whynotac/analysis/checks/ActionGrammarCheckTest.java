@@ -193,6 +193,8 @@ class ActionGrammarCheckTest {
         move();
         tickEnd();
         // a rotation, and a teleport of the vehicle the player left: their replies, then the attack
+        out(new ClientboundPacket.SetPassengers(40, new int[] {SELF}));
+        out(new ClientboundPacket.SetPassengers(40, new int[0]));
         out(new ClientboundPacket.PlayerRotation(90F, false, 0F, false));
         out(new ClientboundPacket.TeleportEntity(40, Vec3d.ZERO, Vec3d.ZERO, 0F, 0F, Set.of(), true));
         sync();

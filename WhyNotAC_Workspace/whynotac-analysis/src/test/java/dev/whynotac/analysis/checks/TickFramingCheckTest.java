@@ -411,4 +411,38 @@ class TickFramingCheckTest {
         tickEnd();
         assertEquals(first, evidence.getFirst().fingerprint());
     }
+
+    @Test
+    void teleportOfUnriddenEntityDoesNotGrantVehicleToken() {
+        nativeClient();
+        deliver(new TimelineEvent.Bound(next(), 0, java.util.UUID.randomUUID(), "me", 1));
+        deliver(new TimelineEvent.Outbound(next(), 0,
+                new ClientboundPacket.Login(1, 8, new ClientboundPacket.Dimension("minecraft:overworld", -64, 384), 0)));
+        tickEnd();
+        // Entity 99 was never ridden by the player: its teleport does not explain an extra PosRot packet.
+        deliver(new TimelineEvent.Outbound(next(), seq,
+                new ClientboundPacket.TeleportEntity(99, Vec3d.ZERO, Vec3d.ZERO, 0F, 0F, Set.of(), true)));
+        move();
+        move();
+        tickEnd();
+        assertEquals(1, evidence.size());
+        assertEquals("0", evidence.getFirst().details().get("vehicleAllowance"));
+    }
+
+    @Test
+    void teleportOfRiddenVehicleGrantsVehicleToken() {
+        nativeClient();
+        deliver(new TimelineEvent.Bound(next(), 0, java.util.UUID.randomUUID(), "me", 1));
+        deliver(new TimelineEvent.Outbound(next(), 0,
+                new ClientboundPacket.Login(1, 8, new ClientboundPacket.Dimension("minecraft:overworld", -64, 384), 0)));
+        deliver(new TimelineEvent.Outbound(next(), 0, new ClientboundPacket.SetPassengers(40, new int[] {1})));
+        deliver(new TimelineEvent.Outbound(next(), 0, new ClientboundPacket.SetPassengers(40, new int[0])));
+        tickEnd();
+        deliver(new TimelineEvent.Outbound(next(), seq,
+                new ClientboundPacket.TeleportEntity(40, Vec3d.ZERO, Vec3d.ZERO, 0F, 0F, Set.of(), true)));
+        move();
+        move();
+        tickEnd();
+        assertEquals(List.of(), evidence);
+    }
 }

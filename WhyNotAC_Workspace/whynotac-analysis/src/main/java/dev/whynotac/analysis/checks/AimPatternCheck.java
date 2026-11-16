@@ -140,6 +140,7 @@ public final class AimPatternCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
+            case TimelineEvent.Bound bound -> state.look.onBound(bound.entityId());
             case TimelineEvent.Outbound out -> {
                 state.look.onOutbound(out);
                 if (out.packet() instanceof ClientboundPacket.Login || out.packet() instanceof ClientboundPacket.Respawn

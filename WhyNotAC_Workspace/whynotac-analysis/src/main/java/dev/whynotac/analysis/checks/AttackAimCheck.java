@@ -93,6 +93,7 @@ public final class AttackAimCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
+            case TimelineEvent.Bound bound -> state.look.onBound(bound.entityId());
             case TimelineEvent.Outbound out -> state.look.onOutbound(out);
             case TimelineEvent.Acknowledged ack -> {
                 state.look.onAcknowledged(ack);

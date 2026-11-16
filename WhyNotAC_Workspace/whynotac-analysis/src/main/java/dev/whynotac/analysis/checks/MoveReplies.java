@@ -4,17 +4,20 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.TimelineEvent;
 import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Which movement packets of a client tick may be replies to the server rather than the tick's own
  * ({@link TickFramingCheck} has the client's rules): the reply to a teleport, paired with its accept by id,
  * and allowances ("tokens") for rotation-only and position-and-rotation packets, one per rotation packet
- * and per entity teleport (conservatively any entity) the client may have handled in the interval. A token
- * lasts from the moment the server sent the packet until the end of the interval in which the client
- * acknowledged a transaction sent after it.
+ * and per vehicle teleport (an entity the player may have ridden since login, narrowed from {@code SetPassengers}
+ * and {@code Login}) the client may have handled in the interval. A token lasts from the moment the server
+ * sent the packet until the end of the interval in which the client acknowledged a transaction sent after it.
  *
  * <p>Fed every event of one session, in order; {@link #closeInterval} at each ClientTickEnd.
  */
@@ -23,6 +26,7 @@ final class MoveReplies {
     static final int MAX_TOKENS = 256;
     static final int MAX_TRACKED_PINGS = 4_096;
     static final int MAX_PENDING_TELEPORTS = 1_024;
+    static final int MAX_VEHICLES = 256;
 
     private static final class Token {
         final long sequence;
@@ -42,7 +46,13 @@ final class MoveReplies {
         }
     };
     /** Teleport ids the server sent and the client has not accepted yet. */
-    private final java.util.Set<Integer> pendingTeleports = new java.util.LinkedHashSet<>();
+    private final Set<Integer> pendingTeleports = new java.util.LinkedHashSet<>();
+    private int selfId = -1;
+    /** Passenger -> vehicle edges (server order) for transitive root-vehicle tracking. */
+    private final Map<Integer, Integer> parentOf = new HashMap<>();
+    /** Entities the player may have ridden since login (or saturated if too many). */
+    private final Set<Integer> riddenVehicles = new HashSet<>();
+    private boolean vehiclesSaturated;
     private boolean saturated;
     /**
      * A teleport the server sent was accepted and no movement packet has followed yet. Not cleared by
@@ -51,17 +61,61 @@ final class MoveReplies {
      */
     private boolean afterAccept;
 
+    void onBound(int entityId) {
+        if (entityId > 0) {
+            selfId = entityId;
+        }
+    }
+
     void onOutbound(TimelineEvent.Outbound out) {
         switch (out.packet()) {
+            case ClientboundPacket.Login login -> {
+                selfId = login.entityId();
+                parentOf.clear();
+                riddenVehicles.clear();
+                vehiclesSaturated = false;
+            }
             case ClientboundPacket.PlayerPosition teleport -> {
                 if (pendingTeleports.size() < MAX_PENDING_TELEPORTS) {
                     pendingTeleports.add(teleport.teleportId());
                 }
             }
             case ClientboundPacket.PlayerRotation ignored -> addToken(rotationTokens, out.sequence());
-            case ClientboundPacket.TeleportEntity ignored -> addToken(vehicleTokens, out.sequence()); // conservative: any entity
+            case ClientboundPacket.SetPassengers passengers -> onSetPassengers(passengers);
+            case ClientboundPacket.TeleportEntity teleport -> {
+                if (selfId < 0 || vehiclesSaturated || riddenVehicles.contains(teleport.entityId())) {
+                    addToken(vehicleTokens, out.sequence());
+                }
+            }
             case ClientboundPacket.Ping ping -> pingSequence.put(ping.id(), out.sequence());
             default -> { }
+        }
+    }
+
+    private void onSetPassengers(ClientboundPacket.SetPassengers passengers) {
+        int vehicleId = passengers.vehicleId();
+        parentOf.values().removeIf(v -> v == vehicleId);
+        for (int p : passengers.passengerIds()) {
+            if (parentOf.size() < MAX_TRACKED_PINGS) {
+                parentOf.put(p, vehicleId);
+            }
+        }
+        if (selfId < 0) {
+            return;
+        }
+        // Walk upward from selfId to collect any vehicle or stacked root vehicle it may now ride.
+        int cursor = selfId;
+        for (int depth = 0; depth < 8; depth++) {
+            Integer parent = parentOf.get(cursor);
+            if (parent == null) {
+                break;
+            }
+            if (riddenVehicles.size() >= MAX_VEHICLES) {
+                vehiclesSaturated = true;
+                break;
+            }
+            riddenVehicles.add(parent);
+            cursor = parent;
         }
     }
 

@@ -27,7 +27,8 @@ public final class Checks {
             Map.entry(ActionGrammarCheck.ID, ActionGrammarCheck::new),
             Map.entry(MovementCheck.ID, MovementCheck::new),
             Map.entry(ClickPatternCheck.ID, ClickPatternCheck::new),
-            Map.entry(AimPatternCheck.ID, AimPatternCheck::new));
+            Map.entry(AimPatternCheck.ID, AimPatternCheck::new),
+            Map.entry(TransactionOrderCheck.ID, (sink, replicas) -> new TransactionOrderCheck(sink)));
     private static final Map<String, Integer> VERSIONS = Map.ofEntries(
             Map.entry(TickFramingCheck.ID, TickFramingCheck.VERSION),
             Map.entry(ClientClockCheck.ID, ClientClockCheck.VERSION),
@@ -39,7 +40,8 @@ public final class Checks {
             Map.entry(ActionGrammarCheck.ID, ActionGrammarCheck.VERSION),
             Map.entry(MovementCheck.ID, MovementCheck.VERSION),
             Map.entry(ClickPatternCheck.ID, ClickPatternCheck.VERSION),
-            Map.entry(AimPatternCheck.ID, AimPatternCheck.VERSION));
+            Map.entry(AimPatternCheck.ID, AimPatternCheck.VERSION),
+            Map.entry(TransactionOrderCheck.ID, TransactionOrderCheck.VERSION));
 
     private Checks() {}
 
@@ -48,7 +50,7 @@ public final class Checks {
         return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink), new AttackReachCheck(sink, replicas), new AttackAimCheck(sink, replicas),
                 new UseAimCheck(sink, replicas), new BreakTimeCheck(sink, replicas), new PredictionSequenceCheck(sink, replicas),
                 new ActionGrammarCheck(sink, replicas), new MovementCheck(sink, replicas),
-                new ClickPatternCheck(sink, replicas), new AimPatternCheck(sink, replicas));
+                new ClickPatternCheck(sink, replicas), new AimPatternCheck(sink, replicas), new TransactionOrderCheck(sink));
     }
 
     /** The check with this id, behind a fresh set of the replicas it may read, or null. */
