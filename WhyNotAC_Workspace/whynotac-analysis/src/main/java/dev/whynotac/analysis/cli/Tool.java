@@ -31,7 +31,68 @@ public final class Tool {
         if (args.length == 2 && args[0].equals("verify")) {
             System.exit(verify(Path.of(args[1]), System.out, System.err));
         }
+        if (args.length == 2 && args[0].equals("explain")) {
+            System.exit(explain(Path.of(args[1]), System.out, System.err));
+        }
+        if (args.length == 2 && args[0].equals("audit")) {
+            System.exit(audit(Path.of(args[1]), System.out, System.err));
+        }
         RecordingTool.main(args);
+    }
+
+    static int explain(Path dossier, PrintStream out, PrintStream err) {
+        String json;
+        try {
+            json = Files.readString(dossier, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            err.println("cannot read " + dossier + ": " + e.getMessage());
+            return 1;
+        }
+        String id = field(json, "id");
+        String player = field(json, "playerName");
+        String identity = field(json, "identity");
+        String check = field(json, "check");
+        String evidenceClass = field(json, "evidenceClass");
+        String lifecycle = field(json, "lifecycle");
+        String summary = field(json, "summary");
+        String fingerprint = field(json, "fingerprint");
+        if (check == null || evidenceClass == null) {
+            err.println("unrecognized dossier JSON: " + dossier);
+            return 1;
+        }
+        String meaning = switch (evidenceClass) {
+            case "P-A" -> "Advantage proof: impossible under vanilla rules with all uncertainties bounded; eligible for corroboration/auto-enforcement when ARMED and authenticated.";
+            case "P-M" -> "Modification proof: client behavior not produced by vanilla client; indicates client modification (soft neutralization/kick only when ARMED, never automatic ban).";
+            case "D" -> "Design statistic: sequential experimental e-value; triggers alerts and human review only.";
+            case "S" -> "Nominal statistic: baseline/behavioral deviation signal; alerts and review priority only (never punitive).";
+            default -> "Context metadata: attached for staff review only.";
+        };
+        out.println("WhyNotAC Case Dossier Explanation");
+        out.println("  Case ID       : " + (id == null ? "unknown" : id));
+        out.println("  Player        : " + (player == null ? "unknown" : player) + " (" + (identity == null ? "UNAUTHENTICATED" : identity) + ")");
+        out.println("  Check         : " + check + " [" + evidenceClass + ", " + (lifecycle == null ? "SHADOW" : lifecycle) + "]");
+        out.println("  Summary       : " + (summary == null ? "" : summary));
+        out.println("  Policy Meaning: " + meaning);
+        if (fingerprint != null) {
+            out.println("  Fingerprint   : " + fingerprint);
+        }
+        out.println("  Re-verify cmd : java -jar WhyNotAC.jar verify " + dossier);
+        return 0;
+    }
+
+    static int audit(Path storageDir, PrintStream out, PrintStream err) {
+        try {
+            Class<?> toolClass = Class.forName("dev.whynotac.storage.AuditLedgerTool");
+            Object result = toolClass.getMethod("verifyLedger", Path.class, PrintStream.class, PrintStream.class)
+                    .invoke(null, storageDir, out, err);
+            return (Integer) result;
+        } catch (ClassNotFoundException e) {
+            err.println("audit ledger verifier requires the full WhyNotAC plugin jar (whynotac-storage missing)");
+            return 1;
+        } catch (ReflectiveOperationException e) {
+            err.println("cannot run audit verifier: " + e.getMessage());
+            return 1;
+        }
     }
 
     static int verify(Path dossier, PrintStream out, PrintStream err) {

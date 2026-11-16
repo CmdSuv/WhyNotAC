@@ -74,6 +74,7 @@ def main():
             verify_inventory(sys.argv[5], check)
             verify_inventory_replica(log, probe, sys.argv[5], check)
             verify_self(log, check)
+            verify_extended_subsystems(log, sys.argv[6], check)
     print("RESULT:", "OK" if not failures else f"{len(failures)} FAILURE(S)")
     sys.exit(1 if failures else 0)
 
@@ -507,6 +508,39 @@ def verify_facts(probe, dump_path, check):
     check(brands == [probe["brand"]] and registrations == [probe["channels"]], f"claimed brand and channels recorded: {brands} {registrations}")
     check(len(infos) == 1 and infos[0]["viewDistance"] == 3 and infos[0]["mainHand"] == "RIGHT" and "en_us" not in open(dump_path).read(),
           f"client settings minimal (no language): {infos}")
+
+
+def verify_extended_subsystems(log, work_dir, check):
+    """Checks AI triage, HealthModel, OpenMetrics exporter, Verdict/BanWave, Storage AuditLedger, and offline CLI."""
+    clean_log = re.sub(r"\x1b\[[0-9;]*m|\r", "", log)
+    check(re.search(r"WhyNotAC AI \(non-punitive\) for WhyNotProbe:", clean_log) is not None,
+          "/whynotac ai reported live non-punitive session moments & shift status")
+    check(re.search(r"WhyNotAC health: GREEN .*all subsystems nominal", clean_log, re.DOTALL) is not None,
+          "/whynotac health reported GREEN")
+    check("whynotac_health_status 0" in clean_log, "/whynotac metrics reported OpenMetrics status=0")
+    check(re.search(r"WhyNotAC verdict:[\s\S]*?armedChecks=\[\][\s\S]*?banWavePending=0", clean_log) is not None,
+          "/whynotac verdict confirmed SHADOW defaults & banWavePending=0")
+    check(re.search(r"WhyNotAC audit ledger valid=true", clean_log) is not None,
+          "/whynotac audit confirmed hash-chained AuditLedger validity")
+
+    stats_m = re.search(r"WhyNotAC stats (\{.*\})", clean_log)
+    check(stats_m is not None, "/whynotac stats emitted JSON")
+    if stats_m:
+        stats = json.loads(stats_m.group(1))
+        check(stats.get("listenerErrors") == 0 and stats.get("lostEvents") == 0
+              and stats.get("health", {}).get("status") == "GREEN",
+              f"stats health is GREEN with 0 errors/losses: {stats.get('health')}")
+
+    audit_path = os.path.join(work_dir, "e2e-audit.json")
+    check(os.path.exists(audit_path), "offline `WhyNotAC.jar audit` produced report")
+    if os.path.exists(audit_path):
+        audit = json.loads(open(audit_path).read())
+        check(audit.get("valid") is True and audit.get("entries", 0) > 0,
+              f"offline `audit` verified signed AuditLedger chain: {audit}")
+
+    explain_path = os.path.join(work_dir, "e2e-explain.txt")
+    check(os.path.exists(explain_path) and "WhyNotAC Case Dossier Explanation" in open(explain_path).read(),
+          "offline `WhyNotAC.jar explain` generated human-readable dossier summary")
 
 
 if __name__ == "__main__":

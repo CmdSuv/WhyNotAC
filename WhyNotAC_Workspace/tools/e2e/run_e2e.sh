@@ -137,12 +137,18 @@ echo "whynotac inventory WhyNotProbe" > "$FIFO"
 echo "whynotac self WhyNotProbe" > "$FIFO"
 echo "whynotac world WhyNotProbe" > "$FIFO"
 echo "whynotac inspect WhyNotProbe" > "$FIFO"
+echo "whynotac ai WhyNotProbe" > "$FIFO"
+echo "whynotac health" > "$FIFO"
+echo "whynotac metrics" > "$FIFO"
 echo "whynotac pipeline WhyNotProbe" > "$FIFO"
 echo "whynotac sessions" > "$FIFO"
 wait "$PROBE"
 sleep 2   # let the server see the disconnect and finalise the recording
 # After the probe: its violation (tick 200) may come later than the commands above on a slow machine.
 echo "whynotac cases" > "$FIFO"
+echo "whynotac verdict" > "$FIFO"
+echo "whynotac audit" > "$FIFO"
+echo "whynotac stats" > "$FIFO"
 sleep 1
 # A data-subject request on the live server's console (docs/privacy/README.md): find, forget, find again.
 # The recordings and dossiers are put back after the stop, so the checks below still have them.
@@ -180,11 +186,17 @@ if [ -n "$RECORDING" ]; then
 fi
 
 # Every dossier is re-verified independently of the server: the same evidence must come out of the recording.
-rm -f "$WORK_DIR/e2e-verify.jsonl"
+rm -f "$WORK_DIR/e2e-verify.jsonl" "$WORK_DIR/e2e-audit.json" "$WORK_DIR/e2e-explain.txt"
 for dossier in "$WORK_DIR"/plugins/WhyNotAC/cases/*.json; do
   [ -e "$dossier" ] || continue
   java -jar "$WORK_DIR/plugins/WhyNotAC.jar" verify "$dossier" >> "$WORK_DIR/e2e-verify.jsonl" || true
+  if [ ! -s "$WORK_DIR/e2e-explain.txt" ]; then
+    java -jar "$WORK_DIR/plugins/WhyNotAC.jar" explain "$dossier" > "$WORK_DIR/e2e-explain.txt" || true
+  fi
 done
+if [ -d "$WORK_DIR/plugins/WhyNotAC/storage" ]; then
+  java -jar "$WORK_DIR/plugins/WhyNotAC.jar" audit "$WORK_DIR/plugins/WhyNotAC/storage" > "$WORK_DIR/e2e-audit.json" || true
+fi
 
 echo "--- server view (whynotac inspect)"
 sed -E 's/\x1b\[[0-9;]*m//g' "$WORK_DIR/e2e-server.log" | grep -E '\[WhyNotAC\]|\[wnprobe\]|== WhyNotAC|WhyNotAC privacy|INFO\]: (recordings|cases): |RTT last|Transactions sent|View |Packets in|Last move|Last rotation|Keys W|Anomalies|WhyNotAC sessions|PlayerSession\[|Pipeline of|^\[[0-9:]+ INFO\]: +[0-9]+ '
