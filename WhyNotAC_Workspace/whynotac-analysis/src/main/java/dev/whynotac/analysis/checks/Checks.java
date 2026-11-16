@@ -16,26 +16,30 @@ import java.util.function.BiFunction;
  */
 public final class Checks {
 
-    private static final Map<String, BiFunction<EvidenceSink, Replicas, TimelineListener>> FACTORIES = Map.of(
-            TickFramingCheck.ID, (sink, replicas) -> new TickFramingCheck(sink),
-            ClientClockCheck.ID, (sink, replicas) -> new ClientClockCheck(sink),
-            AttackReachCheck.ID, AttackReachCheck::new,
-            AttackAimCheck.ID, AttackAimCheck::new,
-            UseAimCheck.ID, UseAimCheck::new,
-            BreakTimeCheck.ID, BreakTimeCheck::new,
-            PredictionSequenceCheck.ID, PredictionSequenceCheck::new,
-            ActionGrammarCheck.ID, ActionGrammarCheck::new,
-            MovementCheck.ID, MovementCheck::new);
-    private static final Map<String, Integer> VERSIONS = Map.of(
-            TickFramingCheck.ID, TickFramingCheck.VERSION,
-            ClientClockCheck.ID, ClientClockCheck.VERSION,
-            AttackReachCheck.ID, AttackReachCheck.VERSION,
-            AttackAimCheck.ID, AttackAimCheck.VERSION,
-            UseAimCheck.ID, UseAimCheck.VERSION,
-            BreakTimeCheck.ID, BreakTimeCheck.VERSION,
-            PredictionSequenceCheck.ID, PredictionSequenceCheck.VERSION,
-            ActionGrammarCheck.ID, ActionGrammarCheck.VERSION,
-            MovementCheck.ID, MovementCheck.VERSION);
+    private static final Map<String, BiFunction<EvidenceSink, Replicas, TimelineListener>> FACTORIES = Map.ofEntries(
+            Map.entry(TickFramingCheck.ID, (sink, replicas) -> new TickFramingCheck(sink)),
+            Map.entry(ClientClockCheck.ID, (sink, replicas) -> new ClientClockCheck(sink)),
+            Map.entry(AttackReachCheck.ID, AttackReachCheck::new),
+            Map.entry(AttackAimCheck.ID, AttackAimCheck::new),
+            Map.entry(UseAimCheck.ID, UseAimCheck::new),
+            Map.entry(BreakTimeCheck.ID, BreakTimeCheck::new),
+            Map.entry(PredictionSequenceCheck.ID, PredictionSequenceCheck::new),
+            Map.entry(ActionGrammarCheck.ID, ActionGrammarCheck::new),
+            Map.entry(MovementCheck.ID, MovementCheck::new),
+            Map.entry(ClickPatternCheck.ID, ClickPatternCheck::new),
+            Map.entry(AimPatternCheck.ID, AimPatternCheck::new));
+    private static final Map<String, Integer> VERSIONS = Map.ofEntries(
+            Map.entry(TickFramingCheck.ID, TickFramingCheck.VERSION),
+            Map.entry(ClientClockCheck.ID, ClientClockCheck.VERSION),
+            Map.entry(AttackReachCheck.ID, AttackReachCheck.VERSION),
+            Map.entry(AttackAimCheck.ID, AttackAimCheck.VERSION),
+            Map.entry(UseAimCheck.ID, UseAimCheck.VERSION),
+            Map.entry(BreakTimeCheck.ID, BreakTimeCheck.VERSION),
+            Map.entry(PredictionSequenceCheck.ID, PredictionSequenceCheck.VERSION),
+            Map.entry(ActionGrammarCheck.ID, ActionGrammarCheck.VERSION),
+            Map.entry(MovementCheck.ID, MovementCheck.VERSION),
+            Map.entry(ClickPatternCheck.ID, ClickPatternCheck.VERSION),
+            Map.entry(AimPatternCheck.ID, AimPatternCheck.VERSION));
 
     private Checks() {}
 
@@ -43,7 +47,8 @@ public final class Checks {
     public static List<TimelineListener> all(EvidenceSink sink, Replicas replicas) {
         return List.of(new TickFramingCheck(sink), new ClientClockCheck(sink), new AttackReachCheck(sink, replicas), new AttackAimCheck(sink, replicas),
                 new UseAimCheck(sink, replicas), new BreakTimeCheck(sink, replicas), new PredictionSequenceCheck(sink, replicas),
-                new ActionGrammarCheck(sink, replicas), new MovementCheck(sink, replicas));
+                new ActionGrammarCheck(sink, replicas), new MovementCheck(sink, replicas),
+                new ClickPatternCheck(sink, replicas), new AimPatternCheck(sink, replicas));
     }
 
     /** The check with this id, behind a fresh set of the replicas it may read, or null. */

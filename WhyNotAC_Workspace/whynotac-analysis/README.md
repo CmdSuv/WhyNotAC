@@ -16,6 +16,8 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `attack-aim` | P-M | Tikin bakışının kutusuyla hiç kesişemeyeceği bir varlığa saldırı (bakmadan vuran ya da tek bakışla birden çok varlığa vuran client) ya da bakışın ancak onu kesin durduran bir bloğun ardında değdiği varlığa saldırı (duvar arkasından vuran client) |
 | `action-grammar` | P-M | Ardından ana elin sallanması gelmeyen saldırı; tikin kendi hareket paketinden sonra gelen saldırı, eşya kullanma, blok kırma ya da hotbar seçimi; sunucunun açtığı bir menü ekrandayken eylem ya da yürüme tuşu |
 | `movement` | P-M | Yaya hareket: hiçbir vanilla client'ın gönderemeyeceği konum, bayrak ya da koşma/girdi paketi; eşya kullanırken saldırı, etkileşim ya da yeni kullanım |
+| `click-pattern` | S | Savaş tıklama istatistikleri (`RunningMoments`, `ClientTickEnd` çerçevelemesi): kazı/kullanım/dürtme hariç sürekli yüksek CPS (`sustained-cps`), sıfıra yakın tik varyansı (`constant-interval`), sabit milisaniyeli dönem-2/3 donanım makrosu (`macro-periodicity`); ceza vermez |
+| `aim-pattern` | S | Savaş nişan istatistikleri (`TickLook`, `MouseTurnModel`): dürbün, büyük `|yaw|` çözünürlük kaybı, ±90° sıkıştırması, binek/teleport ve sinematik/kesirli fare muafiyetleri dışlandıktan sonra tekrarlayan vur-geri-dön (`hit-and-snapback`), sabit açısal hızlı takip (`robotic-tracking`) ve yalnızca savaşta bozulan fare kafesi (`combat-lattice-break`); ceza vermez |
 
 ### Paylar (`VAL-4`)
 
@@ -695,12 +697,8 @@ saati birlikte yanlışsa bu görülmez. Değer `/whynotac stats`'ta `serverCloc
 
 ## Planlanan aileler
 
-- **Aim:** `MouseTurnModel` tersine çevirme ile imleç sayımı uzayına geçiş (hassasiyet tahmini,
-  çok-kareli float birikimini hesaba katan kafes uyumu), açısal hız/ivme/jerk dağılımları,
-  hedefe kilitlenme ve aşırı-düzeltme imzaları, "mükemmel rastgelelik" testleri
-  (entropi, otokorelasyon, spektral düzlük).
-- **Tıklama:** saldırı/swing aralıklarının dağılımı (kaydırmalı Welford momentleri, basıklık,
-  çarpıklık), donanım makrosu periyodikliği, insan kas sınırları.
+- **Aim (devam):** çok-kareli entropi / otokorelasyon / spektral düzlük ve aşırı-düzeltme imzaları (`aim-pattern` içinde temel kafes bozulması, sabit açısal hız ve vur-geri-dön ilk sürüm olarak SHADOW'da açıldı).
+- **Tıklama (devam):** insan kas sınırı kalibrasyonu ve profil birleştirme (`click-pattern` içinde `RunningMoments` ile `sustained-cps`, `constant-interval`, `macro-periodicity` SHADOW'da açıldı).
 - **Zamanlama:** `ClientTickEnd` çerçevelemesiyle Timer/Blink, transaction tutma, paket
   patlamaları.
 - **Etkileşim:** erişim/hitbox (bit-tam `viewVector` ışın izleme), görüş hattı, envanter zamanlaması.
