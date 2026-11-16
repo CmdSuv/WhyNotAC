@@ -18,9 +18,11 @@ import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.recording.write.RecordingStore;
+import dev.whynotac.storage.StorageManager;
 import dev.whynotac.verdict.SecondVerifier;
 import dev.whynotac.verdict.VerdictConfig;
 import dev.whynotac.verdict.VerdictEngine;
+import net.minecraft.SharedConstants;
 import dev.whynotac.world.ClientEntitiesTracker;
 import dev.whynotac.world.ClientInventoryTracker;
 import dev.whynotac.world.ClientSelfTracker;
@@ -56,6 +58,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private PacketInterceptor interceptor;
     private RecordingStore recordings;
     private VerdictEngine verdict;
+    private StorageManager storage;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
@@ -106,6 +109,16 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         verdict.addCaseListener(alerts);
         PaperVerdictBridge verdictBridge = new PaperVerdictBridge(this, verdictConfig);
         verdict.addEnforcementListener(verdictBridge);
+        try {
+            String buildTag = getPluginMeta().getVersion() + "-p" + SharedConstants.getProtocolVersion();
+            storage = new StorageManager(getDataPath().resolve("storage"), buildTag, getLogger());
+            storage.restoreFalseBanBudget(verdict.falseBanBudget(), verdictConfig.falseBanBudgetWindowMillis(), System.currentTimeMillis());
+            verdict.addCaseListener(storage);
+            verdict.addEnforcementListener(storage);
+        } catch (IOException e) {
+            getLogger().log(Level.SEVERE, "WhyNotAC immutable storage audit ledger failed to initialize; suppressing active enforcement to SHADOW", e);
+            verdict.circuitBreaker().setKillSwitch(true, "storage ledger error: " + e.getMessage());
+        }
         if (verdictConfig.mitigationsEnabled()) {
             getServer().getPluginManager().registerEvents(verdictBridge, this);
         }
@@ -155,7 +168,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         WhyNotCommand command = new WhyNotCommand(interceptor, registry, diagnostics, this::stats, cases,
                 new WorldVerifier(interceptor, worldTracker, this), new EntityVerifier(interceptor, entitiesTracker, this),
                 new InventoryVerifier(interceptor, inventoryTracker, ItemPrototypes.vanilla(), this), new SelfVerifier(interceptor, selfTracker, tagsTracker, this),
-                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, this), verdict, this);
+                new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage, this), verdict, storage, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -196,6 +209,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }
         if (verdict != null) {
             verdict.close();
+        }
+        if (storage != null) {
+            storage.close();
         }
         if (cases != null) {
             cases.close();

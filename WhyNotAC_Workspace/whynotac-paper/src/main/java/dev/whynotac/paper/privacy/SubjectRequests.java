@@ -2,6 +2,7 @@ package dev.whynotac.paper.privacy;
 
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.recording.cli.RecordingTool;
+import dev.whynotac.storage.StorageManager;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -30,13 +31,19 @@ public final class SubjectRequests {
     private final Path recordings;
     private final Path secret;
     private final CaseStore cases;
+    private final StorageManager storage;
     private final Plugin plugin;
     private final AtomicBoolean busy = new AtomicBoolean();
 
     public SubjectRequests(Path recordings, Path secret, CaseStore cases, Plugin plugin) {
+        this(recordings, secret, cases, null, plugin);
+    }
+
+    public SubjectRequests(Path recordings, Path secret, CaseStore cases, StorageManager storage, Plugin plugin) {
         this.recordings = recordings;
         this.secret = secret;
         this.cases = cases;
+        this.storage = storage;
         this.plugin = plugin;
     }
 
@@ -97,7 +104,23 @@ public final class SubjectRequests {
                         + (delete ? ", deleted rows " + result.deletedRows() + ", deleted dossiers " + result.deletedDossiers()
                                 : forget ? " (dry run: nothing deleted)" : "")
                         + (result.failures().isEmpty() ? "" : ", for manual review " + result.failures()));
-                boolean ok = recordingsClean && result.failures().isEmpty();
+                boolean storageClean = true;
+                if (storage != null) {
+                    try {
+                        if (delete) {
+                            boolean deletedProfile = storage.forgetSubject(subject, System.currentTimeMillis());
+                            lines.add("storage: profile deleted=" + deletedProfile + ", ledger erasure recorded");
+                        } else {
+                            boolean present = storage.profiles().find(subject).isPresent();
+                            lines.add("storage: profile " + (present ? "present" : "none")
+                                    + (forget ? " (dry run: nothing deleted)" : ""));
+                        }
+                    } catch (java.io.IOException e) {
+                        storageClean = false;
+                        lines.add("storage: failed: " + e.getMessage());
+                    }
+                }
+                boolean ok = recordingsClean && storageClean && result.failures().isEmpty();
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     busy.set(false);
                     sender.sendMessage(Component.text("WhyNotAC privacy " + action + " " + subject + (ok ? "" : " (incomplete: see below)"),

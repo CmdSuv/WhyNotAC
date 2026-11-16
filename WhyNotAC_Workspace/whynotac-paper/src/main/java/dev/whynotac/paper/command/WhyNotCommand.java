@@ -12,6 +12,9 @@ import dev.whynotac.protocol.latency.LatencySnapshot;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
+import dev.whynotac.storage.AuditLedger;
+import dev.whynotac.storage.ReviewWorkflow;
+import dev.whynotac.storage.StorageManager;
 import dev.whynotac.verdict.CircuitBreaker;
 import dev.whynotac.verdict.FalseBanBudget;
 import dev.whynotac.verdict.VerdictConfig;
@@ -23,6 +26,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -49,11 +53,12 @@ public final class WhyNotCommand implements BasicCommand {
     private final SelfVerifier self;
     private final SubjectRequests privacy;
     private final VerdictEngine verdict;
+    private final StorageManager storage;
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
             CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory, SelfVerifier self, SubjectRequests privacy,
-            VerdictEngine verdict, org.bukkit.plugin.Plugin plugin) {
+            VerdictEngine verdict, StorageManager storage, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
@@ -65,6 +70,7 @@ public final class WhyNotCommand implements BasicCommand {
         this.self = self;
         this.privacy = privacy;
         this.verdict = verdict;
+        this.storage = storage;
         this.plugin = plugin;
     }
 
@@ -216,8 +222,67 @@ public final class WhyNotCommand implements BasicCommand {
                 sender.sendMessage(Component.text("WhyNotAC circuit tripped=" + cb.tripped() + " killSwitch=" + cb.killSwitchActive()
                         + " recentEnforced=" + cb.recentEnforcedSubjects(), NamedTextColor.GRAY));
             }
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("audit")) {
+            if (storage == null) {
+                sender.sendMessage(Component.text("WhyNotAC storage ledger unavailable", NamedTextColor.RED));
+                return;
+            }
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                try {
+                    AuditLedger.ChainVerification v = storage.ledger().verify();
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(Component.text(
+                            "WhyNotAC audit ledger valid=" + v.valid() + " entries=" + v.entryCount()
+                                    + " lastSeq=" + v.lastSequence() + " head=" + v.headHash().substring(0, 12)
+                                    + (v.valid() ? "" : " error=" + v.failureReason()),
+                            v.valid() ? NamedTextColor.GREEN : NamedTextColor.RED)));
+                } catch (java.io.IOException e) {
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(Component.text(
+                            "WhyNotAC audit verify error: " + e.getMessage(), NamedTextColor.RED)));
+                }
+            });
+        } else if (args.length >= 2 && args[0].equalsIgnoreCase("review")) {
+            if (storage == null) {
+                sender.sendMessage(Component.text("WhyNotAC storage workflow unavailable", NamedTextColor.RED));
+                return;
+            }
+            String casePrefix = args[1];
+            String reviewer = sender.getName();
+            String sub = args.length >= 3 ? args[2].toLowerCase(Locale.ROOT) : "status";
+            String notes = args.length > 3 ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length)) : "";
+            cases.find(casePrefix, found -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (found.isEmpty()) {
+                    sender.sendMessage(Component.text("No single case starts with " + casePrefix, NamedTextColor.RED));
+                    return;
+                }
+                String caseId = found.get().id();
+                long now = System.currentTimeMillis();
+                try {
+                    ReviewWorkflow.ReviewRecord rec = switch (sub) {
+                        case "pass1" -> storage.reviews().recordFirstReview(caseId, reviewer, notes, now);
+                        case "confirm" -> storage.reviews().confirmSecondReview(caseId, reviewer, notes, now);
+                        case "appeal" -> storage.reviews().submitAppeal(caseId, notes, now);
+                        case "uphold" -> storage.reviews().resolveAppeal(caseId, reviewer, true, notes, now);
+                        case "overturn" -> {
+                            ReviewWorkflow.ReviewRecord r = storage.reviews().resolveAppeal(caseId, reviewer, false, notes, now);
+                            verdict.falseBanBudget().recordIncident(caseId, "overturned by " + reviewer + ": " + notes, now);
+                            if (found.get().playerId() != null) {
+                                try {
+                                    storage.profiles().recordFalseBanIncident(UUID.fromString(found.get().playerId()), now);
+                                } catch (Exception ignored) { }
+                            }
+                            yield r;
+                        }
+                        default -> storage.reviews().status(caseId).orElseGet(() -> storage.reviews().open(caseId, now));
+                    };
+                    sender.sendMessage(Component.text("WhyNotAC review " + caseId.substring(0, 8) + " status=" + rec.status()
+                            + " primary=" + rec.primaryReviewer() + " secondary=" + rec.secondaryReviewer()
+                            + (rec.notes().isEmpty() ? "" : " notes=" + rec.notes()), NamedTextColor.GRAY));
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    sender.sendMessage(Component.text("Review rejected: " + e.getMessage(), NamedTextColor.RED));
+                }
+            }));
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id> | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
         }
     }
@@ -279,7 +344,10 @@ public final class WhyNotCommand implements BasicCommand {
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
             return List.of("inspect", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "cases", "case",
-                    "verdict", "killswitch", "circuit");
+                    "review", "audit", "verdict", "killswitch", "circuit");
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("review")) {
+            return List.of("status", "pass1", "confirm", "appeal", "uphold", "overturn");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("pipeline") || args[0].equalsIgnoreCase("world")
                 || args[0].equalsIgnoreCase("entities") || args[0].equalsIgnoreCase("inventory") || args[0].equalsIgnoreCase("self"))) {
