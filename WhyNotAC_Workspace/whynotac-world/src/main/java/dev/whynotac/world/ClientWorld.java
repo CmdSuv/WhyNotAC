@@ -72,10 +72,10 @@ public final class ClientWorld {
     private final PingLedger ledger;
     private final boolean sharedLedger;
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
-    private final Map<Long, Integer> unsettledBlocks = new HashMap<>();
+    private final LongCounterMap unsettledBlocks = new LongCounterMap();
     /** For each unsettled block, the state before each of its pending changes, oldest first (INVALID: not known). */
     private final Map<Long, ArrayDeque<Integer>> previousStates = new HashMap<>();
-    private final Map<Long, Integer> unsettledChunks = new HashMap<>();
+    private final LongCounterMap unsettledChunks = new LongCounterMap();
     private final List<View> pendingViews = new ArrayList<>();
     /** Client predictions by position: the highest block-action sequence that touched it. */
     private final Map<Long, Integer> predictions = new HashMap<>();
@@ -379,8 +379,8 @@ public final class ClientWorld {
         // The client processed everything sent before that ping.
         while (!pending.isEmpty() && pending.peekFirst().sequence < pingSeq) {
             Pending p = pending.pollFirst();
-            Map<Long, Integer> counts = p.kind == Pending.BLOCK ? unsettledBlocks : unsettledChunks;
-            counts.computeIfPresent(p.key, (k, n) -> n > 1 ? n - 1 : null);
+            LongCounterMap counts = p.kind == Pending.BLOCK ? unsettledBlocks : unsettledChunks;
+            counts.decrement(p.key);
             if (p.kind == Pending.BLOCK) {
                 previousStates.computeIfPresent(p.key, (k, before) -> {
                     before.pollFirst();
@@ -692,7 +692,7 @@ public final class ClientWorld {
 
     private void pend(long sequence, int kind, long key) {
         pending.add(new Pending(sequence, kind, key));
-        (kind == Pending.BLOCK ? unsettledBlocks : unsettledChunks).merge(key, 1, Integer::sum);
+        (kind == Pending.BLOCK ? unsettledBlocks : unsettledChunks).increment(key);
     }
 
     private void markAllStale() {
@@ -751,9 +751,12 @@ public final class ClientWorld {
         if (storage == null || blockState(x, y, z) == UNKNOWN) {
             return false;
         }
+        if (unsettledChunks.isEmpty() && pendingViews.isEmpty() && unsettledBlocks.isEmpty() && predictions.isEmpty()) {
+            return true;
+        }
         int cx = x >> 4;
         int cz = z >> 4;
-        if (unsettledChunks.containsKey(chunkKey(cx, cz))) {
+        if (!unsettledChunks.isEmpty() && unsettledChunks.containsKey(chunkKey(cx, cz))) {
             return false;
         }
         for (View view : pendingViews) {
@@ -761,8 +764,45 @@ public final class ClientWorld {
                 return false;
             }
         }
+        if (unsettledBlocks.isEmpty() && predictions.isEmpty()) {
+            return true;
+        }
         long key = blockKey(x, y, z);
-        return !unsettledBlocks.containsKey(key) && !predictions.containsKey(key);
+        return (unsettledBlocks.isEmpty() || !unsettledBlocks.containsKey(key))
+                && (predictions.isEmpty() || !predictions.containsKey(key));
+    }
+
+    /**
+     * Returns {@link #blockState(int, int, int)} when {@link #settled(int, int, int)} holds, else {@link #UNKNOWN},
+     * performing a single chunk lookup and avoiding {@code Long} boxing on unsettled maps when empty.
+     */
+    public int settledBlockState(int x, int y, int z) {
+        int state = blockState(x, y, z);
+        if (state == UNKNOWN) {
+            return UNKNOWN;
+        }
+        if (unsettledChunks.isEmpty() && pendingViews.isEmpty() && unsettledBlocks.isEmpty() && predictions.isEmpty()) {
+            return state;
+        }
+        int cx = x >> 4;
+        int cz = z >> 4;
+        if (!unsettledChunks.isEmpty() && unsettledChunks.containsKey(chunkKey(cx, cz))) {
+            return UNKNOWN;
+        }
+        for (View view : pendingViews) {
+            if (view.inRange(cx, cz) != storage.inRange(cx, cz)) {
+                return UNKNOWN;
+            }
+        }
+        if (unsettledBlocks.isEmpty() && predictions.isEmpty()) {
+            return state;
+        }
+        long key = blockKey(x, y, z);
+        if ((!unsettledBlocks.isEmpty() && unsettledBlocks.containsKey(key))
+                || (!predictions.isEmpty() && predictions.containsKey(key))) {
+            return UNKNOWN;
+        }
+        return state;
     }
 
     /**
@@ -1461,6 +1501,136 @@ public final class ClientWorld {
     private record View(long sequence, int centerX, int centerZ, int radius) {
         boolean inRange(int x, int z) {
             return Math.abs(x - centerX) <= radius && Math.abs(z - centerZ) <= radius;
+        }
+    }
+
+    /** Primitive {@code long -> positive count} table eliminating {@code Long} boxing on chunk/block keys. */
+    private static final class LongCounterMap {
+        private long[] keys = new long[32];
+        private int[] counts = new int[32];
+        private int size;
+        private int zeroCount;
+
+        boolean isEmpty() {
+            return size == 0 && zeroCount == 0;
+        }
+
+        int size() {
+            return size + (zeroCount > 0 ? 1 : 0);
+        }
+
+        void clear() {
+            if (size > 0) {
+                Arrays.fill(counts, 0);
+                size = 0;
+            }
+            zeroCount = 0;
+        }
+
+        boolean containsKey(long key) {
+            if (key == 0L) {
+                return zeroCount > 0;
+            }
+            if (size == 0) {
+                return false;
+            }
+            int mask = keys.length - 1;
+            for (int i = mix(key) & mask; ; i = (i + 1) & mask) {
+                int c = counts[i];
+                if (c == 0) {
+                    return false;
+                }
+                if (keys[i] == key) {
+                    return true;
+                }
+            }
+        }
+
+        void increment(long key) {
+            if (key == 0L) {
+                zeroCount++;
+                return;
+            }
+            if (2 * (size + 1) > keys.length) {
+                rehash();
+            }
+            insert(key);
+        }
+
+        private void insert(long key) {
+            int mask = keys.length - 1;
+            int i = mix(key) & mask;
+            while (counts[i] != 0) {
+                if (keys[i] == key) {
+                    counts[i]++;
+                    return;
+                }
+                i = (i + 1) & mask;
+            }
+            keys[i] = key;
+            counts[i] = 1;
+            size++;
+        }
+
+        void decrement(long key) {
+            if (key == 0L) {
+                if (zeroCount > 0) {
+                    zeroCount--;
+                }
+                return;
+            }
+            int mask = keys.length - 1;
+            int gap = -1;
+            for (int i = mix(key) & mask; counts[i] != 0; i = (i + 1) & mask) {
+                if (keys[i] == key) {
+                    if (counts[i] > 1) {
+                        counts[i]--;
+                        return;
+                    }
+                    gap = i;
+                    break;
+                }
+            }
+            if (gap < 0) {
+                return;
+            }
+            for (int j = (gap + 1) & mask; counts[j] != 0; j = (j + 1) & mask) {
+                int home = mix(keys[j]) & mask;
+                if (((j - home) & mask) >= ((j - gap) & mask)) {
+                    keys[gap] = keys[j];
+                    counts[gap] = counts[j];
+                    gap = j;
+                }
+            }
+            keys[gap] = 0L;
+            counts[gap] = 0;
+            size--;
+        }
+
+        private void rehash() {
+            long[] oldKeys = keys;
+            int[] oldCounts = counts;
+            keys = new long[oldKeys.length * 2];
+            counts = new int[oldCounts.length * 2];
+            int mask = keys.length - 1;
+            for (int idx = 0; idx < oldKeys.length; idx++) {
+                int c = oldCounts[idx];
+                if (c != 0) {
+                    long k = oldKeys[idx];
+                    int i = mix(k) & mask;
+                    while (counts[i] != 0) {
+                        i = (i + 1) & mask;
+                    }
+                    keys[i] = k;
+                    counts[i] = c;
+                }
+            }
+        }
+
+        private static int mix(long z) {
+            z = (z ^ (z >>> 33)) * 0xff51afd7ed558ccdL;
+            z = (z ^ (z >>> 33)) * 0xc4ceb9fe1a85ec53L;
+            return (int) (z ^ (z >>> 33));
         }
     }
 }

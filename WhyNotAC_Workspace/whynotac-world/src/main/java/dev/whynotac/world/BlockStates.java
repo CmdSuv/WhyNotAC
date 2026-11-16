@@ -315,6 +315,11 @@ public final class BlockStates {
         return shapes[shape[state]];
     }
 
+    /** Whether every box of the empty-context {@link #collisionShape(int)} stays inside {@code [0, 1]} on every axis. */
+    public boolean collisionInCell(int state) {
+        return withinCell[shape[state]];
+    }
+
     /** The outline shape (see the class comment), in the block's own coordinates. */
     public Shape outlineShape(int state) {
         return shapes[outline[state]];

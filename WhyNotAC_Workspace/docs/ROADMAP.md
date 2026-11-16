@@ -179,6 +179,7 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   - Sürümler imzalı ve tekrarlanabilir olur, SBOM eklenir (`REL-03`).
 - **Gözlemlenebilirlik:** metrikler ve sağlık modeli (`OBS-01`). Performans hedefi gerçek arazide
   oyuncu başına < 1 ms/s (görev #27). Bugün 40 botla oyuncu başına 2,5-2,9 ms/s (analiz 1,6-1,8, ağ kenarı 0,8-1,0, kayıt 0,2; 2026-10-30'da 3,2; tek koşu ±%10-15 oynar).
+  Paylaşılan `PingLedger`, `ClientWorld.settledBlockState` + `LongCounterMap`, `Colliders.blocks` statik hızlı yolu + `BlockStates.collisionInCell`, `ClientEntities` sıfır-tahsis yakınlık/itme taraması ve `ClientInventory.views()` revizyon önbelleği ile iç içe tekrar oynatma (`ReplayCost interleaved`, 42.908 tick, tüm 12 kontrol + replikalar) ~40.019 ns/tick'ten **26.062 ns/tick**'e (20 tick/sn = oyuncu başına ~0,52 ms/s analiz) düştü.
   Yeniden gönderilen chunk'ların kayda başvuruyla yazılması, tekrar yazılan kayıtlarda kaydın sıkıştırmasını
   yarıya indirdi (oyuncu başına net yaklaşık 0,23 ms/s) ve diski %43 küçülttü; canlı 40 bot koşusunda toplam 2,8 ms/s
   (kayıt 0,28'den 0,15'e). Ağ kenarının dökümü ve iç içe tekrar oynatma: docs/benchmarks/2026-10-31-edge-and-tick.md.

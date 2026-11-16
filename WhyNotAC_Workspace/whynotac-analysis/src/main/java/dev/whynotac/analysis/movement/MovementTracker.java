@@ -3060,8 +3060,9 @@ public final class MovementTracker {
         /** A block that may still change reads as it is where every state it may hold moves the player alike. */
         @Override
         public int blockState(int x, int y, int z) {
-            if (world.settled(x, y, z)) {
-                return world.blockState(x, y, z);
+            int state = world.settledBlockState(x, y, z);
+            if (state != ClientWorld.UNKNOWN) {
+                return state;
             }
             int[] possible = world.possibleStates(x, y, z);
             // any of them (the client's own placement may hold one the server's state is not yet)

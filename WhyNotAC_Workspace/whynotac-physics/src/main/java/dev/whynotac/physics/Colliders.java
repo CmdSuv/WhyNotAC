@@ -84,9 +84,7 @@ public final class Colliders {
      * border's shape, when the player is close to it, not overlapping the box ({@code noBorderCollision}).
      */
     public static boolean noCollision(World world, Context context, Box box) throws Unknown {
-        List<Voxels> shapes = new ArrayList<>();
-        blocks(world, context, box, shapes, null);
-        if (!shapes.isEmpty()) {
+        if (blocks(world, context, box, null, null, false)) {
             return false;
         }
         Voxels border = context == null ? null : context.border(box);
@@ -98,9 +96,7 @@ public final class Colliders {
      * blocks that suffocate ({@link BlockStates#SUFFOCATING}). A block whose shape depends on the world is not known.
      */
     public static boolean collidesWithSuffocatingBlock(World world, Box box) throws Unknown {
-        List<Voxels> shapes = new ArrayList<>();
-        blocks(world, null, box, shapes, null, true);
-        return !shapes.isEmpty();
+        return blocks(world, null, box, null, null, true);
     }
 
     /**
@@ -136,7 +132,7 @@ public final class Colliders {
         blocks(world, context, box, out, positions, false);
     }
 
-    private static void blocks(World world, Context context, Box box, List<Voxels> out, List<BlockPos> positions, boolean onlySuffocating)
+    private static boolean blocks(World world, Context context, Box box, List<Voxels> out, List<BlockPos> positions, boolean onlySuffocating)
             throws Unknown {
         BlockStates states = world.states();
         int x0 = floor(box.minX() - VoxelCollisions.EPSILON) - 1;
@@ -146,6 +142,7 @@ public final class Colliders {
         int z0 = floor(box.minZ() - VoxelCollisions.EPSILON) - 1;
         int z1 = floor(box.maxZ() + VoxelCollisions.EPSILON) + 1;
         Voxels entityShape = null;
+        boolean found = false;
         // Cursor3D: x fastest, then y, then z; cells on 1, 2 or 3 faces of the range are faces, edges, corners.
         for (int z = z0; z <= z1; z++) {
             for (int y = y0; y <= y1; y++) {
@@ -158,8 +155,59 @@ public final class Colliders {
                     if (state == ClientWorld.UNKNOWN) {
                         throw new Unknown("unknown block at " + x + " " + y + " " + z);
                     }
+                    int flags = states.flags(state);
+                    boolean special = (flags & (BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) != 0;
+                    if (!special) {
+                        if (onlySuffocating && (flags & BlockStates.SUFFOCATING) == 0) {
+                            continue;
+                        }
+                        Shape shape = states.collisionShape(state);
+                        if (shape.isEmpty()) {
+                            continue;
+                        }
+                        if (type == 1 && states.collisionInCell(state)) {
+                            continue;
+                        }
+                        if (type == 2) {
+                            continue;
+                        }
+                        if ((flags & BlockStates.OFFSET) != 0) {
+                            throw new Unknown(states.block(state) + " (offset shape) at " + x + " " + y + " " + z);
+                        }
+                        if (out == null && found) {
+                            continue; // existence already known and this static shape cannot throw Unknown
+                        }
+                        boolean collides;
+                        if ((flags & BlockStates.FULL_BLOCK) != 0 || shape == FULL_BLOCK) {
+                            collides = box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0);
+                            if (collides) {
+                                found = true;
+                                if (out != null) {
+                                    out.add(Voxels.moved(shape, x, y, z));
+                                }
+                                if (positions != null) {
+                                    positions.add(new BlockPos(x, y, z));
+                                }
+                            }
+                        } else {
+                            Voxels moved = Voxels.moved(shape, x, y, z);
+                            if (entityShape == null) {
+                                entityShape = VoxelCollisions.create(box);
+                            }
+                            if (VoxelCollisions.overlaps(moved, entityShape)) {
+                                found = true;
+                                if (out != null) {
+                                    out.add(moved);
+                                }
+                                if (positions != null) {
+                                    positions.add(new BlockPos(x, y, z));
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     Shape shape = states.collisionShape(state);
-                    boolean dynamic = states.has(state, BlockStates.DYNAMIC_SHAPE);
+                    boolean dynamic = (flags & BlockStates.DYNAMIC_SHAPE) != 0;
                     if (onlySuffocating && states.block(state).equals(POWDER_SNOW)) {
                         continue; // isSuffocating: its empty-context shape is empty
                     }
@@ -167,12 +215,12 @@ public final class Colliders {
                         if (dynamic && !states.block(state).equals(SCAFFOLDING)) { // scaffolding's empty-context shape never is a full block
                             throw new Unknown(states.block(state) + " (whether it suffocates depends on the world) at " + x + " " + y + " " + z);
                         }
-                        if (!states.has(state, BlockStates.SUFFOCATING)) {
+                        if ((flags & BlockStates.SUFFOCATING) == 0) {
                             continue;
                         }
                     }
                     // hasLargeCollisionShape(): true without a shape cache (dynamic shapes), else beyond the unit cube
-                    if (type == 1 && !(dynamic || isLarge(shape))) {
+                    if (type == 1 && !(dynamic || !states.collisionInCell(state))) {
                         continue;
                     }
                     if (type == 2 && !states.block(state).equals("minecraft:moving_piston")) {
@@ -189,7 +237,7 @@ public final class Colliders {
                     boolean collides;
                     Voxels moved = Voxels.moved(shape, x, y, z);
                     // BlockCollisions: Shapes.block() itself (a full block's table shape, powder snow's own) meets the box as a box
-                    if (states.has(state, BlockStates.FULL_BLOCK) || shape == FULL_BLOCK) {
+                    if ((flags & BlockStates.FULL_BLOCK) != 0 || shape == FULL_BLOCK) {
                         collides = box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0);
                     } else {
                         if (entityShape == null) {
@@ -198,7 +246,10 @@ public final class Colliders {
                         collides = VoxelCollisions.overlaps(moved, entityShape);
                     }
                     if (collides) {
-                        out.add(moved);
+                        found = true;
+                        if (out != null) {
+                            out.add(moved);
+                        }
                         if (positions != null) {
                             positions.add(new BlockPos(x, y, z));
                         }
@@ -206,6 +257,7 @@ public final class Colliders {
                 }
             }
         }
+        return found;
     }
 
     /** {@code state.getCollisionShape(level, pos, CollisionContext.of(player))}: the table's shape where it is the client's. */
@@ -327,19 +379,6 @@ public final class Colliders {
             }
         }
         throw new IllegalStateException("no two-layer snow in the block data");
-    }
-
-    private static boolean isLarge(Shape shape) {
-        if (shape.isEmpty()) {
-            return false;
-        }
-        Voxels v = Voxels.of(shape);
-        for (Axis axis : Axis.values()) {
-            if (v.min(axis) < 0.0 || v.max(axis) > 1.0) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** {@code Mth.floor(double)}. */

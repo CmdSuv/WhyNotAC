@@ -104,6 +104,8 @@ public final class ClientInventory {
     /** Every attack range a full stack showed, by the client's hash of it: what a hashed stack's range is. */
     private final java.util.Map<Integer, Stack.AttackRange> rangesByHash = new java.util.HashMap<>();
     private List<State> candidates;
+    private List<View> cachedViews;
+    private long cachedViewsEnd = Long.MIN_VALUE;
     /** Entity ids the server announced as allays (ids are never reused); {@code allaysUnknown}: some may be missing. */
     private final Set<Integer> allays = new java.util.HashSet<>();
     private boolean allaysUnknown;
@@ -204,6 +206,7 @@ public final class ClientInventory {
         };
         if (op != null) {
             pending.add(new Pending(seq, op));
+            cachedViews = null;
             switch (op) {
                 case Op.Content content -> content.items().forEach(this::learn);
                 case Op.Slot slot -> learn(slot.item());
@@ -266,6 +269,7 @@ public final class ClientInventory {
             next.add(State.unknown().at(applicable));
         }
         candidates = bound(distinct(next));
+        cachedViews = null;
     }
 
     /** The states without repeats, in order: one state (every tick end of a settled inventory) is not hashed. */
@@ -293,11 +297,13 @@ public final class ClientInventory {
         }
         pending.subList(0, done).clear();
         candidates = bound(distinct(next));
+        cachedViews = null;
     }
 
     private void lose() {
         pending.clear();
         candidates = new ArrayList<>(List.of(State.unknown()));
+        cachedViews = null;
     }
 
     private long windowEnd() {
@@ -730,6 +736,10 @@ public final class ClientInventory {
 
     /** Every state the client may hold now. */
     public List<View> views() {
+        long end = windowEnd();
+        if (cachedViews != null && (pending.isEmpty() || cachedViewsEnd == end)) {
+            return cachedViews;
+        }
         List<View> out = new ArrayList<>();
         Set<State> seen = new LinkedHashSet<>();
         for (State s : possible()) {
@@ -738,7 +748,10 @@ public final class ClientInventory {
                 out.add(new View(Arrays.asList(s.hotbar.clone()), s.offhand, s.selected, s.menuId, s.mayBeNone.clone(), s.feet, blockUses(s)));
             }
         }
-        return out;
+        List<View> snapshot = Collections.unmodifiableList(out);
+        cachedViews = snapshot;
+        cachedViewsEnd = end;
+        return snapshot;
     }
 
     private static int[] blockUses(State s) {

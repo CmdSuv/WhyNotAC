@@ -2335,27 +2335,29 @@ public final class ClientEntities {
                 }
             }
         }
-        boolean[] near = {false};
+        long windowEnd = windowEnd();
         for (Track track : tracks.values()) {
             Head head = heads.get(track.id);
-            forEachPossibleState(track.id, st -> {
-                if (near[0] || st.known() && !st.present()) {
-                    return;
+            int applicable = applicable(track, windowEnd);
+            for (State candidate : track.candidates) {
+                for (State st : prefixes(track, candidate, applicable)) {
+                    boolean known = !st.lostAll;
+                    if (known && !st.present) {
+                        continue;
+                    }
+                    // a candidate lost in place keeps its type (as in push)
+                    String t = st.type != null ? st.type : head != null ? head.type : null;
+                    if (t != null && !t.equals(type)) {
+                        continue;
+                    }
+                    if (!known || st.lostPosition) {
+                        return true;
+                    }
+                    double r = radius + st.rPos;
+                    if (Math.abs(st.x - x) <= r && Math.abs(st.y - y) <= r && Math.abs(st.z - z) <= r) {
+                        return true;
+                    }
                 }
-                // a candidate lost in place keeps its type (as in push)
-                String t = st.type() != null ? st.type() : head != null ? head.type : null;
-                if (t != null && !t.equals(type)) {
-                    return;
-                }
-                if (!st.known() || !st.positionKnown()) {
-                    near[0] = true;
-                } else {
-                    double r = radius + st.positionRadius();
-                    near[0] = Math.abs(st.x() - x) <= r && Math.abs(st.y() - y) <= r && Math.abs(st.z() - z) <= r;
-                }
-            });
-            if (near[0]) {
-                return true;
             }
         }
         return false;
@@ -2416,38 +2418,56 @@ public final class ClientEntities {
         if (!complete) {
             return true;
         }
-        boolean[] near = {false};
+        long windowEnd = windowEnd();
+        EntitySizes sizes = EntitySizes.vanilla();
         for (Track track : tracks.values()) {
             if (track.id == self || track.id == other) {
                 continue;
             }
             Head head = heads.get(track.id);
-            forEachPossibleState(track.id, st -> {
-                if (near[0] || st.known() && !st.present()) {
-                    return;
+            int applicable = applicable(track, windowEnd);
+            for (State candidate : track.candidates) {
+                for (State st : prefixes(track, candidate, applicable)) {
+                    boolean known = !st.lostAll;
+                    if (known && !st.present) {
+                        continue;
+                    }
+                    String type = st.type != null ? st.type : head != null ? head.type : null;
+                    boolean positionKnown = known && !st.lostPosition;
+                    EntitySizes.Size high = null;
+                    if (known && type != null) {
+                        high = sizes.size(type, st.pose, st.baby, st.scaleHigh, st.data0, st.data1, Math.max(st.anim, st.animO));
+                    }
+                    if (counts == null && (!positionKnown || high == null)) {
+                        if (near(serverOrderBase(track.id), minX, minY, minZ, maxX, maxY, maxZ, unknownRadius)) {
+                            return true;
+                        }
+                        continue;
+                    }
+                    if (counts != null && type != null && types.known(type) && !counts.test(type)) {
+                        continue;
+                    }
+                    if (!known || type == null || high == null) {
+                        return true;
+                    }
+                    if (!positionKnown) {
+                        if (near(serverOrderBase(track.id), minX, minY, minZ, maxX, maxY, maxZ, unknownRadius)) {
+                            return true;
+                        }
+                        continue;
+                    }
+                    float half = high.width() / 2.0F;
+                    double r = st.rPos;
+                    double bMinX = (st.x - half) - r;
+                    double bMaxX = (st.x + half) + r;
+                    double bMinY = st.y - r;
+                    double bMaxY = (st.y + high.height()) + r;
+                    double bMinZ = (st.z - half) - r;
+                    double bMaxZ = (st.z + half) + r;
+                    if (bMinX <= maxX && bMaxX >= minX && bMinY <= maxY && bMaxY >= minY && bMinZ <= maxZ && bMaxZ >= minZ) {
+                        return true;
+                    }
                 }
-                String type = st.type() != null ? st.type() : head != null ? head.type : null;
-                boolean boxKnown = st.known() && st.positionKnown() && st.bounds() != null;
-                if (counts == null && !boxKnown) {
-                    near[0] = near(serverOrderBase(track.id), minX, minY, minZ, maxX, maxY, maxZ, unknownRadius);
-                    return;
-                }
-                if (counts != null && type != null && types.known(type) && !counts.test(type)) {
-                    return;
-                }
-                if (!st.known() || type == null || (st.positionKnown() ? st.bounds() == null : st.size() == null)) {
-                    near[0] = true;
-                    return;
-                }
-                if (!st.positionKnown()) {
-                    near[0] = near(serverOrderBase(track.id), minX, minY, minZ, maxX, maxY, maxZ, unknownRadius);
-                    return;
-                }
-                EntitySizes.Box b = st.bounds(); // the position's radius included
-                near[0] = b.minX() <= maxX && b.maxX() >= minX && b.minY() <= maxY && b.maxY() >= minY && b.minZ() <= maxZ && b.maxZ() >= minZ;
-            });
-            if (near[0]) {
-                return true;
             }
         }
         return false;
@@ -2667,26 +2687,35 @@ public final class ClientEntities {
             }
             return null;
         }
-        PossibleState view = st.view();
-        EntitySizes.Box bounds = view.bounds(); // the position's radius included
-        if (bounds == null) {
+        EntitySizes sizes = EntitySizes.vanilla();
+        EntitySizes.Size high = sizes.size(type, st.pose, st.baby, st.scaleHigh, st.data0, st.data1, Math.max(st.anim, st.animO));
+        if (high == null) {
             if (st.x > minX - unknownRadius && st.x < maxX + unknownRadius && st.y > minY - unknownRadius && st.y < maxY + unknownRadius
                     && st.z > minZ - unknownRadius && st.z < maxZ + unknownRadius) {
                 throw new NotKnown(type + " of a size not known");
             }
             return null;
         }
-        if (!(bounds.minX() <= maxX && bounds.maxX() >= minX && bounds.minY() <= maxY && bounds.maxY() >= minY && bounds.minZ() <= maxZ
-                && bounds.maxZ() >= minZ)) {
+        float highHalf = high.width() / 2.0F;
+        double r = st.rPos;
+        double bMinX = (st.x - highHalf) - r;
+        double bMaxX = (st.x + highHalf) + r;
+        double bMinY = st.y - r;
+        double bMaxY = (st.y + high.height()) + r;
+        double bMinZ = (st.z - highHalf) - r;
+        double bMaxZ = (st.z + highHalf) + r;
+        if (!(bMinX <= maxX && bMaxX >= minX && bMinY <= maxY && bMaxY >= minY && bMinZ <= maxZ && bMaxZ >= minZ)) {
             return null; // cannot meet the box
         }
-        double r = st.rPos;
-        if (r != 0 || view.size() == null || !st.tickedKnown || collidesOrPushesItself(type)) {
+        EntitySizes.Size low = sizes.size(type, st.pose, st.baby, st.scaleLow, st.data0, st.data1, Math.min(st.anim, st.animO));
+        EntitySizes.Size size = low != null && low.equals(high) ? low : null;
+        if (r != 0 || size == null || !st.tickedKnown || collidesOrPushesItself(type)) {
             throw new NotKnown(collidesOrPushesItself(type) ? type + ", which collides" : r != 0 ? type + " whose position is not known exactly"
-                    : view.size() == null ? type + " whose size is not known exactly" : type + " that may or may not have ticked");
+                    : size == null ? type + " whose size is not known exactly" : type + " that may or may not have ticked");
         }
-        EntitySizes.Box b = view.size().box(st.x, st.y, st.z);
-        boolean meets = minX < b.maxX() && maxX > b.minX() && minY < b.maxY() && maxY > b.minY() && minZ < b.maxZ() && maxZ > b.minZ();
+        float half = size.width() / 2.0F;
+        boolean meets = minX < (st.x + half) && maxX > (st.x - half) && minY < (st.y + size.height()) && maxY > st.y
+                && minZ < (st.z + half) && maxZ > (st.z - half);
         if (!meets || !st.ticked || st.player && st.spectator == 1) {
             return null; // apart, not ticked, or a spectator (noPhysics)
         }
