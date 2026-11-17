@@ -501,12 +501,14 @@ final class CheatDetectionAndBypassTest {
             assertTrue(bench.mitigations.stream().anyMatch(d ->
                     d.evidence().check().equals("attack-aim") && d.mitigation() == MitigationKind.CANCEL_IMPOSSIBLE_HIT));
 
-            // 2. Action Grammar: NoSwing after attack
+            // 2. Action Grammar: NoSwing after attack + PacketBounds: invalid hotbar slot (9 > 8)
             bench.now += 2_000_000_000L;
             bench.spawnMob(31, "minecraft:zombie", 0.5, 64.0, -2.0);
             bench.in(new ServerboundPacket.InteractEntity(31, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+            bench.in(new ServerboundPacket.SetCarriedItem(9));
             bench.idleTick(TICK_NANOS);
             assertTrue(bench.countCases("action-grammar") >= 1);
+            assertTrue(bench.countCases("packet-bounds") >= 1, "Out-of-bounds hotbar slot must trigger packet-bounds");
 
             // 3. FastBreak (dirt takes 15 ticks by hand; stop at tick 12) + PredictionSequence skip
             bench.now += 2_000_000_000L;

@@ -13,9 +13,9 @@ Normatif kurallar [POLICY.md](POLICY.md)'dedir; ikisi çelişirse POLICY geçerl
 | Client kimliği, topoloji, beyanlar (güven düzeyleriyle) | Tamam | `AUTHENTICATED_*`, `CLAIMED_BY_PROXY`, `UNAUTHENTICATED`, offline `AUTH_PLUGIN_CONFIRMED` (`AuthPluginHook`) ve imzalı Velocity kenar kanalı (`whynotac-velocity`, `NET-01`) |
 | Client'ın dünyası, varlıkları, envanteri, kendi oyuncusu (client sırasıyla) | Tamam | [2b-3](phases/PHASE-2B-3-REPORT.md), [2b-5](phases/PHASE-2B-5-REPORT.md), [2b-6](phases/PHASE-2B-6-REPORT.md), [2b-7](phases/PHASE-2B-7-REPORT.md), [2b-8](phases/PHASE-2B-8-REPORT.md) |
 | Kanıt, politika, vaka, dosya, bağımsız `verify` | Tamam | [Slice 0](phases/SLICE-0-REPORT.md) |
-| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `prediction-sequence` (P-M), `action-grammar` (P-M), `movement` (P-M), `click-pattern` (S), `aim-pattern` (S), `transaction-order` (P-M) | SHADOW | Dürüst trafikte 0 vaka: E2E, gerçek client, yük (yük botları vanilla fiziğiyle yürümediği için `movement`, gerçek arazide seçim yapmadan vurdukları için `attack-aim`'in blok bulguları orada ayrı sayılır) |
+| Kontroller: `tick-framing` (P-M), `client-clock` (P-M), `attack-reach` (P-A), `attack-aim` (P-M), `use-aim` (P-M), `break-time` (P-M), `prediction-sequence` (P-M), `action-grammar` (P-M), `packet-bounds` (P-M), `movement` (P-M), `click-pattern` (S), `aim-pattern` (S, v2), `container-timing` (S), `transaction-order` (P-M) | SHADOW (+ `mitigate-pilot` şablonu) | Dürüst trafikte 0 vaka: E2E, gerçek client, yük; canlı hile + etkisizleştirme E2E (`tools/e2e/run_cheat_e2e.sh`) CI'da doğrulanır |
 | Kayıt, takma ad, veri sahibi talepleri | Tamam | [docs/privacy](privacy/README.md) |
-| Gerçek client, E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e`, `tools/load` |
+| Gerçek client, E2E, hile/mitigation E2E, interop, yük testi | CI'da / araçta | `tools/realclient`, `tools/e2e` (`run_e2e.sh`, `run_proxy_e2e.sh`, `run_cheat_e2e.sh`), `tools/load` |
 | Hareket fiziği (`whynotac-physics`) | Yaya, süzülme ve binekler tamam | Çarpışma çekirdeği resmi client'ın koduyla; yaya hareket adımı (otomatik zıplama, hız değiştiricileri, efektler, eşya kullanımı, tırmanma, slime/yatak sekmesi, çit/duvar üstü, su (akıntı, yüzme, göz), sürünme, içinden etki eden bloklar (ağ, çalı, bal, kabarcık sütunu, toz kar), lav (Nether'in hızlı lavı dahil), iskele, dünya sınırı, suda riptide ve dönme saldırısı), elytra ile süzülme ve roket, tekne, at, domuz, strider, happy ghast, nautilus ve deve gerçek client'ın parkuruyla bit bit aynı; sunucu tarafı `movement` kontrolü (sürülen binekler dahil) SHADOW'da, canlıların itmesini takımlarıyla (görev #33), client'ın henüz işlemediği ama adım için eşdeğer blok değişikliklerini (görev #50), sunucunun hızını (savrulma, patlama, mızrak hamlesi) ve koyduğu dönüşü (yanıtıyla, görev #93) izliyor; gerçek client oturumunda 0 açıklanamayan tick |
 | Karar ve kalıcı depolama (`whynotac-verdict`, `whynotac-storage`) | Temel çekirdek tamam | `DependencyGroup`, `VerdictConfig` (`CFG-01`), `CircuitBreaker` / kill-switch (`VER-12`), `FalseBanBudget` (`VER-08`), SHA-256 `EvidenceCertificate` (`VER-07`), asenkron `SecondVerifier` (`VER-05`/`VER-06`), `AuditLedger` (hash zinciri + HMAC + `PROD-13`), `SubjectProfileStore` (`STO-03`), `ReviewWorkflow` (`ADM-02`/`VER-15`) ve Paper yumuşak hafifletme devrede; varsayılan profil `SHADOW` |
 | Yapay zekâ ve önceliklendirme (`whynotac-ai`) | Çekirdek tamam (cezasız) | `BehavioralFeatureExtractor` (`AI-01`), `AccountBaselineModel` (`AI-02`), Ville güvenlikli `EValueProcess` + `ProbeScheduler` (`AI-04`/`AI-05`), `AiAdvisor` vaka puanlama ve `/whynotac ai` |
@@ -155,10 +155,13 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   etkisizleştirme/`SecondVerifier` akışı ve 240 FPS / 10s donma / toggle-sprint uç meşru davranışları),
   `MutationResilienceTest` (`TEST-03`: güvenlik eşiklerinde sınır/operatör mutasyon direnci) ve
   `AiRegressionCalibrationTest` (`AI-03`: gerçek `regression/*.wnrec` oturumlarıyla baz çizgi kalibrasyonu).
-- **Soundness notları** (`POLICY.md`, tamam): tüm 12 kontrol + `design-probe` için normatif bilgi sınırları,
+- **Soundness notları** (`POLICY.md`, tamam): tüm 14 kontrol + `design-probe` için normatif bilgi sınırları,
   varsayımlar, muafiyetler ve atlatma sınırları [SOUNDNESS.md](SOUNDNESS.md) dosyasında belgelendi.
-- **Hile verisi** (`DATA-02`): yalnızca sahibin onayıyla, izole bir sanal makinede, açık kaynak
-  client'larla kaydedilir.
+- **Canlı Hile ve Etkisizleştirme E2E + Dağıtım Rehberi** (`DATA-02`, `PROD-14`, tamam): `tools/e2e/run_cheat_e2e.sh`
+  gerçek Paper 1.21.11 üzerinde `ARMED` + `mitigations: true` ile `CANCEL_IMPOSSIBLE_HIT` ve `SETBACK_POSITION`
+  davranışını canlı doğrular; operatör profilleri (`deploy/`), [OPERATOR-GUIDE.md](OPERATOR-GUIDE.md) ve
+  [UPGRADE-GUIDE-PROD14.md](UPGRADE-GUIDE-PROD14.md) eklendi. Açık kaynak hile istemcileriyle saha kaydı (`DATA-02`)
+  yalnızca sahibin onayıyla izole VM'de yapılır.
 
 ## Faz 5 — Karar ve uygulama
 

@@ -25,6 +25,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 | `transaction-order` | `P-M` | `CLOCK_AND_FRAMING` | `MAX_TICKS_AFTER_KEEPALIVE = 12`; tek TCP akışı + `PacketProcessor` sırası | `NONE` (opt-in `KICK`) | [Aşağıda §2.7](#27-transaction-order-p-m) |
 | `action-grammar` | `P-M` | `PACKET_GRAMMAR` | `handleKeybinds` -> `tickEntities`, saldırı/STAB sonrası `Swing`, açık menü | `NONE` (opt-in `KICK`) | [Aşağıda §2.8](#28-action-grammar-p-m) |
 | `prediction-sequence` | `P-M` | `PACKET_GRAMMAR` | `BlockStatePredictionHandler` seviye aralığı `[levelsLow, levelsHigh]` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9](#29-prediction-sequence-p-m) |
+| `packet-bounds` | `P-M` | `PACKET_GRAMMAR` | Sonlu `MovePlayer`/`MoveVehicle`, hotbar `0..8`, `entityId != selfId`, blok imleci `[-1, 2]` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9b](#29b-packet-bounds-p-m) |
 | `movement` | `P-M` | `MOVEMENT_PHYSICS` | Bit-tam 1.21.11 çarpışma + hipotez kümesi (`≤ 64`), x86/ARM `Math.cos` | `SETBACK_POSITION` | [Aşağıda §2.10](#210-movement-p-m) |
 | `click-pattern` | `S` | `STATISTICAL_SIGNALS` | 40 tik CPS eşiği (`50`/`80`), 60 aralıklı `stdDev ≤ 0,14` / periyot-2,3 | Yasak (`NONE`) | [Aşağıda §2.11](#211-click-pattern-s) |
 | `aim-pattern` | `S` | `STATISTICAL_SIGNALS` | `25°` sıçrama / `0,015°` `stdDev` / düşük entropi (`≤ 1,05 bit`) / kafes bozulması | Yasak (`NONE`) | [Aşağıda §2.12](#212-aim-pattern-s) |
@@ -89,6 +90,14 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 ### 2.9 `prediction-sequence` (`P-M`)
 - **Dayanak:** `MultiPlayerGameMode.startPrediction` + `BlockStatePredictionHandler.currentSequenceNr++` (`PredictionSequenceCheck.java`). Tahminlenen paketler (`UseItemOn`, `UseItem`, `START_DESTROY_BLOCK`, `STOP_DESTROY_BLOCK`) sıradaki numarayı (veya yeni dünya oluşmuşsa `1` sayısını) taşır; tahminlenmeyen eylemler (`ABORT_DESTROY_BLOCK`, bırakma, el değiştirme, STAB) `0` taşır.
 - **Dışlanan Durumlar:** İlk paket öncesi, `Gap` / kayıp olay veya `UNKNOWN` eylem görüldüğünde seviye takibi sıfırlanır.
+
+### 2.9b `packet-bounds` (`P-M`)
+- **Dayanak:** Decompile 1.21.11 `ServerboundMovePlayerPacket`, `Inventory.isHotbarSlot`, `ProjectileUtil.getEntityHitResult` ve `ServerboundUseItemOnPacket` (`PacketBoundsCheck.java`).
+  1. `non-finite-movement`: `MovePlayer` veya `MoveVehicle` içinde `NaN` / `±Infinity` koordinat veya açı.
+  2. `invalid-hotbar-slot`: `SetCarriedItem` yuvasının `0..8` dışına çıkması.
+  3. `self-interaction`: `InteractEntity` paketinin oyuncunun kendi `selfId` varlık kimliğini hedeflemesi.
+  4. `invalid-block-cursor`: `UseItemOn` vuruş noktasının sonlu olmaması veya blok imleç ofsetinin `[-1.0001, 2.0001]` zarfı dışına çıkması.
+- **Dışlanan Durumlar:** `Login` öncesi (`selfId < 0`) ve kabul edilemez pencereler (`Gap`/çevirici).
 
 ### 2.10 `movement` (`P-M`)
 - **Dayanak:** Decompile 1.21.11 `OnFoot` + `Colliders` + araç motorları (`Boat`, `Horse`, `ItemSteering`) + `Border` + dünya tahminleri (`whynotac-physics`, `MovementCheck.java`, `MovementTracker.java`, [whynotac-analysis README § movement](../whynotac-analysis/README.md#movement-movementcheck-movementmovementtracker)). Oyuncunun olası durum kümesi (maks. `64` hipotez) `x86_64` ve `AARCH64` JVM `Math.cos` tablo/intrinsic farklılıkları dâhil bit bit ilerletilir; kayıp sonrası durağan çapa (`settleAnchor`) veya düz/zıplamalı koşu çapası (`runAnchor`) ile yeniden kurulur.

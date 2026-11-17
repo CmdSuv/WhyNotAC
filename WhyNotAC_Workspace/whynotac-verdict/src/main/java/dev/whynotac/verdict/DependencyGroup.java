@@ -29,6 +29,7 @@ public enum DependencyGroup {
             Map.entry("break-time", BLOCK_TIMING),
             Map.entry("action-grammar", PACKET_GRAMMAR),
             Map.entry("prediction-sequence", PACKET_GRAMMAR),
+            Map.entry("packet-bounds", PACKET_GRAMMAR),
             Map.entry("click-pattern", STATISTICAL_SIGNALS),
             Map.entry("aim-pattern", STATISTICAL_SIGNALS),
             Map.entry("container-timing", STATISTICAL_SIGNALS),
