@@ -47,6 +47,12 @@ final class AccountBaselineModelTest {
         assertFalse(shifted.coldStart());
         assertTrue(shifted.rmsZScore() > 10.0, "Expected strong z-score shift, got " + shifted.rmsZScore());
         assertFalse(shifted.topFeature().isEmpty());
+
+        // Same-mean variance collapse (mean stays 5.05 ticks, but spread collapses from 0.60 -> 0.00 robotic macro)
+        AccountBaselineModel.ShiftAssessment collapsed = model.assess(player, snapshotOf(5.05, 0.0, 36, 4.05, 36));
+        assertFalse(collapsed.coldStart());
+        assertTrue(collapsed.rmsZScore() > 2.5,
+                "Expected variance collapse at identical mean to produce elevated z-score, got " + collapsed.rmsZScore());
     }
 
     @Test

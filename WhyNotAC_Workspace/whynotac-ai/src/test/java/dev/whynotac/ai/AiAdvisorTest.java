@@ -60,6 +60,13 @@ final class AiAdvisorTest {
         assertTrue(snap.features().get(BehavioralFeatureExtractor.CLICK_INTERVAL_TICKS).count() > 0);
         assertTrue(snap.features().get(BehavioralFeatureExtractor.AIM_ANGULAR_STEP_DEG).count() > 0);
         assertTrue(snap.features().get(BehavioralFeatureExtractor.TICK_DELTA_MS).count() > 0);
+        assertTrue(snap.features().get(BehavioralFeatureExtractor.COMBAT_AIM_STEP_DEG).count() > 0);
+        assertTrue(snap.features().get(BehavioralFeatureExtractor.COMBAT_AIM_JERK_DEG).count() > 0);
+        assertTrue(snap.features().get(BehavioralFeatureExtractor.ATTACK_SNAP_RATIO).count() > 0);
+
+        AiAdvisor.IntrinsicRiskAssessment intrinsic = advisor.assessIntrinsicRisk(snap);
+        assertTrue(intrinsic.score0To100() > 20.0, "Expected intrinsic cold-start risk > 20, got " + intrinsic.score0To100());
+        assertFalse(intrinsic.dominantSignal().equals("none"));
 
         Evidence ev = new Evidence(
                 "click-pattern", 1, EvidenceClass.NOMINAL_STATISTIC,

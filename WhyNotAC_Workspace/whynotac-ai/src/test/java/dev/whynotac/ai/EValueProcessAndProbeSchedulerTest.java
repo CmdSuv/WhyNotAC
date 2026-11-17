@@ -82,6 +82,11 @@ final class EValueProcessAndProbeSchedulerTest {
         ProbeScheduler.ProbePlan plan = scheduler.maybeSchedule(player, 260L, true);
         assertNotNull(plan);
         assertEquals(260L, plan.scheduledAtTick());
+        assertTrue(plan.distanceBlocks() >= 2.05 && plan.distanceBlocks() <= 2.75,
+                "Decoy distance must stay inside vanilla 3.0 reach: " + plan.distanceBlocks());
+        assertTrue(Math.abs(plan.yawOffsetDeg()) >= 130.0f,
+                "Decoy yaw offset must stay behind honest camera FOV: " + plan.yawOffsetDeg());
+        assertTrue(plan.effectiveTtlTicks(10L) >= 4L);
 
         // Immediately afterwards, in cooldown again
         assertNull(scheduler.maybeSchedule(player, 270L, true));

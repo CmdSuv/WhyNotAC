@@ -7,7 +7,7 @@
 
 ## Sınıflar
 
-- `BehavioralFeatureExtractor` (`AI-01`): `click_interval_ticks`, `aim_angular_step_deg`, `tick_delta_ms` ve `horizontal_step_blocks` serilerinin çevrimiçi kaydırmalı momentlerini çıkarır.
-- `AccountBaselineModel` (`AI-02`): oturum özetlerini `RunningMoments#merge` ile uzun dönem hesaba yuvarlar, standart-hata küçültmeli z-skoruyla hesap devri / makro profil değişimini ölçer (en zayıf özellik katkısıyla açıklanabilir).
-- `EValueProcess` & `ProbeScheduler` (`AI-04`, `AI-05`): savaş sırasında rastgele gecikmeli sonda zamanlar ve ikili sonuçları $P_{H_0}(\sup_t E_t \ge 1/\alpha) \le \alpha$ güvenlik sınırını koruyan test martingalinde biriktirir.
-- `AiAdvisor`: `TimelineListener` + `VerdictEngine.CaseListener` cephesi; Paper üzerinde `/whynotac ai <player>` ve `/whynotac cases` `[ai=...]` çıktılarıyla sunulur.
+- `BehavioralFeatureExtractor` (`AI-01`): 4 genel oturum serisi (`click_interval_ticks`, `aim_angular_step_deg`, `tick_delta_ms`, `horizontal_step_blocks`) ile 4 savaş-koşullu / çapraz özelliği (`combat_aim_step_deg`, `combat_aim_jerk_deg`, `attack_snap_ratio`, `container_click_interval_ticks`) çevrimiçi kaydırmalı momentlerle çıkarır.
+- `AccountBaselineModel` (`AI-02`): oturum özetlerini `RunningMoments#merge` ile uzun dönem hesaba yuvarlar; hem ortalama kaymasını (`zMean`) hem de aynı ortalamada varyans çökmesini / robotik düzenli ritmi (`zSpread`) birlikte değerlendirerek hesap devri / makro profil değişimini ölçer.
+- `EValueProcess` & `ProbeScheduler` (`AI-04`, `AI-05`): savaş sırasında `DECOY_LOS_CHECK`, `RANDOMIZED_HITBOX_OFFSET` ve `TARGET_SWAP_CADENCE` modlarına göre vanilla `3.0` blok erişim sınırı içinde (`2.05..2.70` blok) ve kamera görüş açısı arkasında (`|yawOffset| >= 130°`) rastgele geometrili sonda planlar; ikili sonuçları $P_{H_0}(\sup_t E_t \ge 1/\alpha) \le \alpha$ güvenlik sınırını koruyan test martingalinde biriktirir.
+- `AiAdvisor`: geçmiş baz çizgisi olmadan da oturum içi çapraz anomali riskini (`IntrinsicRiskAssessment`: `low-click-variance`, `zero-jerk-combat-aim`, `attack-snap-acceleration`, `rapid-container-cadence`) hesaplar; Paper üzerinde `/whynotac ai <player>` ve `/whynotac cases` `[ai=...]` çıktılarıyla sunulur.

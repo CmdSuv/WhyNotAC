@@ -154,6 +154,8 @@ public final class ClientEntities {
     private static final int UNSET = Integer.MIN_VALUE;
     /** A rocket's target set while the candidate was lost: not known. */
     private static final int ATTACHED_UNKNOWN = Integer.MIN_VALUE + 1;
+    /** Virtual entity IDs >= this bound are synthetic clientbound-only behind-FOV probes, not server world entities. */
+    public static final int VIRTUAL_DECOY_MIN_ID = 1_900_000_000;
 
     /** Whether the client has an entity with a given id. */
     public enum Existence { PRESENT, ABSENT, MAYBE, UNKNOWN }
@@ -544,8 +546,8 @@ public final class ClientEntities {
 
     private void addEntity(long seq, ClientboundPacket.AddEntity add) {
         int id = add.entityId();
-        if (!level || id == selfId) {
-            return; // no level: dropped; the player's own id: not another entity
+        if (!level || id == selfId || id >= VIRTUAL_DECOY_MIN_ID) {
+            return; // no level: dropped; the player's own id or a synthetic probe decoy: not another world entity
         }
         boolean player = EntityTypes.PLAYER.equals(add.type());
         boolean maybe = false;

@@ -5,6 +5,7 @@ import dev.whynotac.ai.DesignProbeEngine;
 import dev.whynotac.ai.ProbeScheduler;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.session.PlayerSession;
+import dev.whynotac.world.ClientEntities;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,19 +29,16 @@ import org.bukkit.plugin.Plugin;
  * Paper server driver for randomized, non-invasive behind-FOV decoy probes (AI-04 / AI-05).
  *
  * <p>Enabled only when {@code ai.active-probes.enabled: true} in {@code config.yml}. Spawns clientbound-only
- * invisible armor-stand decoys 3.25 blocks behind combat players' camera yaw without touching server world chunks,
- * despawning them after {@code ttlTicks}.
+ * invisible decoys using randomized {@link ProbeScheduler.ProbePlan} geometry within vanilla 3.0-block attack reach
+ * behind combat players' camera yaw without touching server world chunks or polluting {@link ClientEntities}.
  */
 public final class LiveProbeDriver implements Runnable {
-
-    private static final double DECOY_DISTANCE_BLOCKS = 3.25;
-    private static final float BEHIND_FOV_YAW_OFFSET_DEG = 145.0f;
 
     private final Plugin plugin;
     private final PacketInterceptor interceptor;
     private final AiAdvisor aiAdvisor;
     private final long ttlTicks;
-    private final AtomicInteger nextVirtualId = new AtomicInteger(1_900_000_000);
+    private final AtomicInteger nextVirtualId = new AtomicInteger(ClientEntities.VIRTUAL_DECOY_MIN_ID);
 
     public LiveProbeDriver(Plugin plugin, PacketInterceptor interceptor, AiAdvisor aiAdvisor, long ttlTicks) {
         this.plugin = plugin;
@@ -74,13 +72,15 @@ public final class LiveProbeDriver implements Runnable {
     private void spawnBehindFovDecoy(
             Player player, PlayerSession session, DesignProbeEngine engine, ProbeScheduler.ProbePlan plan) {
         Location base = player.getLocation();
-        double yawRad = Math.toRadians(base.getYaw() + BEHIND_FOV_YAW_OFFSET_DEG);
-        double x = base.getX() - Math.sin(yawRad) * DECOY_DISTANCE_BLOCKS;
-        double y = base.getY() + 0.15;
-        double z = base.getZ() + Math.cos(yawRad) * DECOY_DISTANCE_BLOCKS;
+        double yawRad = Math.toRadians(base.getYaw() + plan.yawOffsetDeg());
+        double dist = plan.distanceBlocks();
+        double x = base.getX() - Math.sin(yawRad) * dist;
+        double y = base.getY() + plan.yOffsetBlocks();
+        double z = base.getZ() + Math.cos(yawRad) * dist;
+        long effectiveTtl = plan.effectiveTtlTicks(ttlTicks);
 
         int virtualId = nextVirtualId.getAndIncrement();
-        if (!engine.registerDecoy(session, virtualId, ttlTicks, plan.expectedNullHitRate())) {
+        if (!engine.registerDecoy(session, virtualId, effectiveTtl, plan.expectedNullHitRate())) {
             return;
         }
 
@@ -90,7 +90,7 @@ public final class LiveProbeDriver implements Runnable {
         }
         ArmorStand phantom = new ArmorStand(((CraftWorld) player.getWorld()).getHandle(), x, y, z);
         phantom.setInvisible(true);
-        phantom.setSmall(true);
+        phantom.setSmall(plan.type() == ProbeScheduler.ProbeType.RANDOMIZED_HITBOX_OFFSET);
         phantom.setNoGravity(true);
 
         nmsPlayer.connection.send(new ClientboundAddEntityPacket(
@@ -107,6 +107,6 @@ public final class LiveProbeDriver implements Runnable {
                     current.connection.send(new ClientboundRemoveEntitiesPacket(virtualId));
                 }
             }
-        }, ttlTicks);
+        }, effectiveTtl);
     }
 }

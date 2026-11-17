@@ -361,12 +361,14 @@ public final class WhyNotCommand implements BasicCommand {
         }
         BehavioralFeatureExtractor.Snapshot snap = aiAdvisor.extractor().snapshot(found.get());
         AccountBaselineModel.ShiftAssessment shift = aiAdvisor.baselineModel().assess(target.getUniqueId(), snap);
+        AiAdvisor.IntrinsicRiskAssessment intrinsic = aiAdvisor.assessIntrinsicRisk(snap);
         EValueProcess probe = aiAdvisor.probeScheduler().processFor(target.getUniqueId());
         sender.sendMessage(Component.text("WhyNotAC AI (non-punitive) for " + target.getName() + ":", NamedTextColor.GOLD));
         sender.sendMessage(Component.text(String.format(Locale.ROOT,
-                "  baselineShift coldStart=%b rmsZ=%.3f top=%s (z=%.3f) | probeE=%.3f%s",
+                "  baselineShift coldStart=%b rmsZ=%.3f top=%s (z=%.3f) | intrinsicRisk=%.1f (%s) | probeE=%.3f%s",
                 shift.coldStart(), shift.rmsZScore(),
                 shift.topFeature().isEmpty() ? "none" : shift.topFeature(), shift.topZScore(),
+                intrinsic.score0To100(), intrinsic.dominantSignal(),
                 probe == null ? 1.0 : probe.wealth(),
                 probe != null && probe.rejectedNull() ? " [H0_REJECTED]" : ""), NamedTextColor.GRAY));
         snap.features().forEach((name, moments) -> sender.sendMessage(Component.text(String.format(Locale.ROOT,

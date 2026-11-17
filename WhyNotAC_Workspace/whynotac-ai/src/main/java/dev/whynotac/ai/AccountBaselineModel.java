@@ -11,13 +11,15 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Per-account multi-session behavioral baseline model (AI-02): uses exact {@link RunningMoments#merge} to roll
  * sessions into long-term profiles without storing raw packet traces, and flags large behavioral shifts
- * (e.g. account sharing / macro profile swap) strictly for human review priority.
+ * (mean drift AND variance-collapse / spread shift) strictly for human review priority.
  */
 public final class AccountBaselineModel {
 
     public record ShiftAssessment(boolean coldStart, double rmsZScore, String topFeature, double topZScore) {}
 
     private static final double MIN_SHRINKAGE_VARIANCE = 1e-4;
+    private static final double MIN_SPREAD_SE_FLOOR = 0.02;
+    private static final double SPREAD_DEADZONE_Z = 1.5;
     private static final long DEFAULT_MIN_BASELINE_SAMPLES = 30;
     private static final long DEFAULT_MIN_SESSION_SAMPLES = 15;
 
@@ -54,12 +56,30 @@ public final class AccountBaselineModel {
             }
             double baseMean = base.mean();
             double baseVar = base.sampleVariance();
-            if (!Double.isFinite(baseMean) || !Double.isFinite(baseVar)) {
+            double currMean = curr.mean();
+            double currVar = curr.sampleVariance();
+            if (!Double.isFinite(baseMean) || !Double.isFinite(baseVar) || !Double.isFinite(currMean)) {
                 continue;
             }
-            // Standard error of the session mean under baseline spread + floor shrinkage
-            double se = Math.sqrt(Math.max(baseVar, MIN_SHRINKAGE_VARIANCE) / curr.count() + MIN_SHRINKAGE_VARIANCE);
-            double z = Math.abs(curr.mean() - baseMean) / se;
+            // 1. Location shift: standard error of the session mean under baseline spread + floor shrinkage
+            double seMean = Math.sqrt(Math.max(baseVar, MIN_SHRINKAGE_VARIANCE) / curr.count() + MIN_SHRINKAGE_VARIANCE);
+            double zMean = Math.abs(currMean - baseMean) / seMean;
+
+            // 2. Dispersion shift (catches same-mean robotic variance collapse or explosive snap spread)
+            double zSpread = 0.0;
+            if (Double.isFinite(currVar) && baseVar >= 1e-3) {
+                double baseStd = Math.sqrt(baseVar);
+                double currStd = Math.sqrt(Math.max(0.0, currVar));
+                double seStd = Math.sqrt(baseVar / (2.0 * curr.count()) + MIN_SPREAD_SE_FLOOR * MIN_SPREAD_SE_FLOOR);
+                double rawSpreadZ = Math.abs(currStd - baseStd) / seStd;
+                // Collapse penalty when session variance drops below 20% of human baseline spread
+                if (baseStd >= 0.15 && currStd <= baseStd * 0.20) {
+                    rawSpreadZ += (baseStd / Math.max(0.02, currStd)) * 0.75;
+                }
+                zSpread = Math.max(0.0, rawSpreadZ - SPREAD_DEADZONE_Z);
+            }
+
+            double z = Math.hypot(zMean, zSpread);
             sumSqZ += z * z;
             compared++;
             if (z > worstZ) {
@@ -77,11 +97,16 @@ public final class AccountBaselineModel {
     public void mergeSession(UUID subject, BehavioralFeatureExtractor.Snapshot snapshot) {
         Objects.requireNonNull(subject, "subject");
         Map<String, RunningMoments> history = baselines.computeIfAbsent(subject, id -> new ConcurrentHashMap<>());
-        snapshot.features().forEach((name, moments) -> history.compute(name, (k, existing) -> {
-            RunningMoments target = existing == null ? new RunningMoments() : existing.copy();
-            target.merge(moments);
-            return target;
-        }));
+        snapshot.features().forEach((name, moments) -> {
+            if (moments.count() == 0) {
+                return;
+            }
+            history.compute(name, (k, existing) -> {
+                RunningMoments target = existing == null ? new RunningMoments() : existing.copy();
+                target.merge(moments);
+                return target;
+            });
+        });
     }
 
     /** Seeds persisted baseline moments once (no-op if this subject already has a loaded baseline in memory). */

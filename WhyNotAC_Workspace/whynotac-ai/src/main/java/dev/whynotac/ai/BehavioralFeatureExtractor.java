@@ -1,6 +1,7 @@
 package dev.whynotac.ai;
 
 import dev.whynotac.math.stats.RunningMoments;
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
@@ -11,7 +12,10 @@ import java.util.Map;
 
 /**
  * Extracts per-session behavioral moments using {@link RunningMoments} (Welford/Pebay shifted online statistics)
- * for non-punitive baseline modeling and case prioritization (AI-01).
+ * for non-punitive baseline modeling, cross-feature anomaly scoring, and case prioritization (AI-01).
+ *
+ * <p>Captures both global session kinematics and combat-conditioned / cross-feature moments so peaceful building
+ * and walking do not dilute PvP combat tracking statistics.
  */
 public final class BehavioralFeatureExtractor implements TimelineListener {
 
@@ -19,6 +23,12 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
     public static final String AIM_ANGULAR_STEP_DEG = "aim_angular_step_deg";
     public static final String TICK_DELTA_MS = "tick_delta_ms";
     public static final String HORIZONTAL_STEP_BLOCKS = "horizontal_step_blocks";
+    public static final String COMBAT_AIM_STEP_DEG = "combat_aim_step_deg";
+    public static final String COMBAT_AIM_JERK_DEG = "combat_aim_jerk_deg";
+    public static final String ATTACK_SNAP_RATIO = "attack_snap_ratio";
+    public static final String CONTAINER_CLICK_INTERVAL_TICKS = "container_click_interval_ticks";
+
+    private static final long COMBAT_WINDOW_TICKS = 40L;
 
     public record Snapshot(Map<String, RunningMoments> features) {
         public Snapshot {
@@ -35,16 +45,27 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
         final RunningMoments aimSteps = new RunningMoments();
         final RunningMoments tickDeltasMs = new RunningMoments();
         final RunningMoments horizontalSteps = new RunningMoments();
+        final RunningMoments combatAimSteps = new RunningMoments();
+        final RunningMoments combatAimJerks = new RunningMoments();
+        final RunningMoments attackSnapRatios = new RunningMoments();
+        final RunningMoments containerClickIntervals = new RunningMoments();
 
         long tick;
         long lastAttackTick = Long.MIN_VALUE;
         long lastTickNano = Long.MIN_VALUE;
+        boolean attackedThisTick;
         boolean hasRot;
         float prevYaw;
         float prevPitch;
+        double prevCombatStep = Double.NaN;
+        double lastNonAttackAimStep = 1.0;
+        double currentTickAimStep = Double.NaN;
         boolean hasPos;
         double prevX;
         double prevZ;
+        int lastContainerId = -1;
+        int lastContainerSlot = Integer.MIN_VALUE;
+        long lastContainerClickTick = Long.MIN_VALUE;
     }
 
     @Override
@@ -54,11 +75,22 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        if (!(event instanceof TimelineEvent.Inbound in)) {
-            return;
-        }
         SessionStats s = session.attachment(STATE, SessionStats::new);
         synchronized (s) {
+            if (event instanceof TimelineEvent.Outbound out) {
+                if (out.packet() instanceof ClientboundPacket.OpenScreen
+                        || out.packet() instanceof ClientboundPacket.ContainerClose
+                        || out.packet() instanceof ClientboundPacket.Respawn
+                        || out.packet() instanceof ClientboundPacket.Login) {
+                    s.lastContainerId = -1;
+                    s.lastContainerSlot = Integer.MIN_VALUE;
+                    s.lastContainerClickTick = Long.MIN_VALUE;
+                }
+                return;
+            }
+            if (!(event instanceof TimelineEvent.Inbound in)) {
+                return;
+            }
             switch (in.packet()) {
                 case ServerboundPacket.InteractEntity interact when interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK -> {
                     if (s.lastAttackTick != Long.MIN_VALUE) {
@@ -68,6 +100,26 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
                         }
                     }
                     s.lastAttackTick = s.tick;
+                    s.attackedThisTick = true;
+                }
+                case ServerboundPacket.ContainerClick click -> {
+                    if (click.containerId() > 0 && click.slot() >= 0) {
+                        if (click.containerId() != s.lastContainerId) {
+                            s.lastContainerId = click.containerId();
+                            s.lastContainerSlot = Integer.MIN_VALUE;
+                            s.lastContainerClickTick = Long.MIN_VALUE;
+                        }
+                        if (click.slot() != s.lastContainerSlot) {
+                            if (s.lastContainerClickTick != Long.MIN_VALUE) {
+                                long dt = s.tick - s.lastContainerClickTick;
+                                if (dt >= 0 && dt <= 40) {
+                                    s.containerClickIntervals.add((double) dt);
+                                }
+                            }
+                            s.lastContainerSlot = click.slot();
+                            s.lastContainerClickTick = s.tick;
+                        }
+                    }
                 }
                 case ServerboundPacket.MovePlayer move -> {
                     if (move.hasRotation() && !move.hasNonFiniteValue()) {
@@ -77,6 +129,18 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
                             double step = Math.hypot(dy, dp);
                             if (step > 0.0 && step < 180.0) {
                                 s.aimSteps.add(step);
+                                s.currentTickAimStep = step;
+                                boolean inCombat = s.attackedThisTick
+                                        || (s.lastAttackTick != Long.MIN_VALUE && (s.tick - s.lastAttackTick) <= COMBAT_WINDOW_TICKS);
+                                if (inCombat) {
+                                    s.combatAimSteps.add(step);
+                                    if (!Double.isNaN(s.prevCombatStep)) {
+                                        s.combatAimJerks.add(Math.abs(step - s.prevCombatStep));
+                                    }
+                                    s.prevCombatStep = step;
+                                } else {
+                                    s.prevCombatStep = Double.NaN;
+                                }
                             }
                         }
                         s.hasRot = true;
@@ -96,6 +160,17 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
                     }
                 }
                 case ServerboundPacket.ClientTickEnd ignored -> {
+                    if (!Double.isNaN(s.currentTickAimStep)) {
+                        if (s.attackedThisTick) {
+                            double denom = Math.max(0.25, s.lastNonAttackAimStep);
+                            double ratio = Math.min(50.0, s.currentTickAimStep / denom);
+                            s.attackSnapRatios.add(ratio);
+                        } else if (s.currentTickAimStep >= 0.05) {
+                            s.lastNonAttackAimStep = 0.75 * s.lastNonAttackAimStep + 0.25 * s.currentTickAimStep;
+                        }
+                    }
+                    s.attackedThisTick = false;
+                    s.currentTickAimStep = Double.NaN;
                     s.tick++;
                     if (s.lastTickNano != Long.MIN_VALUE) {
                         double ms = (in.nanoTime() - s.lastTickNano) / 1_000_000.0;
@@ -119,6 +194,10 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
             out.put(AIM_ANGULAR_STEP_DEG, s.aimSteps);
             out.put(TICK_DELTA_MS, s.tickDeltasMs);
             out.put(HORIZONTAL_STEP_BLOCKS, s.horizontalSteps);
+            out.put(COMBAT_AIM_STEP_DEG, s.combatAimSteps);
+            out.put(COMBAT_AIM_JERK_DEG, s.combatAimJerks);
+            out.put(ATTACK_SNAP_RATIO, s.attackSnapRatios);
+            out.put(CONTAINER_CLICK_INTERVAL_TICKS, s.containerClickIntervals);
             return new Snapshot(out);
         }
     }
