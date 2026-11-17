@@ -161,7 +161,7 @@ check("CheatProbe tick-framing (" in clean, "live ARMED tick-framing detection f
 check("CheatProbe client-clock (" in clean, "live ARMED client-clock detection fired")
 check("CheatProbe attack-aim (" in clean, "live ARMED attack-aim (Silent KillAura) detection fired")
 check("CheatProbe action-grammar (" in clean, "live ARMED action-grammar detection fired")
-check("CheatProbe packet-bounds (" in clean, "live ARMED packet-bounds (BadPackets hotbar slot) detection fired")
+check("CheatProbe packet-bounds (" in clean, "live ARMED packet-bounds (BadPackets cursor bounds) detection fired")
 check("Test passed" in clean, "Target husk survived 8 diamond-sword reach attacks (CANCEL_IMPOSSIBLE_HIT worked)")
 check(len(probe["setback_teleports"]) >= 1, f"Player received Paper SETBACK_POSITION teleport ({len(probe['setback_teleports'])})")
 check(http_health.get("status") == "GREEN", f"HTTP /health returned GREEN: {http_health}")

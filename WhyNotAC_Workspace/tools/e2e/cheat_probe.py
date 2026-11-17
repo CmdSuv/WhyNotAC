@@ -127,9 +127,15 @@ def main():
                 client.send(pc.PLAY_S_TICK_END)
             clock_burst_sent = True
 
-        # Phase 7 (tick 235): Invalid hotbar slot 9 (> 8) -> packet-bounds (P-M)
+        # Phase 7 (tick 235): Out-of-bounds UseItemOn cursor offset (2.5, 0.5, 0.5) -> packet-bounds (P-M)
         if tick == 235 and not packet_bounds_sent:
-            client.send(pc.PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 9))
+            bx, by, bz = int(math.floor(x)), int(math.floor(y)) - 1, int(math.floor(z))
+            block_pos_long = ((bx & 0x3FFFFFF) << 38) | ((bz & 0x3FFFFFF) << 12) | (by & 0xFFF)
+            client.send(
+                pc.PLAY_S_USE_ITEM_ON,
+                pc.varint(0) + struct.pack(">q", block_pos_long) + pc.varint(1)
+                + struct.pack(">fff??", 2.5, 0.5, 0.5, False, False) + pc.varint(1)
+            )
             packet_bounds_sent = True
 
         tick += 1
