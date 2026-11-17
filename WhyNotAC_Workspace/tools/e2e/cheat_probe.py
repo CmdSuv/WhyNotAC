@@ -133,7 +133,7 @@ def main():
             block_pos_long = ((bx & 0x3FFFFFF) << 38) | ((bz & 0x3FFFFFF) << 12) | (by & 0xFFF)
             client.send(
                 pc.PLAY_S_USE_ITEM_ON,
-                pc.varint(0) + struct.pack(">q", block_pos_long) + pc.varint(1)
+                pc.varint(0) + struct.pack(">Q", block_pos_long) + pc.varint(1)
                 + struct.pack(">fff??", 2.5, 0.5, 0.5, False, False) + pc.varint(1)
             )
             packet_bounds_sent = True
