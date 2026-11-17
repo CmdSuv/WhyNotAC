@@ -51,7 +51,7 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
 
     private final BehavioralFeatureExtractor extractor = new BehavioralFeatureExtractor();
     private final AccountBaselineModel baselineModel = new AccountBaselineModel();
-    private final ProbeScheduler probeScheduler = new ProbeScheduler();
+    private final ProbeScheduler probeScheduler;
     private final DesignProbeEngine designProbeEngine;
     private final Map<String, CasePriority> prioritizedCases = new ConcurrentHashMap<>();
     private final Map<String, UUID> caseSubjects = new ConcurrentHashMap<>();
@@ -65,7 +65,12 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
     }
 
     public AiAdvisor(EvidenceSink sink) {
-        this.designProbeEngine = new DesignProbeEngine(probeScheduler, sink);
+        this(sink, new ProbeScheduler());
+    }
+
+    public AiAdvisor(EvidenceSink sink, ProbeScheduler probeScheduler) {
+        this.probeScheduler = java.util.Objects.requireNonNull(probeScheduler, "probeScheduler");
+        this.designProbeEngine = new DesignProbeEngine(this.probeScheduler, sink);
     }
 
     public DesignProbeEngine designProbeEngine() {

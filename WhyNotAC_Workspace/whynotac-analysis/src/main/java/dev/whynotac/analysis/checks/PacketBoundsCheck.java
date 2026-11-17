@@ -32,13 +32,18 @@ import java.util.TreeMap;
  *   <li>{@code invalid-container-slot}: {@code ContainerClick} with {@code slot < -1 && slot != -999}
  *       ({@code AbstractContainerScreen.slotClicked});</li>
  *   <li>{@code invalid-container-swap}: {@code ContainerClick} with {@code clickType == "SWAP"} and
- *       {@code button} outside hotbar {@code 0..8} and offhand {@code 40} ({@code AbstractContainerMenu.doClick}).</li>
+ *       {@code button} outside hotbar {@code 0..8} and offhand {@code 40} ({@code AbstractContainerMenu.doClick});</li>
+ *   <li>{@code command-entity-mismatch} and {@code invalid-command-data}: {@code PlayerCommand} targeting an entity
+ *       id other than {@code selfId}, or carrying out-of-bounds {@code data} ({@code START_RIDING_JUMP} outside
+ *       {@code 0..100}, or non-zero {@code data} on any other known action);</li>
+ *   <li>{@code invalid-chunk-batch-rate}: {@code ChunkBatchReceived} with non-finite or out-of-bounds
+ *       {@code desiredChunksPerTick} ({@code <= 0.0F || > 64.0F}).</li>
  * </ul>
  */
 public final class PacketBoundsCheck implements TimelineListener {
 
     public static final String ID = "packet-bounds";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     static final double MIN_CURSOR_OFFSET = -1.0001;
@@ -126,6 +131,40 @@ public final class PacketBoundsCheck implements TimelineListener {
                     details.put("reason", "invalid-container-swap");
                     details.put("button", Integer.toString(click.button()));
                     report(session, state, in, "ContainerClick SWAP button " + click.button() + " outside vanilla 0..8 or 40 bounds", details);
+                }
+            }
+            case ServerboundPacket.PlayerCommand cmd -> {
+                ClientSelf self = replicas.self().self(session);
+                if (self.selfId() >= 0 && cmd.entityId() != self.selfId()) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "command-entity-mismatch");
+                    details.put("entityId", Integer.toString(cmd.entityId()));
+                    details.put("selfId", Integer.toString(self.selfId()));
+                    report(session, state, in, "PlayerCommand entityId " + cmd.entityId() + " != selfId " + self.selfId(), details);
+                } else if (cmd.action() == ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP
+                        && (cmd.data() < 0 || cmd.data() > 100)) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "invalid-command-data");
+                    details.put("action", cmd.action().name());
+                    details.put("data", Integer.toString(cmd.data()));
+                    report(session, state, in, "START_RIDING_JUMP data " + cmd.data() + " outside vanilla 0..100 bounds", details);
+                } else if (cmd.action() != ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP
+                        && cmd.action() != ServerboundPacket.PlayerCommand.Action.UNKNOWN
+                        && cmd.data() != 0) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "invalid-command-data");
+                    details.put("action", cmd.action().name());
+                    details.put("data", Integer.toString(cmd.data()));
+                    report(session, state, in, "PlayerCommand " + cmd.action() + " carried non-zero data " + cmd.data(), details);
+                }
+            }
+            case ServerboundPacket.ChunkBatchReceived batch -> {
+                float rate = batch.desiredChunksPerTick();
+                if (!Float.isFinite(rate) || rate <= 0.0F || rate > 64.0F) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "invalid-chunk-batch-rate");
+                    details.put("desiredChunksPerTick", Float.toString(rate));
+                    report(session, state, in, "ChunkBatchReceived desiredChunksPerTick " + rate + " outside vanilla (0, 64] bounds", details);
                 }
             }
             default -> { }

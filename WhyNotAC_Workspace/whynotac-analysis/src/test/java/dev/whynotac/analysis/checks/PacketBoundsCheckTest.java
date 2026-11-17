@@ -129,6 +129,24 @@ final class PacketBoundsCheckTest {
                 new ServerboundPacket.ContainerClick(0, 1, 10, 99, "SWAP", List.of(), Stack.EMPTY)));
         assertEquals(6, evidence.size());
         assertEquals("invalid-container-swap", evidence.get(5).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerCommand(SELF + 99, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        assertEquals(7, evidence.size());
+        assertEquals("command-entity-mismatch", evidence.get(6).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerCommand(SELF, ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP, 150)));
+        assertEquals(8, evidence.size());
+        assertEquals("invalid-command-data", evidence.get(7).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ChunkBatchReceived(-1.0F)));
+        assertEquals(9, evidence.size());
+        assertEquals("invalid-chunk-batch-rate", evidence.get(8).details().get("reason"));
     }
 
     @Test

@@ -74,6 +74,8 @@ ai:
   active-probes:
     enabled: true
     ttl-ticks: 10
+    min-cooldown-ticks: 8
+    max-jitter-ticks: 2
 CFG
 
 echo 'eula=true' > "$WORK_DIR/eula.txt"
@@ -114,6 +116,10 @@ sleep 2
 echo "give CheatProbe minecraft:diamond_sword" > "$FIFO"
 echo "execute at CheatProbe run summon minecraft:husk ~4.3 ~ ~ {NoAI:1b,PersistenceRequired:1b,Tags:[\"wn_target\"],Health:12.0f,attributes:[{id:\"minecraft:max_health\",base:12.0d}]}" > "$FIFO"
 echo "execute at CheatProbe run summon minecraft:husk ~ ~ ~2.8 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wn_aura\"],Health:20.0f,attributes:[{id:\"minecraft:max_health\",base:20.0d}]}" > "$FIFO"
+
+sleep 9
+echo "whynotac ai CheatProbe" > "$FIFO"
+echo "whynotac entities CheatProbe" > "$FIFO"
 
 wait "$PROBE"
 sleep 1
@@ -162,6 +168,9 @@ check("CheatProbe client-clock (" in clean, "live ARMED client-clock detection f
 check("CheatProbe attack-aim (" in clean, "live ARMED attack-aim (Silent KillAura) detection fired")
 check("CheatProbe action-grammar (" in clean, "live ARMED action-grammar detection fired")
 check("CheatProbe packet-bounds (" in clean, "live ARMED packet-bounds (BadPackets cursor bounds) detection fired")
+check("CheatProbe design-probe (" in clean, "live ARMED design-probe (behind-FOV decoy martingale) detection fired")
+check("WhyNotAC AI (non-punitive) for CheatProbe:" in clean and "intrinsicRisk=" in clean,
+      "live /whynotac ai reported non-punitive session moments & intrinsicRisk")
 check("Test passed" in clean, "Target husk survived 8 diamond-sword reach attacks (CANCEL_IMPOSSIBLE_HIT worked)")
 check(len(probe["setback_teleports"]) >= 1, f"Player received Paper SETBACK_POSITION teleport ({len(probe['setback_teleports'])})")
 check(http_health.get("status") == "GREEN", f"HTTP /health returned GREEN: {http_health}")

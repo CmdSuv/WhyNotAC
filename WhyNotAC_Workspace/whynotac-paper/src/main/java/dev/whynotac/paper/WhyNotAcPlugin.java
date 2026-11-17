@@ -123,7 +123,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         VerdictConfig verdictConfig = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
         verdict = new VerdictEngine(verdictConfig, SecondVerifier.ReplaySource.fromRecordingPaths(
                 session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session)));
-        aiAdvisor = new AiAdvisor(verdict);
+        long probeMinCooldown = Math.max(1L, getConfig().getLong("ai.active-probes.min-cooldown-ticks", 200L));
+        long probeMaxJitter = Math.max(0L, getConfig().getLong("ai.active-probes.max-jitter-ticks", 400L));
+        aiAdvisor = new AiAdvisor(verdict, new dev.whynotac.ai.ProbeScheduler(probeMinCooldown, probeMaxJitter, 0.001, 0x5A17_C0DEL));
         registry.addListener(aiAdvisor);
         verdict.addCaseListener(cases);
         verdict.addCaseListener(alerts);

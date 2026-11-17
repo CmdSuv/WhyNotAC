@@ -7,6 +7,7 @@ import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineEvent.ClientFact;
 import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Trust;
 import dev.whynotac.protocol.session.TimelineEvent.Observation.Source;
+import dev.whynotac.protocol.version.SupportedProtocols;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -73,7 +74,7 @@ public final class AdmissibilityTracker {
         if (observationSequence >= fromSequence) {
             reasons.add("the observation point changed inside the window");
         }
-        if (!"774".equals(nativeProtocol)) {
+        if (!SupportedProtocols.isFullyVerified(nativeProtocol)) {
             reasons.add("native protocol not established as 774 (" + nativeProtocol + ")");
         }
         if (!"none".equals(translator)) {

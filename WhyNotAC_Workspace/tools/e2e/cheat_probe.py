@@ -54,6 +54,7 @@ def main():
     split_tick_sent = False
     silent_killaura_sent = False
     packet_bounds_sent = False
+    attacked_decoys = set()
 
     start = time.monotonic()
     handled_setbacks = 0
@@ -71,6 +72,14 @@ def main():
         elif tick in (30, 50, 70):
             # Regular 20-tick vanilla standing heartbeat keeps MovementTracker base position fresh
             client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))
+
+        # Active Decoy Probe response (before any tick movement packet, during combat windows)
+        if (80 <= tick <= 112) or (tick >= 145):
+            for eid in list(client.entities.keys()):
+                if eid >= 1_900_000_000 and eid not in attacked_decoys:
+                    attacked_decoys.add(eid)
+                    client.send(pc.PLAY_S_INTERACT, pc.varint(eid) + pc.varint(1) + b"\x00")
+                    client.send(pc.PLAY_S_SWING, pc.varint(0))
 
         # Phase 2 (ticks 80..112): Reach cheat — 8 attacks every 4 ticks against husky ~4.3 blocks east
         # (within Paper's 6.0 cap, outside vanilla 3.0 reach): ARMED attack-reach must cancel hits #2..#8
