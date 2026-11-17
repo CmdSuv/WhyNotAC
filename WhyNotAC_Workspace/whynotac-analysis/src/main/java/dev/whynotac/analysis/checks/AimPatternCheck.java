@@ -53,7 +53,7 @@ import java.util.TreeMap;
 public final class AimPatternCheck implements TimelineListener {
 
     public static final String ID = "aim-pattern";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     // Signal 1: hit-and-snapback
@@ -67,6 +67,13 @@ public final class AimPatternCheck implements TimelineListener {
     static final double MIN_ROBOTIC_MEAN_DYAW = 1.5;
     static final double MAX_ROBOTIC_STD_DEV = 0.015;
     static final int COMBAT_ACTIVE_TICKS = 4;
+
+    // Signal 2b: low-entropy-aim (multi-tick discrete speed locking, e.g. alternating aimbot steps)
+    static final int ENTROPY_WINDOW = 32;
+    static final double MIN_ENTROPY_STEP = 0.5;
+    static final double ENTROPY_BIN_WIDTH = 0.25;
+    static final double MAX_ENTROPY_BITS = 1.05;
+    static final int MIN_ENTROPY_ATTACKS = 3;
 
     // Signal 3: combat-lattice-break (MouseTurnModel GCD baseline vs combat deviation)
     static final int BASELINE_WINDOW = 20;
@@ -120,8 +127,9 @@ public final class AimPatternCheck implements TimelineListener {
         SnapCandidate pendingSnap;
         final ArrayDeque<long[]> snapbacks = new ArrayDeque<>(); // [tick, seq, nano]
 
-        // Robotic constant-speed combat tracking
+        // Robotic constant-speed & low-entropy combat tracking
         final ArrayDeque<double[]> roboticSamples = new ArrayDeque<>(); // [absDYaw, seq, nano]
+        final ArrayDeque<double[]> entropySamples = new ArrayDeque<>(); // [absDYaw, attacked(0/1), seq, nano]
 
         // Lattice baseline + combat break
         double prevCleanPitchDelta = Double.NaN;
@@ -244,8 +252,10 @@ public final class AimPatternCheck implements TimelineListener {
         boolean inCombat = attackedThisTick || (state.lastAttackTick != Long.MIN_VALUE && tick - state.lastAttackTick <= COMBAT_ACTIVE_TICKS);
         if (inCombat) {
             checkRoboticTracking(session, state, tickEnd, Math.abs(dYaw));
+            checkLowEntropyTracking(session, state, tickEnd, Math.abs(dYaw), attackedThisTick);
         } else {
             state.roboticSamples.clear();
+            state.entropySamples.clear();
             state.currentTarget = Integer.MIN_VALUE;
         }
 
@@ -323,6 +333,55 @@ public final class AimPatternCheck implements TimelineListener {
                     String.format(Locale.ROOT, "constant combat angular speed (mean %.2f deg/tick, sd %.4f over %d ticks)",
                             mean, sd, ROBOTIC_WINDOW), details)) {
                 state.roboticSamples.clear();
+            }
+        }
+    }
+
+    private void checkLowEntropyTracking(PlayerSession session, State state, TimelineEvent.Inbound tickEnd,
+                                         double absDYaw, boolean attackedThisTick) {
+        if (absDYaw < MIN_ENTROPY_STEP) {
+            return;
+        }
+        state.entropySamples.addLast(new double[] {absDYaw, attackedThisTick ? 1.0 : 0.0, tickEnd.sequence(), tickEnd.nanoTime()});
+        while (state.entropySamples.size() > ENTROPY_WINDOW) {
+            state.entropySamples.pollFirst();
+        }
+        if (state.entropySamples.size() < ENTROPY_WINDOW) {
+            return;
+        }
+        RunningMoments moments = new RunningMoments();
+        Map<Long, Integer> bins = new java.util.HashMap<>();
+        int attackTicks = 0;
+        for (double[] s : state.entropySamples) {
+            moments.add(s[0]);
+            if (s[1] > 0.5) {
+                attackTicks++;
+            }
+            long bin = Math.round(s[0] / ENTROPY_BIN_WIDTH);
+            bins.merge(bin, 1, Integer::sum);
+        }
+        double mean = moments.mean();
+        double sd = moments.sampleStdDev();
+        if (attackTicks < MIN_ENTROPY_ATTACKS || mean < MIN_ROBOTIC_MEAN_DYAW || sd < MAX_ROBOTIC_STD_DEV) {
+            return;
+        }
+        double entropy = 0.0;
+        for (int count : bins.values()) {
+            double p = (double) count / ENTROPY_WINDOW;
+            entropy -= p * (Math.log(p) / Math.log(2.0));
+        }
+        if (bins.size() <= 2 && entropy <= MAX_ENTROPY_BITS) {
+            double[] first = state.entropySamples.peekFirst();
+            Map<String, String> details = new TreeMap<>();
+            details.put("reason", "low-entropy-aim");
+            details.put("samples", Integer.toString(ENTROPY_WINDOW));
+            details.put("uniqueBins", Integer.toString(bins.size()));
+            details.put("entropyBits", format(entropy));
+            details.put("meanAbsDYaw", format(mean));
+            if (report(session, state, (long) first[2], (long) first[3], tickEnd,
+                    String.format(Locale.ROOT, "low-entropy combat aiming (H=%.2f bits, %d bins over %d ticks)",
+                            entropy, bins.size(), ENTROPY_WINDOW), details)) {
+                state.entropySamples.clear();
             }
         }
     }
@@ -498,6 +557,7 @@ public final class AimPatternCheck implements TimelineListener {
         state.hasPrev = false;
         state.pendingSnap = null;
         state.roboticSamples.clear();
+        state.entropySamples.clear();
         state.currentTarget = Integer.MIN_VALUE;
         state.prevCleanPitchDelta = Double.NaN;
         state.combatLatticeSamples.clear();

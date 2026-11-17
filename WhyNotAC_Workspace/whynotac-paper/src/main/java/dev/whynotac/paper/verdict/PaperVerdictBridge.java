@@ -8,7 +8,9 @@ import dev.whynotac.verdict.VerdictDecision;
 import dev.whynotac.verdict.VerdictEngine;
 import io.papermc.paper.ban.BanListType;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.Date;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -39,7 +41,12 @@ import org.bukkit.plugin.Plugin;
  */
 public final class PaperVerdictBridge implements VerdictEngine.EnforcementListener, Listener {
 
-    private static final long MITIGATION_TTL_NANOS = TimeUnit.MILLISECONDS.toNanos(350);
+    /**
+     * Bridges the 1-second check report cooldown so deterministic continuous cheats cannot land
+     * unmitigated hits/actions in a cooldown hole while recovering automatically once clean.
+     */
+    static final long MITIGATION_TTL_NANOS = TimeUnit.MILLISECONDS.toNanos(1_250);
+    private static final int SAFE_TRAIL_SIZE = 3;
     private static final long HIDE_INFORMATION_TTL_NANOS = TimeUnit.SECONDS.toNanos(15);
     private static final double HIDE_INFORMATION_DISTANCE_SQ = 16.0 * 16.0;
 
@@ -51,7 +58,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
     private final Map<UUID, Long> cancelAttackUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> cancelBlockUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> setbackCooldownUntilNanos = new ConcurrentHashMap<>();
-    private final Map<UUID, Location> safeLocations = new ConcurrentHashMap<>();
+    private final Map<UUID, Deque<Location>> safeTrails = new ConcurrentHashMap<>();
     private final Map<UUID, Long> hideInfoUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Set<UUID>> hiddenTargetsByObserver = new ConcurrentHashMap<>();
 
@@ -198,7 +205,8 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
                 setbackCooldownUntilNanos.put(uuid, deadline);
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     Player p = Bukkit.getPlayer(uuid);
-                    Location safe = safeLocations.get(uuid);
+                    Deque<Location> trail = safeTrails.get(uuid);
+                    Location safe = earliestSafeLocation(trail);
                     if (p != null && p.isOnline() && safe != null && safe.getWorld() != null && safe.getWorld().equals(p.getWorld())) {
                         p.teleport(safe);
                     }
@@ -278,8 +286,29 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         if (cooldown != null && System.nanoTime() < cooldown) {
             return;
         }
-        Location to = event.getTo();
-        safeLocations.put(uuid, (to != null ? to : event.getFrom()).clone());
+        Deque<Location> trail = safeTrails.computeIfAbsent(uuid, k -> new ArrayDeque<>(SAFE_TRAIL_SIZE));
+        recordSafeStep(trail, event.getFrom());
+    }
+
+    static void recordSafeStep(Deque<Location> trail, Location from) {
+        if (from == null) {
+            return;
+        }
+        synchronized (trail) {
+            if (trail.size() >= SAFE_TRAIL_SIZE) {
+                trail.pollFirst();
+            }
+            trail.addLast(from.clone());
+        }
+    }
+
+    static Location earliestSafeLocation(Deque<Location> trail) {
+        if (trail == null) {
+            return null;
+        }
+        synchronized (trail) {
+            return trail.peekFirst();
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -321,7 +350,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         cancelAttackUntilNanos.remove(uuid);
         cancelBlockUntilNanos.remove(uuid);
         setbackCooldownUntilNanos.remove(uuid);
-        safeLocations.remove(uuid);
+        safeTrails.remove(uuid);
         hideInfoUntilNanos.remove(uuid);
         hiddenTargetsByObserver.remove(uuid);
         hiddenTargetsByObserver.values().forEach(set -> set.remove(uuid));

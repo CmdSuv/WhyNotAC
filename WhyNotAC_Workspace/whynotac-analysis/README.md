@@ -705,15 +705,13 @@ Tüm 12 kontrol + `design-probe` için normatif **varsayımlar, bilgi sınırlar
 - **`attack-reach` (`AttackReachCheck` / `AttackReach`):** Decompile `GameRenderer.pick` + `startAttack`; tüm olası göz, poz ve hedef kutu çiftleri için `EPSILON = 1e-4` blok ile sınır aşımında `P-A` üretir, piston/shulker itmelerinde ve creative/spectator ihtimalinde iddiadan çekilir.
 - **`transaction-order` (`TransactionOrderCheck`):** `PacketProcessor` sırası gereği `AcceptTeleportation` sonrasına kalan önceki `Ping` cevabını (`ping-after-later-teleport-accept`) ve `KeepAlive` yanıtından sonra `12` tick geciktirilen `Ping`'i (`ping-delayed-past-keepalive`) yakalar.
 - **`click-pattern` (`ClickPatternCheck`):** `ClientTickEnd` çerçeveli `sustained-cps` (40 tik ≥ 50/80), `constant-interval` (`stdDev ≤ 0,14`) ve `macro-periodicity` (periyot 2/3) `S` sinyalleri; kazı/kullanım/dürtme hariç, asla cezalandırmaz.
-- **`aim-pattern` (`AimPatternCheck`):** Dürbün, büyük `|yaw|`, `±90°` pitch, binek/teleport ve sinematik/gamepad muafiyetleri sonrası `hit-and-snapback`, `robotic-tracking` ve `combat-lattice-break` `S` sinyalleri; asla cezalandırmaz.
+- **`aim-pattern` (`AimPatternCheck` v2):** Dürbün, büyük `|yaw|`, `±90°` pitch, binek/teleport ve sinematik/gamepad muafiyetleri sonrası `hit-and-snapback`, `robotic-tracking`, `low-entropy-aim` (Shannon entropisi ≤ 1,05 bit / ≤ 2 hız kutusu) ve `combat-lattice-break` `S` sinyalleri; asla cezalandırmaz.
+- **`container-timing` (`ContainerTimingCheck`):** `ClientTickEnd` çerçeveli `rapid-container-transfer` (`≤ 10` tikte ≥ `10` ayrı yuva) ve `constant-container-cadence` (`stdDev ≤ 0,10` tick) `S` sinyalleri; aynı yuva tekrarları ve creative dışlanır, asla cezalandırmaz.
 
 ## Planlanan aileler
 
-- **Aim (devam):** çok-kareli entropi / otokorelasyon / spektral düzlük ve aşırı-düzeltme imzaları (`aim-pattern` içinde temel kafes bozulması, sabit açısal hız ve vur-geri-dön ilk sürüm olarak SHADOW'da açıldı).
-- **Tıklama (devam):** insan kas sınırı kalibrasyonu ve profil birleştirme (`click-pattern` içinde `RunningMoments` ile `sustained-cps`, `constant-interval`, `macro-periodicity` SHADOW'da açıldı).
-- **Zamanlama:** `ClientTickEnd` çerçevelemesiyle Timer/Blink, transaction tutma, paket
-  patlamaları.
-- **Etkileşim:** erişim/hitbox (bit-tam `viewVector` ışın izleme), görüş hattı, envanter zamanlaması.
+- **Tamamlanan çekirdek sürümler:** Envanter zamanlaması (`container-timing` içinde `rapid-container-transfer` ve `constant-container-cadence`), çok-kareli aim entropisi (`aim-pattern` v2 içinde `low-entropy-aim`), tıklama istatistikleri (`click-pattern`) ve `ClientTickEnd` zamanlama/sıra kontrolleri (`client-clock`, `tick-framing`, `transaction-order`) SHADOW'da açıktır.
+- **İlerideki Ar-Ge uzantıları:** Spektral FFT / otokorelasyon profilleri ve yeni Minecraft sürümlerine (`PROD-14`) uyarlanan envanter/eylem genişletmeleri (`docs/UPGRADE-GUIDE-PROD14.md`).
 
 Sinematik kamera, dürbün, kesirli imleç ve büyük-yaw çözünürlük kaybı gibi bilinen meşru
 istisnalar, dedektör kanıt üretmeden **önce** dışlanır.

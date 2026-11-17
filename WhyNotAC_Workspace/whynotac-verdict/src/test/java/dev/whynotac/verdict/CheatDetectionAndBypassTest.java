@@ -622,9 +622,22 @@ final class CheatDetectionAndBypassTest {
             assertTrue(macro.countCases("click-pattern") >= 1, "AutoClicker constant cadence must trigger click-pattern");
             assertTrue(macro.countCases("aim-pattern") >= 1, "Robotic angular velocity must trigger aim-pattern");
 
+            // 3. ChestStealer (12 rapid QUICK_MOVE transfers across 3 ticks inside an open generic_9x3 chest)
+            macro.out(new ClientboundPacket.OpenScreen(3, "minecraft:generic_9x3"));
+            macro.sync();
+            for (int slot = 0; slot < 12; slot++) {
+                macro.in(new ServerboundPacket.ContainerClick(3, 1, slot, 0, "QUICK_MOVE", List.of(), Stack.EMPTY));
+                if (slot % 4 == 3) {
+                    macro.idleTick(TICK_NANOS);
+                }
+            }
+            assertTrue(macro.countCases("container-timing") >= 1, "ChestStealer burst must trigger container-timing");
+
             // POLICY.md guarantee: even with autoBanEnabled + autoKickEnabled, S checks NEVER neutralize/kick/ban
             assertTrue(macro.mitigations.stream().noneMatch(d ->
-                    d.evidence().check().equals("click-pattern") || d.evidence().check().equals("aim-pattern")));
+                    d.evidence().check().equals("click-pattern")
+                            || d.evidence().check().equals("aim-pattern")
+                            || d.evidence().check().equals("container-timing")));
             assertEquals(0, macro.kicks.size());
             assertEquals(0, macro.tempBans.size());
         }

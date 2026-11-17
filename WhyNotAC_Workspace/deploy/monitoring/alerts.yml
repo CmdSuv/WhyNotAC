@@ -1,0 +1,44 @@
+groups:
+  - name: whynotac_health
+    rules:
+      - alert: WhyNotAcDegraded
+        expr: whynotac_health_status == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WhyNotAC health DEGRADED"
+          description: "WhyNotAC loop/queue or recorder latency exceeded threshold; inspect /whynotac health."
+
+      - alert: WhyNotAcCritical
+        expr: whynotac_health_status == 2
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "WhyNotAC health CRITICAL"
+          description: "Circuit breaker tripped, listener errors detected, events dropped, or AuditLedger unreadable."
+
+      - alert: WhyNotAcLostEvents
+        expr: increase(whynotac_lost_events_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "WhyNotAC dropped timeline events"
+          description: "Timeline event queue dropped packets; windows fail open without conviction."
+
+      - alert: WhyNotAcListenerErrors
+        expr: increase(whynotac_listener_errors_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "WhyNotAC uncaught analysis listener exception"
+          description: "An analysis listener threw an exception; review logs and .wnrec dumps immediately."
+
+      - alert: WhyNotAcLoopSlow
+        expr: whynotac_transaction_loop_mean_wall_micros > 2500
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WhyNotAC main-thread transaction loop latency elevated"

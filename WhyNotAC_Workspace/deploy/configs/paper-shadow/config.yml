@@ -1,0 +1,50 @@
+# WhyNotAC Live Pilot — SHADOW Observation Profile (1.21.11)
+# Safe default: opens cases/dossiers, collects AI & OpenMetrics telemetry, NEVER mitigates, kicks, or bans.
+
+recording:
+  enabled: true
+  max-age-days: 14
+  max-total-megabytes: 4096
+  max-queued-megabytes: 64
+
+observation:
+  edge: true
+  per-tick-transactions: true
+  flush-transactions: true
+
+cases:
+  retention-days: 90
+
+verdict:
+  armed-checks: []
+  mitigations: false
+  hide-information: false
+  auto-kick: false
+  auto-ban: false
+  second-verifier: true
+  require-corroboration-for-ban: true
+  temp-ban-hours: 24
+  max-enforced-players-per-minute: 5
+  max-false-ban-budget: 1
+  false-ban-window-days: 7
+  correlation-half-life-seconds: 120
+  min-score-for-mitigation: 1.0
+  min-score-for-kick: 3.0
+  ban-wave-delay-seconds: 0
+
+identity:
+  trust-auth-plugins: true
+
+observability:
+  health-watchdog: true
+  metrics-http-port: 9108
+
+network-bridge:
+  enabled: false
+  secret-file: "network-secret.key"
+  max-clock-skew-seconds: 60
+
+ai:
+  active-probes:
+    enabled: false
+    ttl-ticks: 10

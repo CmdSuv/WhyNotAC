@@ -334,6 +334,24 @@ class AimPatternCheckTest {
     }
 
     @Test
+    void twoStepAlternatingKillAuraTriggersLowEntropyAimWithoutBreakingRoboticStdDev() {
+        float yaw = 0.0F;
+        for (int t = 0; t < 34; t++) {
+            // Alternates between +2.0 and +4.0 deg/tick (stdDev ~ 1.0 >> 0.015, so robotic-tracking stays silent!)
+            yaw += (t % 2 == 0) ? 2.0F : 4.0F;
+            if (t % 3 == 0) {
+                attack();
+            }
+            look(yaw, 0.0F);
+            tick();
+        }
+        assertFalse(evidence.isEmpty(), "low-entropy quantized combat aim must trigger aim-pattern");
+        assertTrue(evidence.stream().anyMatch(e -> "low-entropy-aim".equals(e.details().get("reason"))),
+                "expected low-entropy-aim finding, got: " + evidence);
+        assertEquals(EvidenceClass.NOMINAL_STATISTIC, evidence.getFirst().evidenceClass());
+    }
+
+    @Test
     void registeredInChecks() {
         assertEquals(AimPatternCheck.VERSION, Checks.version(AimPatternCheck.ID));
         assertTrue(Checks.all((s, e) -> { }, Replicas.vanilla()).stream().anyMatch(AimPatternCheck.class::isInstance));

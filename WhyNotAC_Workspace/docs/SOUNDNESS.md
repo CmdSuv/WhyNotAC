@@ -27,8 +27,9 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 | `prediction-sequence` | `P-M` | `PACKET_GRAMMAR` | `BlockStatePredictionHandler` seviye aralığı `[levelsLow, levelsHigh]` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9](#29-prediction-sequence-p-m) |
 | `movement` | `P-M` | `MOVEMENT_PHYSICS` | Bit-tam 1.21.11 çarpışma + hipotez kümesi (`≤ 64`), x86/ARM `Math.cos` | `SETBACK_POSITION` | [Aşağıda §2.10](#210-movement-p-m) |
 | `click-pattern` | `S` | `STATISTICAL_SIGNALS` | 40 tik CPS eşiği (`50`/`80`), 60 aralıklı `stdDev ≤ 0,14` / periyot-2,3 | Yasak (`NONE`) | [Aşağıda §2.11](#211-click-pattern-s) |
-| `aim-pattern` | `S` | `STATISTICAL_SIGNALS` | `25°` sıçrama / `0,015°` `stdDev` / `MouseTurnModel` kafes bozulması | Yasak (`NONE`) | [Aşağıda §2.12](#212-aim-pattern-s) |
-| `design-probe` | `D` | `STATISTICAL_SIGNALS` | Ville eşitsizliği (`e-process ≥ 1 / alpha`) rastgele yem sonda deneyi | Yasak (`NONE`; `HIDE_INFORMATION` izinli) | [Aşağıda §2.13](#213-design-probe-d) |
+| `aim-pattern` | `S` | `STATISTICAL_SIGNALS` | `25°` sıçrama / `0,015°` `stdDev` / düşük entropi (`≤ 1,05 bit`) / kafes bozulması | Yasak (`NONE`) | [Aşağıda §2.12](#212-aim-pattern-s) |
+| `container-timing` | `S` | `STATISTICAL_SIGNALS` | `10` tikte ≥ `10` ayrı sandık yuvası / `14` tıklamada `stdDev ≤ 0,10` | Yasak (`NONE`) | [Aşağıda §2.13](#213-container-timing-s) |
+| `design-probe` | `D` | `STATISTICAL_SIGNALS` | Ville eşitsizliği (`e-process ≥ 1 / alpha`) rastgele yem sonda deneyi | Yasak (`NONE`; `HIDE_INFORMATION` izinli) | [Aşağıda §2.14](#214-design-probe-d) |
 
 ---
 
@@ -104,11 +105,18 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 - **Dışlanan Durumlar:** Kazı ticks (`digging`), `UseItem`/`UseItemOn` ve mızrak dürtmesi (`STAB`) dışlanır. `ActionPolicy` gereği `NEUTRALIZE`, `KICK`, `TEMP_BAN` her koşulda **yasaktır**.
 
 ### 2.12 `aim-pattern` (`S` — Asla Cezalandırmaz)
-- **Dayanak:** `TickLook` istemci dönüşleri + `MouseTurnModel` ayrık fare kafesi (`AimPatternCheck.java`).
+- **Dayanak:** `TickLook` istemci dönüşleri + `MouseTurnModel` ayrık fare kafesi (`AimPatternCheck.java` v2).
 - **Meşru Muafiyetler (Önceden Dışlanır):** Elde dürbün (`spyglass`), büyük `|yaw|` ULP çözünürlük kaybı (`ulp > 0.001F`), `±90°` pitch sıkıştırması, binek/teleport/kamera dönüşleri, ve sinematik kamera / gamepad / HiDPI fare (yalnızca savaş dışında kararlı fare kafesi `>= 18/20` oturmuşsa `combat-lattice-break` etkinleşir).
-- **Sinyaller:** `hit-and-snapback` (`>= 25°` dönüş + 1–2 tickte `<= 5°` geri dönüş, 120 tikte `>= 3`), `robotic-tracking` (`25` tikte `mean >= 1.5°`, `sampleStdDev <= 0.015°`), `combat-lattice-break` (`15` tikte `>= 12` sapma). `ActionPolicy` gereği ceza tetiklemez.
+- **Sinyaller:** `hit-and-snapback` (`>= 25°` dönüş + 1–2 tickte `<= 5°` geri dönüş, 120 tikte `>= 3`), `robotic-tracking` (`25` tikte `mean >= 1.5°`, `sampleStdDev <= 0.015°`), `low-entropy-aim` (`32` hareketli savaş tikinde ≥ `3` saldırılı pencerede `0,25°` kuantize hız kutularının `≤ 2` kutu ve `≤ 1,05 bit` Shannon entropisinde kilitlenmesi) ve `combat-lattice-break` (`15` tikte `>= 12` sapma). `ActionPolicy` gereği ceza tetiklemez.
 
-### 2.13 `design-probe` (`D` — Asla Cezalandırmaz)
+### 2.13 `container-timing` (`S` — Asla Cezalandırmaz)
+- **Dayanak:** `ClientTickEnd` çerçevelemesiyle envanter ve sandık tıklamaları (`ContainerTimingCheck.java`).
+- **Sinyaller:**
+  - `rapid-container-transfer`: Sunucu menüsünde (`containerId > 0`) `<= 10` client tick içinde `>= 10` **farklı** yuvaya (`slot >= 0 && slot != lastSlot`) hızlı aktarım tıklaması (`ChestStealer`).
+  - `constant-container-cadence`: `>= 14` ardışık farklı yuva tıklaması aralığında (`1..6` tick, `mean <= 3.5`) `sampleStdDev <= 0.10` tick robotik ritim.
+- **Dışlanan Durumlar:** Aynı yuvaya tekrarlı tıklama/sürükleme (`slot == lastSlot`), yuva dışı bırakma (`slot < 0`), creative/spectator ihtimali ve `Gap`/çevirili pencere. `ActionPolicy` gereği asla ceza veya etkisizleştirme tetiklemez.
+
+### 2.14 `design-probe` (`D` — Asla Cezalandırmaz)
 - **Dayanak:** Rastgele zamanlanan yem sonda (`ProbeScheduler` + `EValueProcess`, `DesignProbeEngine.java`). Ville eşitsizliği altında her yem deneyi sıfır-hipotez çarpışma oranı $p_0$ ile test martingali $M_t = \prod \frac{\text{outcome}}{p_0}$ veya bahis e-süreci biriktirir; yalnızca $M_t \ge 1 / \alpha$ geçtiğinde ve pencere kabul edilebilir olduğunda `DESIGN_STATISTIC` üretir.
 - **İzinli Eylemler (`ActionPolicy`):** Yalnızca `ALERT`, `REVIEW` ve (yalnızca `ARMED` modda) `HIDE_INFORMATION`. `NEUTRALIZE`, `KICK` ve `BAN` sınıfsal olarak **yasaktır**.
 

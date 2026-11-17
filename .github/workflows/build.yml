@@ -97,6 +97,8 @@ jobs:
         run: for i in 1 2 3 4 5; do ./gradlew --version > /dev/null && exit 0; sleep $((15 * i)); done; exit 1
       - name: Run live Velocity + Paper proxy E2E
         run: tools/e2e/run_proxy_e2e.sh "$RUNNER_TEMP/proxy-e2e"
+      - name: Run live ARMED cheat + mitigation E2E
+        run: bash tools/e2e/run_cheat_e2e.sh "$RUNNER_TEMP/cheat-e2e"
       - name: Upload proxy E2E logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
