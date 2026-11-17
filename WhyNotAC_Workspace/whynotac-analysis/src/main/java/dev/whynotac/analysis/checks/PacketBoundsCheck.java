@@ -28,13 +28,17 @@ import java.util.TreeMap;
  *   <li>{@code self-interaction}: {@code InteractEntity} targeting the player's own entity id
  *       ({@code ProjectileUtil.getEntityHitResult} excludes the shooter/camera entity);</li>
  *   <li>{@code invalid-block-cursor}: {@code UseItemOn} with a non-finite hit location or a cursor offset
- *       outside the vanilla block outline envelope {@code [-1.0001, 2.0001]}.</li>
+ *       outside the vanilla block outline envelope {@code [-1.0001, 2.0001]};</li>
+ *   <li>{@code invalid-container-slot}: {@code ContainerClick} with {@code slot < -1 && slot != -999}
+ *       ({@code AbstractContainerScreen.slotClicked});</li>
+ *   <li>{@code invalid-container-swap}: {@code ContainerClick} with {@code clickType == "SWAP"} and
+ *       {@code button} outside hotbar {@code 0..8} and offhand {@code 40} ({@code AbstractContainerMenu.doClick}).</li>
  * </ul>
  */
 public final class PacketBoundsCheck implements TimelineListener {
 
     public static final String ID = "packet-bounds";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     static final double MIN_CURSOR_OFFSET = -1.0001;
@@ -110,6 +114,19 @@ public final class PacketBoundsCheck implements TimelineListener {
                 report(session, state, in,
                         String.format(Locale.ROOT, "UseItemOn cursor offset (%.4f, %.4f, %.4f) outside vanilla block bounds", dx, dy, dz),
                         details);
+            }
+            case ServerboundPacket.ContainerClick click -> {
+                if (click.slot() < -1 && click.slot() != -999) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "invalid-container-slot");
+                    details.put("slot", Integer.toString(click.slot()));
+                    report(session, state, in, "ContainerClick slot " + click.slot() + " outside vanilla bounds (>= -1 or -999)", details);
+                } else if ("SWAP".equals(click.clickType()) && (click.button() < 0 || (click.button() > 8 && click.button() != 40))) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "invalid-container-swap");
+                    details.put("button", Integer.toString(click.button()));
+                    report(session, state, in, "ContainerClick SWAP button " + click.button() + " outside vanilla 0..8 or 40 bounds", details);
+                }
             }
             default -> { }
         }

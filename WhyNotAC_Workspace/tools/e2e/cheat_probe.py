@@ -53,6 +53,7 @@ def main():
     clock_burst_sent = False
     split_tick_sent = False
     silent_killaura_sent = False
+    packet_bounds_sent = False
 
     start = time.monotonic()
     handled_setbacks = 0
@@ -125,6 +126,11 @@ def main():
             for _ in range(30):
                 client.send(pc.PLAY_S_TICK_END)
             clock_burst_sent = True
+
+        # Phase 7 (tick 235): Invalid hotbar slot 9 (> 8) -> packet-bounds (P-M)
+        if tick == 235 and not packet_bounds_sent:
+            client.send(pc.PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 9))
+            packet_bounds_sent = True
 
         tick += 1
         start = max(start, time.monotonic() - 0.5 - tick * 0.05)

@@ -15,6 +15,7 @@ import dev.whynotac.protocol.packet.BlockPosition;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.protocol.session.TimelineEvent;
@@ -72,7 +73,7 @@ final class PacketBoundsCheckTest {
     }
 
     @Test
-    void validHotbarMovementInteractAndBlockCursorProduceZeroEvidence() {
+    void validHotbarMovementInteractContainerAndBlockCursorProduceZeroEvidence() {
         for (int slot = 0; slot <= 8; slot++) {
             session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.SetCarriedItem(slot)));
         }
@@ -83,12 +84,16 @@ final class PacketBoundsCheckTest {
         session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
                 new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(1, 63, 1), BlockFace.UP,
                         new Vec3d(1.5, 64.0, 1.5), false, false, 1)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, -999, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, 10, 40, "SWAP", List.of(), Stack.EMPTY)));
         assertTrue(evidence.isEmpty());
         assertTrue(rejected.isEmpty());
     }
 
     @Test
-    void detectsNonFiniteMoveInvalidHotbarSlotSelfInteractAndOutOfBoundsCursor() {
+    void detectsNonFiniteMoveInvalidHotbarSlotSelfInteractInvalidContainerAndOutOfBoundsCursor() {
         session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
                 new ServerboundPacket.MovePlayer(Double.NaN, 64.0, 0.5, 0.0F, 0.0F, true, false, true, false)));
         assertEquals(1, evidence.size());
@@ -112,12 +117,24 @@ final class PacketBoundsCheckTest {
                         new Vec3d(12.5, 64.5, 0.5), false, false, 2)));
         assertEquals(4, evidence.size());
         assertEquals("invalid-block-cursor", evidence.get(3).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, -5, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        assertEquals(5, evidence.size());
+        assertEquals("invalid-container-slot", evidence.get(4).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, 10, 99, "SWAP", List.of(), Stack.EMPTY)));
+        assertEquals(6, evidence.size());
+        assertEquals("invalid-container-swap", evidence.get(5).details().get("reason"));
     }
 
     @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(PacketBoundsCheck.VERSION, Checks.version(PacketBoundsCheck.ID));
         assertNotNull(Checks.create(PacketBoundsCheck.ID, (s, e) -> { }));
-        assertFalse( new PacketBoundsCheck((s, e) -> { }, Replicas.vanilla()).readsEntityMotion());
+        assertFalse(new PacketBoundsCheck((s, e) -> { }, Replicas.vanilla()).readsEntityMotion());
     }
 }

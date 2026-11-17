@@ -30,6 +30,7 @@ public final class Checks {
             Map.entry(ClickPatternCheck.ID, ClickPatternCheck::new),
             Map.entry(AimPatternCheck.ID, AimPatternCheck::new),
             Map.entry(ContainerTimingCheck.ID, ContainerTimingCheck::new),
+            Map.entry(ScaffoldPatternCheck.ID, ScaffoldPatternCheck::new),
             Map.entry(PacketBoundsCheck.ID, PacketBoundsCheck::new),
             Map.entry(TransactionOrderCheck.ID, (sink, replicas) -> new TransactionOrderCheck(sink)));
     private static final Map<String, Integer> VERSIONS = Map.ofEntries(
@@ -45,6 +46,7 @@ public final class Checks {
             Map.entry(ClickPatternCheck.ID, ClickPatternCheck.VERSION),
             Map.entry(AimPatternCheck.ID, AimPatternCheck.VERSION),
             Map.entry(ContainerTimingCheck.ID, ContainerTimingCheck.VERSION),
+            Map.entry(ScaffoldPatternCheck.ID, ScaffoldPatternCheck.VERSION),
             Map.entry(PacketBoundsCheck.ID, PacketBoundsCheck.VERSION),
             Map.entry(TransactionOrderCheck.ID, TransactionOrderCheck.VERSION));
 
@@ -56,7 +58,8 @@ public final class Checks {
                 new UseAimCheck(sink, replicas), new BreakTimeCheck(sink, replicas), new PredictionSequenceCheck(sink, replicas),
                 new ActionGrammarCheck(sink, replicas), new MovementCheck(sink, replicas),
                 new ClickPatternCheck(sink, replicas), new AimPatternCheck(sink, replicas),
-                new ContainerTimingCheck(sink, replicas), new PacketBoundsCheck(sink, replicas),
+                new ContainerTimingCheck(sink, replicas), new ScaffoldPatternCheck(sink, replicas),
+                new PacketBoundsCheck(sink, replicas),
                 new TransactionOrderCheck(sink));
     }
 

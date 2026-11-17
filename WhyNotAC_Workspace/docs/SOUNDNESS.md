@@ -25,11 +25,12 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 | `transaction-order` | `P-M` | `CLOCK_AND_FRAMING` | `MAX_TICKS_AFTER_KEEPALIVE = 12`; tek TCP akışı + `PacketProcessor` sırası | `NONE` (opt-in `KICK`) | [Aşağıda §2.7](#27-transaction-order-p-m) |
 | `action-grammar` | `P-M` | `PACKET_GRAMMAR` | `handleKeybinds` -> `tickEntities`, saldırı/STAB sonrası `Swing`, açık menü | `NONE` (opt-in `KICK`) | [Aşağıda §2.8](#28-action-grammar-p-m) |
 | `prediction-sequence` | `P-M` | `PACKET_GRAMMAR` | `BlockStatePredictionHandler` seviye aralığı `[levelsLow, levelsHigh]` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9](#29-prediction-sequence-p-m) |
-| `packet-bounds` | `P-M` | `PACKET_GRAMMAR` | Sonlu `MovePlayer`/`MoveVehicle`, hotbar `0..8`, `entityId != selfId`, blok imleci `[-1, 2]` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9b](#29b-packet-bounds-p-m) |
+| `packet-bounds` | `P-M` | `PACKET_GRAMMAR` | Sonlu `MovePlayer`/`MoveVehicle`, hotbar `0..8`, `entityId != selfId`, blok imleci `[-1, 2]`, `ContainerClick` yuva/SWAP | `NONE` (opt-in `KICK`) | [Aşağıda §2.9b](#29b-packet-bounds-p-m) |
 | `movement` | `P-M` | `MOVEMENT_PHYSICS` | Bit-tam 1.21.11 çarpışma + hipotez kümesi (`≤ 64`), x86/ARM `Math.cos` | `SETBACK_POSITION` | [Aşağıda §2.10](#210-movement-p-m) |
 | `click-pattern` | `S` | `STATISTICAL_SIGNALS` | 40 tik CPS eşiği (`50`/`80`), 60 aralıklı `stdDev ≤ 0,14` / periyot-2,3 | Yasak (`NONE`) | [Aşağıda §2.11](#211-click-pattern-s) |
 | `aim-pattern` | `S` | `STATISTICAL_SIGNALS` | `25°` sıçrama / `0,015°` `stdDev` / düşük entropi (`≤ 1,05 bit`) / kafes bozulması | Yasak (`NONE`) | [Aşağıda §2.12](#212-aim-pattern-s) |
 | `container-timing` | `S` | `STATISTICAL_SIGNALS` | `10` tikte ≥ `10` ayrı sandık yuvası / `14` tıklamada `stdDev ≤ 0,10` | Yasak (`NONE`) | [Aşağıda §2.13](#213-container-timing-s) |
+| `scaffold-pattern` | `S` | `STATISTICAL_SIGNALS` | `22°` yerleştir-geri-dön (`place-and-snapback`) / `12` blokta `stdDev ≤ 0,10` köprü ritmi | Yasak (`NONE`) | [Aşağıda §2.13b](#213b-scaffold-pattern-s--asla-cezalandırmaz) |
 | `design-probe` | `D` | `STATISTICAL_SIGNALS` | Ville eşitsizliği (`e-process ≥ 1 / alpha`) rastgele yem sonda deneyi | Yasak (`NONE`; `HIDE_INFORMATION` izinli) | [Aşağıda §2.14](#214-design-probe-d) |
 
 ---
@@ -97,6 +98,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
   2. `invalid-hotbar-slot`: `SetCarriedItem` yuvasının `0..8` dışına çıkması.
   3. `self-interaction`: `InteractEntity` paketinin oyuncunun kendi `selfId` varlık kimliğini hedeflemesi.
   4. `invalid-block-cursor`: `UseItemOn` vuruş noktasının sonlu olmaması veya blok imleç ofsetinin `[-1.0001, 2.0001]` zarfı dışına çıkması.
+  5. `invalid-container-slot` ve `invalid-container-swap`: `ContainerClick` yuva indeksinin `< -1 && != -999` olması veya `SWAP` tıklamasında `button` alanının `0..8` ve `40` dışına çıkması.
 - **Dışlanan Durumlar:** `Login` öncesi (`selfId < 0`) ve kabul edilemez pencereler (`Gap`/çevirici).
 
 ### 2.10 `movement` (`P-M`)
@@ -124,6 +126,13 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
   - `rapid-container-transfer`: Sunucu menüsünde (`containerId > 0`) `<= 10` client tick içinde `>= 10` **farklı** yuvaya (`slot >= 0 && slot != lastSlot`) hızlı aktarım tıklaması (`ChestStealer`).
   - `constant-container-cadence`: `>= 14` ardışık farklı yuva tıklaması aralığında (`1..6` tick, `mean <= 3.5`) `sampleStdDev <= 0.10` tick robotik ritim.
 - **Dışlanan Durumlar:** Aynı yuvaya tekrarlı tıklama/sürükleme (`slot == lastSlot`), yuva dışı bırakma (`slot < 0`), creative/spectator ihtimali ve `Gap`/çevirili pencere. `ActionPolicy` gereği asla ceza veya etkisizleştirme tetiklemez.
+
+### 2.13b `scaffold-pattern` (`S` — Asla Cezalandırmaz)
+- **Dayanak:** `TickLook` istemci dönüşleri + `UseItemOn` yatay/alt yüz köprü yerleştirmeleri (`ScaffoldPatternCheck.java`).
+- **Sinyaller:**
+  - `place-and-snapback`: `face != BlockFace.UP` olan blok yerleştirmesinde `>= 22°` tek-tik dönüş yapıp `1..2` tik içinde eski bakışa `<= 6°` hatayla geri dönülmesi (`120` tikte `>= 3` tekrar — TellyBridge / snap-Scaffold).
+  - `constant-bridge-cadence`: `>= 12` ardışık farklı blok konumuna yatay yerleştirmede (`1..6` tik, `mean <= 4.5`) `sampleStdDev <= 0.10` tik robotik ritim.
+- **Dışlanan Durumlar:** Üst yüze kule çıkma (`BlockFace.UP`), aynı bloğa tekrarlı tıklama (`pos.equals(lastBridgePos)`), binek/teleport/creative/spectator durumları. `ActionPolicy` gereği asla ceza veya etkisizleştirme tetiklemez.
 
 ### 2.14 `design-probe` (`D` — Asla Cezalandırmaz)
 - **Dayanak:** Rastgele zamanlanan yem sonda (`ProbeScheduler` + `EValueProcess`, `DesignProbeEngine.java`). Ville eşitsizliği altında her yem deneyi sıfır-hipotez çarpışma oranı $p_0$ ile test martingali $M_t = \prod \frac{\text{outcome}}{p_0}$ veya bahis e-süreci biriktirir; yalnızca $M_t \ge 1 / \alpha$ geçtiğinde ve pencere kabul edilebilir olduğunda `DESIGN_STATISTIC` üretir.
