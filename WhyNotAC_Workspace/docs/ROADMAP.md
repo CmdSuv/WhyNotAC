@@ -204,6 +204,12 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek çok-süreçli Velocity 3.4.0 + Paper 1.21.11 E2E testleri
   `tools/e2e/run_proxy_e2e.sh` ve CI `e2e-proxy` işiyle doğrulanır.
 
+## Faz 7 – Faz 12 — İleri Mühendislik ve Tam Kapsam Yol Haritası (Yeni)
+
+Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) daraltılması, yeni nesil deterministik kontroller (`VelocityCheck`, `InventoryActionCheck`, `UseSlowdownCheck`, `TimerBalanceCheck`, `BacktrackAndPingSpoofCheck`, `InteractAtBoxCheck`), 2. nesil çok-değişkenli `whynotac-ai` (Mahalanobis kovaryans, Kelly/GRO adaptif martingal, oturum-içi toggle dedektörü), `WhyNotAC.jar benchmark` CLI + hile korpusu (`DATA-02`), canlı `alerts-stream.jsonl` / `/whynotac reload` ve çoklu-sürüm (`PROD-14`) mimarisini kapsayan **30+ iş paketlik ayrıntılı master plan** için bkz.:
+
+- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 12 Ayrıntılı Teknik Yol Haritası**
+
 ## Sahibin kararını bekleyenler
 
 | Konu | Neden önemli | Kaynak |
