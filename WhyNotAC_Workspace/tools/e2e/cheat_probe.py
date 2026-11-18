@@ -58,20 +58,18 @@ def main():
 
     start = time.monotonic()
     handled_setbacks = 0
+    reminder = 0
+    sent_on_ground = False
     while client.alive and tick < end_tick:
+        pos_sent_this_tick = False
         # Sync position cleanly if server set us back (SETBACK_POSITION) and confirm ground standing
         if len(client.setback_positions) > handled_setbacks:
             handled_setbacks = len(client.setback_positions)
             x, y, z, yaw, pitch = client.position
+            reminder = 0
+            sent_on_ground = True
             client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))
-
-        # Phase 1 (ticks 5..14): clean rotation updates populate PaperVerdictBridge 3-step safeTrails cleanly
-        if 5 <= tick < 15:
-            yaw = pc.f32(yaw + 3.0)
-            client.send(pc.PLAY_S_MOVE_ROT, struct.pack(">ffB", yaw, pitch, 1))
-        elif tick in (30, 50, 70):
-            # Regular 20-tick vanilla standing heartbeat keeps MovementTracker base position fresh
-            client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))
+            pos_sent_this_tick = True
 
         # Active Decoy Probe response (before any tick movement packet, during combat windows)
         if (80 <= tick <= 112) or (tick >= 145):
@@ -83,7 +81,11 @@ def main():
 
         # Phase 2 (ticks 80..112): Reach cheat — 8 attacks every 4 ticks against husky ~4.3 blocks east
         # (within Paper's 6.0 cap, outside vanilla 3.0 reach): ARMED attack-reach must cancel hits #2..#8
-        if 80 <= tick <= 112 and tick % 4 == 0:
+        rot_changed = False
+        if 5 <= tick < 15:
+            yaw = pc.f32(yaw + 3.0)
+            rot_changed = True
+        elif 80 <= tick <= 112 and tick % 4 == 0:
             husk_id = None
             best_d = 0.0
             for eid, (etype, ex, ey, ez) in client.entities.items():
@@ -99,17 +101,16 @@ def main():
                 client.send(pc.PLAY_S_SWING, pc.varint(0))
                 if aim_yaw != yaw:
                     yaw = aim_yaw
-                    client.send(pc.PLAY_S_MOVE_ROT, struct.pack(">ffB", yaw, pitch, 1))
+                    rot_changed = True
                 reach_attacks += 1
-
-        # Quiet settle anchor for MovementTracker (ticks 126 and 132 >= SETTLE_MIN_TICKS apart, >= 12 quiet ticks)
-        if tick in (126, 132):
-            client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))
 
         # Phase 3 (tick 140): Fly/Step cheat (+2.2 blocks upward) -> MovementCheck P-M + SETBACK_POSITION teleport
         if tick == 140 and not fly_injected:
             client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y + 2.2, z, 0))
             fly_injected = True
+            pos_sent_this_tick = True
+            reminder = 0
+            sent_on_ground = False
 
         # Phase 4 (tick 180): Split-Tick (two extra movement packets in one tick)
         if tick == 180 and not split_tick_sent:
@@ -117,6 +118,9 @@ def main():
             yaw = pc.f32(yaw + 3.0)
             client.send(pc.PLAY_S_MOVE_ROT, struct.pack(">ffB", yaw, pitch, 1))
             split_tick_sent = True
+            rot_changed = False
+            pos_sent_this_tick = True
+            reminder += 1
 
         # Phase 5 (tick 200): Silent KillAura + NoSwing against dedicated in-reach husk (d < 3.5) -> attack-aim + action-grammar
         if tick == 200 and not silent_killaura_sent:
@@ -126,7 +130,32 @@ def main():
                     client.send(pc.PLAY_S_MOVE_ROT, struct.pack(">ffB", pc.f32(yaw + 135.0), pitch, 1))
                     yaw = pc.f32(yaw + 135.0)
                     silent_killaura_sent = True
+                    rot_changed = False
+                    reminder += 1
+                    pos_sent_this_tick = True
                     break
+
+        if not pos_sent_this_tick:
+            need_pos = (reminder + 1 >= 20)
+            flags_changed = not sent_on_ground
+            if need_pos and rot_changed:
+                client.send(pc.PLAY_S_MOVE_POS_ROT, struct.pack(">dddffB", x, y, z, yaw, pitch, 1))
+                reminder = 0
+                sent_on_ground = True
+            elif need_pos:
+                client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))
+                reminder = 0
+                sent_on_ground = True
+            elif rot_changed:
+                client.send(pc.PLAY_S_MOVE_ROT, struct.pack(">ffB", yaw, pitch, 1))
+                reminder += 1
+                sent_on_ground = True
+            elif flags_changed:
+                client.send(pc.PLAY_S_MOVE_STATUS_ONLY if hasattr(pc, "PLAY_S_MOVE_STATUS_ONLY") else 0x20, struct.pack(">B", 1))
+                reminder += 1
+                sent_on_ground = True
+            else:
+                reminder += 1
 
         client.send(pc.PLAY_S_TICK_END)
 

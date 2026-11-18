@@ -116,10 +116,19 @@ done
 echo "paper up: $(grep -o 'Done ([^)]*)' "$WORK_DIR/cheat-server.log")"
 
 echo "gamerule spawn_monsters false" > "$FIFO"
-python3 -I "$HERE/cheat_probe.py" 127.0.0.1 "$PORT" CheatProbe 13 > "$WORK_DIR/cheat-probe.json" &
+python3 -I "$HERE/cheat_probe.py" 127.0.0.1 "$PORT" CheatProbe 14 > "$WORK_DIR/cheat-probe.json" &
 PROBE=$!
 
-sleep 2
+for _ in $(seq 1 150); do
+  if grep -q 'CheatProbe joined the game' "$WORK_DIR/cheat-server.log" 2>/dev/null; then
+    break
+  fi
+  if ! kill -0 "$PROBE" 2>/dev/null; then
+    echo "cheat_probe exited before joining"; tail -30 "$WORK_DIR/cheat-server.log"; exit 1
+  fi
+  sleep 0.2
+done
+sleep 0.5
 # Diamond sword (7.0 dmg/hit) vs 12.0 HP husk 4.3 blocks away: 2 unmitigated hits would kill it (14 >= 12);
 # WhyNotAC CANCEL_IMPOSSIBLE_HIT keeps it alive across 8 hits!
 echo "give CheatProbe minecraft:diamond_sword" > "$FIFO"
