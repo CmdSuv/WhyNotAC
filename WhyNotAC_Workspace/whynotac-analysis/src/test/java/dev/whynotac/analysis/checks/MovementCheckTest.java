@@ -3719,4 +3719,54 @@ class MovementCheckTest {
         tick(FORWARD, 0.0F, 0.0F, new Vec3d(0.0, 0.25, 0.0));
         assertTrue(count(MovementTracker.Outcome.UNEXPLAINED) >= 1, String.valueOf(ticks.subList(dismountIdx, ticks.size())));
     }
+
+    @Test
+    void immediateDismountTeleportOverAirPreservesFiniteFallDistance() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        // Immediate dismount teleport into free air (y = 68.0 over flat stone at y = 64.0).
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[] {}));
+        out(new ClientboundPacket.RemoveEntities(new int[] {BOAT}));
+        player = new PlayerState(10.5, 68.0, 10.5, Vec3d.ZERO, 0.0F, 0.0F, false, false, false, false, false, 0.0,
+                false, false, false, PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO,
+                false, false, false, false, null, 0);
+        teleport(10.5, 68.0, 10.5, 0.0F, 0.0F);
+        int dismountIdx = ticks.size();
+        ticks(4, NONE, 0.0F);
+        List<MovementTracker.Tick> post = ticks.subList(dismountIdx, ticks.size());
+        assertTrue(post.stream().anyMatch(t -> "anchored: dismounted".equals(t.reason())), String.valueOf(post));
+        assertEquals(MovementTracker.Outcome.EXPLAINED, post.getLast().outcome(), String.valueOf(post));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(post));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void delayedTeleportAfterDismountOverAirNeverCausesFalseUnexplained() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        // Dismount onto solid ground without teleport, walk slightly over 6 ticks, then /tp over air (y = 68.0).
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[] {}));
+        out(new ClientboundPacket.RemoveEntities(new int[] {BOAT}));
+        player = new PlayerState(6.5, 64.0, 6.5, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, true, true, 0.0,
+                false, false, false, PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO,
+                false, false, false, false, null, 0);
+        for (int i = 0; i < 6; i++) {
+            tick(i % 2 == 0 ? FORWARD : NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        }
+        player = new PlayerState(10.5, 68.0, 10.5, Vec3d.ZERO, 0.0F, 0.0F, false, false, false, false, false, 0.0,
+                false, false, false, PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO,
+                false, false, false, false, null, 0);
+        teleport(10.5, 68.0, 10.5, 0.0F, 0.0F);
+        ticks(8, NONE, 0.0F);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(List.of(), evidence);
+    }
 }

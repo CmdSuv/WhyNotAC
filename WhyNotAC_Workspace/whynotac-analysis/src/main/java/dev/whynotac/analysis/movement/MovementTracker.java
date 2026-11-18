@@ -307,6 +307,9 @@ public final class MovementTracker {
     private long dismountTeleportSequence = Long.MIN_VALUE;
     private boolean dismountAccepted;
     private boolean dismountedPendingTeleport;
+    private boolean dismountFallClean;
+    private boolean dismountTeleportFallClean;
+    private int dismountWaitTicks;
     /**
      * The run anchor's record ({@link #runAnchor}): the positions the client sent at the ends of its last steady ticks
      * (oldest first, at most {@link #RUN_MAX_TICKS} + 1), and the keys, rotation and sprinting they all had.
@@ -468,6 +471,9 @@ public final class MovementTracker {
                 dismountTeleport = null;
                 dismountAccepted = false;
                 dismountedPendingTeleport = false;
+                dismountFallClean = false;
+                dismountTeleportFallClean = false;
+                dismountWaitTicks = 0;
                 teamChange(gap.sequence(), ClientTeams.LOST); // until a login
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
                 if (!sharedLedger) {
@@ -2527,6 +2533,7 @@ public final class MovementTracker {
             if (dismounted != null) {
                 dismountTeleport = null;
                 dismountAccepted = false;
+                dismountTeleportFallClean = false;
                 hypotheses = List.copyOf(borderTicked(dismounted, entities.lastTickRanNormally()));
                 lastHands = hands();
                 since = end.sequence();
@@ -2535,6 +2542,17 @@ public final class MovementTracker {
             if (in.move != null) {
                 dismountTeleport = null;
                 dismountAccepted = false;
+                dismountTeleportFallClean = false;
+            }
+        }
+        if (dismountTeleport != null && !dismountAccepted) {
+            dismountTeleportFallClean = false;
+        }
+        if (dismountedPendingTeleport && dismountTeleport == null) {
+            dismountFallClean = false;
+            if (++dismountWaitTicks > 4) {
+                dismountedPendingTeleport = false;
+                dismountWaitTicks = 0;
             }
         }
         Hypothesis settled = baseReliable ? settleAnchor(number, in, w, world, entities) : null;
@@ -2606,8 +2624,12 @@ public final class MovementTracker {
             }
             if (prevVehicle != -1 && b.self().vehicle() == -1) {
                 dismountedPendingTeleport = true;
+                dismountFallClean = true;
+                dismountWaitTicks = 0;
             } else if (b.self().vehicle() != -1) {
                 dismountedPendingTeleport = false;
+                dismountFallClean = false;
+                dismountWaitTicks = 0;
             }
             if (packet instanceof ClientboundPacket.SetTime time) {
                 baseGameTime = time.gameTime(); // setTimeFromServer: counted on by its ticks, from below this
@@ -2639,16 +2661,23 @@ public final class MovementTracker {
                 dismountTeleport = null;
                 dismountAccepted = false;
                 dismountedPendingTeleport = false;
-            } else if ((dismountedPendingTeleport || "riding".equals(lostReason))
+                dismountFallClean = false;
+                dismountTeleportFallClean = false;
+                dismountWaitTicks = 0;
+            } else if (dismountedPendingTeleport
                     && packet instanceof ClientboundPacket.PlayerPosition teleport && b.self().vehicle() == -1
                     && isAbsoluteDismountTeleport(teleport)) {
                 dismountTeleport = teleport;
                 dismountTeleportSequence = pendingEvent.sequence();
+                dismountTeleportFallClean = dismountFallClean;
                 dismountAccepted = false;
                 dismountedPendingTeleport = false;
+                dismountFallClean = false;
+                dismountWaitTicks = 0;
             } else if (clearsDismountTeleport(packet, b.self().vehicle())) {
                 dismountTeleport = null;
                 dismountAccepted = false;
+                dismountTeleportFallClean = false;
             }
         }
         base = b.self();
@@ -2713,12 +2742,13 @@ public final class MovementTracker {
         boolean[] groundOpts = {true, false};
         boolean[] crouchOpts = {false, true};
         boolean[] modOpts = {present, !present};
+        double initialFallDistance = dismountTeleportFallClean ? 0.0 : Double.NaN;
         try {
             for (boolean ground : groundOpts) {
                 for (boolean crouch : crouchOpts) {
                     PlayerState.Pose pose = crouch ? PlayerState.Pose.CROUCHING : PlayerState.Pose.STANDING;
                     PlayerState cand = new PlayerState(tx, ty, tz, tp.deltaMovement(), yaw, pitch, ground, false, false, ground,
-                            ground, Double.NaN, sentBefore.sprinting(), present, crouch, pose, sentBefore.input(), 0, 0, 0, null,
+                            ground, initialFallDistance, sentBefore.sprinting(), present, crouch, pose, sentBefore.input(), 0, 0, 0, null,
                             false, Vec3d.ZERO, false, false, false, false, null, 0);
                     Box box = cand.box();
                     if (!baseBefore.border().known() && !baseBefore.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
@@ -2746,6 +2776,7 @@ public final class MovementTracker {
         } catch (Lose e) {
             return null;
         }
+        anchored.removeIf(h -> Double.isNaN(h.player().fallDistance()));
         return anchored.isEmpty() ? null : List.copyOf(merged(anchored));
     }
 
