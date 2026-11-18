@@ -48,6 +48,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
     static final int SURVIVAL = 0;
     static final int CREATIVE = 1;
     static final int ADVENTURE = 2;
+    static final int FOOD_EITHER = Integer.MAX_VALUE;
 
     public SelfState {
         otherAttributes = Set.copyOf(otherAttributes);
@@ -115,6 +116,11 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
 
     SelfState withHealth(float newHealth, int newFood) {
         return new SelfState(ticking, positionKnown, firstTick, newFood, newHealth, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
+                vehicle, noGravity, using, border, rainLevel, spinAttack);
+    }
+
+    SelfState withFoodEither() {
+        return new SelfState(ticking, positionKnown, firstTick, FOOD_EITHER, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
                 vehicle, noGravity, using, border, rainLevel, spinAttack);
     }
 

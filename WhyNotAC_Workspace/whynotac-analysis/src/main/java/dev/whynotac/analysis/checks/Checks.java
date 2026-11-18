@@ -32,6 +32,12 @@ public final class Checks {
             Map.entry(ContainerTimingCheck.ID, ContainerTimingCheck::new),
             Map.entry(ScaffoldPatternCheck.ID, ScaffoldPatternCheck::new),
             Map.entry(PacketBoundsCheck.ID, PacketBoundsCheck::new),
+            Map.entry(InventoryActionCheck.ID, InventoryActionCheck::new),
+            Map.entry(InteractAtBoxCheck.ID, InteractAtBoxCheck::new),
+            Map.entry(UseSlowdownCheck.ID, UseSlowdownCheck::new),
+            Map.entry(VelocityCheck.ID, VelocityCheck::new),
+            Map.entry(TimerBalanceCheck.ID, (sink, replicas) -> new TimerBalanceCheck(sink)),
+            Map.entry(PingSpoofCheck.ID, (sink, replicas) -> new PingSpoofCheck(sink)),
             Map.entry(TransactionOrderCheck.ID, (sink, replicas) -> new TransactionOrderCheck(sink)));
     private static final Map<String, Integer> VERSIONS = Map.ofEntries(
             Map.entry(TickFramingCheck.ID, TickFramingCheck.VERSION),
@@ -48,6 +54,12 @@ public final class Checks {
             Map.entry(ContainerTimingCheck.ID, ContainerTimingCheck.VERSION),
             Map.entry(ScaffoldPatternCheck.ID, ScaffoldPatternCheck.VERSION),
             Map.entry(PacketBoundsCheck.ID, PacketBoundsCheck.VERSION),
+            Map.entry(InventoryActionCheck.ID, InventoryActionCheck.VERSION),
+            Map.entry(InteractAtBoxCheck.ID, InteractAtBoxCheck.VERSION),
+            Map.entry(UseSlowdownCheck.ID, UseSlowdownCheck.VERSION),
+            Map.entry(VelocityCheck.ID, VelocityCheck.VERSION),
+            Map.entry(TimerBalanceCheck.ID, TimerBalanceCheck.VERSION),
+            Map.entry(PingSpoofCheck.ID, PingSpoofCheck.VERSION),
             Map.entry(TransactionOrderCheck.ID, TransactionOrderCheck.VERSION));
 
     private Checks() {}
@@ -59,7 +71,10 @@ public final class Checks {
                 new ActionGrammarCheck(sink, replicas), new MovementCheck(sink, replicas),
                 new ClickPatternCheck(sink, replicas), new AimPatternCheck(sink, replicas),
                 new ContainerTimingCheck(sink, replicas), new ScaffoldPatternCheck(sink, replicas),
-                new PacketBoundsCheck(sink, replicas),
+                new PacketBoundsCheck(sink, replicas), new InventoryActionCheck(sink, replicas),
+                new InteractAtBoxCheck(sink, replicas),
+                new UseSlowdownCheck(sink, replicas), new VelocityCheck(sink, replicas),
+                new TimerBalanceCheck(sink), new PingSpoofCheck(sink),
                 new TransactionOrderCheck(sink));
     }
 

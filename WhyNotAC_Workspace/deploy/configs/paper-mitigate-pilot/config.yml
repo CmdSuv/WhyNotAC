@@ -23,6 +23,11 @@ verdict:
     - "break-time"
     - "use-aim"
     - "movement"
+    - "velocity-response"
+    - "packet-bounds"
+    - "inventory-protocol"
+    - "interact-at-box"
+    - "use-item-state"
     - "design-probe"
   mitigations: true
   hide-information: true
@@ -45,6 +50,7 @@ identity:
 observability:
   health-watchdog: true
   metrics-http-port: 9108
+  alert-stream-file: "alerts-stream.jsonl"
 
 network-bridge:
   enabled: false

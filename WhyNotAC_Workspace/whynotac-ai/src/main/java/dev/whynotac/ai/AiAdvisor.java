@@ -217,8 +217,18 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
                 double contrib = Math.min(20.0, (1.5 - cMean) * 14.0);
                 risk += contrib;
                 if (contrib > bestContribution) {
+                    bestContribution = contrib;
                     dominant = "rapid-container-cadence";
                 }
+            }
+        }
+
+        double toggleZ = snap.intraSessionToggleZ();
+        if (Double.isFinite(toggleZ) && toggleZ >= 3.0) {
+            double contrib = Math.min(35.0, (toggleZ - 2.0) * 6.0);
+            risk += contrib;
+            if (contrib > bestContribution) {
+                dominant = "intra-session-toggle";
             }
         }
 

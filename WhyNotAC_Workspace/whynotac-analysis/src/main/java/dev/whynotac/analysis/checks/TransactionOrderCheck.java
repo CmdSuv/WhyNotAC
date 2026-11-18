@@ -190,7 +190,7 @@ public final class TransactionOrderCheck implements TimelineListener {
         if (state.lastReportNanos != Long.MIN_VALUE && toNano - state.lastReportNanos < REPORT_INTERVAL_NANOS) {
             return;
         }
-        Admissibility admissibility = state.admissibility.evaluate(fromSeq);
+        Admissibility admissibility = state.admissibility.evaluateTranslatorSafe(fromSeq);
         if (!admissibility.admissible()) {
             sink.rejected(session, ID, admissibility);
             return;

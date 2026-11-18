@@ -23,6 +23,7 @@ import dev.whynotac.world.ClientInventory;
 import dev.whynotac.world.ClientTeams;
 import dev.whynotac.world.ClientWorld;
 import dev.whynotac.world.ItemPrototypes;
+import dev.whynotac.world.Shape;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -1673,7 +1674,7 @@ public final class MovementTracker {
                         throw new Lose("a trident's use completed (a release may move the player on the client)");
                     }
                     if (s.food() <= 6 && !s.mayFly()) {
-                        throw new Lose("eaten while hungry (the client's own food decides sprinting before the server's)");
+                        yield h.withSelf(s.withUsing(null).withFoodEither());
                     }
                     yield h.withSelf(s.withUsing(null));
                 }
@@ -1846,6 +1847,11 @@ public final class MovementTracker {
     private void simulate(Hypothesis h, TickInput in, View view, Set<Hypothesis> out, Map<StepKey, OnFoot.Step> steps, List<PlayerState> predictions)
             throws Lose {
         SelfState self = h.self();
+        if (self.food() == SelfState.FOOD_EITHER) {
+            simulate(h.withSelf(self.withHealth(self.health(), 6)), in, view, out, steps, predictions);
+            simulate(h.withSelf(self.withHealth(self.health(), 20)), in, view, out, steps, predictions);
+            return;
+        }
         if (in.loaded) {
             if (self.ticking()) {
                 return; // a vanilla client says it loaded once per new player
@@ -2300,21 +2306,23 @@ public final class MovementTracker {
                 item = stack.item();
             }
             ItemPrototypes.Prototype prototype = item == null ? null : PROTOTYPES.get(item);
-            int state = prototype == null || prototype.places() == null ? -1 : states.onlyStateOf(prototype.places());
-            if (state < 0 || !states.has(state, BlockStates.FULL_BLOCK) || states.has(state, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                return "not a block item placing one full block";
+            if (prototype == null || prototype.places() == null) {
+                return "not a resolved block item";
             }
-            dev.whynotac.protocol.packet.BlockPosition at = world.placement(use.sequence(), state);
-            if (at == null) {
-                return "the blocks do not decide where it goes";
+            ClientWorld.Placement placed = world.placementForItem(use.sequence(), prototype.places());
+            if (placed == null) {
+                return "the blocks or item state do not decide placement";
             }
+            dev.whynotac.protocol.packet.BlockPosition at = placed.position();
+            int state = placed.state();
             if (entities.mayHaveBuildingBlockerNear(selfId, at.x() - ENTITY_MARGIN, at.y() - ENTITY_MARGIN, at.z() - ENTITY_MARGIN, at.x() + 1 + ENTITY_MARGIN,
                     at.y() + 1 + ENTITY_MARGIN, at.z() + 1 + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)) {
                 return "an entity may be in the way";
             }
+            Shape shape = states.collisionShape(state);
             int way = -2;
             for (Hypothesis h : starts) {
-                int here = inTheWay(h.player().box(), at.x(), at.y(), at.z());
+                int here = inTheWay(h.player().box(), at.x(), at.y(), at.z(), shape);
                 if (here < 0 || way != -2 && here != way) {
                     return "the player may or may not be in the way";
                 }
@@ -2324,6 +2332,28 @@ public final class MovementTracker {
             in.resolvedBlockUses = i + 1;
         }
         return null;
+    }
+
+    /** {@code Level.isUnobstructed} for a block collision shape at {@code (x, y, z)} and the player's box. */
+    static int inTheWay(Box box, int x, int y, int z, Shape shape) {
+        int count = shape.boxCount();
+        if (count == 0) {
+            return 0;
+        }
+        int result = 0;
+        for (int b = 0; b < count; b++) {
+            double ox = Math.min(box.maxX(), x + shape.box(b, 3)) - Math.max(box.minX(), x + shape.box(b, 0));
+            double oy = Math.min(box.maxY(), y + shape.box(b, 4)) - Math.max(box.minY(), y + shape.box(b, 1));
+            double oz = Math.min(box.maxZ(), z + shape.box(b, 5)) - Math.max(box.minZ(), z + shape.box(b, 2));
+            if (!(ox > 0) || !(oy > 0) || !(oz > 0)) {
+                continue;
+            }
+            if (ox >= 1.0E-6 && oy >= 1.0E-6 && oz >= 1.0E-6) {
+                return 1;
+            }
+            result = -1;
+        }
+        return result;
     }
 
     /**

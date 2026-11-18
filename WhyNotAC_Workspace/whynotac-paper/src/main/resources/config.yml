@@ -73,6 +73,8 @@ observability:
   health-watchdog: true
   # Optional loopback HTTP exporter (/metrics OpenMetrics + /health JSON). 0 disables the HTTP listener.
   metrics-http-port: 0
+  # Real-time structured JSONL alert & case stream (plugins/WhyNotAC/<file>). Blank disables export.
+  alert-stream-file: "alerts-stream.jsonl"
 
 network-bridge:
   # Authenticated Velocity companion bridge (whynotac:bridge) for NET-01 / NET-22.

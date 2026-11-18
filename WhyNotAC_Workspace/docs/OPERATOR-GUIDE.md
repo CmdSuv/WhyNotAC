@@ -68,19 +68,20 @@ Offline-mode sunucularda [`identity.trust-auth-plugins: true`](../deploy/configs
 | `/whynotac ai <oyuncu>` | Cezasız davranışsal sapma özellikleri, AI öncelik puanı ve e-süreci özeti |
 | `/whynotac cases` / `/whynotac case <önek>` | Son açılan vakalar ve dosya bilgisi |
 | `/whynotac review <önek> <pass1|confirm|appeal|uphold|overturn>` | İki farklı yetkili gerektiren inceleme/itiraz süreci |
-| `/whynotac health` / `/whynotac metrics` / `/whynotac stats` | Sağlık (`GREEN`/`DEGRADED`/`CRITICAL`), OpenMetrics ve JSON telemetri |
-| `/whynotac verdict` / `/whynotac killswitch [on|off]` / `/whynotac circuit [reset]` | Karar politikası durumu, devre kesici ve ban bütçesi yönetimi |
+| `/whynotac metrics` / `/whynotac health` / `/whynotac stats` | Sağlık (`GREEN`/`DEGRADED`/`CRITICAL`), OpenMetrics ve JSON telemetri |
+| `/whynotac verdict` / `/whynotac reload` / `/whynotac killswitch [on|off]` / `/whynotac circuit [reset]` | Karar politikası, canlı `config.yml` sıcak yenileme (`CONFIG_RELOAD` audit), devre kesici |
 | `/whynotac audit` / `/whynotac network` / `/whynotac sessions` | İmzalı hash zinciri doğrulama, proxy köprü sayaçları, aktif oturumlar |
 | `/whynotac privacy <find|forget> <uuid>` | GDPR/KVKK veri bulma ve kalıcı silme talebi |
 
 ### Çevrimdışı JAR CLI (`java -jar WhyNotAC.jar ...`)
 - `verify <dossier.json>` — Kayıtlı `.wnrec` üzerinden bağımsız replikada bulguyu tekrar üretir ve parmak izini doğrular.
-- `explain <dossier.json>` — İnsan tarafından okunabilir inceleme ve itiraz özetini basar.
+- `explain <dossier.json>` — İnsan tarafından okunabilir inceleme, karar ve AI triage (`aiPriorityScore`, `aiDominantSignal`, `aiProbeWealth`) özetini basar.
+- `benchmark [regression-dir]` — Tüm dürüst `.wnrec` kayıtlarını (`0` yanlış pozitif) ve 12 senaryolu hile kıyaslama matrisini çalıştırıp `BENCHMARK_JSON` üretir.
 - `audit <storage-dir>` — `plugins/WhyNotAC/storage` dizinindeki HMAC/hash zincirli denetim defterinin bütünlüğünü doğrular.
 - `inspect <file.wnrec>` / `dump <file.wnrec>` / `find ...` / `forget ...` — Ham kayıt ve mahremiyet araçları ([`docs/privacy`](privacy/README.md)).
 
 ---
 
-## 6. Prometheus & Alerting Kurulumu
+## 6. Prometheus, Alert Stream & Grafana Kurulumu
 
-[`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml) ve [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) dosyaları, `observability.metrics-http-port: 9108` üzerinden doğrudan gerçek `MetricsExporter` metriklerini (`whynotac_health_status`, `whynotac_lost_events_total`, `whynotac_listener_errors_total`, `whynotac_transaction_loop_mean_wall_micros`, `whynotac_check_min_margin`) izler.
+[`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml), [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) ve [`deploy/monitoring/grafana-dashboard.json`](../deploy/monitoring/grafana-dashboard.json) dosyaları, `observability.metrics-http-port: 9108` üzerinden `MetricsExporter` metriklerini izler; `observability.alert-stream-file: "alerts-stream.jsonl"` ise açılan her vakayı gerçek zamanlı tek-satır JSON akışına yazar.

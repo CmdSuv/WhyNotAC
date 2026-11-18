@@ -115,9 +115,7 @@ public final class ProbeScheduler {
     /** Feeds an experimental outcome (1.0 = unexpected hit on probe, 0.0 = ignored/clean) to the session's e-process. */
     public EValueProcess recordOutcome(UUID subject, double outcome01, double nullHitRate) {
         EValueProcess ep = martingales.computeIfAbsent(subject, id -> new EValueProcess(alpha));
-        // Kelly-conservative martingale bet toward high-signal cheat deviations while strictly preserving E_H0[factor] = 1
-        double bet = Math.min(8.0, 0.40 / Math.max(1e-6, nullHitRate));
-        ep.observe(outcome01, nullHitRate, bet);
+        ep.observeAdaptive(outcome01, nullHitRate);
         return ep;
     }
 

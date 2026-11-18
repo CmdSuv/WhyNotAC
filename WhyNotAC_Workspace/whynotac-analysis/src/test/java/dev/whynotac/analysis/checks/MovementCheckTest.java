@@ -1267,6 +1267,10 @@ class MovementCheckTest {
      * server places it too and acknowledges {@code lag} ticks later. {@code cheat}: moved up this much in the last tick.
      */
     private void tower(int levels, int lag, double cheat) throws Colliders.Unknown {
+        towerWithBlock(STONE, levels, lag, cheat);
+    }
+
+    private void towerWithBlock(int blockState, int levels, int lag, double cheat) throws Colliders.Unknown {
         List<int[]> replies = new ArrayList<>(); // {tick due, y, sequence, placed}
         int start = (int) Math.round(player.y()); // standing on the column so far
         int level = start;
@@ -1275,7 +1279,7 @@ class MovementCheckTest {
             for (java.util.Iterator<int[]> it = replies.iterator(); it.hasNext(); ) {
                 int[] r = it.next();
                 if (r[0] <= tick) {
-                    out(new ClientboundPacket.BlockUpdate(new BlockPosition(0, r[1], 0), r[3] == 1 ? STONE : AIR));
+                    out(new ClientboundPacket.BlockUpdate(new BlockPosition(0, r[1], 0), r[3] == 1 ? blockState : AIR));
                     out(new ClientboundPacket.BlockChangedAck(r[2]));
                     sync();
                     it.remove();
@@ -1286,7 +1290,7 @@ class MovementCheckTest {
                 keybinds.add(useOnTop(level));
                 boolean clear = player.y() >= level + 1 || player.y() + 1.8 <= level; // Level.isUnobstructed: touching is clear
                 if (clear) {
-                    placed.put(List.of(0, level, 0), STONE); // BlockItem.place, before the player's tick
+                    placed.put(List.of(0, level, 0), blockState); // BlockItem.place, before the player's tick
                     keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
                 }
                 replies.add(new int[] {tick + lag, level, blockSequence, clear ? 1 : 0});
@@ -1300,14 +1304,55 @@ class MovementCheckTest {
         }
     }
 
-    private void holdStone(int count) {
+    private void holdItem(String itemKey, int count) {
         List<Stack> items = new ArrayList<>();
         for (int i = 0; i < 46; i++) {
             items.add(Stack.EMPTY);
         }
-        items.set(36, new Stack("minecraft:stone", count, List.of(), List.of(), null, false));
+        items.set(36, new Stack(itemKey, count, List.of(), List.of(), null, false));
         out(new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY));
         sync();
+    }
+
+    private void holdStone(int count) {
+        holdItem("minecraft:stone", count);
+    }
+
+    @Test
+    void placingMultiStateLogsUnderneathPlayerRemainsExplained() throws Exception {
+        int logY = STATES.stateOf("minecraft:oak_log", "axis=y");
+        holdItem("minecraft:oak_log", 64);
+        ticks(3, NONE, 0.0F, 90.0F);
+        int before = ticks.size();
+        towerWithBlock(logY, 3, 2, 0.0);
+        ticks(5, NONE, 0.0F, 90.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(before, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(67.0, player.y(), 1.0E-9);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void placingHalfSlabOnSideRemainsExplained() throws Exception {
+        int bottomSlab = STATES.stateOf("minecraft:stone_slab", "type=bottom,waterlogged=false");
+        holdItem("minecraft:stone_slab", 64);
+        ticks(3, NONE, -90.0F, 0.0F);
+        int before = ticks.size();
+        // Place stone block at (2, 64, 0), then attach a bottom slab at (1, 64, 0) on WEST face of (2, 64, 0)
+        place(2, 64, 0, STONE);
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(2, 64, 0),
+                BlockFace.WEST, new Vec3d(2.0, 64.25, 0.5), false, false, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(1, 64, 0), bottomSlab);
+        int seqPlaced = blockSequence;
+        tick(FORWARD, -90.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(1, 64, 0), bottomSlab));
+        out(new ClientboundPacket.BlockChangedAck(seqPlaced));
+        sync();
+        ticks(6, NONE, -90.0F, 0.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(before, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
     }
 
     @Test
@@ -2522,6 +2567,29 @@ class MovementCheckTest {
         assertEquals(List.of(), evidence);
         assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
         assertEquals(72, count(MovementTracker.Outcome.EXPLAINED));
+    }
+
+    @Test
+    void eatingWhileHungryKeepsFullTrackingWithoutLosingClaim() throws Exception {
+        hold("minecraft:golden_apple", null);
+        out(new ClientboundPacket.SetHealth(20.0F, 4, 0.0F));
+        sync();
+        ticks(5, FORWARD, 30.0F);
+        keybinds.add(useItem(Hand.MAIN_HAND));
+        use = OnFoot.ItemUse.DEFAULT;
+        tick(FORWARD, 30.0F, 0.0F, Vec3d.ZERO);
+        livingFlags(1);
+        ticks(31, FORWARD, 30.0F);
+        out(new ClientboundPacket.EntityEvent(SELF, ClientboundPacket.EntityEvent.FINISH_USING_ITEM));
+        use = null;
+        livingFlags(0);
+        // Client finishes eating before SetHealth arrives and starts sprinting
+        ticks(2, SPRINT, 30.0F);
+        out(new ClientboundPacket.SetHealth(20.0F, 12, 5.0F));
+        sync();
+        ticks(10, SPRINT, 30.0F);
+        assertEquals(List.of(), evidence);
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED) + count(MovementTracker.Outcome.NO_CLAIM), String.valueOf(ticks));
     }
 
     @Test

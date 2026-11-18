@@ -67,7 +67,7 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
         boolean banDispatchedOrPending;
     }
 
-    private final VerdictConfig config;
+    private volatile VerdictConfig config;
     private final CircuitBreaker circuitBreaker;
     private final FalseBanBudget falseBanBudget;
     private final SecondVerifier secondVerifier;
@@ -95,6 +95,11 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
 
     public VerdictConfig config() {
         return config;
+    }
+
+    /** Atomically updates the active verdict configuration without resetting session states. */
+    public void updateConfig(VerdictConfig newConfig) {
+        this.config = Objects.requireNonNull(newConfig, "newConfig");
     }
 
     public CircuitBreaker circuitBreaker() {

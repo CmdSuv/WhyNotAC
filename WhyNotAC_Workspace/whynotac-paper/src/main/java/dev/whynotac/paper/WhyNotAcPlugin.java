@@ -8,6 +8,7 @@ import dev.whynotac.paper.ai.LiveProbeDriver;
 import dev.whynotac.paper.cases.Alerts;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.command.WhyNotCommand;
+import dev.whynotac.paper.diagnostics.AlertStreamExporter;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.HealthModel;
 import dev.whynotac.paper.diagnostics.MetricsExporter;
@@ -72,10 +73,12 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private PacketInterceptor interceptor;
     private RecordingStore recordings;
     private VerdictEngine verdict;
+    private PaperVerdictBridge verdictBridge;
     private StorageManager storage;
     private AiAdvisor aiAdvisor;
     private AuthPluginHook authPluginHook;
     private MetricsExporter metricsExporter;
+    private AlertStreamExporter alertStreamExporter;
     private PaperNetworkBridge networkBridge;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
@@ -113,6 +116,26 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         RecordingSetup.Recording recorder = recording;
         cases = new CaseStore(getDataPath().resolve("cases.db"), getDataPath().resolve("cases"),
                 session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session),
+                verdictCase -> {
+                    if (aiAdvisor == null || verdictCase.session() == null) {
+                        return java.util.Optional.empty();
+                    }
+                    dev.whynotac.ai.BehavioralFeatureExtractor.Snapshot snap = aiAdvisor.extractor().snapshot(verdictCase.session());
+                    dev.whynotac.ai.AiAdvisor.IntrinsicRiskAssessment intrinsic = aiAdvisor.assessIntrinsicRisk(snap);
+                    dev.whynotac.ai.AiAdvisor.CasePriority prio = aiAdvisor.priorityOf(verdictCase.id());
+                    java.util.UUID pid = verdictCase.session().identity() != null ? verdictCase.session().identity().playerId() : null;
+                    dev.whynotac.ai.AccountBaselineModel.ShiftAssessment shift = pid == null
+                            ? new dev.whynotac.ai.AccountBaselineModel.ShiftAssessment(true, 0.0, "", 0.0)
+                            : aiAdvisor.baselineModel().assess(pid, snap);
+                    dev.whynotac.ai.EValueProcess ep = pid == null ? null : aiAdvisor.probeScheduler().processFor(pid);
+                    return java.util.Optional.of(new CaseStore.AiTelemetry(
+                            prio != null ? prio.score0To100() : intrinsic.score0To100(),
+                            intrinsic.score0To100(),
+                            intrinsic.dominantSignal(),
+                            shift.rmsZScore(),
+                            shift.topFeature(),
+                            ep != null ? ep.wealth() : 1.0));
+                },
                 getPluginMeta().getVersion(), getLogger());
         int caseRetentionDays = Math.max(1, getConfig().getInt("cases.retention-days", 90));
         cases.retain(caseRetentionDays);
@@ -127,10 +150,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         long probeMaxJitter = Math.max(0L, getConfig().getLong("ai.active-probes.max-jitter-ticks", 400L));
         aiAdvisor = new AiAdvisor(verdict, new dev.whynotac.ai.ProbeScheduler(probeMinCooldown, probeMaxJitter, 0.001, 0x5A17_C0DEL));
         registry.addListener(aiAdvisor);
+        // Register aiAdvisor first so CaseStore and AlertStreamExporter read populated AI triage scores on case open
+        verdict.addCaseListener(aiAdvisor);
         verdict.addCaseListener(cases);
         verdict.addCaseListener(alerts);
-        verdict.addCaseListener(aiAdvisor);
-        PaperVerdictBridge verdictBridge = new PaperVerdictBridge(this, verdictConfig);
+        verdictBridge = new PaperVerdictBridge(this, verdictConfig);
         verdict.addEnforcementListener(verdictBridge);
         try {
             String buildTag = getPluginMeta().getVersion() + "-p" + SharedConstants.getProtocolVersion();
@@ -142,12 +166,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             getLogger().log(Level.SEVERE, "WhyNotAC immutable storage audit ledger failed to initialize; suppressing active enforcement to SHADOW", e);
             verdict.circuitBreaker().setKillSwitch(true, "storage ledger error: " + e.getMessage());
         }
-        if (verdictConfig.mitigationsEnabled() || verdictConfig.hidesInformationEnabled()) {
-            getServer().getPluginManager().registerEvents(verdictBridge, this);
-        }
-        if (verdictConfig.hidesInformationEnabled()) {
-            Bukkit.getScheduler().runTaskTimer(this, verdictBridge::tickOcclusionVisibility, 10L, 10L);
-        }
+        getServer().getPluginManager().registerEvents(verdictBridge, this);
+        Bukkit.getScheduler().runTaskTimer(this, verdictBridge::tickOcclusionVisibility, 10L, 10L);
         // The client's world, before every check that reads it (listeners see an event in registration order).
         Replicas replicas = Replicas.vanilla();
         replicas.listeners().forEach(registry::addListener);
@@ -226,6 +246,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 getLogger().log(Level.WARNING, "WhyNotAC failed to bind metrics HTTP port " + metricsPort, e);
             }
         }
+        String alertStreamFile = getConfig().getString("observability.alert-stream-file", "alerts-stream.jsonl");
+        if (alertStreamFile != null && !alertStreamFile.isBlank()) {
+            alertStreamExporter = new AlertStreamExporter(getDataPath().resolve(alertStreamFile.trim()), aiAdvisor, getLogger());
+            verdict.addCaseListener(alertStreamExporter);
+        }
         if (getConfig().getBoolean("network-bridge.enabled", false)) {
             String secretName = getConfig().getString("network-bridge.secret-file", "network-secret.key");
             long maxSkewMs = Math.max(1L, getConfig().getLong("network-bridge.max-clock-skew-seconds", 60L)) * 1000L;
@@ -278,7 +303,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                                 networkBridge.sendEnforcementNotice(subject, "GDPR_FORGET", "", "", 0L, "gdpr erasure");
                             }
                         }, this),
-                verdict, storage, aiAdvisor, networkBridge, this);
+                verdict, storage, aiAdvisor, networkBridge, this::reloadConfiguration, this);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,
                 event -> event.registrar().register("whynotac", "WhyNotAC diagnostics", List.of("wnac"), command));
         getLogger().info("WhyNotAC packet interceptor attached (" + threads + " analysis threads)");
@@ -329,6 +354,34 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (metricsExporter != null) {
             metricsExporter.close();
         }
+        if (alertStreamExporter != null) {
+            alertStreamExporter.close();
+        }
+    }
+
+    /** Hot-reloads {@code config.yml} verdict settings without dropping active sessions. */
+    public String reloadConfiguration(String operator) {
+        reloadConfig();
+        VerdictConfig updated = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
+        if (verdict != null) {
+            verdict.updateConfig(updated);
+        }
+        if (verdictBridge != null) {
+            verdictBridge.updateConfig(updated);
+        }
+        String summary = String.format(Locale.ROOT,
+                "armed=%d (%s) mitigations=%b hideInfo=%b autoKick=%b autoBan=%b",
+                updated.armedChecks().size(),
+                String.join(",", updated.armedChecks()),
+                updated.mitigationsEnabled(),
+                updated.hidesInformationEnabled(),
+                updated.autoKickEnabled(),
+                updated.autoBanEnabled());
+        if (storage != null) {
+            storage.recordConfigReloadAsync(operator, summary, System.currentTimeMillis());
+        }
+        getLogger().info("WhyNotAC configuration reloaded by " + operator + ": " + summary);
+        return summary;
     }
 
     /** One line of JSON for {@code /whynotac stats}: totals since start-up, for operators and the load test. */

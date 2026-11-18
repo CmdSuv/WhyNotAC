@@ -40,7 +40,8 @@ public final class AuditLedger implements AutoCloseable {
         CIRCUIT_BREAKER_TRIPPED,
         REVIEW_RECORDED,
         APPEAL_RESOLVED,
-        SUBJECT_FORGOTTEN
+        SUBJECT_FORGOTTEN,
+        CONFIG_RELOAD
     }
 
     public record LedgerEntry(

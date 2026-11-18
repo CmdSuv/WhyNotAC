@@ -1,5 +1,6 @@
 package dev.whynotac.ai;
 
+import dev.whynotac.math.stats.RunningCovarianceMatrix;
 import dev.whynotac.math.stats.RunningMoments;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -26,6 +27,7 @@ public final class AccountBaselineModel {
     private final long minBaselineSamples;
     private final long minSessionSamples;
     private final Map<UUID, Map<String, RunningMoments>> baselines = new ConcurrentHashMap<>();
+    private final Map<UUID, RunningCovarianceMatrix> covarianceBaselines = new ConcurrentHashMap<>();
 
     public AccountBaselineModel() {
         this(DEFAULT_MIN_BASELINE_SAMPLES, DEFAULT_MIN_SESSION_SAMPLES);
@@ -87,6 +89,20 @@ public final class AccountBaselineModel {
                 worstFeature = entry.getKey();
             }
         }
+        RunningCovarianceMatrix baseCov = covarianceBaselines.get(subject);
+        RunningCovarianceMatrix currCov = current.combatCovariance();
+        if (baseCov != null && currCov != null && baseCov.count() >= minBaselineSamples && currCov.count() >= 5) {
+            double mahalanobis = baseCov.mahalanobisDistance(currCov.mean(), 0.05);
+            if (Double.isFinite(mahalanobis)) {
+                double normZ = mahalanobis / Math.sqrt(currCov.dim());
+                sumSqZ += normZ * normZ;
+                compared++;
+                if (normZ > worstZ) {
+                    worstZ = normZ;
+                    worstFeature = "combat_covariance_mahalanobis";
+                }
+            }
+        }
         if (compared == 0) {
             return new ShiftAssessment(true, 0.0, "", 0.0);
         }
@@ -107,6 +123,15 @@ public final class AccountBaselineModel {
                 return target;
             });
         });
+        if (snapshot.combatCovariance() != null && snapshot.combatCovariance().count() > 0) {
+            covarianceBaselines.compute(subject, (k, existing) -> {
+                RunningCovarianceMatrix target = existing == null
+                        ? new RunningCovarianceMatrix(BehavioralFeatureExtractor.COMBAT_COVARIANCE_DIM)
+                        : existing.copy();
+                target.merge(snapshot.combatCovariance());
+                return target;
+            });
+        }
     }
 
     /** Seeds persisted baseline moments once (no-op if this subject already has a loaded baseline in memory). */
@@ -136,6 +161,7 @@ public final class AccountBaselineModel {
     }
 
     public boolean forget(UUID subject) {
+        covarianceBaselines.remove(subject);
         return baselines.remove(subject) != null;
     }
 }

@@ -714,6 +714,39 @@ final class CheatDetectionAndBypassTest {
             }
             assertEquals(List.of(), toggle.cases, "Toggle sprint/crouch across movement & open GUI must open 0 cases");
         }
+
+        // 5. Sprint-jump bridging cadence + 1.21.11 cooldown attack rhythms must produce 0 cases
+        try (BenchSession bridge = new BenchSession(armedConfig(true), "AUTHENTICATED_MOJANG", Trust.AUTHENTIC, 0)) {
+            PlayerState.Keys sprintJump = new PlayerState.Keys(true, false, false, false, true, false, true);
+            for (int t = 0; t < 25; t++) {
+                float variedYaw = (t * 2.3f + (t % 3) * 0.4f) % 360.0f;
+                float variedPitch = 72.0f + (t % 4) * 0.6f;
+                bridge.vanillaStep(sprintJump, variedYaw, variedPitch, Vec3d.ZERO, null, TICK_NANOS);
+            }
+            // Cooldown-paced swings with natural human jitter (11..14 ticks apart)
+            int[] gaps = {12, 11, 13, 12, 14, 11, 12, 13};
+            for (int gap : gaps) {
+                bridge.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+                for (int i = 0; i < gap; i++) {
+                    bridge.vanillaStep(PlayerState.Keys.NONE, (i * 1.7f), 5.0f, Vec3d.ZERO, null, TICK_NANOS);
+                }
+            }
+            assertEquals(List.of(), bridge.cases, "Sprint-jump movement and cooldown swings must open 0 cases");
+        }
+
+        // 6. 1000 ms network lag burst (20 queued vanilla ticks arriving inside 1 ms) must open 0 cases
+        try (BenchSession lagBurst = new BenchSession(armedConfig(true), "AUTHENTICATED_MOJANG", Trust.AUTHENTIC, 0)) {
+            lagBurst.now += 1_000_000_000L;
+            for (int t = 0; t < 20; t++) {
+                lagBurst.vanillaStep(PlayerState.Keys.NONE, 0F, 0F, Vec3d.ZERO, null, 50_000L);
+            }
+            lagBurst.now += 500_000_000L;
+            lagBurst.sync();
+            for (int t = 0; t < 15; t++) {
+                lagBurst.vanillaStep(PlayerState.Keys.NONE, 0F, 0F, Vec3d.ZERO, null, TICK_NANOS);
+            }
+            assertEquals(List.of(), lagBurst.cases, "1000 ms lag burst recovery must open 0 cases");
+        }
     }
 
     private static ClientboundPacket.UpdateTags vanillaTagsPacket() {

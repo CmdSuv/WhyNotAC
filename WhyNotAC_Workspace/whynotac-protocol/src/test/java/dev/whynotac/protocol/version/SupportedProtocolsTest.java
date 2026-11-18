@@ -21,5 +21,9 @@ final class SupportedProtocolsTest {
         assertTrue(spec.combatVerified());
         assertTrue(spec.clockAndOrderVerified());
         assertTrue(spec.fullyVerified());
+        assertEquals(SupportedProtocols.VersionedTables.MC_1_21_11, SupportedProtocols.tablesFor(774).orElseThrow());
+        assertTrue(SupportedProtocols.tablesFor(999).isEmpty());
+        assertTrue(SupportedProtocols.supportsTranslatorSafe("viaversion", false));
+        assertFalse(SupportedProtocols.supportsTranslatorSafe("viaversion", true));
     }
 }

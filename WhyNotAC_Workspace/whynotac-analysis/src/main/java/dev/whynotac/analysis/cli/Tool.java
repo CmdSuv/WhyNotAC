@@ -37,6 +37,15 @@ public final class Tool {
         if (args.length == 2 && args[0].equals("audit")) {
             System.exit(audit(Path.of(args[1]), System.out, System.err));
         }
+        if (args.length >= 1 && args[0].equals("benchmark")) {
+            try {
+                BenchmarkRunner.runCli(args, System.out, System.err);
+                return;
+            } catch (IOException e) {
+                System.err.println("benchmark failed: " + e.getMessage());
+                System.exit(1);
+            }
+        }
         RecordingTool.main(args);
     }
 
@@ -67,17 +76,44 @@ public final class Tool {
             case "S" -> "Nominal statistic: baseline/behavioral deviation signal; alerts and review priority only (never punitive).";
             default -> "Context metadata: attached for staff review only.";
         };
+        String dependencyGroup = field(json, "dependencyGroup");
+        String authorizedAction = field(json, "authorizedAction");
+        String verificationStatus = field(json, "verificationStatus");
+        String aiPriorityScore = numberField(json, "aiPriorityScore");
+        String aiIntrinsicRisk = numberField(json, "aiIntrinsicRisk");
+        String aiDominantSignal = field(json, "aiDominantSignal");
+        String aiBaselineRmsZ = numberField(json, "aiBaselineRmsZ");
+        String aiTopFeature = field(json, "aiTopFeature");
+        String aiProbeWealth = numberField(json, "aiProbeWealth");
         out.println("WhyNotAC Case Dossier Explanation");
         out.println("  Case ID       : " + (id == null ? "unknown" : id));
         out.println("  Player        : " + (player == null ? "unknown" : player) + " (" + (identity == null ? "UNAUTHENTICATED" : identity) + ")");
         out.println("  Check         : " + check + " [" + evidenceClass + ", " + (lifecycle == null ? "SHADOW" : lifecycle) + "]");
+        if (dependencyGroup != null || authorizedAction != null || verificationStatus != null) {
+            out.println("  Verdict       : group=" + (dependencyGroup == null ? "?" : dependencyGroup)
+                    + ", action=" + (authorizedAction == null ? "?" : authorizedAction)
+                    + ", secondVerify=" + (verificationStatus == null ? "?" : verificationStatus));
+        }
         out.println("  Summary       : " + (summary == null ? "" : summary));
         out.println("  Policy Meaning: " + meaning);
+        if (aiPriorityScore != null) {
+            out.println("  AI Triage     : priority=" + aiPriorityScore + "/100"
+                    + (aiIntrinsicRisk != null ? ", intrinsicRisk=" + aiIntrinsicRisk : "")
+                    + (aiDominantSignal != null && !aiDominantSignal.isEmpty() ? ", signal=" + aiDominantSignal : "")
+                    + (aiBaselineRmsZ != null ? ", baselineRmsZ=" + aiBaselineRmsZ : "")
+                    + (aiTopFeature != null && !aiTopFeature.isEmpty() ? ", topFeature=" + aiTopFeature : "")
+                    + (aiProbeWealth != null ? ", probeWealth=" + aiProbeWealth : ""));
+        }
         if (fingerprint != null) {
             out.println("  Fingerprint   : " + fingerprint);
         }
         out.println("  Re-verify cmd : java -jar WhyNotAC.jar verify " + dossier);
         return 0;
+    }
+
+    private static String numberField(String json, String name) {
+        Matcher m = Pattern.compile("\"" + Pattern.quote(name) + "\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(json);
+        return m.find() ? m.group(1) : null;
     }
 
     static int audit(Path storageDir, PrintStream out, PrintStream err) {

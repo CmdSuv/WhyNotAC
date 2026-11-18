@@ -56,4 +56,25 @@ final class AdmissibilityTrackerTest {
         assertTrue(result.admissible());
         assertEquals(IdentityTier.UNAUTHENTICATED, result.identity());
     }
+
+    @Test
+    void evaluateTranslatorSafeAllowsKnownJavaTranslatorWhileRejectingStrictAndBedrock() {
+        AdmissibilityTracker tracker = new AdmissibilityTracker();
+        tracker.onEvent(new Observation(0L, 10L, Source.WIRE, Source.WIRE, 774, "wire"));
+        tracker.onEvent(new ClientFact(1L, 20L, Fact.NATIVE_PROTOCOL, "773", Trust.FORMAT_BOUND, "ViaVersion"));
+        tracker.onEvent(new ClientFact(2L, 30L, Fact.TRANSLATOR, "viaversion", Trust.FORMAT_BOUND, "ViaVersion"));
+        tracker.onEvent(new ClientFact(3L, 40L, Fact.TRANSACTION_ORIGIN, "CLIENT", Trust.FORMAT_BOUND, "test"));
+        tracker.onEvent(new ClientFact(4L, 50L, Fact.IDENTITY, "AUTHENTICATED_MOJANG", Trust.AUTHENTIC, "mojang"));
+
+        // Strict evaluate rejects non-774 / translator
+        org.junit.jupiter.api.Assertions.assertFalse(tracker.evaluate(10L).admissible());
+        // Translator-safe evaluate accepts known Java translator with WIRE + CLIENT transactions
+        Admissibility safe = tracker.evaluateTranslatorSafe(10L);
+        assertTrue(safe.admissible());
+        assertEquals(IdentityTier.AUTHENTICATED, safe.identity());
+
+        // Bedrock is still rejected by evaluateTranslatorSafe
+        tracker.onEvent(new ClientFact(5L, 60L, Fact.BEDROCK, "true", Trust.FORMAT_BOUND, "Floodgate"));
+        org.junit.jupiter.api.Assertions.assertFalse(tracker.evaluateTranslatorSafe(10L).admissible());
+    }
 }

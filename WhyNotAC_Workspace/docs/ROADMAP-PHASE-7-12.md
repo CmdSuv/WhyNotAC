@@ -195,13 +195,13 @@ Amaç: [POLICY.md](POLICY.md) cezasızlık sınırını (`S`/`D` asla ceza verme
 
 ---
 
-## Özet Uygulama Sırası ve Kapı Tablosu
+## Özet Uygulama Sırası ve Tamamlanma Durumu (`2026-11-18`)
 
-| Faz | Paket Kodu | Başlık | Çıktı / Hedef Sınıf | Doğrulama Kapısı |
+| Faz | Paket Kodu | Başlık | Çıktı / Hedef Sınıf | Doğrulama Kapısı & Durum |
 |---|---|---|---|---|
-| **Faz 7** | `PH7-01..05` | `SetHealth`/`Cooldown` modelleme, çok-durumlu blok (`Slab`/`Log`) ve kova tahmini, binek iniş devri | `ClientboundPacket`, `MovementTracker`, `ClientWorld` | `MovementCheckTest` + `RegressionReplayTest` (`0` FP) |
-| **Faz 8** | `PH8-01..06` | `VelocityCheck` (`P-A`), `InventoryActionCheck` (`P-M`), `UseSlowdownCheck` (`P-M`), `TimerBalance`, `PingSpoof`, `InteractAtBox` | `whynotac-analysis/checks/*` (Toplam **20+** kontrol) | Birim testleri + `CheatDetectionAndBypassTest` + Canlı E2E |
-| **Faz 9** | `PH9-01..04` | Mahalanobis kovaryans, Kelly/GRO adaptif martingal, oturum-içi toggle tespiti, AI dossier açıklaması | `whynotac-ai/*`, `CaseStore`, `Tool explain` | `AiAdvisorTest` + `AiRegressionCalibrationTest` |
-| **Faz 10** | `PH10-01..03` | `WhyNotAC.jar benchmark` CLI + `.wnrec` hile korpusu + `LEGITIMATE-BEHAVIOUR` kalan uç testler | `BenchmarkRunner`, `Tool.java`, `LegitimateEdgeCatalogueTest` | `WhyNotAC.jar benchmark` (`100%` yakalama, `0` FP) |
-| **Faz 11** | `PH11-01..03` | `alerts-stream.jsonl` / Webhook, `/whynotac reload` sıcak yenileme, Grafana JSON panosu | `AlertStreamExporter`, `WhyNotCommand`, `deploy/monitoring/` | `PaperVerdictBridgeTest` + Canlı E2E |
-| **Faz 12** | `PH12-01..02` | ViaVersion arkası güvenli nedensellik (`evaluateTranslatorSafe`) ve çoklu-sürüm tablo yönlendiricisi | `AdmissibilityTracker`, `SupportedProtocols` | `SupportedProtocolsTest` + Interop E2E |
+| **Faz 7** | `PH7-01..05` | Açken yemek hipotezi (`FOOD_EITHER`), çok-durumlu sütun/kütük (`RotatedPillar`) & `SlabBlock` yerleştirmesi ve `Shape` çarpışma zarfı | `SelfState`, `MovementTracker`, `BlockStates`, `ClientWorld` | **TAMAMLANDI** (`MovementCheckTest`, `ClientWorldTest`, `RegressionReplayTest` `0` FP) |
+| **Faz 8** | `PH8-01..06` | `VelocityCheck` (`P-A`), `InventoryActionCheck` (`P-M`), `UseSlowdownCheck` (`P-M`), `TimerBalanceCheck` (`S`), `PingSpoofCheck` (`S`), `InteractAtBoxCheck` (`P-M`) | `whynotac-analysis/checks/*` (**21** yerleşik kontrol + `design-probe`) | **TAMAMLANDI** (Tüm birim testleri + `CheatDetectionAndBypassTest` + Canlı E2E) |
+| **Faz 9** | `PH9-01..04` | `RunningCovarianceMatrix` + Tikhonov Mahalanobis uzaklığı, Kelly/GRO adaptif martingal, oturum-içi toggle tespiti, AI dossier JSON & `Tool explain` | `whynotac-math`, `whynotac-ai/*`, `CaseStore`, `Tool.explain` | **TAMAMLANDI** (`RunningCovarianceMatrixTest` + `AiAdvisorTest`) |
+| **Faz 10** | `PH10-01..03` | `WhyNotAC.jar benchmark` CLI (dürüst `.wnrec` + 12 senaryolu hile kıyaslama matrisi) + `1000 ms` lag burst & bridging/cooldown testleri (`VAL-13`) | `BenchmarkRunner`, `Tool.java`, `CheatDetectionAndBypassTest` | **TAMAMLANDI** (`BenchmarkRunnerTest` 12/12 + `0` FP) |
+| **Faz 11** | `PH11-01..03` | Gerçek zamanlı `alerts-stream.jsonl`, `/whynotac reload` sıcak yenileme (`CONFIG_RELOAD` ledger), Grafana `whynotac_*` panosu | `AlertStreamExporter`, `WhyNotCommand`, `deploy/monitoring/grafana-dashboard.json` | **TAMAMLANDI** (`AlertStreamExporterTest` + `PaperVerdictBridgeTest`) |
+| **Faz 12** | `PH12-01..02` | ViaVersion arkası güvenli nedensellik (`evaluateTranslatorSafe`) ve çoklu-sürüm `VersionedTables` yönlendiricisi | `AdmissibilityTracker`, `SupportedProtocols` | **TAMAMLANDI** (`AdmissibilityTrackerTest` + `SupportedProtocolsTest`) |

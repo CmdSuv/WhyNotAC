@@ -979,6 +979,133 @@ public final class ClientWorld {
      * entity or the player in the way: {@code Level.isUnobstructed}) is the caller's to know; it says what happened
      * with {@link #resolveUse}.
      */
+    public record Placement(BlockPosition position, int state) {}
+
+    /**
+     * Resolves exact placement position and block state for single-state full cubes, directional
+     * pillars ({@code axis=x|y|z}, e.g. logs/hay/quartz_pillar), and non-waterlogged slabs placed into pure air.
+     * Returns null when the client's placed state or target position cannot be determined solely from
+     * {@code UseItemOn} and settled/predicted block states.
+     */
+    public Placement placementForItem(int sequence, String placedBlockKey) {
+        if (placedBlockKey == null || storage == null || hasUnlocatedPredictionBefore(sequence)) {
+            return null;
+        }
+        int single = states.onlyStateOf(placedBlockKey);
+        if (single >= 0) {
+            BlockPosition pos = placement(sequence, single);
+            return pos == null ? null : new Placement(pos, single);
+        }
+        ServerboundPacket.UseItemOn use = uses.get(sequence);
+        if (use == null) {
+            return null;
+        }
+        BlockPosition c = use.position();
+        BlockFace face = use.face();
+        int tx = c.x() + face.stepX();
+        int ty = c.y() + face.stepY();
+        int tz = c.z() + face.stepZ();
+        if (ty < minY() || ty >= minY() + height()) {
+            return null;
+        }
+        int[][] before = useBefore.get(sequence);
+        int[] clicked = before == null ? null : before[0];
+        int[] target = before == null ? null : before[1];
+        if (clicked == null || target == null) {
+            return null;
+        }
+        for (int s : clicked) {
+            if (states.has(s, BlockStates.INTERACTIVE | BlockStates.REPLACEABLE | BlockStates.CUSTOM_REPLACING)) {
+                return null;
+            }
+        }
+        // Variant A: RotatedPillarBlock (exact 3 states axis=x/y/z, all FULL_BLOCK, non-reactive)
+        int first = states.firstStateOf(placedBlockKey);
+        if (first >= 0) {
+            int[] all = states.statesOfBlock(first);
+            if (all.length == 3 && isPurePillarStates(all)) {
+                String axisProp = switch (face) {
+                    case UP, DOWN -> "axis=y";
+                    case NORTH, SOUTH -> "axis=z";
+                    case EAST, WEST -> "axis=x";
+                    default -> null;
+                };
+                int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
+                if (chosen < 0 || !targetReplaceableNonReactive(target, placedBlockKey) || !neighboursNonReactive(before)) {
+                    return null;
+                }
+                return new Placement(new BlockPosition(tx, ty, tz), chosen);
+            }
+            // Variant B: Non-waterlogged SlabBlock into pure AIR (avoids waterlogging & double-slab merging)
+            if (placedBlockKey.endsWith("_slab") && use.location() != null) {
+                for (int s : target) {
+                    if (!states.isAir(s)) {
+                        return null;
+                    }
+                }
+                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+                    int[] beside = before[i + 1];
+                    if (beside == null) {
+                        return null;
+                    }
+                    for (int s : beside) {
+                        if (reacts(s) && !states.block(s).endsWith("_slab")) {
+                            return null;
+                        }
+                    }
+                }
+                boolean bottom = face == BlockFace.UP
+                        || (face != BlockFace.DOWN && (use.location().y() - ty) <= 0.5);
+                String props = bottom ? "type=bottom,waterlogged=false" : "type=top,waterlogged=false";
+                int chosen = states.stateOf(placedBlockKey, props);
+                if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isPurePillarStates(int[] all) {
+        for (int s : all) {
+            if (!states.has(s, BlockStates.FULL_BLOCK)
+                    || states.has(s, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)
+                    || reacts(s)) {
+                return false;
+            }
+            String p = states.properties(s);
+            if (!"axis=x".equals(p) && !"axis=y".equals(p) && !"axis=z".equals(p)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean targetReplaceableNonReactive(int[] target, String placedBlockKey) {
+        for (int s : target) {
+            if (!states.has(s, BlockStates.REPLACEABLE) || states.has(s, BlockStates.CUSTOM_REPLACING) || reacts(s)
+                    || states.block(s).equals(placedBlockKey)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean neighboursNonReactive(int[][] before) {
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] beside = before[i + 1];
+            if (beside == null) {
+                return false;
+            }
+            for (int s : beside) {
+                if (reacts(s)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public BlockPosition placement(int sequence, int state) {
         ServerboundPacket.UseItemOn use = uses.get(sequence);
         if (use == null || storage == null || hasUnlocatedPredictionBefore(sequence) || !states.isValid(state)

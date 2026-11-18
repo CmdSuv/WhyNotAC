@@ -16,12 +16,30 @@ public final class EValueProcess {
     private double wealth = 1.0;
     private long observations;
     private double hits;
+    private double lastLambda;
 
     public EValueProcess(double alpha) {
         if (!Double.isFinite(alpha) || alpha <= 0.0 || alpha >= 1.0) {
             throw new IllegalArgumentException("alpha must be in (0, 1)");
         }
         this.alphaThreshold = 1.0 / alpha;
+    }
+
+    /**
+     * Updates the sequential test martingale using a predictable plug-in Kelly/GRO betting fraction
+     * {@code lambda_t} computed strictly from prior observations {@code F_{t-1}}, preserving Ville's
+     * inequality {@code E_H0[E_t | F_{t-1}] <= E_{t-1}} at every optional stopping time.
+     */
+    public synchronized double observeAdaptive(double outcome01, double nullMean) {
+        if (outcome01 < 0.0 || outcome01 > 1.0 || nullMean <= 0.0 || nullMean >= 1.0) {
+            throw new IllegalArgumentException("Invalid outcome/nullMean bounds");
+        }
+        double priorAltMean = (hits + 0.5) / (observations + 1.0);
+        double kellyLambda = priorAltMean > nullMean
+                ? (priorAltMean - nullMean) / (nullMean * (1.0 - nullMean))
+                : 0.5;
+        double boundedLambda = Math.max(0.5, Math.min(0.95 / nullMean, kellyLambda));
+        return observe(outcome01, nullMean, boundedLambda);
     }
 
     /** Updates the sequential test martingale with one randomized experiment outcome in [0, 1]. */
@@ -33,6 +51,7 @@ public final class EValueProcess {
         double maxPosLambda = 0.99 / nullMean;
         double minNegLambda = -0.99 / (1.0 - nullMean);
         double lambda = Math.max(minNegLambda, Math.min(maxPosLambda, betFraction));
+        lastLambda = lambda;
 
         double factor = 1.0 + lambda * (outcome01 - nullMean);
         if (factor < 0.0) {
@@ -67,9 +86,14 @@ public final class EValueProcess {
         return observations == 0 ? 0.0 : hits / observations;
     }
 
+    public synchronized double lastLambda() {
+        return lastLambda;
+    }
+
     public synchronized void reset() {
         wealth = 1.0;
         observations = 0L;
         hits = 0.0;
+        lastLambda = 0.0;
     }
 }

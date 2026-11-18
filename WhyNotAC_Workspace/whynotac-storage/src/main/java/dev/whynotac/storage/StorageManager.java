@@ -208,4 +208,16 @@ public final class StorageManager implements VerdictEngine.CaseListener, Verdict
         }
         ledger.close();
     }
+
+    /** Appends an operator-initiated hot configuration reload entry to the audit ledger. */
+    public void recordConfigReloadAsync(String operator, String details, long epochMillis) {
+        writer.execute(() -> {
+            try {
+                ledger.append(AuditLedger.EntryKind.CONFIG_RELOAD, epochMillis, "", "", null,
+                        (operator == null ? "console" : operator) + ": " + (details == null ? "" : details));
+            } catch (IOException e) {
+                logger.log(Level.WARNING, "WhyNotAC failed to record config reload audit entry", e);
+            }
+        });
+    }
 }

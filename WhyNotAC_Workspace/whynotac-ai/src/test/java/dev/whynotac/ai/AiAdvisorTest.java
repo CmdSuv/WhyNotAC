@@ -63,6 +63,7 @@ final class AiAdvisorTest {
         assertTrue(snap.features().get(BehavioralFeatureExtractor.COMBAT_AIM_STEP_DEG).count() > 0);
         assertTrue(snap.features().get(BehavioralFeatureExtractor.COMBAT_AIM_JERK_DEG).count() > 0);
         assertTrue(snap.features().get(BehavioralFeatureExtractor.ATTACK_SNAP_RATIO).count() > 0);
+        assertTrue(snap.combatCovariance().count() > 0);
 
         AiAdvisor.IntrinsicRiskAssessment intrinsic = advisor.assessIntrinsicRisk(snap);
         assertTrue(intrinsic.score0To100() > 20.0, "Expected intrinsic cold-start risk > 20, got " + intrinsic.score0To100());
@@ -100,6 +101,63 @@ final class AiAdvisorTest {
         assertTrue(advisor.baselineModel().baselineSnapshot(playerId).isEmpty());
 
         suspect.disconnect(10_000_000_000L);
+    }
+
+    @Test
+    void detectsMidSessionToggleAndAdaptiveMartingaleBetting() {
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 4096, (s, e, err) -> {
+            throw new AssertionError("Listener failed", err);
+        });
+        AiAdvisor advisor = new AiAdvisor();
+        registry.addListener(advisor);
+
+        PlayerSession toggleSession = registry.open("127.0.0.1:3000");
+        toggleSession.bind(UUID.randomUUID(), "TogglePlayer", 1, 100L);
+
+        // First half: 30 human attacks with varied intervals (4..7 ticks) and moderate aim
+        long nano = 1_000_000_000L;
+        float yaw = 0.0f;
+        int tick = 0;
+        for (int a = 0; a < 30; a++) {
+            int gap = 4 + (a % 4);
+            for (int i = 0; i < gap; i++) {
+                yaw = (yaw + 2.0f + (i % 3) * 0.7f) % 360.0f;
+                toggleSession.onInbound(new ServerboundPacket.MovePlayer(0.0, 64.0, 0.0, yaw, 5.0f, true, true, true, false), nano);
+                if (i == gap - 1) {
+                    toggleSession.onInbound(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK,
+                            Hand.MAIN_HAND, Vec3d.ZERO, false), nano + 100_000L);
+                }
+                toggleSession.onInbound(new ServerboundPacket.ClientTickEnd(), nano + 50_000_000L);
+                nano += 50_000_000L;
+                tick++;
+            }
+        }
+
+        // Second half: player toggles 1-tick constant-interval auto-clicker & 20-deg snap aim for 32 ticks
+        for (int a = 0; a < 32; a++) {
+            yaw = (yaw + 20.0f) % 360.0f;
+            toggleSession.onInbound(new ServerboundPacket.MovePlayer(0.0, 64.0, 0.0, yaw, 5.0f, true, true, true, false), nano);
+            toggleSession.onInbound(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK,
+                    Hand.MAIN_HAND, Vec3d.ZERO, false), nano + 100_000L);
+            toggleSession.onInbound(new ServerboundPacket.ClientTickEnd(), nano + 50_000_000L);
+            nano += 50_000_000L;
+            tick++;
+        }
+
+        BehavioralFeatureExtractor.Snapshot snap = advisor.extractor().snapshot(toggleSession);
+        assertTrue(snap.intraSessionToggleZ() >= 5.0,
+                "Expected high intraSessionToggleZ after mid-session toggle, got " + snap.intraSessionToggleZ());
+        AiAdvisor.IntrinsicRiskAssessment risk = advisor.assessIntrinsicRisk(snap);
+        assertTrue(risk.score0To100() >= 25.0, "Expected intrinsic risk >= 25 after toggle, got " + risk.score0To100());
+
+        EValueProcess adaptive = new EValueProcess(0.001);
+        double w1 = adaptive.observeAdaptive(1.0, 0.05);
+        double lambda1 = adaptive.lastLambda();
+        double w2 = adaptive.observeAdaptive(1.0, 0.05);
+        double lambda2 = adaptive.lastLambda();
+        assertTrue(w2 > w1 && lambda2 > lambda1, "Predictable Kelly bet should increase after prior hit");
+
+        toggleSession.disconnect(nano + 1_000_000_000L);
     }
 
     private static void feedCombatSession(

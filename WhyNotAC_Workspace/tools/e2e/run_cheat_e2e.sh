@@ -56,6 +56,10 @@ verdict:
     - "break-time"
     - "use-aim"
     - "movement"
+    - "velocity-response"
+    - "inventory-protocol"
+    - "interact-at-box"
+    - "use-item-state"
     - "tick-framing"
     - "client-clock"
     - "action-grammar"
@@ -70,6 +74,7 @@ verdict:
 observability:
   health-watchdog: true
   metrics-http-port: $METRICS_PORT
+  alert-stream-file: "alerts-stream.jsonl"
 ai:
   active-probes:
     enabled: true
@@ -124,6 +129,7 @@ echo "whynotac entities CheatProbe" > "$FIFO"
 wait "$PROBE"
 sleep 1
 echo "execute if entity @e[tag=wn_target]" > "$FIFO"
+echo "whynotac reload" > "$FIFO"
 echo "whynotac verdict" > "$FIFO"
 echo "whynotac audit" > "$FIFO"
 echo "whynotac health" > "$FIFO"
@@ -141,12 +147,16 @@ rm -f "$FIFO"
 AUDIT_JSON=$(java -cp "$PLUGIN_JAR" dev.whynotac.analysis.cli.Tool audit "$WORK_DIR/plugins/WhyNotAC/storage")
 DOSSIER=$(find "$WORK_DIR/plugins/WhyNotAC/cases" -name '*.json' | head -1)
 VERIFY_OUT=""
-[ -n "$DOSSIER" ] && VERIFY_OUT=$(java -cp "$PLUGIN_JAR" dev.whynotac.analysis.cli.Tool verify "$DOSSIER" || true)
+EXPLAIN_OUT=""
+if [ -n "$DOSSIER" ]; then
+  VERIFY_OUT=$(java -cp "$PLUGIN_JAR" dev.whynotac.analysis.cli.Tool verify "$DOSSIER" || true)
+  EXPLAIN_OUT=$(java -cp "$PLUGIN_JAR" dev.whynotac.analysis.cli.Tool explain "$DOSSIER" || true)
+fi
 
-python3 - "$WORK_DIR" "$AUDIT_JSON" "$DOSSIER" "$VERIFY_OUT" <<'PY'
-import json, re, sys
+python3 - "$WORK_DIR" "$AUDIT_JSON" "$DOSSIER" "$VERIFY_OUT" "$EXPLAIN_OUT" <<'PY'
+import json, os, re, sys
 
-work_dir, audit_raw, dossier, verify_out = sys.argv[1:5]
+work_dir, audit_raw, dossier, verify_out, explain_out = sys.argv[1:6]
 log = open(f"{work_dir}/cheat-server.log", errors="replace").read()
 clean = re.sub(r"\x1b\[[0-9;]*m|\r", "", log)
 probe = json.load(open(f"{work_dir}/cheat-probe.json"))
@@ -179,6 +189,12 @@ check("whynotac_cases_opened_total" in metrics and "whynotac_lost_events_total 0
 check(audit.get("valid") is True and audit.get("entries", 0) > 0, f"Offline signed AuditLedger verified: {audit}")
 check(bool(dossier) and ("ok" in verify_out.lower() or "verified" in verify_out.lower() or verify_out != ""),
       f"Offline dossier verify produced output: {verify_out.strip()}")
+check("WhyNotAC configuration reloaded:" in clean, "Live /whynotac reload succeeded")
+check("AI Triage" in explain_out, "Offline Tool explain printed AI triage telemetry")
+alert_stream_path = f"{work_dir}/plugins/WhyNotAC/alerts-stream.jsonl"
+alert_lines = open(alert_stream_path).read().splitlines() if os.path.exists(alert_stream_path) else []
+check(len(alert_lines) >= 1 and all("caseId" in line for line in alert_lines),
+      f"alerts-stream.jsonl recorded {len(alert_lines)} JSONL case alert(s)")
 
 if not all(checks):
     sys.exit(1)

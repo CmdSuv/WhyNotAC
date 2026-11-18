@@ -93,13 +93,29 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 - **Dışlanan Durumlar:** İlk paket öncesi, `Gap` / kayıp olay veya `UNKNOWN` eylem görüldüğünde seviye takibi sıfırlanır.
 
 ### 2.9b `packet-bounds` (`P-M`)
-- **Dayanak:** Decompile 1.21.11 `ServerboundMovePlayerPacket`, `Inventory.isHotbarSlot`, `ProjectileUtil.getEntityHitResult` ve `ServerboundUseItemOnPacket` (`PacketBoundsCheck.java`).
+- **Dayanak:** Decompile 1.21.11 `ServerboundMovePlayerPacket`, `Inventory.isHotbarSlot`, `ProjectileUtil.getEntityHitResult`, `ServerboundUseItemOnPacket` ve `ContainerClick` kuralları (`PacketBoundsCheck.java`).
   1. `non-finite-movement`: `MovePlayer` veya `MoveVehicle` içinde `NaN` / `±Infinity` koordinat veya açı.
   2. `invalid-hotbar-slot`: `SetCarriedItem` yuvasının `0..8` dışına çıkması.
   3. `self-interaction`: `InteractEntity` paketinin oyuncunun kendi `selfId` varlık kimliğini hedeflemesi.
   4. `invalid-block-cursor`: `UseItemOn` vuruş noktasının sonlu olmaması veya blok imleç ofsetinin `[-1.0001, 2.0001]` zarfı dışına çıkması.
   5. `invalid-container-slot` ve `invalid-container-swap`: `ContainerClick` yuva indeksinin `< -1 && != -999` olması veya `SWAP` tıklamasında `button` alanının `0..8` ve `40` dışına çıkması.
 - **Dışlanan Durumlar:** `Login` öncesi (`selfId < 0`) ve kabul edilemez pencereler (`Gap`/çevirici).
+
+### 2.9c `velocity-response` (`P-A`)
+- **Dayanak:** `SetEntityMotion(vy >= 0.12)` sonrası ping onayı alındığında yerde duran ve başının üstünde (`feet`, `head`, `aboveHead == AIR`) engel bulunmayan bir survival/adventure oyuncunun dikey momentumunu sıfırlayan (`%0` dikey Anti-KB: `ignored-vertical-knockback`) istemciler (`VelocityCheck.java`). Entity-push yalnızca yatay olduğu için yakın dövüşte `MovementTracker` çekilse dahi sağlam kalır.
+
+### 2.9d `inventory-protocol` (`P-M`)
+- **Dayanak:** Vanilla `Minecraft.tick()` içinde aynı client tick içerisinde ekran kapatma (`ContainerClose`) olmadan bir `ContainerClick` ardından `InteractEntity`/`UseItem`/`UseItemOn`/blok kırma/koşma başlatma (`action-during-container-click`) veya yatay hareket tuşu basımı (`walk-during-container-click`, InvWalk/AutoTotem) (`InventoryActionCheck.java`).
+
+### 2.9e `interact-at-box` (`P-M`)
+- **Dayanak:** `InteractEntity(INTERACT_AT)` yerel hedef sapmasının, hedef varlığın `EntitySizes` olası boyut zarfının dışına çıkması (`non-finite-interact-at`, `out-of-bounds-interact-at`) (`InteractAtBoxCheck.java`).
+
+### 2.9f `use-item-state` (`P-M`)
+- **Dayanak:** `handleKeybinds()` ve `sendPosition()` tik-içi gönderim sırası (`RELEASE_USE_ITEM` aynı tikte saldırıdan veya `UseItem`/`UseItemOn`'dan önce gelemez; `START_SPRINTING`/`STOP_SPRINTING` sonrasında aynı tikte kullanım/bırakma gelemez — AutoBlock/NoSlow paket döngüsü) (`UseSlowdownCheck.java`).
+
+### 2.9g `timer-balance` ve `ping-spoof` (`S` — Asla Cezalandırmaz)
+- **`timer-balance` (`TimerBalanceCheck.java`):** En az 4 döngü boyunca yavaşlatma (`<= 15` TPS) ardından hızlı boşaltma (`>= 24.5` TPS) yapan osilasyonlu bakiye zamanlayıcı (`oscillating-timer-balance`).
+- **`ping-spoof` (`PingSpoofCheck.java`):** `KeepAlive` ağı RTT'sine kıyasla `>= 10` ardışık aktif transaction'da `+180 ms` üzeri gecikmeli `Ping` şişirmesi (`sustained-ping-rtt-inflation`, Backtrack). Both use `AdmissibilityTracker.evaluateTranslatorSafe` and never auto-kick/ban.
 
 ### 2.10 `movement` (`P-M`)
 - **Dayanak:** Decompile 1.21.11 `OnFoot` + `Colliders` + araç motorları (`Boat`, `Horse`, `ItemSteering`) + `Border` + dünya tahminleri (`whynotac-physics`, `MovementCheck.java`, `MovementTracker.java`, [whynotac-analysis README § movement](../whynotac-analysis/README.md#movement-movementcheck-movementmovementtracker)). Oyuncunun olası durum kümesi (maks. `64` hipotez) `x86_64` ve `AARCH64` JVM `Math.cos` tablo/intrinsic farklılıkları dâhil bit bit ilerletilir; kayıp sonrası durağan çapa (`settleAnchor`) veya düz/zıplamalı koşu çapası (`runAnchor`) ile yeniden kurulur.

@@ -3,6 +3,7 @@ package dev.whynotac.world;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -871,5 +872,27 @@ class ClientWorldTest {
         in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(3, 65, 0), BlockFace.WEST, new Vec3d(3, 65.62, 0.5), false, false, 9));
         assertEquals(Double.POSITIVE_INFINITY, east(0.5, 65.62, 0.5, R, 10), "the client's prediction: not known");
         assertEquals(2.5, world.certainOutlineHitBefore(0.5 - R, 65.62 - R, 0.5 - R, 0.5 + R, 65.62 + R, 0.5 + R, 1, 0, 0, 10, 9), 1e-3);
+    }
+
+    @Test
+    void resolvesPillarAxisAndNonWaterloggedSlabPlacements() {
+        stoneInTheAir();
+        // Clicking UP with an oak_log places axis=y at (5, 11, 5)
+        useOn(5, 10, 5, BlockFace.UP, 10);
+        ClientWorld.Placement logY = world.placementForItem(10, "minecraft:oak_log");
+        assertNotNull(logY);
+        assertEquals(new BlockPosition(5, 11, 5), logY.position());
+        assertEquals(STATES.stateOf("minecraft:oak_log", "axis=y"), logY.state());
+        world.resolveUse(10, logY.position(), logY.state());
+
+        // Clicking EAST side with stone_slab hitting bottom half places type=bottom,waterlogged=false
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(5, 10, 5), BlockFace.EAST,
+                new Vec3d(6.0, 10.25, 5.5), false, false, 11));
+        ClientWorld.Placement slabBottom = world.placementForItem(11, "minecraft:stone_slab");
+        assertNotNull(slabBottom);
+        assertEquals(new BlockPosition(6, 10, 5), slabBottom.position());
+        assertEquals(STATES.stateOf("minecraft:stone_slab", "type=bottom,waterlogged=false"), slabBottom.state());
+        world.resolveUse(11, slabBottom.position(), slabBottom.state());
+        assertArrayEquals(new int[] {slabBottom.state()}, world.possibleStates(6, 10, 5));
     }
 }

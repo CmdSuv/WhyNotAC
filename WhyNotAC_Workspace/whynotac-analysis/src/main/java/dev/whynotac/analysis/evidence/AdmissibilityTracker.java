@@ -92,6 +92,35 @@ public final class AdmissibilityTracker {
         return new Admissibility(reasons.isEmpty(), reasons, tier(fromSequence));
     }
 
+    /**
+     * Evaluates admissibility for protocol-translator-invariant checks (e.g., non-finite coordinates,
+     * transaction ordering, statistical cadence), requiring edge wire observation, client-origin
+     * transactions, non-Bedrock topology, and zero gap/loss in the window, while allowing known
+     * Java protocol translators (such as ViaVersion) when {@code translator != null}.
+     */
+    public Admissibility evaluateTranslatorSafe(long fromSequence) {
+        List<String> reasons = new ArrayList<>();
+        if (inbound != Source.WIRE || outbound != Source.WIRE) {
+            reasons.add("not observed at the network edge (" + inbound + "/" + outbound + ")");
+        }
+        if (observationSequence >= fromSequence) {
+            reasons.add("the observation point changed inside the window");
+        }
+        if (translator == null) {
+            reasons.add("translator state not established (null)");
+        }
+        if (!"CLIENT".equals(transactionOrigin)) {
+            reasons.add("transactions are not known to be answered by the client (" + transactionOrigin + ")");
+        }
+        if (bedrock || "GEYSER_LOCAL".equals(topology)) {
+            reasons.add("Bedrock client (no model yet)");
+        }
+        if (lastLossSequence >= fromSequence) {
+            reasons.add("lost or untranslatable events inside the window");
+        }
+        return new Admissibility(reasons.isEmpty(), reasons, tier(fromSequence));
+    }
+
     private IdentityTier tier(long fromSequence) {
         if ("AUTHENTICATED_MOJANG".equals(identity) || "AUTHENTICATED_BY_PROXY".equals(identity)) {
             return IdentityTier.AUTHENTICATED;

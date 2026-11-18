@@ -52,8 +52,8 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
 
     private final Plugin plugin;
     private final Logger logger;
-    private final boolean mitigationsEnabled;
-    private final boolean hidesInformationEnabled;
+    private volatile boolean mitigationsEnabled;
+    private volatile boolean hidesInformationEnabled;
 
     private final Map<UUID, Long> cancelAttackUntilNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Long> cancelBlockUntilNanos = new ConcurrentHashMap<>();
@@ -67,6 +67,14 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         this.logger = plugin.getLogger();
         this.mitigationsEnabled = config.mitigationsEnabled();
         this.hidesInformationEnabled = config.hidesInformationEnabled();
+    }
+
+    /** Atomically updates runtime mitigation/occlusion flags after {@code /whynotac reload}. */
+    public void updateConfig(VerdictConfig config) {
+        if (config != null) {
+            this.mitigationsEnabled = config.mitigationsEnabled();
+            this.hidesInformationEnabled = config.hidesInformationEnabled();
+        }
     }
 
     public static VerdictConfig loadConfig(ConfigurationSection section, Logger logger) {

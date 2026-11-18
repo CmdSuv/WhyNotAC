@@ -38,6 +38,7 @@ identity:
 observability:
   health-watchdog: true
   metrics-http-port: 9108
+  alert-stream-file: "alerts-stream.jsonl"
 
 network-bridge:
   enabled: false

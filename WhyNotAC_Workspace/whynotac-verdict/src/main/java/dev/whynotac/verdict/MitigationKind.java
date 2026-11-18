@@ -22,7 +22,7 @@ public enum MitigationKind {
         return switch (checkId) {
             case "attack-reach", "attack-aim" -> CANCEL_IMPOSSIBLE_HIT;
             case "break-time", "use-aim" -> CANCEL_IMPOSSIBLE_BLOCK_ACTION;
-            case "movement" -> SETBACK_POSITION;
+            case "movement", "velocity-response" -> SETBACK_POSITION;
             default -> NONE;
         };
     }

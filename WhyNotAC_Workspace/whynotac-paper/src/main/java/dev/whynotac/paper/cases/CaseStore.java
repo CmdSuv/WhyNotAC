@@ -55,9 +55,19 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
 
     static final int MAX_QUEUED = 10_000;
 
+    /** Optional AI case triage context written into each case dossier JSON. */
+    public record AiTelemetry(
+            double priorityScore,
+            double intrinsicRisk,
+            String dominantSignal,
+            double baselineRmsZ,
+            String topFeature,
+            double probeWealth) {}
+
     private final Path database;
     private final Path dossiers;
     private final Function<PlayerSession, Optional<Path>> recordingOf;
+    private final Function<VerdictCase, Optional<AiTelemetry>> aiTelemetryOf;
     private final String whynotacVersion;
     private final Logger logger;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(r -> {
@@ -73,9 +83,20 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
     private boolean databaseFailed; // writer thread only
 
     public CaseStore(Path database, Path dossiers, Function<PlayerSession, Optional<Path>> recordingOf, String whynotacVersion, Logger logger) {
+        this(database, dossiers, recordingOf, c -> Optional.empty(), whynotacVersion, logger);
+    }
+
+    public CaseStore(
+            Path database,
+            Path dossiers,
+            Function<PlayerSession, Optional<Path>> recordingOf,
+            Function<VerdictCase, Optional<AiTelemetry>> aiTelemetryOf,
+            String whynotacVersion,
+            Logger logger) {
         this.database = database;
         this.dossiers = dossiers;
         this.recordingOf = recordingOf;
+        this.aiTelemetryOf = aiTelemetryOf == null ? c -> Optional.empty() : aiTelemetryOf;
         this.whynotacVersion = whynotacVersion;
         this.logger = logger;
     }
@@ -384,6 +405,15 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
         field(json, "verificationStatus", c.certificate().verificationStatus().name());
         field(json, "certificateId", c.certificate().certificateId());
         field(json, "certificateSha256", c.certificate().sha256Digest());
+        AiTelemetry ai = aiTelemetryOf.apply(c).orElse(null);
+        if (ai != null) {
+            json.append(String.format(java.util.Locale.ROOT, "  \"aiPriorityScore\": %.2f,\n", ai.priorityScore()));
+            json.append(String.format(java.util.Locale.ROOT, "  \"aiIntrinsicRisk\": %.2f,\n", ai.intrinsicRisk()));
+            field(json, "aiDominantSignal", ai.dominantSignal());
+            json.append(String.format(java.util.Locale.ROOT, "  \"aiBaselineRmsZ\": %.3f,\n", ai.baselineRmsZ()));
+            field(json, "aiTopFeature", ai.topFeature());
+            json.append(String.format(java.util.Locale.ROOT, "  \"aiProbeWealth\": %.4f,\n", ai.probeWealth()));
+        }
         json.append("  \"whynotacVersion\": \"").append(escape(whynotacVersion)).append("\"\n}\n");
         return json.toString();
     }

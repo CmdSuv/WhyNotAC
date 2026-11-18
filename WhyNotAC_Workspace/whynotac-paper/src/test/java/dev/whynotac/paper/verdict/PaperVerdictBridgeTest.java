@@ -93,7 +93,9 @@ class PaperVerdictBridgeTest {
                 if (profile.equals("paper-mitigate-pilot")) {
                     assertTrue(cfg.mitigationsEnabled());
                     assertTrue(cfg.hidesInformationEnabled());
-                    assertEquals(6, cfg.armedChecks().size());
+                    assertEquals(11, cfg.armedChecks().size());
+                    assertTrue(cfg.armedChecks().contains("velocity-response"));
+                    assertTrue(cfg.armedChecks().contains("inventory-protocol"));
                 } else {
                     assertTrue(cfg.armedChecks().isEmpty(), profile + " must default to SHADOW");
                     assertFalse(cfg.mitigationsEnabled());

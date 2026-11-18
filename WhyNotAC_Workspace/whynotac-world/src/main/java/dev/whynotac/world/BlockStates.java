@@ -437,6 +437,21 @@ public final class BlockStates {
         return first < 0 || first + 1 < this.block.length && block.equals(this.block[first + 1]) ? -1 : first;
     }
 
+    /** Exact state id of {@code block} having property string {@code props}, or -1 if absent. */
+    public int stateOf(String block, String props) {
+        int first = firstStateOf(block);
+        if (first < 0) {
+            return -1;
+        }
+        String target = props == null ? "" : props;
+        for (int id = first; id < this.block.length && this.block[id].equals(block); id++) {
+            if (target.equals(this.properties[id])) {
+                return id;
+            }
+        }
+        return -1;
+    }
+
     public int shapeCount() {
         return shapes.length;
     }

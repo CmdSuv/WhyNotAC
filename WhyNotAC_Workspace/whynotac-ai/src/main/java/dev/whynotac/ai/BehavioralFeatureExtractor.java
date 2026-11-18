@@ -1,5 +1,6 @@
 package dev.whynotac.ai;
 
+import dev.whynotac.math.stats.RunningCovarianceMatrix;
 import dev.whynotac.math.stats.RunningMoments;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
@@ -29,12 +30,29 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
     public static final String CONTAINER_CLICK_INTERVAL_TICKS = "container_click_interval_ticks";
 
     private static final long COMBAT_WINDOW_TICKS = 40L;
+    private static final int RECENT_WINDOW = 30;
+    public static final int COMBAT_COVARIANCE_DIM = 4;
 
-    public record Snapshot(Map<String, RunningMoments> features) {
+    public record Snapshot(
+            Map<String, RunningMoments> features,
+            double intraSessionToggleZ,
+            RunningCovarianceMatrix combatCovariance) {
+
+        public Snapshot(Map<String, RunningMoments> features) {
+            this(features, 0.0, new RunningCovarianceMatrix(COMBAT_COVARIANCE_DIM));
+        }
+
+        public Snapshot(Map<String, RunningMoments> features, double intraSessionToggleZ) {
+            this(features, intraSessionToggleZ, new RunningCovarianceMatrix(COMBAT_COVARIANCE_DIM));
+        }
+
         public Snapshot {
             Map<String, RunningMoments> copy = new LinkedHashMap<>();
             features.forEach((k, v) -> copy.put(k, v.copy()));
             features = Collections.unmodifiableMap(copy);
+            combatCovariance = combatCovariance == null
+                    ? new RunningCovarianceMatrix(COMBAT_COVARIANCE_DIM)
+                    : combatCovariance.copy();
         }
     }
 
@@ -49,6 +67,76 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
         final RunningMoments combatAimJerks = new RunningMoments();
         final RunningMoments attackSnapRatios = new RunningMoments();
         final RunningMoments containerClickIntervals = new RunningMoments();
+        final RunningCovarianceMatrix combatCovariance = new RunningCovarianceMatrix(COMBAT_COVARIANCE_DIM);
+        double lastClickDt = Double.NaN;
+        double lastCombatStep = Double.NaN;
+        double lastCombatJerk = Double.NaN;
+
+        // Disjoint early-session vs recent sliding window (30 samples) for mid-session toggle detection
+        final RunningMoments earlyClickIntervals = new RunningMoments();
+        final double[] recentClicks = new double[RECENT_WINDOW];
+        int recentClickCount;
+        int recentClickHead;
+
+        final RunningMoments earlyCombatAimSteps = new RunningMoments();
+        final double[] recentCombatAim = new double[RECENT_WINDOW];
+        int recentCombatAimCount;
+        int recentCombatAimHead;
+
+        void recordClickInterval(double dt) {
+            clickIntervals.add(dt);
+            lastClickDt = dt;
+            if (recentClickCount == RECENT_WINDOW) {
+                earlyClickIntervals.add(recentClicks[recentClickHead]);
+                recentClicks[recentClickHead] = dt;
+                recentClickHead = (recentClickHead + 1) % RECENT_WINDOW;
+            } else {
+                recentClicks[recentClickCount++] = dt;
+            }
+        }
+
+        void recordCombatAimStep(double step) {
+            combatAimSteps.add(step);
+            if (recentCombatAimCount == RECENT_WINDOW) {
+                earlyCombatAimSteps.add(recentCombatAim[recentCombatAimHead]);
+                recentCombatAim[recentCombatAimHead] = step;
+                recentCombatAimHead = (recentCombatAimHead + 1) % RECENT_WINDOW;
+            } else {
+                recentCombatAim[recentCombatAimCount++] = step;
+            }
+        }
+
+        double computeIntraSessionToggleZ() {
+            double maxZ = 0.0;
+            if (earlyClickIntervals.count() >= 20 && recentClickCount == RECENT_WINDOW) {
+                RunningMoments rec = new RunningMoments();
+                for (double v : recentClicks) {
+                    rec.add(v);
+                }
+                double earlyMean = earlyClickIntervals.mean();
+                double earlySdRaw = earlyClickIntervals.sampleStdDev();
+                double recSdRaw = rec.sampleStdDev();
+                double earlyStd = Double.isFinite(earlySdRaw) ? Math.max(0.35, earlySdRaw) : 0.35;
+                double recStd = Double.isFinite(recSdRaw) ? recSdRaw : 0.0;
+                double meanDropZ = Math.max(0.0, (earlyMean - rec.mean()) / (earlyStd / Math.sqrt(RECENT_WINDOW)));
+                double spreadCollapseZ = Double.isFinite(earlySdRaw) && earlySdRaw >= 0.40 && recStd < earlySdRaw * 0.25
+                        ? (earlySdRaw - recStd) / 0.15
+                        : 0.0;
+                maxZ = Math.max(maxZ, Math.min(25.0, Math.max(meanDropZ, spreadCollapseZ)));
+            }
+            if (earlyCombatAimSteps.count() >= 20 && recentCombatAimCount == RECENT_WINDOW) {
+                RunningMoments rec = new RunningMoments();
+                for (double v : recentCombatAim) {
+                    rec.add(v);
+                }
+                double earlyMean = earlyCombatAimSteps.mean();
+                double earlySdRaw = earlyCombatAimSteps.sampleStdDev();
+                double earlyStd = Double.isFinite(earlySdRaw) ? Math.max(0.50, earlySdRaw) : 0.50;
+                double stepJumpZ = Math.max(0.0, (rec.mean() - earlyMean) / (earlyStd / Math.sqrt(RECENT_WINDOW)));
+                maxZ = Math.max(maxZ, Math.min(25.0, stepJumpZ));
+            }
+            return maxZ;
+        }
 
         long tick;
         long lastAttackTick = Long.MIN_VALUE;
@@ -96,7 +184,7 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
                     if (s.lastAttackTick != Long.MIN_VALUE) {
                         long dt = s.tick - s.lastAttackTick;
                         if (dt > 0 && dt <= 40) {
-                            s.clickIntervals.add((double) dt);
+                            s.recordClickInterval((double) dt);
                         }
                     }
                     s.lastAttackTick = s.tick;
@@ -133,9 +221,12 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
                                 boolean inCombat = s.attackedThisTick
                                         || (s.lastAttackTick != Long.MIN_VALUE && (s.tick - s.lastAttackTick) <= COMBAT_WINDOW_TICKS);
                                 if (inCombat) {
-                                    s.combatAimSteps.add(step);
+                                    s.recordCombatAimStep(step);
+                                    s.lastCombatStep = step;
                                     if (!Double.isNaN(s.prevCombatStep)) {
-                                        s.combatAimJerks.add(Math.abs(step - s.prevCombatStep));
+                                        double jerk = Math.abs(step - s.prevCombatStep);
+                                        s.combatAimJerks.add(jerk);
+                                        s.lastCombatJerk = jerk;
                                     }
                                     s.prevCombatStep = step;
                                 } else {
@@ -165,6 +256,11 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
                             double denom = Math.max(0.25, s.lastNonAttackAimStep);
                             double ratio = Math.min(50.0, s.currentTickAimStep / denom);
                             s.attackSnapRatios.add(ratio);
+                            if (Double.isFinite(s.lastClickDt)
+                                    && Double.isFinite(s.lastCombatStep)
+                                    && Double.isFinite(s.lastCombatJerk)) {
+                                s.combatCovariance.add(s.lastClickDt, s.lastCombatStep, s.lastCombatJerk, ratio);
+                            }
                         } else if (s.currentTickAimStep >= 0.05) {
                             s.lastNonAttackAimStep = 0.75 * s.lastNonAttackAimStep + 0.25 * s.currentTickAimStep;
                         }
@@ -198,7 +294,7 @@ public final class BehavioralFeatureExtractor implements TimelineListener {
             out.put(COMBAT_AIM_JERK_DEG, s.combatAimJerks);
             out.put(ATTACK_SNAP_RATIO, s.attackSnapRatios);
             out.put(CONTAINER_CLICK_INTERVAL_TICKS, s.containerClickIntervals);
-            return new Snapshot(out);
+            return new Snapshot(out, s.computeIntraSessionToggleZ(), s.combatCovariance);
         }
     }
 

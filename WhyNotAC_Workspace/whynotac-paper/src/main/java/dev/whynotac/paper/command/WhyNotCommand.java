@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -64,12 +65,21 @@ public final class WhyNotCommand implements BasicCommand {
     private final StorageManager storage;
     private final AiAdvisor aiAdvisor;
     private final PaperNetworkBridge networkBridge;
+    private final Function<String, String> reloader;
     private final org.bukkit.plugin.Plugin plugin;
 
     public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
             Supplier<HealthModel.Evaluation> health, Supplier<String> metrics, CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory,
             SelfVerifier self, SubjectRequests privacy, VerdictEngine verdict, StorageManager storage, AiAdvisor aiAdvisor,
             PaperNetworkBridge networkBridge, org.bukkit.plugin.Plugin plugin) {
+        this(interceptor, registry, diagnostics, stats, health, metrics, cases, world, entities, inventory, self, privacy,
+                verdict, storage, aiAdvisor, networkBridge, operator -> "Hot reload unavailable", plugin);
+    }
+
+    public WhyNotCommand(PacketInterceptor interceptor, SessionRegistry registry, Diagnostics diagnostics, Supplier<String> stats,
+            Supplier<HealthModel.Evaluation> health, Supplier<String> metrics, CaseStore cases, WorldVerifier world, EntityVerifier entities, InventoryVerifier inventory,
+            SelfVerifier self, SubjectRequests privacy, VerdictEngine verdict, StorageManager storage, AiAdvisor aiAdvisor,
+            PaperNetworkBridge networkBridge, Function<String, String> reloader, org.bukkit.plugin.Plugin plugin) {
         this.interceptor = interceptor;
         this.registry = registry;
         this.diagnostics = diagnostics;
@@ -86,6 +96,7 @@ public final class WhyNotCommand implements BasicCommand {
         this.storage = storage;
         this.aiAdvisor = aiAdvisor;
         this.networkBridge = networkBridge;
+        this.reloader = reloader;
         this.plugin = plugin;
     }
 
@@ -336,6 +347,9 @@ public final class WhyNotCommand implements BasicCommand {
                     sender.sendMessage(Component.text("Review rejected: " + e.getMessage(), NamedTextColor.RED));
                 }
             }));
+        } else if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+            String summary = reloader.apply(sender.getName());
+            sender.sendMessage(Component.text("WhyNotAC configuration reloaded: " + summary, NamedTextColor.GREEN));
         } else if (args.length == 2 && args[0].equalsIgnoreCase("ai")) {
             Player target = Bukkit.getPlayerExact(args[1]);
             if (target == null) {
@@ -344,7 +358,7 @@ public final class WhyNotCommand implements BasicCommand {
             }
             inspectAi(sender, target);
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac metrics | /whynotac network | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac metrics | /whynotac network | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac reload | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
         }
     }
@@ -433,7 +447,7 @@ public final class WhyNotCommand implements BasicCommand {
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
             return List.of("inspect", "ai", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "health",
-                    "metrics", "network", "cases", "case", "review", "audit", "verdict", "killswitch", "circuit");
+                    "metrics", "network", "cases", "case", "review", "audit", "verdict", "reload", "killswitch", "circuit");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("review")) {
             return List.of("status", "pass1", "confirm", "appeal", "uphold", "overturn");
