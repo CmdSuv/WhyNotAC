@@ -839,6 +839,11 @@ public final class EventCodec {
                     body.writeZigZag(g.type());
                     body.writeFloat(g.param());
                 }
+                case ClientboundPacket.Cooldown c -> {
+                    body.writeVarInt(CB_COOLDOWN);
+                    string(c.group());
+                    body.writeZigZag(c.duration());
+                }
                 case ClientboundPacket.Unmodeled u -> {
                     body.writeVarInt(CB_UNMODELED);
                     string(u.type());
@@ -1432,6 +1437,7 @@ public final class EventCodec {
                             in.readFloat(), in.readFloat());
                 }
                 case CB_GAME_EVENT -> new ClientboundPacket.GameEvent(zint(in), in.readFloat());
+                case CB_COOLDOWN -> new ClientboundPacket.Cooldown(string(in), zint(in));
                 case CB_UNMODELED -> new ClientboundPacket.Unmodeled(string(in));
                 case CB_UNTRANSLATABLE -> new ClientboundPacket.Untranslatable(string(in));
                 default -> {

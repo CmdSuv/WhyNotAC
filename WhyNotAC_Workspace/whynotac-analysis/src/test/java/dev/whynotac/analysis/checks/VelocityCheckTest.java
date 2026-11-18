@@ -135,6 +135,33 @@ final class VelocityCheckTest {
     }
 
     @Test
+    void detectsHorizontalAntiKbWhileJumpingOrIgnoringHorizontalPush() {
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.36, 0.0))));
+        syncPing();
+        // Cheater accepts vertical jump (leaves ground) to bypass vertical-only check, but zero horizontal displacement
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.36, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals(EvidenceClass.ADVANTAGE_PROOF, evidence.get(0).evidenceClass());
+        assertEquals("ignored-horizontal-knockback", evidence.get(0).details().get("reason"));
+    }
+
+    @Test
+    void honestHorizontalKnockbackProducesZeroEvidence() {
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.36, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.36, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        tick();
+        assertTrue(evidence.isEmpty());
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(VelocityCheck.VERSION, Checks.version(VelocityCheck.ID));
         assertNotNull(Checks.create(VelocityCheck.ID, (s, e) -> { }));

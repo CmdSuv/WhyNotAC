@@ -35,6 +35,11 @@ public final class PingSpoofCheck implements TimelineListener {
     public static final int VERSION = 1;
     static final int REQUIRED_INFLATED_SAMPLES = 10;
     static final double MIN_INFLATION_MS = 180.0;
+    static final int REQUIRED_PRE_ATTACK_INFLATED = 4;
+    static final double PRE_ATTACK_INFLATION_MS = 160.0;
+    static final double MIN_COMBAT_DROP_MS = 120.0;
+    static final double MAX_KEEPALIVE_FOR_DROP_MS = 100.0;
+    static final int ATTACK_DROP_WINDOW_TICKS = 3;
     static final long REPORT_INTERVAL_NANOS = 2_000_000_000L;
 
     private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
@@ -60,6 +65,11 @@ public final class PingSpoofCheck implements TimelineListener {
         long streakStartSeq = -1L;
         long streakStartNano;
         double inflatedSumMs;
+        int preDropHighSamples;
+        double preDropBaselinePingMs = Double.NaN;
+        long preDropStartSeq = -1L;
+        long preDropStartNano;
+        long ticksSinceAttack = Long.MAX_VALUE / 4;
         long lastReportNanos = Long.MIN_VALUE;
 
         void reset() {
@@ -67,6 +77,8 @@ public final class PingSpoofCheck implements TimelineListener {
             keepAliveSentNanos.clear();
             ticksSinceLastAck = 0;
             latestKeepAliveRttMs = Double.NaN;
+            ticksSinceAttack = Long.MAX_VALUE / 4;
+            resetPreDrop();
             resetStreak();
         }
 
@@ -74,6 +86,12 @@ public final class PingSpoofCheck implements TimelineListener {
             inflatedStreak = 0;
             streakStartSeq = -1L;
             inflatedSumMs = 0.0;
+        }
+
+        void resetPreDrop() {
+            preDropHighSamples = 0;
+            preDropBaselinePingMs = Double.NaN;
+            preDropStartSeq = -1L;
         }
     }
 
@@ -99,7 +117,14 @@ public final class PingSpoofCheck implements TimelineListener {
             case TimelineEvent.Inbound in -> {
                 switch (in.packet()) {
                     case ServerboundPacket.PlayerLoaded ignored -> state.loaded = true;
-                    case ServerboundPacket.ClientTickEnd ignored -> state.ticksSinceLastAck++;
+                    case ServerboundPacket.ClientTickEnd ignored -> {
+                        state.ticksSinceLastAck++;
+                        if (state.ticksSinceAttack < Long.MAX_VALUE / 4) {
+                            state.ticksSinceAttack++;
+                        }
+                    }
+                    case ServerboundPacket.InteractEntity interact when interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK ->
+                            state.ticksSinceAttack = 0;
                     case ServerboundPacket.KeepAlive ka -> {
                         Long sentNano = state.keepAliveSentNanos.remove(ka.id());
                         if (sentNano != null && in.nanoTime() >= sentNano) {
@@ -124,6 +149,34 @@ public final class PingSpoofCheck implements TimelineListener {
         // Require the client to actually be ticking (not frozen/loading a huge chunk batch)
         boolean activeTicking = state.ticksSinceLastAck >= 1;
         state.ticksSinceLastAck = 0;
+        if (state.preDropHighSamples >= REQUIRED_PRE_ATTACK_INFLATED
+                && state.ticksSinceAttack <= ATTACK_DROP_WINDOW_TICKS
+                && state.latestKeepAliveRttMs < MAX_KEEPALIVE_FOR_DROP_MS
+                && state.preDropBaselinePingMs - pingRttMs >= MIN_COMBAT_DROP_MS) {
+            long fromSeq = state.preDropStartSeq;
+            long fromNano = state.preDropStartNano;
+            double baselinePingMs = state.preDropBaselinePingMs;
+            state.resetPreDrop();
+            state.resetStreak();
+            if (state.lastReportNanos == Long.MIN_VALUE
+                    || ack.nanoTime() - state.lastReportNanos >= REPORT_INTERVAL_NANOS) {
+                emitCombatDrop(session, state, fromSeq, fromNano, ack, baselinePingMs, pingRttMs, state.latestKeepAliveRttMs);
+            }
+            return;
+        }
+        if (activeTicking && diffMs >= PRE_ATTACK_INFLATION_MS && pingRttMs <= 2_500.0
+                && state.latestKeepAliveRttMs < MAX_KEEPALIVE_FOR_DROP_MS) {
+            if (state.preDropHighSamples == 0) {
+                state.preDropStartSeq = ack.sequence();
+                state.preDropStartNano = ack.nanoTime();
+                state.preDropBaselinePingMs = pingRttMs;
+            } else {
+                state.preDropBaselinePingMs = Math.min(state.preDropBaselinePingMs, pingRttMs);
+            }
+            state.preDropHighSamples++;
+        } else if (diffMs < PRE_ATTACK_INFLATION_MS * 0.5) {
+            state.resetPreDrop();
+        }
         if (activeTicking && diffMs >= MIN_INFLATION_MS && pingRttMs <= 2_500.0) {
             if (state.inflatedStreak == 0) {
                 state.streakStartSeq = ack.sequence();
@@ -144,6 +197,28 @@ public final class PingSpoofCheck implements TimelineListener {
         } else {
             state.resetStreak();
         }
+    }
+
+    private void emitCombatDrop(PlayerSession session, State state, long fromSeq, long fromNano,
+            TimelineEvent.Acknowledged at, double baselinePingMs, double dropPingMs, double kaMs) {
+        Admissibility admissibility = state.admissibility.evaluateTranslatorSafe(fromSeq);
+        if (!admissibility.admissible()) {
+            sink.rejected(session, ID, admissibility);
+            return;
+        }
+        Map<String, String> details = new TreeMap<>();
+        details.put("reason", "combat-rtt-drop");
+        details.put("baselinePingMs", String.format(Locale.ROOT, "%.1f", baselinePingMs));
+        details.put("droppedPingMs", String.format(Locale.ROOT, "%.1f", dropPingMs));
+        details.put("dropDeltaMs", String.format(Locale.ROOT, "%.1f", baselinePingMs - dropPingMs));
+        details.put("keepAliveRttMs", String.format(Locale.ROOT, "%.1f", kaMs));
+        sink.accept(session,
+                new Evidence(ID, VERSION, EvidenceClass.NOMINAL_STATISTIC, fromSeq, at.sequence(), fromNano, at.nanoTime(),
+                        String.format(Locale.ROOT,
+                                "Ping RTT dropped %.1f ms (from %.1f ms to %.1f ms) at attack while KeepAlive stayed %.1f ms",
+                                baselinePingMs - dropPingMs, baselinePingMs, dropPingMs, kaMs),
+                        details, admissibility));
+        state.lastReportNanos = at.nanoTime();
     }
 
     private void emit(

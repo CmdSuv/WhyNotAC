@@ -17,7 +17,7 @@ NAME=RealProbe
 
 python3 -I "$HERE/fetch_client.py" "$WORK_DIR/client-cache" > /dev/null
 if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
-  curl -fsS --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
+  curl -fsS --retry 3 --retry-delay 5 --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
 fi
 echo "$PAPER_SHA256  $WORK_DIR/$PAPER_JAR" | sha256sum -c --quiet -
 echo 'eula=true' > "$WORK_DIR/eula.txt"
@@ -35,7 +35,11 @@ spawn-monsters=false
 max-players=5
 motd=WhyNotAC real client
 PROPS
-(cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
+for i in 1 2 3 4; do
+  if (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar); then break; fi
+  [ "$i" -eq 4 ] && exit 1
+  sleep $((10 * i))
+done
 mkdir -p "$WORK_DIR/plugins/WhyNotAC" "$WORK_DIR/game"
 rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/plugins/WhyNotAC/cases.db"
 printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 2048\n  max-queued-megabytes: 64\n' > "$WORK_DIR/plugins/WhyNotAC/config.yml"

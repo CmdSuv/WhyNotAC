@@ -43,6 +43,7 @@ import dev.whynotac.world.ItemPrototypes;
 import dev.whynotac.world.ClientWorldTracker;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -247,8 +248,12 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             }
         }
         String alertStreamFile = getConfig().getString("observability.alert-stream-file", "alerts-stream.jsonl");
-        if (alertStreamFile != null && !alertStreamFile.isBlank()) {
-            alertStreamExporter = new AlertStreamExporter(getDataPath().resolve(alertStreamFile.trim()), aiAdvisor, getLogger());
+        String webhookUrl = getConfig().getString("observability.webhook-url", "");
+        Path alertStreamPath = (alertStreamFile != null && !alertStreamFile.isBlank())
+                ? getDataPath().resolve(alertStreamFile.trim())
+                : null;
+        if (alertStreamPath != null || (webhookUrl != null && !webhookUrl.isBlank())) {
+            alertStreamExporter = new AlertStreamExporter(alertStreamPath, aiAdvisor, getLogger(), webhookUrl);
             verdict.addCaseListener(alertStreamExporter);
         }
         if (getConfig().getBoolean("network-bridge.enabled", false)) {

@@ -4,7 +4,14 @@ import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.Admissibility;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.analysis.movement.SpeedAttribute;
+import dev.whynotac.math.vanilla.PlatformCos;
+import dev.whynotac.math.vanilla.VanillaMath;
 import dev.whynotac.math.vector.Vec3d;
+import dev.whynotac.physics.Border;
+import dev.whynotac.physics.Colliders;
+import dev.whynotac.physics.OnFoot;
+import dev.whynotac.physics.PlayerState;
 import dev.whynotac.protocol.packet.BlockFace;
 import dev.whynotac.protocol.packet.BlockPosition;
 import dev.whynotac.protocol.packet.ClientboundPacket;
@@ -18,15 +25,26 @@ import dev.whynotac.protocol.session.TimelineEvent.ClientFact;
 import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Fact;
 import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Trust;
 import dev.whynotac.protocol.session.TimelineEvent.Observation.Source;
+import dev.whynotac.recording.format.Block;
+import dev.whynotac.recording.format.ByteSink;
+import dev.whynotac.recording.format.EventCodec;
+import dev.whynotac.recording.format.RecordingFormat;
+import dev.whynotac.recording.format.RecordingHeader;
 import dev.whynotac.recording.read.RecordingReader;
+import dev.whynotac.recording.write.BlockSink;
+import dev.whynotac.recording.write.RecordingWriter;
 import dev.whynotac.world.BlockStates;
 import dev.whynotac.world.Replicas;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,16 +53,20 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.zip.Deflater;
 
 /**
- * Reproducible TPR / FPR / Replay-Cost benchmark runner ({@code java -jar WhyNotAC.jar benchmark [regression-dir]}).
+ * Reproducible TPR / FPR / TTD / Replay-Cost benchmark runner
+ * ({@code java -jar WhyNotAC.jar benchmark [regression-dir] [cheat-corpus-dir]}).
  *
  * <p>Executes:
  * <ol>
  *   <li>All honest {@code *.wnrec} recordings in the regression directory (when present), verifying
  *       zero false positives and measuring per-event replay cost;</li>
- *   <li>A built-in 10-scenario adversarial + legitimate benchmark matrix spanning {@code P-A},
- *       {@code P-M}, and {@code S} check families.</li>
+ *   <li>All adversarial {@code *.wnrec} recordings in the {@code cheat-corpus} directory (when present),
+ *       verifying zero false negatives;</li>
+ *   <li>A built-in 20-scenario adversarial + legitimate benchmark matrix spanning {@code P-A},
+ *       {@code P-M}, and {@code S} check families with per-scenario ticks-to-detect (TTD) and runtime.</li>
  * </ol>
  */
 public final class BenchmarkRunner {
@@ -54,57 +76,101 @@ public final class BenchmarkRunner {
     private static final int STONE = BlockStates.vanilla().firstStateOf("minecraft:stone");
     private static final int AIR = BlockStates.vanilla().firstStateOf("minecraft:air");
 
+    public record ScenarioResult(String name, String expectedCheck, boolean expectFinding, int findings, long ttdTicks, double elapsedMs) {
+        public boolean passed() {
+            return expectFinding ? findings > 0 : findings == 0;
+        }
+    }
+
     public record BenchmarkReport(
             int honestRecordings,
             int honestFalsePositives,
             long totalHonestEvents,
             double usPerEvent,
+            int cheatRecordings,
+            int cheatFalseNegatives,
+            long totalCheatEvents,
             int scenariosTotal,
             int scenariosPassed,
-            Map<String, Integer> scenarioFindings) {
+            Map<String, Integer> scenarioFindings,
+            List<ScenarioResult> scenarioResults) {
 
         public boolean allPassed() {
-            return honestFalsePositives == 0 && scenariosPassed == scenariosTotal;
+            return honestFalsePositives == 0 && cheatFalseNegatives == 0 && scenariosPassed == scenariosTotal;
         }
     }
 
     private BenchmarkRunner() {}
 
     public static void runCli(String[] args, PrintStream out, PrintStream err) throws IOException {
+        if (args.length >= 3 && "--write-corpus".equals(args[1])) {
+            Path outDir = Path.of(args[2]);
+            int written = generateCheatCorpus(outDir);
+            out.println("Wrote " + written + " cheat corpus recordings to " + outDir.toAbsolutePath());
+            return;
+        }
         Path regressionDir = args.length >= 2 ? Path.of(args[1]) : Path.of("regression");
-        BenchmarkReport report = run(regressionDir);
+        Path cheatCorpusDir = args.length >= 3 ? Path.of(args[2]) : defaultCheatCorpus(regressionDir);
+        BenchmarkReport report = run(regressionDir, cheatCorpusDir);
         out.printf(Locale.ROOT,
                 "=== WhyNotAC Benchmark Report ===%n"
                         + "Honest .wnrec recordings : %d (events=%d, falsePositives=%d, cost=%.2f us/event)%n"
+                        + "Cheat  .wnrec corpus     : %d (events=%d, falseNegatives=%d)%n"
                         + "Synthetic scenarios      : %d/%d PASSED%n",
                 report.honestRecordings(),
                 report.totalHonestEvents(),
                 report.honestFalsePositives(),
                 report.usPerEvent(),
+                report.cheatRecordings(),
+                report.totalCheatEvents(),
+                report.cheatFalseNegatives(),
                 report.scenariosPassed(),
                 report.scenariosTotal());
-        for (Map.Entry<String, Integer> e : report.scenarioFindings().entrySet()) {
-            out.printf(Locale.ROOT, "  %-34s -> findings=%d%n", e.getKey(), e.getValue());
+        for (ScenarioResult r : report.scenarioResults()) {
+            out.printf(Locale.ROOT, "  %-36s [%-18s] -> findings=%d, ttd=%dt, time=%.2fms (%s)%n",
+                    r.name(),
+                    r.expectedCheck() == null ? "honest" : r.expectedCheck(),
+                    r.findings(),
+                    r.ttdTicks(),
+                    r.elapsedMs(),
+                    r.passed() ? "PASS" : "FAIL");
         }
         out.printf(Locale.ROOT,
                 "BENCHMARK_JSON: {\"honestRecordings\":%d,\"honestFalsePositives\":%d,"
                         + "\"totalHonestEvents\":%d,\"usPerEvent\":%.3f,"
+                        + "\"cheatRecordings\":%d,\"cheatFalseNegatives\":%d,\"totalCheatEvents\":%d,"
                         + "\"scenariosPassed\":%d,\"scenariosTotal\":%d,\"allPassed\":%s}%n",
                 report.honestRecordings(),
                 report.honestFalsePositives(),
                 report.totalHonestEvents(),
                 report.usPerEvent(),
+                report.cheatRecordings(),
+                report.cheatFalseNegatives(),
+                report.totalCheatEvents(),
                 report.scenariosPassed(),
                 report.scenariosTotal(),
                 report.allPassed());
         if (!report.allPassed()) {
             err.println("Benchmark failed: honestFalsePositives=" + report.honestFalsePositives()
+                    + ", cheatFalseNegatives=" + report.cheatFalseNegatives()
                     + ", scenariosPassed=" + report.scenariosPassed() + "/" + report.scenariosTotal());
             System.exit(2);
         }
     }
 
+    private static Path defaultCheatCorpus(Path regressionDir) {
+        if (regressionDir == null) {
+            return Path.of("cheat-corpus");
+        }
+        Path parent = regressionDir.getParent();
+        return parent == null ? Path.of("cheat-corpus") : parent.resolve("cheat-corpus");
+    }
+
     public static BenchmarkReport run(Path regressionDir) throws IOException {
+        return run(regressionDir, defaultCheatCorpus(regressionDir));
+    }
+
+    public static BenchmarkReport run(Path regressionDir, Path cheatCorpusDir) throws IOException {
         int honestRecordings = 0;
         int honestFalsePositives = 0;
         long totalHonestEvents = 0L;
@@ -140,94 +206,184 @@ public final class BenchmarkRunner {
             }
         }
 
+        Map<String, Integer> scenarioFindings = new LinkedHashMap<>();
+        int cheatRecordings = 0;
+        int cheatFalseNegatives = 0;
+        long totalCheatEvents = 0L;
+        if (cheatCorpusDir != null && Files.isDirectory(cheatCorpusDir)) {
+            Set<Path> cheatFiles = new TreeSet<>();
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(cheatCorpusDir, "*.wnrec")) {
+                for (Path p : ds) {
+                    cheatFiles.add(p);
+                }
+            }
+            for (Path rec : cheatFiles) {
+                cheatRecordings++;
+                List<Evidence> found = new ArrayList<>();
+                SessionRegistry registry = newRegistry(found);
+                PlayerSession session = registry.openReplay(rec.getFileName().toString());
+                RecordingReader reader = RecordingReader.open(rec);
+                TimelineEvent last = null;
+                for (TimelineEvent ev : reader) {
+                    totalCheatEvents++;
+                    session.deliver(ev);
+                    last = ev;
+                }
+                if (!session.isClosed()) {
+                    long seq = last == null ? 0 : last.sequence() + 1;
+                    long nano = last == null ? 0 : last.nanoTime();
+                    session.deliver(new TimelineEvent.Disconnected(seq, nano));
+                }
+                scenarioFindings.put("corpus:" + rec.getFileName(), found.size());
+                if (found.isEmpty()) {
+                    cheatFalseNegatives++;
+                }
+            }
+        }
+
         double usPerEvent = totalHonestEvents > 0
                 ? (replayElapsedNanos / 1_000.0) / totalHonestEvents
                 : 0.0;
 
-        Map<String, Integer> scenarioFindings = new LinkedHashMap<>();
+        List<ScenarioResult> scenarioResults = new ArrayList<>();
+        // Legitimate baselines (0 findings expected)
+        scenarioResults.add(measure("honest-baseline-session", null, false, h -> scenarioHonest(h)));
+        scenarioResults.add(measure("honest-lag-burst-with-pings", null, false, h -> scenarioHonestLagBurst(h)));
+        scenarioResults.add(measure("honest-sprint-jump-motion", null, false, h -> scenarioHonestSprint(h)));
+        // Deterministic P-A physics/combat checks
+        scenarioResults.add(measure("reach-4.2b-violation", "attack-reach", true, h -> scenarioReach(h)));
+        scenarioResults.add(measure("aim-off-target-violation", "attack-aim", true, h -> scenarioAimOffTarget(h)));
+        scenarioResults.add(measure("instant-stone-break", "break-time", true, h -> scenarioInstantBreak(h)));
+        scenarioResults.add(measure("block-reach-6.5b-violation", "use-aim", true, h -> scenarioUseAimReach(h)));
+        scenarioResults.add(measure("movement-step-fly-violation", "movement", true, h -> scenarioMovementFly(h)));
+        scenarioResults.add(measure("vertical-anti-kb-0pct", "velocity-response", true, h -> scenarioZeroAntiKb(h)));
+        scenarioResults.add(measure("horizontal-anti-kb-0pct", "velocity-response", true, h -> scenarioHorizontalAntiKb(h)));
+        // Deterministic P-M grammar/protocol checks
+        scenarioResults.add(measure("packet-bounds-hotbar-cursor", "packet-bounds", true, h -> scenarioPacketBounds(h)));
+        scenarioResults.add(measure("inventory-walk-autototem", "inventory-protocol", true, h -> scenarioInventoryProtocol(h)));
+        scenarioResults.add(measure("unopened-container-click", "inventory-protocol", true, h -> scenarioUnopenedContainerClick(h)));
+        scenarioResults.add(measure("interact-at-box-spoof", "interact-at-box", true, h -> scenarioInteractAtBox(h)));
+        scenarioResults.add(measure("autoblock-noslow-same-tick", "use-item-state", true, h -> scenarioUseSlowdown(h)));
+        scenarioResults.add(measure("tick-framing-multi-move", "tick-framing", true, h -> scenarioTickFraming(h)));
+        // Statistical S checks (ALERT only)
+        scenarioResults.add(measure("constant-interval-autoclicker", "click-pattern", true, h -> scenarioAutoClicker(h)));
+        scenarioResults.add(measure("oscillating-timer-balance", "timer-balance", true, h -> scenarioTimerBalance(h)));
+        scenarioResults.add(measure("ping-spoof-backtrack-rtt", "ping-spoof", true, h -> scenarioPingSpoof(h)));
+        scenarioResults.add(measure("combat-rtt-drop-backtrack", "ping-spoof", true, h -> scenarioCombatRttDrop(h)));
+
         int passed = 0;
-        int total = 0;
-
-        // 1. Honest baseline session (must produce 0 findings)
-        total++;
-        int fHonest = runScenarioHonest();
-        scenarioFindings.put("honest-baseline-session", fHonest);
-        if (fHonest == 0) passed++;
-
-        // 2. Reach 4.2-block violation (P-A: attack-reach)
-        total++;
-        int fReach = runScenarioReach();
-        scenarioFindings.put("reach-4.2b-violation", fReach);
-        if (fReach > 0) passed++;
-
-        // 3. Off-axis / wall raycast aim violation (P-A: attack-aim)
-        total++;
-        int fAim = runScenarioAimOffTarget();
-        scenarioFindings.put("aim-off-target-violation", fAim);
-        if (fAim > 0) passed++;
-
-        // 4. Instant stone break (P-A: break-time)
-        total++;
-        int fBreak = runScenarioInstantBreak();
-        scenarioFindings.put("instant-stone-break", fBreak);
-        if (fBreak > 0) passed++;
-
-        // 5. 0% vertical Anti-KB (P-A: velocity-response)
-        total++;
-        int fKb = runScenarioZeroAntiKb();
-        scenarioFindings.put("vertical-anti-kb-0pct", fKb);
-        if (fKb > 0) passed++;
-
-        // 6. Out-of-bounds hotbar & cursor (P-M: packet-bounds)
-        total++;
-        int fBounds = runScenarioPacketBounds();
-        scenarioFindings.put("packet-bounds-hotbar-cursor", fBounds);
-        if (fBounds > 0) passed++;
-
-        // 7. InvWalk + AutoTotem attack in same tick (P-M: inventory-protocol)
-        total++;
-        int fInv = runScenarioInventoryProtocol();
-        scenarioFindings.put("inventory-walk-autototem", fInv);
-        if (fInv > 0) passed++;
-
-        // 8. InteractAt bounding box spoof (P-M: interact-at-box)
-        total++;
-        int fBox = runScenarioInteractAtBox();
-        scenarioFindings.put("interact-at-box-spoof", fBox);
-        if (fBox > 0) passed++;
-
-        // 9. AutoBlock + NoSlow same-tick ordering (P-M: use-item-state)
-        total++;
-        int fUse = runScenarioUseSlowdown();
-        scenarioFindings.put("autoblock-noslow-same-tick", fUse);
-        if (fUse > 0) passed++;
-
-        // 10. Constant-interval auto-clicker (S: click-pattern)
-        total++;
-        int fClick = runScenarioAutoClicker();
-        scenarioFindings.put("constant-interval-autoclicker", fClick);
-        if (fClick > 0) passed++;
-
-        // 11. Oscillating slow-fast balance timer (S: timer-balance)
-        total++;
-        int fTimer = runScenarioTimerBalance();
-        scenarioFindings.put("oscillating-timer-balance", fTimer);
-        if (fTimer > 0) passed++;
-
-        // 12. Paired KeepAlive vs Ping Backtrack RTT inflation (S: ping-spoof)
-        total++;
-        int fPingSpoof = runScenarioPingSpoof();
-        scenarioFindings.put("ping-spoof-backtrack-rtt", fPingSpoof);
-        if (fPingSpoof > 0) passed++;
+        for (ScenarioResult r : scenarioResults) {
+            scenarioFindings.put(r.name(), r.findings());
+            if (r.passed()) {
+                passed++;
+            }
+        }
 
         return new BenchmarkReport(
                 honestRecordings,
                 honestFalsePositives,
                 totalHonestEvents,
                 usPerEvent,
-                total,
+                cheatRecordings,
+                cheatFalseNegatives,
+                totalCheatEvents,
+                scenarioResults.size(),
                 passed,
-                scenarioFindings);
+                scenarioFindings,
+                List.copyOf(scenarioResults));
+    }
+
+    @FunctionalInterface
+    private interface ScenarioBody {
+        void run(Harness h);
+    }
+
+    private static ScenarioResult measure(String name, String checkId, boolean expectFinding, ScenarioBody body) {
+        long t0 = System.nanoTime();
+        Harness h = newHarness("bench-" + name, null);
+        h.watchedCheck = checkId;
+        body.run(h);
+        double elapsedMs = (System.nanoTime() - t0) / 1_000_000.0;
+        int findings = checkId == null ? h.findings.size() : countCheck(h.findings, checkId);
+        long ttd = findings == 0 ? (expectFinding ? -1L : 0L)
+                : Math.max(1L, h.firstFindingTick - Math.max(0, h.cheatStartTick) + 1L);
+        return new ScenarioResult(name, checkId, expectFinding, findings, ttd, elapsedMs);
+    }
+
+    /** Generates deterministic adversarial {@code .wnrec} files into {@code outputDir}. */
+    public static int generateCheatCorpus(Path outputDir) throws IOException {
+        Files.createDirectories(outputDir);
+        record CorpusEntry(String fileName, ScenarioBody body) {}
+        List<CorpusEntry> entries = List.of(
+                new CorpusEntry("cheat-reach-4.2b.wnrec", BenchmarkRunner::scenarioReach),
+                new CorpusEntry("cheat-movement-fly.wnrec", BenchmarkRunner::scenarioMovementFly),
+                new CorpusEntry("cheat-velocity-antikb.wnrec", BenchmarkRunner::scenarioZeroAntiKb),
+                new CorpusEntry("cheat-invwalk-bounds.wnrec", h -> {
+                    scenarioInventoryProtocol(h);
+                    scenarioPacketBounds(h);
+                }),
+                new CorpusEntry("cheat-tick-framing-timer.wnrec", h -> {
+                    scenarioTickFraming(h);
+                    scenarioTimerBalance(h);
+                }),
+                new CorpusEntry("cheat-ping-spoof.wnrec", BenchmarkRunner::scenarioPingSpoof));
+        for (CorpusEntry entry : entries) {
+            Path file = outputDir.resolve(entry.fileName());
+            writeScenarioRecording(file, entry.fileName(), entry.body());
+        }
+        return entries.size();
+    }
+
+    private static void writeScenarioRecording(Path file, String name, ScenarioBody body) throws IOException {
+        try (FileChannel channel = FileChannel.open(
+                file, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+            Deflater deflater = new Deflater(Deflater.BEST_SPEED);
+            IOException[] failure = {null};
+            RecordingHeader header = new RecordingHeader(
+                    RecordingFormat.VERSION,
+                    774,
+                    "1.21.11",
+                    "whynotac-bench",
+                    UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8)),
+                    new UUID(11, 11),
+                    1_700_000_000_000L);
+            writeChannel(channel, header.encode());
+            BlockSink sink = new BlockSink() {
+                @Override
+                public boolean accept(Block block) {
+                    try {
+                        writeChannel(channel, block.encode(deflater));
+                    } catch (IOException ex) {
+                        failure[0] = ex;
+                    }
+                    return true;
+                }
+
+                @Override
+                public void close(long totalEvents, long lostEvents) {
+                    ByteSink end = new ByteSink(32);
+                    EventCodec.Encoder.encodeEnd(totalEvents, lostEvents, end);
+                    accept(new Block(0, 0, 0, 0, 0, end.toByteArray()));
+                }
+            };
+            RecordingWriter writer = new RecordingWriter(sink, RecordingWriter.DEFAULT_TARGET_BLOCK_BYTES, Long.MAX_VALUE);
+            Harness h = newHarness(name, writer);
+            body.run(h);
+            h.deliver(new TimelineEvent.Disconnected(h.seq++, h.now));
+            writer.close();
+            deflater.end();
+            if (failure[0] != null) {
+                throw failure[0];
+            }
+            channel.force(true);
+        }
+    }
+
+    private static void writeChannel(FileChannel channel, byte[] bytes) throws IOException {
+        ByteBuffer buf = ByteBuffer.wrap(bytes);
+        while (buf.hasRemaining()) {
+            channel.write(buf);
+        }
     }
 
     private static SessionRegistry newRegistry(List<Evidence> findings) {
@@ -249,132 +405,182 @@ public final class BenchmarkRunner {
         return registry;
     }
 
-    private static Harness newHarness(String name) {
+    private static Harness newHarness(String name, RecordingWriter recorder) {
         List<Evidence> findings = new ArrayList<>();
         SessionRegistry registry = newRegistry(findings);
         PlayerSession session = registry.openReplay(name);
-        Harness h = new Harness(session, findings);
+        Harness h = new Harness(session, findings, recorder);
         h.bootstrap();
         return h;
     }
 
-    private static int runScenarioHonest() {
-        Harness h = newHarness("bench-honest");
+    private static void scenarioHonest(Harness h) {
         for (int t = 0; t < 20; t++) {
-            h.in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, (t * 3.1f) % 360.0f, 0.0f, true, true, true, false));
-            h.tick();
+            h.stepVanilla(Harness.KEYS_NONE, (t * 3.1f) % 360.0f, 0.0f);
         }
-        return h.findings.size();
     }
 
-    private static int runScenarioReach() {
-        Harness h = newHarness("bench-reach");
+    private static void scenarioHonestLagBurst(Harness h) {
+        for (int t = 0; t < 12; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, (t * 1.5f) % 360.0f, 0.0f);
+        }
+        // Sudden 180 ms gap then buffered ticks: legitimate client stall must yield 0 findings
+        h.now += 180_000_000L;
+        for (int t = 0; t < 5; t++) {
+            h.now += 5_000_000L;
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+    }
+
+    private static void scenarioHonestSprint(Harness h) {
+        PlayerState.Keys forward = new PlayerState.Keys(true, false, false, false, false, false, false);
+        for (int i = 0; i < 6; i++) {
+            h.stepVanilla(forward, 0.0f, 0.0f);
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+    }
+
+    private static void scenarioReach(Harness h) {
+        h.markCheatStart();
         h.spawnZombie(2, 2.5, 64.0, 7.2); // 4.7 blocks away (> 3.0 survival reach)
         h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
         h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
         h.tick();
-        return countCheck(h.findings, "attack-reach");
     }
 
-    private static int runScenarioAimOffTarget() {
-        Harness h = newHarness("bench-aim");
+    private static void scenarioAimOffTarget(Harness h) {
         h.spawnZombie(2, 2.5, 64.0, 4.5); // in front (+Z, yaw=0), but player looks 180 deg away (-Z)
-        h.in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 180.0f, 0.0f, true, true, true, false));
-        h.tick();
+        h.stepVanilla(Harness.KEYS_NONE, 180.0f, 0.0f);
+        h.markCheatStart();
         h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
         h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
         h.tick();
-        return countCheck(h.findings, "attack-aim");
     }
 
-    private static int runScenarioInstantBreak() {
-        Harness h = newHarness("bench-break");
+    private static void scenarioInstantBreak(Harness h) {
+        h.markCheatStart();
         BlockPosition pos = new BlockPosition(2, 63, 3);
         h.in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, pos, BlockFace.UP, 1));
         h.tick();
         h.in(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.STOP_DESTROY_BLOCK, pos, BlockFace.UP, 2));
         h.tick();
-        return countCheck(h.findings, "break-time");
     }
 
-    private static int runScenarioZeroAntiKb() {
-        Harness h = newHarness("bench-kb");
+    private static void scenarioUseAimReach(Harness h) {
+        h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        h.out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 65, 9), STONE));
+        h.syncPing();
+        h.markCheatStart();
+        h.in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(2, 65, 9), BlockFace.NORTH,
+                new Vec3d(2.5, 65.62, 9.0), false, false, 1));
+        h.tick();
+    }
+
+    private static void scenarioMovementFly(Harness h) {
+        h.markCheatStart();
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y() + 0.65, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+    }
+
+    private static void scenarioZeroAntiKb(Harness h) {
+        h.markCheatStart();
         h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.25, 0.42, 0.0)));
         h.syncPing();
-        h.in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false));
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y(), h.player.z(), 0.0f, 0.0f, true, false, true, false));
         h.tick();
         h.tick();
-        return countCheck(h.findings, "velocity-response");
     }
 
-    private static int runScenarioPacketBounds() {
-        Harness h = newHarness("bench-bounds");
+    private static void scenarioHorizontalAntiKb(Harness h) {
+        h.markCheatStart();
+        h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.45, 0.36, 0.0)));
+        h.syncPing();
+        // Cheater accepts upward jump but suppresses all horizontal displacement
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y() + 0.36, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+        h.tick();
+    }
+
+    private static void scenarioPacketBounds(Harness h) {
+        h.markCheatStart();
         h.in(new ServerboundPacket.SetCarriedItem(9));
         h.tick();
-        return countCheck(h.findings, "packet-bounds");
     }
 
-    private static int runScenarioInventoryProtocol() {
-        Harness h = newHarness("bench-inv");
+    private static void scenarioInventoryProtocol(Harness h) {
+        h.markCheatStart();
         h.in(new ServerboundPacket.ContainerClick(0, 1, 36, 0, "SWAP", List.of(), Stack.EMPTY));
         h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
         h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
         h.tick();
-        return countCheck(h.findings, "inventory-protocol");
     }
 
-    private static int runScenarioInteractAtBox() {
-        Harness h = newHarness("bench-box");
+    private static void scenarioUnopenedContainerClick(Harness h) {
+        h.markCheatStart();
+        h.in(new ServerboundPacket.ContainerClick(3, 1, 5, 0, "PICKUP", List.of(), Stack.EMPTY));
+        h.tick();
+    }
+
+    private static void scenarioInteractAtBox(Harness h) {
         h.spawnZombie(2, 2.5, 64.0, 4.5);
+        h.markCheatStart();
         h.in(new ServerboundPacket.InteractEntity(
                 2, ServerboundPacket.InteractEntity.Kind.INTERACT_AT, Hand.MAIN_HAND, new Vec3d(2.5, 0.5, 0.0), false));
         h.tick();
-        return countCheck(h.findings, "interact-at-box");
     }
 
-    private static int runScenarioUseSlowdown() {
-        Harness h = newHarness("bench-use");
+    private static void scenarioUseSlowdown(Harness h) {
+        h.markCheatStart();
         h.in(new ServerboundPacket.PlayerAction(
                 ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, new BlockPosition(0, 0, 0), BlockFace.DOWN, 0));
         h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
         h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
         h.tick();
-        return countCheck(h.findings, "use-item-state");
     }
 
-    private static int runScenarioAutoClicker() {
-        Harness h = newHarness("bench-click");
+    private static void scenarioTickFraming(Harness h) {
+        h.markCheatStart();
+        h.in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false));
+        h.in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false));
+        h.tick();
+    }
+
+    private static void scenarioAutoClicker(Harness h) {
         h.spawnZombie(2, 2.5, 64.0, 4.5);
+        h.markCheatStart();
         for (int i = 0; i < 65; i++) {
             h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
             h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
             h.tick();
             h.tick();
         }
-        return countCheck(h.findings, "click-pattern");
     }
 
-    private static int runScenarioTimerBalance() {
-        Harness h = newHarness("bench-timer-balance");
-        for (int cycle = 0; cycle < 4; cycle++) {
+    private static void scenarioTimerBalance(Harness h) {
+        // Complete the initial 1.0s warmup bucket cleanly (21st tick is at t = +1.000s)
+        while (h.tickCount <= 20) {
+            h.tick();
+        }
+        h.markCheatStart();
+        for (int cycle = 0; cycle < 5; cycle++) {
             for (int t = 0; t < 11; t++) {
                 h.now += 96_000_000L;
                 h.in(new ServerboundPacket.ClientTickEnd());
+                h.noteTick();
             }
             for (int t = 0; t < 28; t++) {
                 h.now += 36_000_000L;
                 h.in(new ServerboundPacket.ClientTickEnd());
+                h.noteTick();
             }
         }
-        return countCheck(h.findings, "timer-balance");
     }
 
-    private static int runScenarioPingSpoof() {
-        Harness h = newHarness("bench-ping-spoof");
-        long kaSent = h.now;
+    private static void scenarioPingSpoof(Harness h) {
         h.out(new ClientboundPacket.KeepAlive(55L));
         h.now += 25_000_000L;
         h.in(new ServerboundPacket.KeepAlive(55L));
+        h.markCheatStart();
         for (int i = 0; i < 12; i++) {
             long pingSent = h.now;
             int id = ++h.pingId;
@@ -382,10 +588,34 @@ public final class BenchmarkRunner {
             for (int t = 0; t < 5; t++) {
                 h.tick();
             }
-            h.session.deliver(new TimelineEvent.Inbound(h.seq++, pingSent + 250_000_000L, 0, new ServerboundPacket.Pong(id)));
-            h.session.deliver(new TimelineEvent.Acknowledged(h.seq++, pingSent + 250_000_000L, id, pingSent, 0));
+            h.deliver(new TimelineEvent.Inbound(h.seq++, pingSent + 250_000_000L, 0, new ServerboundPacket.Pong(id)));
+            h.deliver(new TimelineEvent.Acknowledged(h.seq++, pingSent + 250_000_000L, id, pingSent, 0));
         }
-        return countCheck(h.findings, "ping-spoof");
+    }
+
+    private static void scenarioCombatRttDrop(Harness h) {
+        h.out(new ClientboundPacket.KeepAlive(77L));
+        h.now += 25_000_000L;
+        h.in(new ServerboundPacket.KeepAlive(77L));
+        h.markCheatStart();
+        for (int i = 0; i < 5; i++) {
+            long pingSent = h.now;
+            int id = ++h.pingId;
+            h.out(new ClientboundPacket.Ping(id));
+            h.tick();
+            long ackTime = pingSent + 260_000_000L;
+            h.deliver(new TimelineEvent.Inbound(h.seq++, ackTime, 0, new ServerboundPacket.Pong(id)));
+            h.deliver(new TimelineEvent.Acknowledged(h.seq++, ackTime, id, pingSent, 0));
+        }
+        long dropPingSent = h.now;
+        int dropId = ++h.pingId;
+        h.out(new ClientboundPacket.Ping(dropId));
+        h.deliver(new TimelineEvent.Inbound(h.seq++, dropPingSent + 10_000_000L, 0,
+                new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+        h.tick();
+        long dropAckTime = dropPingSent + 30_000_000L;
+        h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropId)));
+        h.deliver(new TimelineEvent.Acknowledged(h.seq++, dropAckTime, dropId, dropPingSent, 0));
     }
 
     private static int countCheck(List<Evidence> findings, String checkId) {
@@ -398,41 +628,173 @@ public final class BenchmarkRunner {
         return c;
     }
 
+    private static final Colliders.World FLAT_WORLD = new Colliders.World() {
+        @Override
+        public BlockStates states() {
+            return BlockStates.vanilla();
+        }
+
+        @Override
+        public int blockState(int x, int y, int z) {
+            return y < 64 ? STONE : AIR;
+        }
+
+        @Override
+        public boolean isLoaded(int chunkX, int chunkZ) {
+            return true;
+        }
+    };
+
     private static final class Harness {
+        static final PlayerState.Keys KEYS_NONE = new PlayerState.Keys(false, false, false, false, false, false, false);
         final PlayerSession session;
         final List<Evidence> findings;
+        final RecordingWriter recorder;
         long seq;
         long now = 2_000_000_000L;
         int pingId = 10;
+        int tickCount;
+        int cheatStartTick = -1;
+        int firstFindingTick = -1;
+        String watchedCheck;
+        PlayerState player;
+        boolean firstTick = true;
+        OnFoot.Speed speed = SpeedAttribute.DEFAULT;
+        PlayerState.Keys sentInput = KEYS_NONE;
+        boolean sentSprinting;
+        double sentX;
+        double sentY;
+        double sentZ;
+        float sentYRot;
+        float sentXRot;
+        boolean sentOnGround;
+        boolean sentCollision;
+        int reminder;
 
-        Harness(PlayerSession session, List<Evidence> findings) {
+        Harness(PlayerSession session, List<Evidence> findings, RecordingWriter recorder) {
             this.session = session;
             this.findings = findings;
+            this.recorder = recorder;
+        }
+
+        void deliver(TimelineEvent ev) {
+            if (recorder != null) {
+                recorder.append(ev);
+            }
+            int before = findings.size();
+            session.deliver(ev);
+            if (firstFindingTick < 0 && findings.size() > before) {
+                for (int i = before; i < findings.size(); i++) {
+                    if (watchedCheck == null || watchedCheck.equals(findings.get(i).check())) {
+                        firstFindingTick = tickCount;
+                        break;
+                    }
+                }
+            }
+        }
+
+        void markCheatStart() {
+            cheatStartTick = tickCount;
         }
 
         void bootstrap() {
             UUID playerId = new UUID(11, 11);
-            session.deliver(new TimelineEvent.Observation(seq++, now, Source.WIRE, Source.WIRE, 774, "bench"));
-            session.deliver(new ClientFact(seq++, now, Fact.IDENTITY, "AUTHENTICATED_MOJANG", Trust.AUTHENTIC, "bench"));
-            session.deliver(new ClientFact(seq++, now, Fact.NATIVE_PROTOCOL, "774", Trust.FORMAT_BOUND, "bench"));
-            session.deliver(new ClientFact(seq++, now, Fact.TRANSLATOR, "none", Trust.FORMAT_BOUND, "bench"));
-            session.deliver(new ClientFact(seq++, now, Fact.TRANSACTION_ORIGIN, "CLIENT", Trust.FORMAT_BOUND, "bench"));
-            session.deliver(new TimelineEvent.Bound(seq++, now, playerId, "benchPlayer", 1));
+            deliver(new TimelineEvent.Observation(seq++, now, Source.WIRE, Source.WIRE, 774, "bench"));
+            deliver(new ClientFact(seq++, now, Fact.IDENTITY, "AUTHENTICATED_MOJANG", Trust.AUTHENTIC, "bench"));
+            deliver(new ClientFact(seq++, now, Fact.NATIVE_PROTOCOL, "774", Trust.FORMAT_BOUND, "bench"));
+            deliver(new ClientFact(seq++, now, Fact.TRANSLATOR, "none", Trust.FORMAT_BOUND, "bench"));
+            deliver(new ClientFact(seq++, now, Fact.TRANSACTION_ORIGIN, "CLIENT", Trust.FORMAT_BOUND, "bench"));
+            deliver(new TimelineEvent.Bound(seq++, now, playerId, "benchPlayer", 1));
+            out(minimalTags());
             out(new ClientboundPacket.Login(1, 4, OVERWORLD, 0));
             out(new ClientboundPacket.PlayerInfoUpdate(
                     true, true, List.of(new ClientboundPacket.PlayerInfoUpdate.Entry(playerId, 0))));
             out(new ClientboundPacket.ChunkCacheCenter(0, 0));
-            out(new ClientboundPacket.LevelChunk(0, 0, flatChunk()));
+            byte[] chunk = flatChunk();
+            for (int cx = -1; cx <= 1; cx++) {
+                for (int cz = -1; cz <= 1; cz++) {
+                    out(new ClientboundPacket.LevelChunk(cx, cz, chunk));
+                }
+            }
+            out(new ClientboundPacket.SetHeldSlot(0));
+            List<Stack> inv = new ArrayList<>(46);
+            for (int i = 0; i < 46; i++) {
+                inv.add(Stack.EMPTY);
+            }
+            out(new ClientboundPacket.ContainerSetContent(0, 1, inv, Stack.EMPTY));
+            player = new PlayerState(2.5, 64.0, 2.5, Vec3d.ZERO, -180.0f, 0.0f, false, false, false, false, false, 0.0,
+                    false, false, false, PlayerState.Pose.STANDING, KEYS_NONE, 0, 0, 0, null, false, Vec3d.ZERO, false, false);
             out(new ClientboundPacket.PlayerPosition(1, new Vec3d(2.5, 64.0, 2.5), Vec3d.ZERO, 0.0f, 0.0f, Set.of()));
             syncPing();
             in(new ServerboundPacket.AcceptTeleportation(1));
-            in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, true, true, false));
+            in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, true, false, false));
             in(new ServerboundPacket.PlayerLoaded());
-            tick();
-            in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false));
-            tick();
-            in(new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false));
-            tick();
+            PlayerState.Keys forward = new PlayerState.Keys(true, false, false, false, false, false, false);
+            stepVanilla(KEYS_NONE, 15.0f, 0.0f);
+            stepVanilla(KEYS_NONE, 0.0f, 0.0f);
+            stepVanilla(forward, 0.0f, 0.0f);
+            stepVanilla(forward, 0.0f, 0.0f);
+            stepVanilla(KEYS_NONE, 0.0f, 0.0f);
+        }
+
+        void stepVanilla(PlayerState.Keys keys, float yRot, float xRot) {
+            PlayerState pre = new PlayerState(player.x(), player.y(), player.z(), player.deltaMovement(), yRot, xRot,
+                    player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
+                    player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(),
+                    player.sprinting(), player.sprintModifier(), player.crouching(), player.pose(), player.keys(),
+                    player.noJumpDelay(), player.sprintTriggerTime(), player.autoJumpTime(), player.support(),
+                    player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(),
+                    player.fallFlying(), player.inPowderSnow(), player.inWater(), player.spinAttackTicks());
+            try {
+                OnFoot.Step step = OnFoot.step(pre, keys, FLAT_WORLD,
+                        new OnFoot.Conditions(true, OnFoot.DEFAULT_SPRINT_WINDOW, firstTick, speed, OnFoot.Effects.NONE,
+                                null, false, PlatformCos.X86_64,
+                                new Border(-30_000_000.0, -30_000_000.0, 30_000_000.0, 30_000_000.0), null));
+                firstTick = false;
+                speed = step.speed();
+                PlayerState post = step.state();
+                player = post;
+                if (!keys.equals(sentInput)) {
+                    in(new ServerboundPacket.PlayerInput(keys.forward(), keys.backward(), keys.left(), keys.right(),
+                            keys.jump(), keys.shift(), keys.sprint()));
+                    sentInput = keys;
+                }
+                if (post.sprinting() != sentSprinting) {
+                    in(new ServerboundPacket.PlayerCommand(1,
+                            post.sprinting() ? ServerboundPacket.PlayerCommand.Action.START_SPRINTING
+                                    : ServerboundPacket.PlayerCommand.Action.STOP_SPRINTING, 0));
+                    sentSprinting = post.sprinting();
+                }
+                reminder++;
+                boolean position = VanillaMath.lengthSquared(post.x() - sentX, post.y() - sentY, post.z() - sentZ)
+                        > VanillaMath.square(2.0E-4) || reminder >= 20;
+                boolean rotation = yRot != sentYRot || xRot != sentXRot;
+                boolean flags = post.onGround() != sentOnGround || post.horizontalCollision() != sentCollision;
+                if (position || rotation || flags) {
+                    in(new ServerboundPacket.MovePlayer(
+                            position ? post.x() : Double.NaN,
+                            position ? post.y() : Double.NaN,
+                            position ? post.z() : Double.NaN,
+                            rotation ? yRot : Float.NaN,
+                            rotation ? xRot : Float.NaN,
+                            position, rotation, post.onGround(), post.horizontalCollision()));
+                }
+                if (position) {
+                    sentX = post.x();
+                    sentY = post.y();
+                    sentZ = post.z();
+                    reminder = 0;
+                }
+                if (rotation) {
+                    sentYRot = yRot;
+                    sentXRot = xRot;
+                }
+                sentOnGround = post.onGround();
+                sentCollision = post.horizontalCollision();
+                tick();
+            } catch (Colliders.Unknown ex) {
+                throw new AssertionError(ex);
+            }
         }
 
         void spawnZombie(int id, double x, double y, double z) {
@@ -442,24 +804,81 @@ public final class BenchmarkRunner {
         }
 
         void out(ClientboundPacket p) {
-            session.deliver(new TimelineEvent.Outbound(seq++, now, p));
+            deliver(new TimelineEvent.Outbound(seq++, now, p));
         }
 
         void in(ServerboundPacket p) {
-            session.deliver(new TimelineEvent.Inbound(seq++, now, 0, p));
+            deliver(new TimelineEvent.Inbound(seq++, now, tickCount, p));
         }
 
         void syncPing() {
             int id = ++pingId;
             out(new ClientboundPacket.Ping(id));
             in(new ServerboundPacket.Pong(id));
-            session.deliver(new TimelineEvent.Acknowledged(seq++, now, id, now, 0));
+            deliver(new TimelineEvent.Acknowledged(seq++, now, id, now, tickCount));
+        }
+
+        void noteTick() {
+            tickCount++;
         }
 
         void tick() {
             in(new ServerboundPacket.ClientTickEnd());
             now += 50_000_000L;
+            tickCount++;
         }
+    }
+
+    private static ClientboundPacket.UpdateTags minimalTags() {
+        BlockStates states = BlockStates.vanilla();
+        List<Integer> climbable = new ArrayList<>();
+        for (String b : dev.whynotac.physics.OnFoot.CLIMBABLE) {
+            climbable.add(states.blockId(states.firstStateOf(b)));
+        }
+        List<Integer> glideThrough = new ArrayList<>();
+        for (String b : dev.whynotac.physics.OnFoot.CAN_GLIDE_THROUGH) {
+            glideThrough.add(states.blockId(states.firstStateOf(b)));
+        }
+        List<Integer> fallReset = new ArrayList<>();
+        for (String b : dev.whynotac.physics.OnFoot.FALL_DAMAGE_RESETTING) {
+            fallReset.add(states.blockId(states.firstStateOf(b)));
+        }
+        List<Integer> fences = new ArrayList<>();
+        List<Integer> walls = new ArrayList<>();
+        for (int id = 0; id < states.blockCount(); id++) {
+            String key = states.blockKey(id);
+            if (key.endsWith("_fence")) {
+                fences.add(id);
+            } else if (key.endsWith("_wall")) {
+                walls.add(id);
+            }
+        }
+        return new ClientboundPacket.UpdateTags(List.of(
+                new ClientboundPacket.UpdateTags.RegistryTags("minecraft:block", List.of(
+                        tag("minecraft:climbable", climbable),
+                        tag("minecraft:can_glide_through", glideThrough),
+                        tag("minecraft:fall_damage_resetting", fallReset),
+                        tag("minecraft:fences", fences),
+                        tag("minecraft:walls", walls),
+                        tag("minecraft:strider_warm_blocks", List.of(states.blockId(states.firstStateOf("minecraft:lava")))))),
+                new ClientboundPacket.UpdateTags.RegistryTags("minecraft:entity_type", List.of(
+                        tag("minecraft:powder_snow_walkable_mobs", List.of()),
+                        tag("minecraft:can_float_while_ridden", List.of(
+                                dev.whynotac.analysis.movement.EngineTags.HORSE,
+                                dev.whynotac.analysis.movement.EngineTags.ZOMBIE_HORSE,
+                                dev.whynotac.analysis.movement.EngineTags.MULE,
+                                dev.whynotac.analysis.movement.EngineTags.DONKEY,
+                                dev.whynotac.analysis.movement.EngineTags.CAMEL,
+                                dev.whynotac.analysis.movement.EngineTags.CAMEL_HUSK)))),
+                new ClientboundPacket.UpdateTags.RegistryTags("minecraft:fluid", List.of(
+                        new ClientboundPacket.UpdateTags.Tag("minecraft:water",
+                                new int[] {dev.whynotac.analysis.movement.EngineTags.WATER, dev.whynotac.analysis.movement.EngineTags.FLOWING_WATER}),
+                        new ClientboundPacket.UpdateTags.Tag("minecraft:lava",
+                                new int[] {dev.whynotac.analysis.movement.EngineTags.LAVA, dev.whynotac.analysis.movement.EngineTags.FLOWING_LAVA})))));
+    }
+
+    private static ClientboundPacket.UpdateTags.Tag tag(String name, List<Integer> ids) {
+        return new ClientboundPacket.UpdateTags.Tag(name, ids.stream().mapToInt(Integer::intValue).toArray());
     }
 
     private static byte[] flatChunk() {

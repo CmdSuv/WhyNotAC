@@ -17,7 +17,7 @@ public final class SpeedAttribute implements OnFoot.Speed {
     static final ClientboundPacket.UpdateAttributes.Modifier SPRINT_MODIFIER = new ClientboundPacket.UpdateAttributes.Modifier(SPRINTING, 0.3F,
             ClientboundPacket.UpdateAttributes.Operation.ADD_MULTIPLIED_TOTAL);
     /** {@code Player.createAttributes}: base {@code 0.1F}, no modifier. */
-    static final SpeedAttribute DEFAULT = new SpeedAttribute(0.1F, new ModifierTable[] {ModifierTable.EMPTY, ModifierTable.EMPTY, ModifierTable.EMPTY});
+    public static final SpeedAttribute DEFAULT = new SpeedAttribute(0.1F, new ModifierTable[] {ModifierTable.EMPTY, ModifierTable.EMPTY, ModifierTable.EMPTY});
     /** {@code RangedAttribute("movement_speed", 0.7, 0.0, 1024.0)}. */
     static final double MIN = 0.0;
     static final double MAX = 1024.0;

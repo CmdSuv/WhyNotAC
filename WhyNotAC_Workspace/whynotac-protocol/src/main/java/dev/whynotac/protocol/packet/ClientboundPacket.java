@@ -535,6 +535,12 @@ public sealed interface ClientboundPacket {
         }
     }
 
+    /**
+     * {@code ClientboundCooldownPacket}: puts an item cooldown group on cooldown for {@code duration} ticks
+     * (0 clears it), counted down once per tick by {@code ItemCooldowns.tick}.
+     */
+    record Cooldown(String group, int duration) implements ClientboundPacket {}
+
     record Unmodeled(String type) implements ClientboundPacket {}
 
     /**

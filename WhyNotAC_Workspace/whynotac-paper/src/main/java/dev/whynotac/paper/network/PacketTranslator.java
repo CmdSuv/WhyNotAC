@@ -70,6 +70,7 @@ import net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundCooldownPacket;
 import net.minecraft.network.protocol.game.ClientboundMountScreenOpenPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundSetCursorItemPacket;
@@ -243,7 +244,7 @@ public final class PacketTranslator {
             "rotate_head", "set_passengers", "move_vehicle", "set_entity_data",
             "container_set_content", "container_set_slot", "set_cursor_item", "set_player_inventory", "set_held_slot", "open_screen",
             "mount_screen_open", "container_close", "entity_event", "set_camera", "set_health", "initialize_border", "set_border_center",
-            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags", "set_equipment", "set_time");
+            "set_border_lerp_size", "set_border_size", "set_player_team", "update_tags", "set_equipment", "set_time", "cooldown");
 
     /**
      * Packets about other entities that come by the hundred per tick, or whose stacks Paper may rewrite on the
@@ -281,7 +282,8 @@ public final class PacketTranslator {
             ClientboundUpdateTagsPacket.class,
             ClientboundContainerClosePacket.class, ClientboundEntityEventPacket.class, ClientboundSetCameraPacket.class,
             ClientboundSetHealthPacket.class, ClientboundSetTimePacket.class, ClientboundInitializeBorderPacket.class, ClientboundSetBorderCenterPacket.class,
-            ClientboundSetBorderLerpSizePacket.class, ClientboundSetBorderSizePacket.class, ClientboundSetPlayerTeamPacket.class);
+            ClientboundSetBorderLerpSizePacket.class, ClientboundSetBorderSizePacket.class, ClientboundSetPlayerTeamPacket.class,
+            ClientboundCooldownPacket.class);
 
     /** Per packet class, computed once: is it (a subclass of) one {@link #outbound} models? */
     static final ClassValue<Boolean> OUTBOUND_MODELLED = new ClassValue<>() {
@@ -676,6 +678,7 @@ public final class PacketTranslator {
             case ClientboundContainerClosePacket close -> new ClientboundPacket.ContainerClose(close.getContainerId());
             case ClientboundSetPlayerTeamPacket team -> playerTeam(team, fromWire);
             case ClientboundUpdateTagsPacket tags -> updateTags(tags);
+            case ClientboundCooldownPacket cooldown -> new ClientboundPacket.Cooldown(cooldown.cooldownGroup().toString(), cooldown.duration());
             default -> unmodeledOutbound.computeIfAbsent(packet.getClass(), c -> new ClientboundPacket.Unmodeled(packet.type().id().toString()));
         };
     }

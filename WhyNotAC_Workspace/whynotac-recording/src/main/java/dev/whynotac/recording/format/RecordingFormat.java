@@ -166,6 +166,7 @@ public final class RecordingFormat {
      * ordinal is one of the last {@link #CHUNK_WINDOW} stored, so a reader holds at most that many bodies.
      */
     public static final int CB_LEVEL_CHUNK_REPEAT = 65;
+    public static final int CB_COOLDOWN = 66;
 
     /**
      * Stored chunk bodies a repeat may refer to: part of the format, never smaller (a reader keeps this

@@ -3673,4 +3673,50 @@ class MovementCheckTest {
         assertTrue(ticks.subList(from, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
                 String.valueOf(ticks.subList(from, ticks.size())));
     }
+
+    @Test
+    void decodedCooldownExpiresAndResumesBlockPlacement() throws Exception {
+        holdStone(64);
+        ticks(3, NONE, 0.0F, 90.0F);
+        out(new ClientboundPacket.Cooldown("minecraft:stone", 3));
+        sync();
+        // While active, cooldown causes a conservative NO_CLAIM on block use (zero FP).
+        int duringStart = ticks.size();
+        tick(NONE, 0.0F, 90.0F, Vec3d.ZERO); // remaining 3 -> 2
+        // Wait remaining 2 ticks so cooldown expires cleanly.
+        ticks(2, NONE, 0.0F, 90.0F); // 2 -> 1 -> 0
+        assertEquals(0, evidence.size());
+        // Once expired, block placement resumes with full EXPLAINED claim!
+        int towerStart = ticks.size();
+        tower(2, 3, 0.0);
+        List<MovementTracker.Tick> after = ticks.subList(towerStart, ticks.size());
+        assertTrue(after.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(after));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void dismountWithPositionTeleportReanchorsImmediately() throws Exception {
+        ticks(5, NONE, 30.0F);
+        boatOnGround(6.5, 6.5);
+        mount(6.5, 6.5);
+        for (int i = 0; i < 10; i++) {
+            rideTick(FORWARD, Vec3d.ZERO);
+        }
+        // Dismount onto solid flat grass without waiting 12 keyless ticks, immediately walking forward.
+        out(new ClientboundPacket.SetPassengers(BOAT, new int[] {}));
+        out(new ClientboundPacket.RemoveEntities(new int[] {BOAT}));
+        player = new PlayerState(10.5, 64.0, 10.5, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, true, true, 0.0,
+                false, false, false, PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO,
+                false, false, false, false, null, 0);
+        teleport(10.5, 64.0, 10.5, 0.0F, 0.0F);
+        int dismountIdx = ticks.size();
+        ticks(5, FORWARD, 0.0F);
+        List<MovementTracker.Tick> post = ticks.subList(dismountIdx, ticks.size());
+        assertTrue(post.stream().anyMatch(t -> "anchored: dismounted".equals(t.reason())), String.valueOf(post));
+        assertEquals(MovementTracker.Outcome.EXPLAINED, post.getLast().outcome(), String.valueOf(post));
+        assertEquals(List.of(), evidence);
+        // And an immediate cheat right after dismount re-anchoring is caught.
+        tick(FORWARD, 0.0F, 0.0F, new Vec3d(0.0, 0.25, 0.0));
+        assertTrue(count(MovementTracker.Outcome.UNEXPLAINED) >= 1, String.valueOf(ticks.subList(dismountIdx, ticks.size())));
+    }
 }

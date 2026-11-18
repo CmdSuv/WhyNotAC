@@ -21,7 +21,7 @@ PAPER_SHA256=5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba
 PORT=25599
 
 if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
-  curl -fsS --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
+  curl -fsS --retry 3 --retry-delay 5 --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
 fi
 echo "$PAPER_SHA256  $WORK_DIR/$PAPER_JAR" | sha256sum -c --quiet -
 echo 'eula=true' > "$WORK_DIR/eula.txt"
@@ -42,7 +42,11 @@ max-players=5
 motd=WhyNotAC E2E
 PROPS
 
-(cd "$ROOT" && ./gradlew -q :whynotac-paper:jar :whynotac-interop-probe:jar)
+for i in 1 2 3 4; do
+  if (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar :whynotac-interop-probe:jar); then break; fi
+  [ "$i" -eq 4 ] && exit 1
+  sleep $((10 * i))
+done
 mkdir -p "$WORK_DIR/plugins/WhyNotAC"
 rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/plugins/WhyNotAC/cases.db"
 cat > "$WORK_DIR/plugins/WhyNotAC/config.yml" <<CONFIG

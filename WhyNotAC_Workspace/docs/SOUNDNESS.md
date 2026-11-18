@@ -102,10 +102,10 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 - **Dışlanan Durumlar:** `Login` öncesi (`selfId < 0`) ve kabul edilemez pencereler (`Gap`/çevirici).
 
 ### 2.9c `velocity-response` (`P-A`)
-- **Dayanak:** `SetEntityMotion(vy >= 0.12)` sonrası ping onayı alındığında yerde duran ve başının üstünde (`feet`, `head`, `aboveHead == AIR`) engel bulunmayan bir survival/adventure oyuncunun dikey momentumunu sıfırlayan (`%0` dikey Anti-KB: `ignored-vertical-knockback`) istemciler (`VelocityCheck.java`). Entity-push yalnızca yatay olduğu için yakın dövüşte `MovementTracker` çekilse dahi sağlam kalır.
+- **Dayanak:** `SetEntityMotion(vy >= 0.12)` sonrası ping onayı alındığında yerde duran ve başının üstünde (`feet`, `head`, `aboveHead == AIR`) engel bulunmayan bir survival/adventure oyuncunun dikey momentumunu sıfırlayan (`ignored-vertical-knockback`) ve çevresi (`3x3x3`) açık havada olup yakında itici varlık yokken yatay `SetEntityMotion(hypot >= 0.25)` itkisini (`< 0.08` izdüşüm) bastıran (`ignored-horizontal-knockback`) istemciler (`VelocityCheck.java`).
 
 ### 2.9d `inventory-protocol` (`P-M`)
-- **Dayanak:** Vanilla `Minecraft.tick()` içinde aynı client tick içerisinde ekran kapatma (`ContainerClose`) olmadan bir `ContainerClick` ardından `InteractEntity`/`UseItem`/`UseItemOn`/blok kırma/koşma başlatma (`action-during-container-click`) veya yatay hareket tuşu basımı (`walk-during-container-click`, InvWalk/AutoTotem) (`InventoryActionCheck.java`).
+- **Dayanak:** Vanilla `Minecraft.tick()` içinde aynı client tick içerisinde ekran kapatma (`ContainerClose`) olmadan bir `ContainerClick` ardından `InteractEntity`/`UseItem`/`UseItemOn`/blok kırma/koşma başlatma (`action-during-container-click`), yatay hareket tuşu basımı (`walk-during-container-click`, InvWalk/AutoTotem) veya açık bir `OpenScreen`/`MountScreenOpen` olmadan `containerId > 0` üzerine tıklama (`unopened-container-click`) (`InventoryActionCheck.java`).
 
 ### 2.9e `interact-at-box` (`P-M`)
 - **Dayanak:** `InteractEntity(INTERACT_AT)` yerel hedef sapmasının, hedef varlığın `EntitySizes` olası boyut zarfının dışına çıkması (`non-finite-interact-at`, `out-of-bounds-interact-at`) (`InteractAtBoxCheck.java`).
@@ -115,7 +115,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 
 ### 2.9g `timer-balance` ve `ping-spoof` (`S` — Asla Cezalandırmaz)
 - **`timer-balance` (`TimerBalanceCheck.java`):** En az 4 döngü boyunca yavaşlatma (`<= 15` TPS) ardından hızlı boşaltma (`>= 24.5` TPS) yapan osilasyonlu bakiye zamanlayıcı (`oscillating-timer-balance`).
-- **`ping-spoof` (`PingSpoofCheck.java`):** `KeepAlive` ağı RTT'sine kıyasla `>= 10` ardışık aktif transaction'da `+180 ms` üzeri gecikmeli `Ping` şişirmesi (`sustained-ping-rtt-inflation`, Backtrack). Both use `AdmissibilityTracker.evaluateTranslatorSafe` and never auto-kick/ban.
+- **`ping-spoof` (`PingSpoofCheck.java`):** `KeepAlive` ağı RTT'sine kıyasla `>= 10` ardışık aktif transaction'da `+180 ms` üzeri gecikmeli `Ping` şişirmesi (`sustained-ping-rtt-inflation`, Backtrack) veya yüksek şişirme sonrasında saldırı (`<= 3` tik) anında `>= 120 ms` ani düşüş (`combat-rtt-drop`). İkisi de `AdmissibilityTracker.evaluateTranslatorSafe` kullanır ve asla otomatik atmaz/yasaklamaz.
 
 ### 2.10 `movement` (`P-M`)
 - **Dayanak:** Decompile 1.21.11 `OnFoot` + `Colliders` + araç motorları (`Boat`, `Horse`, `ItemSteering`) + `Border` + dünya tahminleri (`whynotac-physics`, `MovementCheck.java`, `MovementTracker.java`, [whynotac-analysis README § movement](../whynotac-analysis/README.md#movement-movementcheck-movementmovementtracker)). Oyuncunun olası durum kümesi (maks. `64` hipotez) `x86_64` ve `AARCH64` JVM `Math.cos` tablo/intrinsic farklılıkları dâhil bit bit ilerletilir; kayıp sonrası durağan çapa (`settleAnchor`) veya düz/zıplamalı koşu çapası (`runAnchor`) ile yeniden kurulur.

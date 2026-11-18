@@ -75,6 +75,8 @@ observability:
   metrics-http-port: 0
   # Real-time structured JSONL alert & case stream (plugins/WhyNotAC/<file>). Blank disables export.
   alert-stream-file: "alerts-stream.jsonl"
+  # Optional async HTTP/HTTPS POST webhook URL for case/alert JSON payloads. Blank disables webhook delivery.
+  webhook-url: ""
 
 network-bridge:
   # Authenticated Velocity companion bridge (whynotac:bridge) for NET-01 / NET-22.

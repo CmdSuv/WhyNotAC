@@ -57,9 +57,23 @@ public final class InventoryActionCheck implements TimelineListener {
         int clickedContainerId;
         long clickSeq;
         long clickNano;
+        boolean sawSessionStart;
+        boolean containerHistoryGap;
+        final java.util.Set<Integer> openContainers = new java.util.HashSet<>();
 
         void clearTick() {
             clickedThisTick = false;
+        }
+
+        void resetContainers(boolean gap) {
+            clearTick();
+            openContainers.clear();
+            if (gap) {
+                containerHistoryGap = true;
+            } else {
+                sawSessionStart = true;
+                containerHistoryGap = false;
+            }
         }
     }
 
@@ -73,13 +87,25 @@ public final class InventoryActionCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
-            case TimelineEvent.Gap ignored -> state.clearTick();
+            case TimelineEvent.Gap ignored -> state.resetContainers(true);
             case TimelineEvent.Outbound out -> {
-                if (out.packet() instanceof ClientboundPacket.ContainerClose
-                        || out.packet() instanceof ClientboundPacket.OpenScreen
-                        || out.packet() instanceof ClientboundPacket.Respawn
-                        || out.packet() instanceof ClientboundPacket.Login) {
-                    state.clearTick();
+                switch (out.packet()) {
+                    case ClientboundPacket.Login ignored -> state.resetContainers(false);
+                    case ClientboundPacket.Respawn ignored -> state.resetContainers(false);
+                    case ClientboundPacket.OpenScreen open -> {
+                        state.clearTick();
+                        if (open.containerId() > 0) {
+                            state.openContainers.add(open.containerId());
+                        }
+                    }
+                    case ClientboundPacket.MountScreenOpen mount -> {
+                        state.clearTick();
+                        if (mount.containerId() > 0) {
+                            state.openContainers.add(mount.containerId());
+                        }
+                    }
+                    case ClientboundPacket.ContainerClose ignored -> state.clearTick();
+                    default -> { }
                 }
             }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
@@ -90,12 +116,29 @@ public final class InventoryActionCheck implements TimelineListener {
     private void onInbound(PlayerSession session, State state, TimelineEvent.Inbound in) {
         switch (in.packet()) {
             case ServerboundPacket.ContainerClick click -> {
+                if (click.containerId() > 0 && state.sawSessionStart && !state.containerHistoryGap
+                        && !state.openContainers.contains(click.containerId())) {
+                    state.clickSeq = in.sequence();
+                    state.clickNano = in.nanoTime();
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "unopened-container-click");
+                    details.put("containerId", Integer.toString(click.containerId()));
+                    report(session, state, in,
+                            "ContainerClick targeting container " + click.containerId() + " with no open screen",
+                            details);
+                    return;
+                }
                 state.clickedThisTick = true;
                 state.clickedContainerId = click.containerId();
                 state.clickSeq = in.sequence();
                 state.clickNano = in.nanoTime();
             }
-            case ServerboundPacket.ContainerClose ignored -> state.clearTick();
+            case ServerboundPacket.ContainerClose close -> {
+                state.clearTick();
+                if (close.containerId() > 0) {
+                    state.openContainers.remove(close.containerId());
+                }
+            }
             case ServerboundPacket.ClientTickEnd ignored -> state.clearTick();
             case ServerboundPacket.PlayerInput input -> {
                 if (state.clickedThisTick && (input.forward() || input.backward() || input.left() || input.right())) {

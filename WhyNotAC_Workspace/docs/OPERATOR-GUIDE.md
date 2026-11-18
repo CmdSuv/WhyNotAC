@@ -84,4 +84,4 @@ Offline-mode sunucularda [`identity.trust-auth-plugins: true`](../deploy/configs
 
 ## 6. Prometheus, Alert Stream & Grafana Kurulumu
 
-[`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml), [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) ve [`deploy/monitoring/grafana-dashboard.json`](../deploy/monitoring/grafana-dashboard.json) dosyaları, `observability.metrics-http-port: 9108` üzerinden `MetricsExporter` metriklerini izler; `observability.alert-stream-file: "alerts-stream.jsonl"` ise açılan her vakayı gerçek zamanlı tek-satır JSON akışına yazar.
+[`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml), [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) ve [`deploy/monitoring/grafana-dashboard.json`](../deploy/monitoring/grafana-dashboard.json) dosyaları, `observability.metrics-http-port: 9108` üzerinden `MetricsExporter` metriklerini izler; `observability.alert-stream-file: "alerts-stream.jsonl"` ise açılan her vakayı gerçek zamanlı tek-satır JSON akışına yazar (`observability.webhook-url` yapılandırılmışsa asenkron HTTP POST ile haricî SIEM/Discord webhook'larına da iletilir).

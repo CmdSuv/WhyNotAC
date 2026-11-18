@@ -96,6 +96,31 @@ final class InventoryActionCheckTest {
     }
 
     @Test
+    void detectsUnopenedContainerClickAndAllowsOpenedThenClosedFlow() {
+        // Clicking containerId=3 without OpenScreen is impossible in vanilla
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(3, 1, 5, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        assertEquals(1, evidence.size());
+        assertEquals("unopened-container-click", evidence.get(0).details().get("reason"));
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, evidence.get(0).evidenceClass());
+
+        // Server opens containerId=4 -> click allowed -> client closes -> subsequent click flagged again
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.OpenScreen(4, "minecraft:generic_9x3")));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(4, 1, 5, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ContainerClose(4)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        assertEquals(1, evidence.size());
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(4, 1, 5, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        assertEquals(2, evidence.size());
+        assertEquals("unopened-container-click", evidence.get(1).details().get("reason"));
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(InventoryActionCheck.VERSION, Checks.version(InventoryActionCheck.ID));
         assertNotNull(Checks.create(InventoryActionCheck.ID, (s, e) -> { }));

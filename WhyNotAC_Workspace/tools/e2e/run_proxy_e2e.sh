@@ -26,17 +26,21 @@ if [ ! -f "$PAPER_DIR/$PAPER_JAR" ]; then
   if [ -f "/tmp/wnac-e2e/$PAPER_JAR" ]; then
     cp "/tmp/wnac-e2e/$PAPER_JAR" "$PAPER_DIR/$PAPER_JAR"
   else
-    curl -fsS --max-time 300 -o "$PAPER_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
+    curl -fsS --retry 3 --retry-delay 5 --max-time 300 -o "$PAPER_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
   fi
 fi
 echo "$PAPER_SHA256  $PAPER_DIR/$PAPER_JAR" | sha256sum -c --quiet -
 
 if [ ! -f "$VEL_DIR/$VELOCITY_JAR" ]; then
-  curl -fsS --max-time 300 -o "$VEL_DIR/$VELOCITY_JAR" "https://fill-data.papermc.io/v1/objects/$VELOCITY_SHA256/$VELOCITY_JAR"
+  curl -fsS --retry 3 --retry-delay 5 --max-time 300 -o "$VEL_DIR/$VELOCITY_JAR" "https://fill-data.papermc.io/v1/objects/$VELOCITY_SHA256/$VELOCITY_JAR"
 fi
 echo "$VELOCITY_SHA256  $VEL_DIR/$VELOCITY_JAR" | sha256sum -c --quiet -
 
-(cd "$ROOT" && ./gradlew -q :whynotac-paper:jar :whynotac-velocity:jar)
+for i in 1 2 3 4; do
+  if (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar :whynotac-velocity:jar); then break; fi
+  [ "$i" -eq 4 ] && exit 1
+  sleep $((10 * i))
+done
 PAPER_PLUGIN=$(find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' | head -1)
 VEL_PLUGIN=$(find "$ROOT/whynotac-velocity/build/libs" -name 'whynotac-velocity-*.jar' ! -name '*-sources.jar' | head -1)
 cp "$PAPER_PLUGIN" "$PAPER_DIR/plugins/WhyNotAC.jar"

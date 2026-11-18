@@ -277,6 +277,7 @@ public final class Generators {
             case "OpenScreen" -> new ClientboundPacket.OpenScreen(anyInt(), anyString());
             case "MountScreenOpen" -> new ClientboundPacket.MountScreenOpen(anyInt(), anyInt(), anyInt());
             case "ContainerClose" -> new ClientboundPacket.ContainerClose(anyInt());
+            case "Cooldown" -> new ClientboundPacket.Cooldown(anyString(), anyInt());
             case "Unmodeled" -> new ClientboundPacket.Unmodeled(anyString());
             case "Untranslatable" -> new ClientboundPacket.Untranslatable(anyString());
             default -> throw new AssertionError("no generator for clientbound " + name + ": add one (and a codec case)");

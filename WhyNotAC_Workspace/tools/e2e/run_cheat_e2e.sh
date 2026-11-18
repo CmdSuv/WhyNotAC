@@ -25,12 +25,16 @@ if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
   elif [ -n "${RUNNER_TEMP:-}" ] && [ -f "$RUNNER_TEMP/proxy-e2e/paper/$PAPER_JAR" ]; then
     cp "$RUNNER_TEMP/proxy-e2e/paper/$PAPER_JAR" "$WORK_DIR/$PAPER_JAR"
   else
-    curl -fsS --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
+    curl -fsS --retry 3 --retry-delay 5 --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
   fi
 fi
 echo "$PAPER_SHA256  $WORK_DIR/$PAPER_JAR" | sha256sum -c --quiet -
 
-(cd "$ROOT" && ./gradlew -q :whynotac-paper:jar)
+for i in 1 2 3 4; do
+  if (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar); then break; fi
+  [ "$i" -eq 4 ] && exit 1
+  sleep $((10 * i))
+done
 PLUGIN_JAR=$(find "$ROOT/whynotac-paper/build/libs" -name 'whynotac-paper-*.jar' ! -name '*-sources.jar' | head -1)
 
 mkdir -p "$WORK_DIR/plugins/WhyNotAC"

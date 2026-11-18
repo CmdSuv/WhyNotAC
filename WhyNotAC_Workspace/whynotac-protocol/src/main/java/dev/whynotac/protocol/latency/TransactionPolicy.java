@@ -31,6 +31,7 @@ public final class TransactionPolicy {
             case ClientboundPacket.RemoveMobEffect effect -> targetsSelf(effect.entityId(), selfEntityId);
             case ClientboundPacket.Explosion explosion -> explosion.playerKnockback() != null;
             case ClientboundPacket.GameEvent event -> event.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE;
+            case ClientboundPacket.Cooldown ignored -> true;
             case ClientboundPacket.PlayerPosition ignored -> true;
             case ClientboundPacket.PlayerRotation ignored -> true;
             // Moves the player only as its former vehicle; positions are not modelled yet (physics backlog).

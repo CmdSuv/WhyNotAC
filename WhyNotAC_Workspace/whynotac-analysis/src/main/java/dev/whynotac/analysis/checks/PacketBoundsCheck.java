@@ -84,19 +84,19 @@ public final class PacketBoundsCheck implements TimelineListener {
                 Map<String, String> details = new TreeMap<>();
                 details.put("reason", "non-finite-movement");
                 details.put("shape", move.shape().name());
-                report(session, state, in, "MovePlayer carried non-finite coordinate or rotation (" + move.shape() + ")", details);
+                report(session, state, in, "MovePlayer carried non-finite coordinate or rotation (" + move.shape() + ")", details, true);
             }
             case ServerboundPacket.MoveVehicle vehicle when !isFiniteVehicle(vehicle) -> {
                 Map<String, String> details = new TreeMap<>();
                 details.put("reason", "non-finite-movement");
                 details.put("shape", "MOVE_VEHICLE");
-                report(session, state, in, "MoveVehicle carried non-finite coordinate or rotation", details);
+                report(session, state, in, "MoveVehicle carried non-finite coordinate or rotation", details, true);
             }
             case ServerboundPacket.SetCarriedItem held when held.slot() < 0 || held.slot() > 8 -> {
                 Map<String, String> details = new TreeMap<>();
                 details.put("reason", "invalid-hotbar-slot");
                 details.put("slot", Integer.toString(held.slot()));
-                report(session, state, in, "selected hotbar slot " + held.slot() + " outside vanilla 0..8 bounds", details);
+                report(session, state, in, "selected hotbar slot " + held.slot() + " outside vanilla 0..8 bounds", details, true);
             }
             case ServerboundPacket.InteractEntity interact -> {
                 ClientSelf self = replicas.self().self(session);
@@ -105,7 +105,7 @@ public final class PacketBoundsCheck implements TimelineListener {
                     details.put("reason", "self-interaction");
                     details.put("entityId", Integer.toString(interact.entityId()));
                     details.put("kind", interact.kind().name());
-                    report(session, state, in, "interacted with own entity id " + interact.entityId() + " (" + interact.kind() + ")", details);
+                    report(session, state, in, "interacted with own entity id " + interact.entityId() + " (" + interact.kind() + ")", details, true);
                 }
             }
             case ServerboundPacket.UseItemOn useOn when !isValidCursor(useOn) -> {
@@ -118,19 +118,19 @@ public final class PacketBoundsCheck implements TimelineListener {
                 details.put("cursorOffset", String.format(Locale.ROOT, "%.4f,%.4f,%.4f", dx, dy, dz));
                 report(session, state, in,
                         String.format(Locale.ROOT, "UseItemOn cursor offset (%.4f, %.4f, %.4f) outside vanilla block bounds", dx, dy, dz),
-                        details);
+                        details, false);
             }
             case ServerboundPacket.ContainerClick click -> {
                 if (click.slot() < -1 && click.slot() != -999) {
                     Map<String, String> details = new TreeMap<>();
                     details.put("reason", "invalid-container-slot");
                     details.put("slot", Integer.toString(click.slot()));
-                    report(session, state, in, "ContainerClick slot " + click.slot() + " outside vanilla bounds (>= -1 or -999)", details);
+                    report(session, state, in, "ContainerClick slot " + click.slot() + " outside vanilla bounds (>= -1 or -999)", details, false);
                 } else if ("SWAP".equals(click.clickType()) && (click.button() < 0 || (click.button() > 8 && click.button() != 40))) {
                     Map<String, String> details = new TreeMap<>();
                     details.put("reason", "invalid-container-swap");
                     details.put("button", Integer.toString(click.button()));
-                    report(session, state, in, "ContainerClick SWAP button " + click.button() + " outside vanilla 0..8 or 40 bounds", details);
+                    report(session, state, in, "ContainerClick SWAP button " + click.button() + " outside vanilla 0..8 or 40 bounds", details, false);
                 }
             }
             case ServerboundPacket.PlayerCommand cmd -> {
@@ -140,14 +140,14 @@ public final class PacketBoundsCheck implements TimelineListener {
                     details.put("reason", "command-entity-mismatch");
                     details.put("entityId", Integer.toString(cmd.entityId()));
                     details.put("selfId", Integer.toString(self.selfId()));
-                    report(session, state, in, "PlayerCommand entityId " + cmd.entityId() + " != selfId " + self.selfId(), details);
+                    report(session, state, in, "PlayerCommand entityId " + cmd.entityId() + " != selfId " + self.selfId(), details, false);
                 } else if (cmd.action() == ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP
                         && (cmd.data() < 0 || cmd.data() > 100)) {
                     Map<String, String> details = new TreeMap<>();
                     details.put("reason", "invalid-command-data");
                     details.put("action", cmd.action().name());
                     details.put("data", Integer.toString(cmd.data()));
-                    report(session, state, in, "START_RIDING_JUMP data " + cmd.data() + " outside vanilla 0..100 bounds", details);
+                    report(session, state, in, "START_RIDING_JUMP data " + cmd.data() + " outside vanilla 0..100 bounds", details, false);
                 } else if (cmd.action() != ServerboundPacket.PlayerCommand.Action.START_RIDING_JUMP
                         && cmd.action() != ServerboundPacket.PlayerCommand.Action.UNKNOWN
                         && cmd.data() != 0) {
@@ -155,7 +155,7 @@ public final class PacketBoundsCheck implements TimelineListener {
                     details.put("reason", "invalid-command-data");
                     details.put("action", cmd.action().name());
                     details.put("data", Integer.toString(cmd.data()));
-                    report(session, state, in, "PlayerCommand " + cmd.action() + " carried non-zero data " + cmd.data(), details);
+                    report(session, state, in, "PlayerCommand " + cmd.action() + " carried non-zero data " + cmd.data(), details, false);
                 }
             }
             case ServerboundPacket.ChunkBatchReceived batch -> {
@@ -164,7 +164,7 @@ public final class PacketBoundsCheck implements TimelineListener {
                     Map<String, String> details = new TreeMap<>();
                     details.put("reason", "invalid-chunk-batch-rate");
                     details.put("desiredChunksPerTick", Float.toString(rate));
-                    report(session, state, in, "ChunkBatchReceived desiredChunksPerTick " + rate + " outside vanilla (0, 64] bounds", details);
+                    report(session, state, in, "ChunkBatchReceived desiredChunksPerTick " + rate + " outside vanilla (0, 64] bounds", details, false);
                 }
             }
             default -> { }
@@ -190,11 +190,14 @@ public final class PacketBoundsCheck implements TimelineListener {
                 && dz >= MIN_CURSOR_OFFSET && dz <= MAX_CURSOR_OFFSET;
     }
 
-    private void report(PlayerSession session, State state, TimelineEvent.Inbound at, String summary, Map<String, String> details) {
+    private void report(PlayerSession session, State state, TimelineEvent.Inbound at, String summary, Map<String, String> details,
+            boolean translatorSafe) {
         if (state.lastReportNanos != Long.MIN_VALUE && at.nanoTime() - state.lastReportNanos < REPORT_INTERVAL_NANOS) {
             return;
         }
-        Admissibility admissibility = state.admissibility.evaluate(at.sequence());
+        Admissibility admissibility = translatorSafe
+                ? state.admissibility.evaluateTranslatorSafe(at.sequence())
+                : state.admissibility.evaluate(at.sequence());
         if (!admissibility.admissible()) {
             sink.rejected(session, ID, admissibility);
             return;

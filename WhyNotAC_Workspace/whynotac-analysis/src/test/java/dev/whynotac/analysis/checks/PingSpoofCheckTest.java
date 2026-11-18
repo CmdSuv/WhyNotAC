@@ -100,6 +100,41 @@ final class PingSpoofCheckTest {
     }
 
     @Test
+    void detectsCombatRttDropAfterBacktrackHoldOnAttack() {
+        long kaSent = now;
+        session.deliver(new TimelineEvent.Outbound(seq++, kaSent, new ClientboundPacket.KeepAlive(1L)));
+        now += 25_000_000L; // Real network RTT = 25 ms
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.KeepAlive(1L)));
+
+        // Hold 5 Ping samples inflated at 260 ms (below REQUIRED_INFLATED_SAMPLES=10 so Rule 1 hasn't fired yet)
+        for (int i = 0; i < 5; i++) {
+            long pingSent = now;
+            session.deliver(new TimelineEvent.Outbound(seq++, pingSent, new ClientboundPacket.Ping(200 + i)));
+            now += 50_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+            long ackTime = pingSent + 260_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, ackTime, 0, new ServerboundPacket.Pong(200 + i)));
+            session.deliver(new TimelineEvent.Acknowledged(seq++, ackTime, 200 + i, pingSent, 0));
+        }
+        assertTrue(evidence.isEmpty());
+
+        // Player attacks and immediately drops Ping RTT back down to 30 ms (delta = 230 ms >= 120 ms)
+        long dropPingSent = now;
+        session.deliver(new TimelineEvent.Outbound(seq++, dropPingSent, new ClientboundPacket.Ping(250)));
+        session.deliver(new TimelineEvent.Inbound(seq++, dropPingSent + 10_000_000L, 0,
+                new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        long dropAckTime = dropPingSent + 30_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, dropAckTime, 0, new ServerboundPacket.Pong(250)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, dropAckTime, 250, dropPingSent, 0));
+
+        assertEquals(1, evidence.size());
+        assertEquals(EvidenceClass.NOMINAL_STATISTIC, evidence.get(0).evidenceClass());
+        assertEquals("combat-rtt-drop", evidence.get(0).details().get("reason"));
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(PingSpoofCheck.VERSION, Checks.version(PingSpoofCheck.ID));
         assertNotNull(Checks.create(PingSpoofCheck.ID, (s, e) -> {}));

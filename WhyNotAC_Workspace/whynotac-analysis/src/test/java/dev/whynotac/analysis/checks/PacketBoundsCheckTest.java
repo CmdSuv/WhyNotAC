@@ -150,6 +150,51 @@ final class PacketBoundsCheckTest {
     }
 
     @Test
+    void translatorSafeRulesAcceptViaVersionWhileStrictRulesReject() {
+        List<Evidence> tvEvidence = new ArrayList<>();
+        List<Admissibility> tvRejected = new ArrayList<>();
+        SessionRegistry tvRegistry = new SessionRegistry(Runnable::run, 1, (s, e, t) -> { throw new AssertionError(t); });
+        Replicas tvReplicas = Replicas.vanilla();
+        tvReplicas.listeners().forEach(tvRegistry::addListener);
+        tvRegistry.addListener(new PacketBoundsCheck(new EvidenceSink() {
+            @Override
+            public void accept(PlayerSession s, Evidence e) {
+                tvEvidence.add(e);
+            }
+
+            @Override
+            public void rejected(PlayerSession s, String check, Admissibility a) {
+                tvRejected.add(a);
+            }
+        }, tvReplicas));
+        PlayerSession tv = tvRegistry.openReplay("bounds-translator");
+        long s = 0;
+        long t = 1_000_000_000L;
+        tv.deliver(new TimelineEvent.Observation(s++, t, Source.WIRE, Source.WIRE, 774, "test"));
+        tv.deliver(new ClientFact(s++, t, Fact.IDENTITY, "AUTHENTICATED_MOJANG", Trust.AUTHENTIC, "test"));
+        tv.deliver(new ClientFact(s++, t, Fact.NATIVE_PROTOCOL, "773", Trust.FORMAT_BOUND, "ViaVersion"));
+        tv.deliver(new ClientFact(s++, t, Fact.TRANSLATOR, "viaversion", Trust.FORMAT_BOUND, "ViaVersion"));
+        tv.deliver(new ClientFact(s++, t, Fact.TRANSACTION_ORIGIN, "CLIENT", Trust.FORMAT_BOUND, "test"));
+        tv.deliver(new TimelineEvent.Bound(s++, t, new UUID(9, 10), "viaUser", SELF));
+        tv.deliver(new TimelineEvent.Outbound(s++, t,
+                new ClientboundPacket.Login(SELF, 8, new ClientboundPacket.Dimension("minecraft:overworld", -64, 384), 0)));
+
+        // Translator-safe: invalid-hotbar-slot accepted under ViaVersion
+        tv.deliver(new TimelineEvent.Inbound(s++, t, 0, new ServerboundPacket.SetCarriedItem(9)));
+        assertEquals(1, tvEvidence.size());
+        assertEquals("invalid-hotbar-slot", tvEvidence.get(0).details().get("reason"));
+        assertTrue(tvRejected.isEmpty());
+
+        // Strict rule: invalid-block-cursor rejected under ViaVersion
+        t += 2_000_000_000L;
+        tv.deliver(new TimelineEvent.Inbound(s++, t, 0,
+                new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(0, 64, 0), BlockFace.UP,
+                        new Vec3d(12.5, 64.5, 0.5), false, false, 1)));
+        assertEquals(1, tvEvidence.size());
+        assertEquals(1, tvRejected.size());
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(PacketBoundsCheck.VERSION, Checks.version(PacketBoundsCheck.ID));
         assertNotNull(Checks.create(PacketBoundsCheck.ID, (s, e) -> { }));
