@@ -110,6 +110,11 @@ public record PlayerState(double x, double y, double z, Vec3d deltaMovement, flo
             this.eyeHeight = eyeHeight;
         }
 
+        /** {@code EntityDimensions.eyeHeight}. */
+        public float eyeHeight() {
+            return eyeHeight;
+        }
+
         /** {@code EntityDimensions.makeBoundingBox(position)}: the box is rebuilt from the position, not moved. */
         public Box box(double x, double y, double z) {
             float half = width / 2.0F;

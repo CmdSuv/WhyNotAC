@@ -36,9 +36,12 @@ import java.util.TreeSet;
  */
 public record SelfState(boolean ticking, boolean positionKnown, boolean firstTick, int food, float health, int gameMode, boolean flying, boolean mayFly,
         OnFoot.Effects effects, SpeedAttribute speed, Set<String> otherAttributes, boolean camera, int vehicle, boolean noGravity,
-        Using using, ClientBorder border, float rainLevel, boolean spinAttack, Map<String, Integer> cooldowns) {
+        Using using, ClientBorder border, float rainLevel, boolean spinAttack, Map<String, Integer> cooldowns,
+        double blockRange, double blockRangeBase) {
 
     static final String MOVEMENT_SPEED = "minecraft:movement_speed";
+    static final String BLOCK_INTERACTION_RANGE = "minecraft:block_interaction_range";
+    static final double DEFAULT_BLOCK_RANGE = 4.5;
     /** Attributes the on-foot step reads, with the client's default value (decompiled {@code Attributes}). */
     static final java.util.Map<String, Double> OTHER_ATTRIBUTES = java.util.Map.of(
             "minecraft:jump_strength", (double) 0.42F,
@@ -59,9 +62,14 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
     }
 
     /** A new player's own state before any packet about it: the client's defaults. */
+    static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, ClientBorder border, float rainLevel,
+            double blockRange, double blockRangeBase) {
+        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false,
+                null, border, rainLevel, false, Map.of(), blockRange, blockRangeBase);
+    }
+
     static SelfState fresh(int gameMode, SpeedAttribute speed, Set<String> otherAttributes, ClientBorder border, float rainLevel) {
-        return new SelfState(false, false, true, 20, 20.0F, gameMode, false, false, OnFoot.Effects.NONE, speed, otherAttributes, true, -1, false, null, border,
-                rainLevel, false, Map.of());
+        return fresh(gameMode, speed, otherAttributes, border, rainLevel, DEFAULT_BLOCK_RANGE, DEFAULT_BLOCK_RANGE);
     }
 
     /** Before the login: nothing known about the session yet. */
@@ -105,39 +113,39 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
 
     SelfState withTicking(boolean value) {
         return new SelfState(value, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withPositionKnown() {
         return new SelfState(ticking, true, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState afterFirstTick() {
         return firstTick ? new SelfState(ticking, positionKnown, false, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns) : this;
+                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase) : this;
     }
 
     SelfState withHealth(float newHealth, int newFood) {
         return new SelfState(ticking, positionKnown, firstTick, newFood, newHealth, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withFoodEither() {
         return new SelfState(ticking, positionKnown, firstTick, FOOD_EITHER, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withAbilities(boolean newFlying, boolean newMayFly) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, newFlying, newMayFly, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     /** {@code MultiPlayerGameMode.setLocalMode}: the mode's abilities ({@code GameType.updatePlayerAbilities}). */
     SelfState withGameMode(int mode) {
         boolean creativeOrSpectator = mode == 1 || mode == 3;
         return new SelfState(ticking, positionKnown, firstTick, food, health, mode, mode == 3, creativeOrSpectator, effects, speed, otherAttributes, camera,
-                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     /**
@@ -162,16 +170,22 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             return this;
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, next, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     /** {@code handleUpdateAttributes}: each attribute's base and modifiers are replaced. */
     SelfState withAttributes(List<ClientboundPacket.UpdateAttributes.Attribute> attributes) {
         SpeedAttribute newSpeed = speed;
         Set<String> other = new TreeSet<>(otherAttributes);
+        double newBlockRange = blockRange;
+        double newBlockRangeBase = blockRangeBase;
         for (ClientboundPacket.UpdateAttributes.Attribute a : attributes) {
             if (a.key().equals(MOVEMENT_SPEED)) {
                 newSpeed = SpeedAttribute.of(a);
+            } else if (a.key().equals(BLOCK_INTERACTION_RANGE)) {
+                newBlockRangeBase = a.base() < 0.0 ? 0.0 : Math.min(a.base(), 64.0);
+                double[] range = dev.whynotac.world.AttributeValues.range(a, 0.0, 64.0);
+                newBlockRange = range[0] == range[1] ? range[0] : Double.NaN;
             } else if (OTHER_ATTRIBUTES.containsKey(a.key())) {
                 double[] range = dev.whynotac.world.AttributeValues.range(a, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
                 double expected = OTHER_ATTRIBUTES.get(a.key());
@@ -183,53 +197,53 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             }
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, other, camera, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                noGravity, using, border, rainLevel, spinAttack, cooldowns, newBlockRange, newBlockRangeBase);
     }
 
     SelfState withSpeed(SpeedAttribute newSpeed) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, newSpeed, otherAttributes, camera,
-                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                vehicle, noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withCamera(boolean self) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, self, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withVehicle(int value) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, value,
-                noGravity, using, border, rainLevel, spinAttack, cooldowns);
+                noGravity, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withNoGravity(boolean value) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                value, using, border, rainLevel, spinAttack, cooldowns);
+                value, using, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     /** The item in use: {@code startUsingItem}, {@code stopUsingItem}, or the use going on with the hand's stack. */
     SelfState withUsing(Using newUsing) {
         return java.util.Objects.equals(newUsing, using) ? this
                 : new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                        vehicle, noGravity, newUsing, border, rainLevel, spinAttack, cooldowns);
+                        vehicle, noGravity, newUsing, border, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withBorder(ClientBorder newBorder) {
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, newBorder, rainLevel, spinAttack, cooldowns);
+                noGravity, using, newBorder, rainLevel, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     /** The server's spin attack flag on the player, from its living-entity flags. */
     SelfState withSpinAttack(boolean value) {
         return value == spinAttack ? this
                 : new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera,
-                        vehicle, noGravity, using, border, rainLevel, value, cooldowns);
+                        vehicle, noGravity, using, border, rainLevel, value, cooldowns, blockRange, blockRangeBase);
     }
 
     /** {@code ClientLevel.setRainLevel}: the value clamped to 0..1 (NaN: not known). */
     SelfState withRainLevel(float value) {
         float level = Float.isNaN(value) ? value : Math.max(0.0F, Math.min(1.0F, value));
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border, level, spinAttack, cooldowns);
+                noGravity, using, border, level, spinAttack, cooldowns, blockRange, blockRangeBase);
     }
 
     SelfState withCooldown(String group, int duration) {
@@ -245,7 +259,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             next.put(group, duration);
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, next);
+                noGravity, using, border, rainLevel, spinAttack, next, blockRange, blockRangeBase);
     }
 
     /** {@code ItemCooldowns.tick}: each active cooldown counts down one tick per player tick. */
@@ -261,7 +275,7 @@ public record SelfState(boolean ticking, boolean positionKnown, boolean firstTic
             }
         }
         return new SelfState(ticking, positionKnown, firstTick, food, health, gameMode, flying, mayFly, effects, speed, otherAttributes, camera, vehicle,
-                noGravity, using, border, rainLevel, spinAttack, next);
+                noGravity, using, border, rainLevel, spinAttack, next, blockRange, blockRangeBase);
     }
 
     /** {@code Level.isRaining}: the rain level above 0.2 (true), not (false), or null when not known. */

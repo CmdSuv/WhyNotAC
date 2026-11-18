@@ -10,6 +10,7 @@ Deterministic `.wnrec` recordings exercising WhyNotAC's core deterministic (`P-A
 - `cheat-invwalk-bounds.wnrec` — Same-tick `ContainerClick` + attack (`inventory-protocol`) and invalid hotbar slot `9` (`packet-bounds`)
 - `cheat-tick-framing-timer.wnrec` — Multi-move framing exploit (`tick-framing`) and oscillating slow/fast timer balance (`timer-balance`)
 - `cheat-ping-spoof.wnrec` — Sustained `Ping` vs `KeepAlive` RTT divergence (`ping-spoof`)
+- `cheat-shield-autoblock.wnrec` — Cross-tick offhand `minecraft:shield` keep-using `AutoBlock` attack (`use-item-state` v2)
 
 Regenerate cleanly anytime from `WhyNotAC_Workspace/`:
 

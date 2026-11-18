@@ -789,8 +789,10 @@ public final class MovementTracker {
         /** The boat's {@code PaddleBoat} and the passenger's {@code MoveVehicle} ({@link BoatRide}). */
         final List<ServerboundPacket.PaddleBoat> paddles = new ArrayList<>(1);
         final List<ServerboundPacket.MoveVehicle> vehicleMoves = new ArrayList<>(1);
-        /** {@code handleKeybinds}' item actions in order: a {@link Hand} for each {@code UseItem}, {@link #RELEASE} for a release. */
+        /** {@code handleKeybinds}' item actions in order: a {@link ServerboundPacket.UseItem} or {@link #RELEASE}. */
         final List<Object> itemActions = new ArrayList<>();
+        /** Block-action sequences of {@link ServerboundPacket.UseItem} packets resolved in this tick. */
+        final Set<Integer> resolvedItemUseSeqs = new java.util.HashSet<>(2);
         /**
          * The client changed what its hands hold in this tick, or may have: a selected slot sent (the selection changed
          * since the last one), a click in a menu, a creative edit, a drop, an interaction.
@@ -873,7 +875,7 @@ public final class MovementTracker {
                     }
                 }
                 case ServerboundPacket.PlayerLoaded ignored -> t.loaded = true;
-                case ServerboundPacket.UseItem use -> t.itemActions.add(use.hand());
+                case ServerboundPacket.UseItem use -> t.itemActions.add(use);
                 case ServerboundPacket.UseItemOn use -> {
                     t.blockUses.add(use); // resolved for the world replica, or the claim ends (resolveBlockUses)
                     t.handsTouched = true; // a placement may use up the stack in its hand
@@ -1337,6 +1339,9 @@ public final class MovementTracker {
                     starts.add(applyPending(h, k));
                 }
             }
+            if (in.itemActions.stream().anyMatch(ServerboundPacket.UseItem.class::isInstance)) {
+                resolveItemUses(in, starts, world, onFoot);
+            }
             if (!in.blockUses.isEmpty()) {
                 // handleKeybinds' uses come before the entities' ticks, from states not using an item (startUseItem)
                 String why = onFoot ? resolveBlockUses(in, starts.stream().filter(a -> a.self().using() == null).toList(), world, entities)
@@ -1347,7 +1352,7 @@ public final class MovementTracker {
             }
             starts = pushed(starts, true, view); // the entities that tick before the player, after the packets
             if (in.unmodelled == null && (in.attacks > 0 || in.stabs > 0 || in.interactions > 0 || !in.blockUses.isEmpty()
-                    || in.itemActions.stream().anyMatch(Hand.class::isInstance))) {
+                    || in.itemActions.stream().anyMatch(ServerboundPacket.UseItem.class::isInstance))) {
                 // Minecraft.handleKeybinds, before the player's tick: while it is using an item it only releases it (the use
                 // key up) and consumes the attack and use keys' clicks; attacks, stabs, interactions and uses come from
                 // startAttack and startUseItem, which only a state not using an item runs
@@ -1800,7 +1805,8 @@ public final class MovementTracker {
         }
         SpeedAttribute speed = s.speed() == null ? null : keepAttributes ? s.speed().copied() : s.speed().baseOnly();
         SelfState self = SelfState.fresh(gameMode < 0 ? s.gameMode() : gameMode, speed,
-                keepAttributes ? s.otherAttributes() : Set.of(), s.border(), s.rainLevel()).withGameMode(gameMode < 0 ? s.gameMode() : gameMode);
+                keepAttributes ? s.otherAttributes() : Set.of(), s.border(), s.rainLevel(),
+                keepAttributes ? s.blockRange() : s.blockRangeBase(), s.blockRangeBase()).withGameMode(gameMode < 0 ? s.gameMode() : gameMode);
         Vec3d delta = keepData ? old.deltaMovement() : Vec3d.ZERO;
         float yRot = keepData ? old.yRot() : -180.0F;
         float xRot = keepData ? old.xRot() : 0.0F;
@@ -2091,16 +2097,20 @@ public final class MovementTracker {
         List<Start> starts = new ArrayList<>(List.of(first));
         for (Object action : in.itemActions) {
             List<Start> next = new ArrayList<>();
-            if (action instanceof Hand hand) {
+            if (action instanceof ServerboundPacket.UseItem use) {
+                Hand hand = use.hand();
+                boolean resolved = in.resolvedItemUseSeqs.contains(use.sequence());
                 List<HandItem> items = handItems(hand);
-                for (HandItem item : items) {
-                    if (item.kind() == ItemPrototypes.UseKind.CHANGES_BLOCKS) {
-                        throw new Lose("an item use that may change a block where WhyNotAC cannot place it");
+                if (!resolved) {
+                    for (HandItem item : items) {
+                        if (item.kind() == ItemPrototypes.UseKind.CHANGES_BLOCKS) {
+                            throw new Lose("an item use that may change a block where WhyNotAC cannot place it");
+                        }
                     }
                 }
                 for (Start s : starts) {
                     addIfNew(next, s);
-                    if (s.using() == null) { // LocalPlayer.startUsingItem: not while using, not with an empty hand
+                    if (!resolved && s.using() == null) { // LocalPlayer.startUsingItem: not while using, not with an empty hand
                         for (HandItem item : items) {
                             // TridentItem.use: a riptide trident fails out of water and rain (isInWaterOrRain)
                             if (item.item() != null && (!item.riptide() || !Boolean.FALSE.equals(inWaterOrRain(s.player(), view, self)))) {
@@ -2332,7 +2342,8 @@ public final class MovementTracker {
             if (prototype == null || prototype.places() == null) {
                 return "not a resolved block item";
             }
-            ClientWorld.Placement placed = world.placementForItem(use.sequence(), prototype.places());
+            String facing = prototype.places().endsWith("_stairs") ? unanimousHorizontalFacing(in, starts) : null;
+            ClientWorld.Placement placed = world.placementForItem(use.sequence(), prototype.places(), facing);
             if (placed == null) {
                 return "the blocks or item state do not decide placement";
             }
@@ -2355,6 +2366,146 @@ public final class MovementTracker {
             in.resolvedBlockUses = i + 1;
         }
         return null;
+    }
+
+    /**
+     * Resolves {@link ServerboundPacket.UseItem} packets in a tracked on-foot tick before block uses and simulation:
+     * non-block-changing uses (shields, bows, food...) clear their global {@code ClientWorld} unlocated markers
+     * cleanly, and deterministic bucket uses resolve their placed fluid/air block across all candidate hypotheses.
+     */
+    private void resolveItemUses(TickInput in, List<Hypothesis> starts, ClientWorld world, boolean onFoot) {
+        if (!onFoot || in.handsTouched || inventory == null || in.unmodelled != null || in.moves > 1 || in.teleportReply != null) {
+            return;
+        }
+        for (Object action : in.itemActions) {
+            if (!(action instanceof ServerboundPacket.UseItem use)) {
+                continue;
+            }
+            List<HandItem> items;
+            try {
+                items = handItems(use.hand());
+            } catch (Lose ignored) {
+                continue;
+            }
+            boolean mayChangeBlocks = false;
+            for (HandItem item : items) {
+                if (item.kind() == ItemPrototypes.UseKind.CHANGES_BLOCKS) {
+                    mayChangeBlocks = true;
+                    break;
+                }
+            }
+            if (!mayChangeBlocks) {
+                world.resolveItemUseNoChange(use.sequence());
+                continue;
+            }
+            if (in.itemActions.size() == 1 && in.blockUses.isEmpty() && tryResolveBucketUse(use, in, starts, world)) {
+                in.resolvedItemUseSeqs.add(use.sequence());
+            }
+        }
+    }
+
+    private boolean tryResolveBucketUse(ServerboundPacket.UseItem use, TickInput in, List<Hypothesis> starts, ClientWorld world) {
+        if (cooldownMayRun || starts.isEmpty()) {
+            return false;
+        }
+        double blockRange = Double.NaN;
+        List<Vec3d> eyes = new ArrayList<>(starts.size());
+        for (Hypothesis h : starts) {
+            SelfState s = h.self();
+            PlayerState p = h.player();
+            if (p == null || s.using() != null || !s.ticking() || !s.positionKnown() || !s.cooldowns().isEmpty()
+                    || (s.gameMode() != SelfState.SURVIVAL && s.gameMode() != SelfState.CREATIVE)
+                    || !s.border().known() || !Double.isFinite(s.blockRange()) || s.blockRange() <= 0.0) {
+                return false;
+            }
+            if (Double.isNaN(blockRange)) {
+                blockRange = s.blockRange();
+            } else if (Double.compare(blockRange, s.blockRange()) != 0) {
+                return false;
+            }
+            float yRot = in.move != null && in.move.hasRotation() ? in.move.yaw() : h.sent().yRot();
+            float xRot = in.move != null && in.move.hasRotation() ? in.move.pitch() : h.sent().xRot();
+            if (Math.abs(yRot - use.yaw()) > 1.0E-5F || Math.abs(xRot - use.pitch()) > 1.0E-5F) {
+                return false;
+            }
+            Vec3d eye = new Vec3d(p.x(), p.y() + p.pose().eyeHeight(), p.z());
+            if (!eyes.contains(eye)) {
+                eyes.add(eye);
+            }
+        }
+        List<ClientInventory.View> views = inventory.views();
+        if (views.isEmpty()) {
+            return false;
+        }
+        int selected = use.hand() == Hand.OFF_HAND ? ClientInventory.HOTBAR : views.getFirst().selected();
+        if (selected < 0) {
+            return false;
+        }
+        String bucketItem = null;
+        for (ClientInventory.View v : views) {
+            int slot = use.hand() == Hand.OFF_HAND ? ClientInventory.HOTBAR : v.selected();
+            if (slot != selected) {
+                return false;
+            }
+            Stack stack = slot == ClientInventory.HOTBAR ? v.offhand() : v.hotbar().get(slot);
+            if (stack == null || stack.isEmpty() || v.itemUses(slot) != 1
+                    || stack.added().contains(CONSUMABLE) || stack.added().contains(USE_COOLDOWN)) {
+                return false;
+            }
+            if (bucketItem != null && !bucketItem.equals(stack.item())) {
+                return false;
+            }
+            bucketItem = stack.item();
+        }
+        ClientWorld.Placement placed = world.bucketPlacement(use.sequence(), bucketItem, eyes, use.yaw(), use.pitch(), blockRange);
+        if (placed == null) {
+            return false;
+        }
+        dev.whynotac.protocol.packet.BlockPosition at = placed.position();
+        for (Hypothesis h : starts) {
+            if (!h.self().border().farFrom(at.x(), at.z(), at.x() + 1.0, at.z() + 1.0, BORDER_MARGIN)) {
+                return false;
+            }
+        }
+        world.resolveItemUseBlock(use.sequence(), at, placed.state());
+        return true;
+    }
+
+    private static String unanimousHorizontalFacing(TickInput in, List<Hypothesis> starts) {
+        if (in.unmodelled != null || in.moves > 1 || in.teleportReply != null || starts.isEmpty()) {
+            return null;
+        }
+        String facing = null;
+        for (Hypothesis h : starts) {
+            if (h.sent() == null) {
+                return null;
+            }
+            float yRot = in.move != null && in.move.hasRotation() ? in.move.yaw() : h.sent().yRot();
+            String f = horizontalFacing(yRot);
+            if (f == null || (facing != null && !facing.equals(f))) {
+                return null;
+            }
+            facing = f;
+        }
+        return facing;
+    }
+
+    private static String horizontalFacing(float yRot) {
+        if (!Float.isFinite(yRot)) {
+            return null;
+        }
+        double scaled = (double) yRot * 4.0 / 360.0 + 0.5;
+        double frac = scaled - Math.floor(scaled);
+        if (Math.min(frac, 1.0 - frac) < 1.0E-3) {
+            return null;
+        }
+        int idx = ((int) Math.floor(scaled)) & 3;
+        return switch (idx) {
+            case 0 -> "south";
+            case 1 -> "west";
+            case 2 -> "north";
+            default -> "east";
+        };
     }
 
     /** {@code Level.isUnobstructed} for a block collision shape at {@code (x, y, z)} and the player's box. */

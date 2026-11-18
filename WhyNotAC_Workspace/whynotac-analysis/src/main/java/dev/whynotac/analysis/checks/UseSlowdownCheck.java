@@ -6,16 +6,22 @@ import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
 import dev.whynotac.protocol.packet.ClientboundPacket;
+import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
+import dev.whynotac.world.ClientInventory;
+import dev.whynotac.world.ClientSelf;
 import dev.whynotac.world.Replicas;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
- * Sound item-use &amp; AutoBlock / NoSlow intra-tick packet ordering check ({@code use-item-state}, P-M, SHADOW).
+ * Sound item-use &amp; AutoBlock / NoSlow intra-tick and cross-tick packet ordering check ({@code use-item-state}, P-M, SHADOW).
  *
  * <p>In vanilla 1.21.11 {@code Minecraft.tick()}, packet emission within a single client tick
  * follows a strict total order across {@code handleKeybinds()} and {@code LocalPlayer.sendPosition()}:
@@ -29,25 +35,30 @@ import java.util.TreeMap;
  *       ({@code PlayerCommand(START_SPRINTING / STOP_SPRINTING)}).</li>
  * </ol>
  *
- * <p>Three deterministic intra-tick invariants follow for every unmodified client:
+ * <p>Furthermore, while {@code player.isUsingItem()} is continuously held active for a non-self-ending hold item
+ * (such as {@code minecraft:shield} or {@code minecraft:spyglass} verified via {@link ClientInventory}) without
+ * an intervening release, swap, drop, container open, or server stop/cooldown, {@code handleKeybinds()} returns
+ * early after checking {@code releaseUsingItem()} and {@code LocalPlayer.canStartSprinting()} forbids starting sprint:
  * <ul>
  *   <li><b>{@code release-before-attack-same-tick}</b>: {@code RELEASE_USE_ITEM} cannot precede
- *       {@code InteractEntity(ATTACK)}, {@code START_DESTROY_BLOCK}, or {@code STAB} in the same tick
- *       (catches {@code AutoBlock} / {@code SwordBlock} unblocking to attack in the same tick).</li>
+ *       {@code InteractEntity(ATTACK)}, {@code START_DESTROY_BLOCK}, or {@code STAB} in the same tick.</li>
  *   <li><b>{@code release-before-use-same-tick}</b>: {@code RELEASE_USE_ITEM} cannot precede
- *       {@code UseItem} or {@code UseItemOn} in the same tick (catches {@code AutoBlock} / {@code FastUse}
- *       release-and-reuse cycles).</li>
- *   <li><b>{@code action-after-sprint-command-same-tick}</b>: {@code START_SPRINTING} / {@code STOP_SPRINTING}
- *       is emitted in {@code sendPosition()} after {@code handleKeybinds()}, so neither
- *       {@code RELEASE_USE_ITEM} nor {@code UseItem}/{@code UseItemOn}/{@code InteractEntity} can follow
- *       a sprint command in the same tick (catches {@code NoSlow} pre-motion sprint/use packet hooks).</li>
+ *       {@code UseItem} or {@code UseItemOn} in the same tick.</li>
+ *   <li><b>{@code action-after-sprint-command-same-tick}</b>: sprint commands are emitted after {@code handleKeybinds()},
+ *       so no {@code RELEASE_USE_ITEM}, {@code UseItem}, {@code UseItemOn}, or {@code InteractEntity} may follow them.</li>
+ *   <li><b>{@code attack-while-using}</b>, <b>{@code use-while-using}</b>, and <b>{@code sprint-while-using}</b>:
+ *       no attack, block dig, item use, or {@code START_SPRINTING} may occur while confirmed continuous shield/spyglass
+ *       use remains active across ticks.</li>
  * </ul>
  */
 public final class UseSlowdownCheck implements TimelineListener {
 
     public static final String ID = "use-item-state";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
+    private static final Set<String> CONTINUOUS_HOLD_ITEMS = Set.of("minecraft:shield", "minecraft:spyglass");
+    private static final String CONSUMABLE = "minecraft:consumable";
+    private static final String USE_COOLDOWN = "minecraft:use_cooldown";
 
     private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
@@ -62,6 +73,7 @@ public final class UseSlowdownCheck implements TimelineListener {
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
         long lastReportNanos = Long.MIN_VALUE;
+        int selfId = -1;
 
         boolean releasedInCurrentTick;
         long releaseSeq = -1L;
@@ -72,12 +84,30 @@ public final class UseSlowdownCheck implements TimelineListener {
         long sprintCmdNano;
         String sprintCmdName;
 
+        boolean sawUseOnThisTick;
+        boolean sawInteractEntityThisTick;
+
+        boolean activeHoldUse;
+        String holdItem;
+        long holdStartSeq = -1L;
+        long holdStartNano;
+        int shieldCooldownTicks;
+        int spyglassCooldownTicks;
+
         void resetTick() {
             releasedInCurrentTick = false;
             releaseSeq = -1L;
             sprintCommandInCurrentTick = false;
             sprintCmdSeq = -1L;
             sprintCmdName = null;
+            sawUseOnThisTick = false;
+            sawInteractEntityThisTick = false;
+        }
+
+        void clearHold() {
+            activeHoldUse = false;
+            holdItem = null;
+            holdStartSeq = -1L;
         }
     }
 
@@ -91,14 +121,62 @@ public final class UseSlowdownCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
-            case TimelineEvent.Gap ignored -> state.resetTick();
-            case TimelineEvent.Outbound out -> {
-                if (out.packet() instanceof ClientboundPacket.Respawn
-                        || out.packet() instanceof ClientboundPacket.Login) {
-                    state.resetTick();
+            case TimelineEvent.Gap ignored -> {
+                state.resetTick();
+                state.clearHold();
+                state.shieldCooldownTicks = 0;
+                state.spyglassCooldownTicks = 0;
+            }
+            case TimelineEvent.Bound bound -> state.selfId = bound.entityId();
+            case TimelineEvent.Outbound out -> onOutbound(state, out.packet());
+            case TimelineEvent.Inbound in -> onInbound(session, state, in);
+            default -> { }
+        }
+    }
+
+    private void onOutbound(State state, ClientboundPacket packet) {
+        switch (packet) {
+            case ClientboundPacket.Login login -> {
+                state.selfId = login.entityId();
+                state.resetTick();
+                state.clearHold();
+                state.shieldCooldownTicks = 0;
+                state.spyglassCooldownTicks = 0;
+            }
+            case ClientboundPacket.Respawn ignored -> {
+                state.resetTick();
+                state.clearHold();
+                state.shieldCooldownTicks = 0;
+                state.spyglassCooldownTicks = 0;
+            }
+            case ClientboundPacket.Cooldown cd -> {
+                state.clearHold();
+                if (cd.duration() > 0) {
+                    if (cd.group().endsWith(":shield") || cd.group().equals("shield")) {
+                        state.shieldCooldownTicks = Math.max(state.shieldCooldownTicks, cd.duration());
+                    } else if (cd.group().endsWith(":spyglass") || cd.group().equals("spyglass")) {
+                        state.spyglassCooldownTicks = Math.max(state.spyglassCooldownTicks, cd.duration());
+                    }
                 }
             }
-            case TimelineEvent.Inbound in -> onInbound(session, state, in);
+            case ClientboundPacket.PlayerPosition ignored -> state.clearHold();
+            case ClientboundPacket.OpenScreen ignored -> state.clearHold();
+            case ClientboundPacket.MountScreenOpen ignored -> state.clearHold();
+            case ClientboundPacket.ContainerClose ignored -> state.clearHold();
+            case ClientboundPacket.ContainerSetContent ignored -> state.clearHold();
+            case ClientboundPacket.ContainerSetSlot ignored -> state.clearHold();
+            case ClientboundPacket.SetPlayerInventory ignored -> state.clearHold();
+            case ClientboundPacket.SetCursorItem ignored -> state.clearHold();
+            case ClientboundPacket.SetHealth ignored -> state.clearHold();
+            case ClientboundPacket.GameEvent ignored -> state.clearHold();
+            case ClientboundPacket.EntityEvent ev when state.selfId >= 0 && ev.entityId() == state.selfId -> state.clearHold();
+            case ClientboundPacket.SetEntityData data when state.selfId >= 0 && data.entityId() == state.selfId -> {
+                for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
+                    if (e.index() == 8 && (e.value() & 1L) == 0L || e.index() == 6) {
+                        state.clearHold();
+                    }
+                }
+            }
             default -> { }
         }
     }
@@ -106,43 +184,74 @@ public final class UseSlowdownCheck implements TimelineListener {
     private void onInbound(PlayerSession session, State state, TimelineEvent.Inbound in) {
         switch (in.packet()) {
             case ServerboundPacket.MovePlayer ignored -> state.resetTick();
-            case ServerboundPacket.ClientTickEnd ignored -> state.resetTick();
             case ServerboundPacket.AcceptTeleportation ignored -> state.resetTick();
+            case ServerboundPacket.ClientTickEnd ignored -> {
+                state.resetTick();
+                if (state.shieldCooldownTicks > 0) {
+                    state.shieldCooldownTicks--;
+                }
+                if (state.spyglassCooldownTicks > 0) {
+                    state.spyglassCooldownTicks--;
+                }
+            }
+            case ServerboundPacket.SetCarriedItem ignored -> state.clearHold();
+            case ServerboundPacket.ContainerClick ignored -> state.clearHold();
+            case ServerboundPacket.ContainerClose ignored -> state.clearHold();
+            case ServerboundPacket.SetCreativeModeSlot ignored -> state.clearHold();
             case ServerboundPacket.PlayerAction action -> {
-                if (action.action() == ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM) {
-                    if (state.sprintCommandInCurrentTick) {
-                        long cmdSeq = state.sprintCmdSeq;
-                        long cmdNano = state.sprintCmdNano;
-                        String cmdName = state.sprintCmdName;
-                        state.resetTick();
-                        Map<String, String> details = new TreeMap<>();
-                        details.put("reason", "action-after-sprint-command-same-tick");
-                        details.put("sprintCommand", cmdName);
-                        details.put("action", "RELEASE_USE_ITEM");
-                        report(session, state, cmdSeq, cmdNano, in,
-                                "sent RELEASE_USE_ITEM after " + cmdName + " in the same tick (NoSlow packet hook)",
-                                details);
-                        return;
+                switch (action.action()) {
+                    case RELEASE_USE_ITEM -> {
+                        if (state.sprintCommandInCurrentTick) {
+                            long cmdSeq = state.sprintCmdSeq;
+                            long cmdNano = state.sprintCmdNano;
+                            String cmdName = state.sprintCmdName;
+                            state.resetTick();
+                            state.clearHold();
+                            Map<String, String> details = new TreeMap<>();
+                            details.put("reason", "action-after-sprint-command-same-tick");
+                            details.put("sprintCommand", cmdName);
+                            details.put("action", "RELEASE_USE_ITEM");
+                            report(session, state, cmdSeq, cmdNano, in,
+                                    "sent RELEASE_USE_ITEM after " + cmdName + " in the same tick (NoSlow packet hook)",
+                                    details);
+                            return;
+                        }
+                        state.clearHold();
+                        state.releasedInCurrentTick = true;
+                        state.releaseSeq = in.sequence();
+                        state.releaseNano = in.nanoTime();
                     }
-                    state.releasedInCurrentTick = true;
-                    state.releaseSeq = in.sequence();
-                    state.releaseNano = in.nanoTime();
-                } else if (action.action() == ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK
-                        || action.action() == ServerboundPacket.PlayerAction.Action.STAB) {
-                    if (state.releasedInCurrentTick) {
-                        long relSeq = state.releaseSeq;
-                        long relNano = state.releaseNano;
-                        state.resetTick();
-                        Map<String, String> details = new TreeMap<>();
-                        details.put("reason", "release-before-attack-same-tick");
-                        details.put("action", action.action().name());
-                        report(session, state, relSeq, relNano, in,
-                                "sent " + action.action().name() + " after RELEASE_USE_ITEM in the same tick",
-                                details);
+                    case SWAP_ITEM_WITH_OFFHAND, DROP_ITEM, DROP_ALL_ITEMS -> state.clearHold();
+                    case START_DESTROY_BLOCK, STAB -> {
+                        if (state.releasedInCurrentTick) {
+                            long relSeq = state.releaseSeq;
+                            long relNano = state.releaseNano;
+                            state.resetTick();
+                            Map<String, String> details = new TreeMap<>();
+                            details.put("reason", "release-before-attack-same-tick");
+                            details.put("action", action.action().name());
+                            report(session, state, relSeq, relNano, in,
+                                    "sent " + action.action().name() + " after RELEASE_USE_ITEM in the same tick",
+                                    details);
+                        } else if (state.activeHoldUse) {
+                            long startSeq = state.holdStartSeq;
+                            long startNano = state.holdStartNano;
+                            String item = state.holdItem;
+                            state.clearHold();
+                            Map<String, String> details = new TreeMap<>();
+                            details.put("reason", "attack-while-using");
+                            details.put("action", action.action().name());
+                            details.put("item", item);
+                            report(session, state, startSeq, startNano, in,
+                                    "sent " + action.action().name() + " while continuously using " + item,
+                                    details);
+                        }
                     }
+                    default -> { }
                 }
             }
             case ServerboundPacket.InteractEntity interact -> {
+                state.sawInteractEntityThisTick = true;
                 if (state.releasedInCurrentTick) {
                     long relSeq = state.releaseSeq;
                     long relNano = state.releaseNano;
@@ -168,13 +277,50 @@ public final class UseSlowdownCheck implements TimelineListener {
                     report(session, state, cmdSeq, cmdNano, in,
                             "sent InteractEntity(" + interact.kind() + ") after " + cmdName + " in the same tick",
                             details);
+                } else if (state.activeHoldUse && interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK) {
+                    long startSeq = state.holdStartSeq;
+                    long startNano = state.holdStartNano;
+                    String item = state.holdItem;
+                    state.clearHold();
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "attack-while-using");
+                    details.put("action", "InteractEntity:ATTACK");
+                    details.put("targetEntityId", Integer.toString(interact.entityId()));
+                    details.put("item", item);
+                    report(session, state, startSeq, startNano, in,
+                            "attacked entity " + interact.entityId() + " while continuously using " + item + " (AutoBlock)",
+                            details);
                 }
             }
-            case ServerboundPacket.UseItem ignored -> onUsePacket(session, state, in, "UseItem");
-            case ServerboundPacket.UseItemOn ignored -> onUsePacket(session, state, in, "UseItemOn");
+            case ServerboundPacket.UseItem use -> {
+                if (onUsePacket(session, state, in, "UseItem")) {
+                    return;
+                }
+                armContinuousHold(session, state, in, use.hand());
+            }
+            case ServerboundPacket.UseItemOn ignored -> {
+                state.sawUseOnThisTick = true;
+                onUsePacket(session, state, in, "UseItemOn");
+            }
             case ServerboundPacket.PlayerCommand cmd -> {
-                if (cmd.action() == ServerboundPacket.PlayerCommand.Action.START_SPRINTING
-                        || cmd.action() == ServerboundPacket.PlayerCommand.Action.STOP_SPRINTING) {
+                if (cmd.action() == ServerboundPacket.PlayerCommand.Action.START_SPRINTING) {
+                    if (state.activeHoldUse) {
+                        long startSeq = state.holdStartSeq;
+                        long startNano = state.holdStartNano;
+                        String item = state.holdItem;
+                        state.clearHold();
+                        Map<String, String> details = new TreeMap<>();
+                        details.put("reason", "sprint-while-using");
+                        details.put("item", item);
+                        report(session, state, startSeq, startNano, in,
+                                "sent START_SPRINTING while continuously using " + item + " (NoSlow)",
+                                details);
+                    }
+                    state.sprintCommandInCurrentTick = true;
+                    state.sprintCmdSeq = in.sequence();
+                    state.sprintCmdNano = in.nanoTime();
+                    state.sprintCmdName = cmd.action().name();
+                } else if (cmd.action() == ServerboundPacket.PlayerCommand.Action.STOP_SPRINTING) {
                     state.sprintCommandInCurrentTick = true;
                     state.sprintCmdSeq = in.sequence();
                     state.sprintCmdNano = in.nanoTime();
@@ -185,7 +331,47 @@ public final class UseSlowdownCheck implements TimelineListener {
         }
     }
 
-    private void onUsePacket(PlayerSession session, State state, TimelineEvent.Inbound in, String packetName) {
+    private void armContinuousHold(PlayerSession session, State state, TimelineEvent.Inbound in, Hand hand) {
+        if (state.sawUseOnThisTick || state.sawInteractEntityThisTick) {
+            return;
+        }
+        ClientSelf self = replicas.self().self(session);
+        if (self.selfId() < 0 || self.mayBeSpectator()) {
+            return;
+        }
+        ClientInventory inventory = replicas.inventory().inventory(session);
+        List<ClientInventory.View> views = inventory.views();
+        if (views.isEmpty()) {
+            return;
+        }
+        String agreed = null;
+        for (ClientInventory.View v : views) {
+            int slot = hand == Hand.MAIN_HAND ? v.selected() : ClientInventory.HOTBAR;
+            if (slot < 0 || v.mayBeNone()[slot]) {
+                return;
+            }
+            Stack stack = hand == Hand.MAIN_HAND ? v.hotbar().get(slot) : v.offhand();
+            if (stack == null || stack.isEmpty() || !CONTINUOUS_HOLD_ITEMS.contains(stack.item())
+                    || stack.added().contains(CONSUMABLE) || stack.added().contains(USE_COOLDOWN)) {
+                return;
+            }
+            if (agreed == null) {
+                agreed = stack.item();
+            } else if (!agreed.equals(stack.item())) {
+                return;
+            }
+        }
+        if ("minecraft:shield".equals(agreed) && state.shieldCooldownTicks > 0
+                || "minecraft:spyglass".equals(agreed) && state.spyglassCooldownTicks > 0) {
+            return;
+        }
+        state.activeHoldUse = true;
+        state.holdItem = agreed;
+        state.holdStartSeq = in.sequence();
+        state.holdStartNano = in.nanoTime();
+    }
+
+    private boolean onUsePacket(PlayerSession session, State state, TimelineEvent.Inbound in, String packetName) {
         if (state.releasedInCurrentTick) {
             long relSeq = state.releaseSeq;
             long relNano = state.releaseNano;
@@ -196,6 +382,7 @@ public final class UseSlowdownCheck implements TimelineListener {
             report(session, state, relSeq, relNano, in,
                     "sent " + packetName + " after RELEASE_USE_ITEM in the same tick",
                     details);
+            return true;
         } else if (state.sprintCommandInCurrentTick) {
             long cmdSeq = state.sprintCmdSeq;
             long cmdNano = state.sprintCmdNano;
@@ -208,7 +395,22 @@ public final class UseSlowdownCheck implements TimelineListener {
             report(session, state, cmdSeq, cmdNano, in,
                     "sent " + packetName + " after " + cmdName + " in the same tick (NoSlow packet hook)",
                     details);
+            return true;
+        } else if (state.activeHoldUse) {
+            long startSeq = state.holdStartSeq;
+            long startNano = state.holdStartNano;
+            String item = state.holdItem;
+            state.clearHold();
+            Map<String, String> details = new TreeMap<>();
+            details.put("reason", "use-while-using");
+            details.put("packet", packetName);
+            details.put("item", item);
+            report(session, state, startSeq, startNano, in,
+                    "sent " + packetName + " while continuously using " + item,
+                    details);
+            return true;
         }
+        return false;
     }
 
     private void report(

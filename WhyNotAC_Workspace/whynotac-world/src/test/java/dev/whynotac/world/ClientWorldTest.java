@@ -895,4 +895,79 @@ class ClientWorldTest {
         world.resolveUse(11, slabBottom.position(), slabBottom.state());
         assertArrayEquals(new int[] {slabBottom.state()}, world.possibleStates(6, 10, 5));
     }
+
+    @Test
+    void resolvesStraightStairPlacementsAndRejectsBesideExistingStairs() {
+        stoneInTheAir();
+        // Clicking UP on (5, 10, 5) with oak_stairs while facing north places straight bottom north stair at (5, 11, 5)
+        useOn(5, 10, 5, BlockFace.UP, 10);
+        ClientWorld.Placement stair = world.placementForItem(10, "minecraft:oak_stairs", "north");
+        assertNotNull(stair);
+        assertEquals(new BlockPosition(5, 11, 5), stair.position());
+        assertEquals(STATES.stateOf("minecraft:oak_stairs", "facing=north,half=bottom,shape=straight,waterlogged=false"), stair.state());
+        world.resolveUse(10, stair.position(), stair.state());
+
+        // Clicking UP on (6, 10, 5) places horizontally adjacent to the existing oak_stairs at (5, 11, 5): shape=straight is no longer guaranteed
+        put(6, 10, 5, STONE);
+        sync();
+        useOn(6, 10, 5, BlockFace.UP, 11);
+        assertNull(world.placementForItem(11, "minecraft:oak_stairs", "east"));
+    }
+
+    @Test
+    void resolvesPlainAndBucketItemUsesSoundly() {
+        airWorld();
+        put(3, 63, 0, STONE);
+        sync();
+        long since = sequence;
+
+        // Plain UseItem cleared via resolveItemUseNoChange no longer blinds world queries
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 2, 0F, 0F));
+        assertTrue(world.hasUnlocatedPrediction());
+        assertTrue(world.mayHaveChangedIn(10, 64, 10, 11, 65, 11, since));
+        world.resolveItemUseNoChange(2);
+        assertFalse(world.hasUnlocatedPrediction());
+        assertFalse(world.mayHaveChangedIn(10, 64, 10, 11, 65, 11, since));
+
+        // Water bucket looking straight down at (3, 63, 0) from (3.5, 65.62, 0.5) places water[level=0] at (3, 64, 0)
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 3, 0F, 90F));
+        ClientWorld.Placement placed = world.bucketPlacement(3, "minecraft:water_bucket",
+                java.util.List.of(new Vec3d(3.5, 65.62, 0.5)), 0F, 90F, 4.5);
+        assertNotNull(placed);
+        assertEquals(new BlockPosition(3, 64, 0), placed.position());
+        int water = STATES.stateOf("minecraft:water", "level=0");
+        assertEquals(water, placed.state());
+        world.resolveItemUseBlock(3, placed.position(), placed.state());
+        assertFalse(world.hasUnlocatedPrediction());
+        assertArrayEquals(new int[] {water}, world.possibleStates(3, 64, 0));
+
+        // Empty bucket scoops the isolated water source back into air
+        put(3, 64, 0, water);
+        out(new ClientboundPacket.BlockChangedAck(3));
+        sync();
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 4, 0F, 90F));
+        ClientWorld.Placement scooped = world.bucketPlacement(4, "minecraft:bucket",
+                java.util.List.of(new Vec3d(3.5, 65.62, 0.5)), 0F, 90F, 4.5);
+        assertNotNull(scooped);
+        assertEquals(new BlockPosition(3, 64, 0), scooped.position());
+        assertEquals(AIR, scooped.state());
+        world.resolveItemUseBlock(4, scooped.position(), scooped.state());
+        assertArrayEquals(new int[] {AIR}, world.possibleStates(3, 64, 0));
+
+        // Adjacent water source disqualifies pickup (infinite source guard)
+        put(3, 64, 0, water);
+        put(4, 64, 0, water);
+        out(new ClientboundPacket.BlockChangedAck(4));
+        sync();
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 5, 0F, 90F));
+        assertNull(world.bucketPlacement(5, "minecraft:bucket",
+                java.util.List.of(new Vec3d(3.5, 65.62, 0.5)), 0F, 90F, 4.5));
+
+        // Ultrawarm dimension rejects water_bucket placement
+        login(8, new ClientboundPacket.Dimension("minecraft:the_nether", 0, 256, true));
+        sync();
+        in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0F, 90F));
+        assertNull(world.bucketPlacement(1, "minecraft:water_bucket",
+                java.util.List.of(new Vec3d(3.5, 65.62, 0.5)), 0F, 90F, 4.5));
+    }
 }

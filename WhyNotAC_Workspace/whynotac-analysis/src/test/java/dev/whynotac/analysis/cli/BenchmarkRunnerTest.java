@@ -41,9 +41,9 @@ final class BenchmarkRunnerTest {
         }
         BenchmarkRunner.BenchmarkReport report = BenchmarkRunner.run(Path.of("../regression"), corpusDir);
         assertEquals(0, report.honestFalsePositives(), "Honest recordings must produce 0 false positives");
-        assertTrue(report.cheatRecordings() >= 6, "Must replay at least 6 cheat corpus recordings");
+        assertTrue(report.cheatRecordings() >= 7, "Must replay at least 7 cheat corpus recordings");
         assertEquals(0, report.cheatFalseNegatives(), "Cheat corpus must produce 0 false negatives: " + report.scenarioFindings());
-        assertTrue(report.scenariosTotal() >= 20, "Must run at least 20 scenarios");
+        assertTrue(report.scenariosTotal() >= 22, "Must run at least 22 scenarios");
         assertEquals(report.scenariosTotal(), report.scenariosPassed(),
                 "All synthetic benchmark scenarios must pass: " + report.scenarioFindings());
         assertTrue(report.allPassed());

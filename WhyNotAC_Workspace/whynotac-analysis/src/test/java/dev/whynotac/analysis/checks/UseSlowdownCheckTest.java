@@ -14,6 +14,7 @@ import dev.whynotac.protocol.packet.BlockPosition;
 import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
+import dev.whynotac.protocol.packet.Stack;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.SessionRegistry;
 import dev.whynotac.protocol.session.TimelineEvent;
@@ -120,5 +121,71 @@ final class UseSlowdownCheckTest {
         assertEquals(UseSlowdownCheck.VERSION, Checks.version(UseSlowdownCheck.ID));
         assertNotNull(Checks.create(UseSlowdownCheck.ID, (s, e) -> {}));
         assertFalse(new UseSlowdownCheck((s, e) -> {}, Replicas.vanilla()).readsEntityMotion());
+    }
+
+    private void giveOffhandShield() {
+        List<Stack> items = new ArrayList<>();
+        Stack shield = new Stack("minecraft:shield", 1, List.of(), List.of(), null, false);
+        for (int i = 0; i < 46; i++) {
+            items.add(i == 45 ? shield : Stack.EMPTY);
+        }
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(77)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.Pong(77)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 77, now, 0));
+    }
+
+    @Test
+    void detectsAttackAndSprintAcrossTicksWhileShieldHeld() {
+        giveOffhandShield();
+
+        // Tick 0: raise offhand shield
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.UseItem(Hand.OFF_HAND, 1, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+
+        // Tick 1 (no RELEASE_USE_ITEM): attack while shield still raised -> AutoBlock KeepUsing
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.InteractEntity(4, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+
+        assertEquals(1, evidence.size());
+        assertEquals("attack-while-using", evidence.get(0).details().get("reason"));
+        assertEquals("minecraft:shield", evidence.get(0).details().get("item"));
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, evidence.get(0).evidenceClass());
+
+        // Tick 2+Cooldown clear, then raise shield again and START_SPRINTING on next tick -> NoSlow sprint-while-using
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2,
+                new ServerboundPacket.UseItem(Hand.OFF_HAND, 2, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.ClientTickEnd()));
+
+        assertEquals(2, evidence.size());
+        assertEquals("sprint-while-using", evidence.get(1).details().get("reason"));
+        assertEquals("minecraft:shield", evidence.get(1).details().get("item"));
+    }
+
+    @Test
+    void shieldCooldownOrReleasePermitsSubsequentAttackWithZeroEvidence() {
+        giveOffhandShield();
+
+        // Raise shield tick 0
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.UseItem(Hand.OFF_HAND, 1, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+
+        // Server disables shield via Cooldown packet -> clears active hold
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Cooldown("minecraft:shield", 100)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.InteractEntity(4, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+
+        assertTrue(evidence.isEmpty(), () -> "Unexpected evidence: " + evidence);
     }
 }

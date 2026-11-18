@@ -1,5 +1,7 @@
 package dev.whynotac.world;
 
+import dev.whynotac.math.vanilla.VanillaMath;
+import dev.whynotac.math.vector.Vec3d;
 import dev.whynotac.protocol.packet.BlockFace;
 import dev.whynotac.protocol.packet.BlockPosition;
 import dev.whynotac.protocol.packet.ClientboundPacket;
@@ -106,6 +108,8 @@ public final class ClientWorld {
     private record Dig(boolean start, BlockPosition position, int[] before) {}
     /** Block-action sequences of item uses whose block changes (if any) WhyNotAC cannot locate. */
     private final ArrayDeque<Integer> unlocatedPredictions = new ArrayDeque<>();
+    /** Changes-queue marker added for each unlocated {@link ServerboundPacket.UseItem}, by its block-action sequence. */
+    private final Map<Integer, long[]> unlocatedUseChanges = new HashMap<>();
     /** block_changed_ack values the client may not have processed yet: [outbound sequence, acked sequence]. */
     private final ArrayDeque<long[]> pendingBlockAcks = new ArrayDeque<>();
     private int confirmedBlockAck = Integer.MIN_VALUE;
@@ -185,8 +189,13 @@ public final class ClientWorld {
         }
     }
 
-    private void changeEverywhere(long sequence) {
-        change(sequence, Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
+    private long[] changeEverywhere(long sequence) {
+        long[] entry = new long[] {sequence, Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE};
+        changes.add(entry);
+        if (changes.size() > MAX_CHANGES) {
+            changesDropped = Math.max(changesDropped, changes.pollFirst()[0]);
+        }
+        return entry;
     }
 
     private void viewChange(long sequence, int oldX, int oldZ, int oldRadius) {
@@ -199,6 +208,7 @@ public final class ClientWorld {
     private void dropChanges(long sequence) {
         changes.clear();
         viewChanges.clear();
+        unlocatedUseChanges.clear();
         changesDropped = Math.max(changesDropped, sequence);
     }
 
@@ -365,7 +375,7 @@ public final class ClientWorld {
             // A plain item use (buckets, lily pads...) may place a block where the client's ray hits, which only physics can locate.
             case ServerboundPacket.UseItem use -> {
                 unlocatedPredictions.add(use.sequence());
-                changeEverywhere(eventSequence);
+                unlocatedUseChanges.put(use.sequence(), changeEverywhere(eventSequence));
             }
             default -> { }
         }
@@ -413,6 +423,7 @@ public final class ClientWorld {
             while (!unlocatedPredictions.isEmpty() && unlocatedPredictions.peekFirst() <= acked) {
                 unlocatedPredictions.pollFirst();
             }
+            unlocatedUseChanges.keySet().removeIf(seq -> seq <= acked);
         }
     }
 
@@ -445,6 +456,7 @@ public final class ClientWorld {
         resolvedUses.clear();
         digs.clear();
         unlocatedPredictions.clear();
+        unlocatedUseChanges.clear();
         pendingBlockAcks.clear();
         confirmedBlockAck = Integer.MIN_VALUE;
     }
@@ -545,18 +557,25 @@ public final class ClientWorld {
     private void predict(long eventSequence, int x, int y, int z, int sequence, boolean withNeighbours) {
         int[][] offsets = withNeighbours ? PREDICTION_NEIGHBOURS : PREDICTION_SELF;
         for (int[] o : offsets) {
-            change(eventSequence, x + o[0], y + o[1], z + o[2], x + o[0], y + o[1], z + o[2]);
-            long key = blockKey(x + o[0], y + o[1], z + o[2]);
-            predictions.merge(key, sequence, Math::max);
-            earliestPredictions.merge(key, sequence, Math::min);
-            int[] sequences = predictionSequences.get(key);
-            if (sequences == null) {
-                predictionSequences.put(key, new int[] {sequence});
-            } else if (sequences[sequences.length - 1] != sequence) {
-                int[] more = Arrays.copyOf(sequences, sequences.length + 1);
-                more[sequences.length] = sequence;
-                predictionSequences.put(key, more);
-            }
+            int px = x + o[0];
+            int py = y + o[1];
+            int pz = z + o[2];
+            change(eventSequence, px, py, pz, px, py, pz);
+            addPredictionCell(px, py, pz, sequence);
+        }
+    }
+
+    private void addPredictionCell(int x, int y, int z, int sequence) {
+        long key = blockKey(x, y, z);
+        predictions.merge(key, sequence, Math::max);
+        earliestPredictions.merge(key, sequence, Math::min);
+        int[] sequences = predictionSequences.get(key);
+        if (sequences == null) {
+            predictionSequences.put(key, new int[] {sequence});
+        } else if (sequences[sequences.length - 1] != sequence) {
+            int[] more = Arrays.copyOf(sequences, sequences.length + 1);
+            more[sequences.length] = sequence;
+            predictionSequences.put(key, more);
         }
     }
 
@@ -983,11 +1002,18 @@ public final class ClientWorld {
 
     /**
      * Resolves exact placement position and block state for single-state full cubes, directional
-     * pillars ({@code axis=x|y|z}, e.g. logs/hay/quartz_pillar), and non-waterlogged slabs placed into pure air.
-     * Returns null when the client's placed state or target position cannot be determined solely from
-     * {@code UseItemOn} and settled/predicted block states.
+     * pillars ({@code axis=x|y|z}), non-waterlogged slabs, and straight non-waterlogged stairs placed into pure air.
      */
     public Placement placementForItem(int sequence, String placedBlockKey) {
+        return placementForItem(sequence, placedBlockKey, null);
+    }
+
+    /**
+     * Resolves exact placement position and block state including {@code StairBlock} ({@code _stairs}) when the
+     * caller supplies the client's unanimous horizontal facing ({@code "north"}, {@code "south"}, {@code "east"},
+     * {@code "west"}) strictly clear of 45-degree diagonal corners.
+     */
+    public Placement placementForItem(int sequence, String placedBlockKey, String horizontalFacing) {
         if (placedBlockKey == null || storage == null || hasUnlocatedPredictionBefore(sequence)) {
             return null;
         }
@@ -1038,10 +1064,8 @@ public final class ClientWorld {
             }
             // Variant B: Non-waterlogged SlabBlock into pure AIR (avoids waterlogging & double-slab merging)
             if (placedBlockKey.endsWith("_slab") && use.location() != null) {
-                for (int s : target) {
-                    if (!states.isAir(s)) {
-                        return null;
-                    }
+                if (!pureAir(target)) {
+                    return null;
                 }
                 for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
                     int[] beside = before[i + 1];
@@ -1062,8 +1086,46 @@ public final class ClientWorld {
                     return new Placement(new BlockPosition(tx, ty, tz), chosen);
                 }
             }
+            // Variant C: Straight non-waterlogged StairBlock into pure AIR with no orthogonal stair or reactive neighbour
+            if (placedBlockKey.endsWith("_stairs") && horizontalFacing != null && use.location() != null) {
+                if (!pureAir(target)) {
+                    return null;
+                }
+                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+                    int[] beside = before[i + 1];
+                    if (beside == null) {
+                        return null;
+                    }
+                    boolean horizontal = PREDICTION_NEIGHBOURS[i][1] == 0;
+                    for (int s : beside) {
+                        if (reacts(s) || (horizontal && states.block(s).endsWith("_stairs"))) {
+                            return null;
+                        }
+                    }
+                }
+                double localY = use.location().y() - ty;
+                if (face != BlockFace.UP && face != BlockFace.DOWN && Math.abs(localY - 0.5) <= 1.0E-5) {
+                    return null;
+                }
+                boolean bottom = face == BlockFace.UP || (face != BlockFace.DOWN && localY <= 0.5);
+                String props = "facing=" + horizontalFacing + ",half=" + (bottom ? "bottom" : "top")
+                        + ",shape=straight,waterlogged=false";
+                int chosen = states.stateOf(placedBlockKey, props);
+                if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                }
+            }
         }
         return null;
+    }
+
+    private boolean pureAir(int[] possible) {
+        for (int s : possible) {
+            if (!states.isAir(s)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean isPurePillarStates(int[] all) {
@@ -1201,6 +1263,359 @@ public final class ClientWorld {
     /** Whether the client may hold blocks of an item use before {@code sequence} that WhyNotAC cannot locate. */
     public boolean hasUnlocatedPredictionBefore(int sequence) {
         return !unlocatedPredictions.isEmpty() && unlocatedPredictions.peekFirst() < sequence;
+    }
+
+    /**
+     * Clears the unlocated-prediction marker of {@link ServerboundPacket.UseItem} {@code sequence} when every item
+     * the client may hold in the used hand cannot modify any block.
+     */
+    public void resolveItemUseNoChange(int sequence) {
+        unlocatedPredictions.remove(Integer.valueOf(sequence));
+        long[] marker = unlocatedUseChanges.remove(sequence);
+        if (marker != null) {
+            changes.remove(marker);
+        }
+    }
+
+    /**
+     * Replaces the unlocated-prediction marker of {@link ServerboundPacket.UseItem} {@code sequence} with a concrete
+     * prediction at {@code at -> state}, or clears it with no block change when {@code at == null}.
+     */
+    public void resolveItemUseBlock(int sequence, BlockPosition at, int state) {
+        unlocatedPredictions.remove(Integer.valueOf(sequence));
+        long[] marker = unlocatedUseChanges.remove(sequence);
+        if (at == null) {
+            if (marker != null) {
+                changes.remove(marker);
+            }
+            return;
+        }
+        if (marker != null) {
+            // Shrink the in-place changes marker to the 3x3x3 neighbourhood while keeping changes monotonic in eventSequence.
+            marker[1] = (long) at.x() - 1;
+            marker[2] = (long) at.y() - 1;
+            marker[3] = (long) at.z() - 1;
+            marker[4] = (long) at.x() + 1;
+            marker[5] = (long) at.y() + 1;
+            marker[6] = (long) at.z() + 1;
+        }
+        int[][] before = around(at.x(), at.y(), at.z(), sequence);
+        Map<Long, Integer> cells = new HashMap<>();
+        for (int[] o : PREDICTION_NEIGHBOURS) {
+            addPredictionCell(at.x() + o[0], at.y() + o[1], at.z() + o[2], sequence);
+            cells.put(blockKey(at.x() + o[0], at.y() + o[1], at.z() + o[2]), KEPT);
+        }
+        cells.put(blockKey(at.x(), at.y(), at.z()), state);
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] o = PREDICTION_NEIGHBOURS[i];
+            int[] beside = before == null ? null : before[i];
+            long key = blockKey(at.x() + o[0], at.y() + o[1], at.z() + o[2]);
+            if (beside == null) {
+                cells.remove(key);
+                continue;
+            }
+            for (int s : beside) {
+                if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE)) {
+                    cells.put(key, SAME_BLOCK);
+                }
+            }
+        }
+        resolvedUses.put(sequence, cells);
+    }
+
+    private static final double BUCKET_RAY_MARGIN = 1.0E-4;
+    private static final double BUCKET_FACE_MARGIN = 1.0E-6;
+    private static final int BUCKET_MAX_STEPS = 256;
+
+    private record BucketRayHit(int hx, int hy, int hz, BlockFace face, int state) {}
+
+    /**
+     * Resolves a deterministic {@code BucketItem.use} placement ({@code water_bucket}, {@code lava_bucket}) or isolated
+     * fluid pickup ({@code bucket} on water/lava source) across every candidate eye position, returning null whenever
+     * geometry, reach, fluids, neighbour reactivity, or block state leaves any ambiguity.
+     */
+    public Placement bucketPlacement(int sequence, String bucketItem, List<Vec3d> eyes, float yaw, float pitch, double blockRange) {
+        if (storage == null || bucketItem == null || eyes == null || eyes.isEmpty()
+                || hasUnlocatedPredictionBefore(sequence) || !(blockRange > 0.0 && Double.isFinite(blockRange))
+                || !Float.isFinite(yaw) || !Float.isFinite(pitch)) {
+            return null;
+        }
+        boolean pickup = "minecraft:bucket".equals(bucketItem);
+        boolean water = "minecraft:water_bucket".equals(bucketItem);
+        boolean lava = "minecraft:lava_bucket".equals(bucketItem);
+        if (!pickup && !water && !lava) {
+            return null;
+        }
+        if (water && isUltrawarmDimension()) {
+            return null; // water evaporates in ultrawarm dimensions such as the Nether
+        }
+        int newState;
+        if (pickup) {
+            newState = states.onlyStateOf("minecraft:air");
+        } else {
+            newState = states.stateOf(water ? "minecraft:water" : "minecraft:lava", "level=0");
+        }
+        if (newState < 0) {
+            return null;
+        }
+        double[] dir = viewVector(pitch, yaw);
+        BucketRayHit firstHit = null;
+        for (Vec3d eye : eyes) {
+            BucketRayHit hit = raycastBucket(sequence, eye, dir, blockRange, pickup);
+            if (hit == null) {
+                return null;
+            }
+            if (firstHit == null) {
+                firstHit = hit;
+            } else if (firstHit.hx() != hit.hx() || firstHit.hy() != hit.hy() || firstHit.hz() != hit.hz()
+                    || firstHit.face() != hit.face()) {
+                return null;
+            }
+        }
+        if (firstHit == null) {
+            return null;
+        }
+        if (pickup) {
+            BlockPosition target = new BlockPosition(firstHit.hx(), firstHit.hy(), firstHit.hz());
+            return bucketTargetAndNeighboursValid(sequence, target.x(), target.y(), target.z(), true, false)
+                    ? new Placement(target, newState) : null;
+        }
+        if (!bucketHitBlockSolidForLiquid(firstHit.state(), water)) {
+            return null;
+        }
+        BlockPosition target = new BlockPosition(
+                firstHit.hx() + firstHit.face().stepX(),
+                firstHit.hy() + firstHit.face().stepY(),
+                firstHit.hz() + firstHit.face().stepZ());
+        return bucketTargetAndNeighboursValid(sequence, target.x(), target.y(), target.z(), false, true)
+                ? new Placement(target, newState) : null;
+    }
+
+    private BucketRayHit raycastBucket(int sequence, Vec3d eye, double[] dir, double range, boolean pickup) {
+        double fx = eye.x();
+        double fy = eye.y();
+        double fz = eye.z();
+        double dx = dir[0] * range;
+        double dy = dir[1] * range;
+        double dz = dir[2] * range;
+        double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (!(len > 1.0E-7)) {
+            return null;
+        }
+        int cx = (int) Math.floor(fx);
+        int cy = (int) Math.floor(fy);
+        int cz = (int) Math.floor(fz);
+        if ((dx < 0 && fx - cx < BUCKET_RAY_MARGIN) || (dx > 0 && cx + 1.0 - fx < BUCKET_RAY_MARGIN)
+                || (dy < 0 && fy - cy < BUCKET_RAY_MARGIN) || (dy > 0 && cy + 1.0 - fy < BUCKET_RAY_MARGIN)
+                || (dz < 0 && fz - cz < BUCKET_RAY_MARGIN) || (dz > 0 && cz + 1.0 - fz < BUCKET_RAY_MARGIN)) {
+            return null;
+        }
+        int stepX = Math.abs(dx) > 1.0E-9 ? (dx > 0 ? 1 : -1) : 0;
+        int stepY = Math.abs(dy) > 1.0E-9 ? (dy > 0 ? 1 : -1) : 0;
+        int stepZ = Math.abs(dz) > 1.0E-9 ? (dz > 0 ? 1 : -1) : 0;
+        double tDeltaX = stepX == 0 ? Double.POSITIVE_INFINITY : stepX / dx;
+        double tDeltaY = stepY == 0 ? Double.POSITIVE_INFINITY : stepY / dy;
+        double tDeltaZ = stepZ == 0 ? Double.POSITIVE_INFINITY : stepZ / dz;
+        double tMaxX = stepX == 0 ? Double.POSITIVE_INFINITY : ((stepX > 0 ? cx + 1.0 : cx) - fx) / dx;
+        double tMaxY = stepY == 0 ? Double.POSITIVE_INFINITY : ((stepY > 0 ? cy + 1.0 : cy) - fy) / dy;
+        double tMaxZ = stepZ == 0 ? Double.POSITIVE_INFINITY : ((stepZ > 0 ? cz + 1.0 : cz) - fz) / dz;
+        double tEnd = 1.0 - BUCKET_RAY_MARGIN / Math.max(1.0, len);
+        double t = 0.0;
+        for (int steps = 0; t <= 1.0 && steps < BUCKET_MAX_STEPS; steps++) {
+            int[] possible = possibleStatesBefore(cx, cy, cz, sequence);
+            if (possible == null || possible.length != 1) {
+                return null;
+            }
+            int s = possible[0];
+            if (!states.isValid(s) || !states.outlineExact(s) || !states.outlineInCell(s)
+                    || states.has(s, BlockStates.MOVING_OUTLINE)) {
+                return null;
+            }
+            BucketRayHit cellHit = testBucketCell(cx, cy, cz, s, fx, fy, fz, dx, dy, dz, tEnd, pickup);
+            if (cellHit != null) {
+                return cellHit.hx() == Integer.MIN_VALUE ? null : cellHit;
+            }
+            if (Math.abs(tMaxX - tMaxY) < 1.0E-5 || Math.abs(tMaxX - tMaxZ) < 1.0E-5 || Math.abs(tMaxY - tMaxZ) < 1.0E-5) {
+                return null;
+            }
+            if (tMaxX < tMaxY && tMaxX < tMaxZ) {
+                t = tMaxX;
+                tMaxX += tDeltaX;
+                cx += stepX;
+            } else if (tMaxY < tMaxZ) {
+                t = tMaxY;
+                tMaxY += tDeltaY;
+                cy += stepY;
+            } else {
+                t = tMaxZ;
+                tMaxZ += tDeltaZ;
+                cz += stepZ;
+            }
+        }
+        return null;
+    }
+
+    private BucketRayHit testBucketCell(int cx, int cy, int cz, int state, double fx, double fy, double fz,
+            double dx, double dy, double dz, double tEnd, boolean pickup) {
+        BucketRayHit ambiguous = new BucketRayHit(Integer.MIN_VALUE, 0, 0, BlockFace.UP, -1);
+        Shape outline = states.outlineShape(state);
+        double bestSolidT = Double.POSITIVE_INFINITY;
+        BlockFace bestSolidFace = null;
+        for (int b = 0; b < outline.boxCount(); b++) {
+            double x0 = cx + outline.box(b, 0);
+            double y0 = cy + outline.box(b, 1);
+            double z0 = cz + outline.box(b, 2);
+            double x1 = cx + outline.box(b, 3);
+            double y1 = cy + outline.box(b, 4);
+            double z1 = cz + outline.box(b, 5);
+            if (x0 - BUCKET_RAY_MARGIN <= fx && fx <= x1 + BUCKET_RAY_MARGIN
+                    && y0 - BUCKET_RAY_MARGIN <= fy && fy <= y1 + BUCKET_RAY_MARGIN
+                    && z0 - BUCKET_RAY_MARGIN <= fz && fz <= z1 + BUCKET_RAY_MARGIN) {
+                return ambiguous;
+            }
+            double tExpanded = enter(fx, fy, fz, dx, dy, dz,
+                    x0 - BUCKET_RAY_MARGIN, y0 - BUCKET_RAY_MARGIN, z0 - BUCKET_RAY_MARGIN,
+                    x1 + BUCKET_RAY_MARGIN, y1 + BUCKET_RAY_MARGIN, z1 + BUCKET_RAY_MARGIN);
+            if (tExpanded > 1.0) {
+                continue;
+            }
+            double tShrunk = enter(fx, fy, fz, dx, dy, dz,
+                    x0 + BUCKET_RAY_MARGIN, y0 + BUCKET_RAY_MARGIN, z0 + BUCKET_RAY_MARGIN,
+                    x1 - BUCKET_RAY_MARGIN, y1 - BUCKET_RAY_MARGIN, z1 - BUCKET_RAY_MARGIN);
+            if (!(tShrunk < tEnd)) {
+                return ambiguous;
+            }
+            double tExact = enter(fx, fy, fz, dx, dy, dz, x0, y0, z0, x1, y1, z1);
+            BlockFace face = enteredFace(fx, fy, fz, dx, dy, dz, x0, y0, z0, x1, y1, z1);
+            if (!(tExact < tEnd) || face == null) {
+                return ambiguous;
+            }
+            if (tExact < bestSolidT) {
+                bestSolidT = tExact;
+                bestSolidFace = face;
+            }
+        }
+        if (!pickup) {
+            return bestSolidFace == null ? null : new BucketRayHit(cx, cy, cz, bestSolidFace, state);
+        }
+        // ClipContext.Fluid.SOURCE_ONLY: pure water[level=0] / lava[level=0] source blocks stop the pickup ray cleanly
+        if (isPureFluidSource(state)) {
+            double y1Max = cy + 1.0;
+            double y1Safe = cy + (8.0 / 9.0);
+            if (cx - BUCKET_RAY_MARGIN <= fx && fx <= cx + 1.0 + BUCKET_RAY_MARGIN
+                    && cy - BUCKET_RAY_MARGIN <= fy && fy <= y1Max + BUCKET_RAY_MARGIN
+                    && cz - BUCKET_RAY_MARGIN <= fz && fz <= cz + 1.0 + BUCKET_RAY_MARGIN) {
+                return ambiguous;
+            }
+            double tExpanded = enter(fx, fy, fz, dx, dy, dz,
+                    cx - BUCKET_RAY_MARGIN, cy - BUCKET_RAY_MARGIN, cz - BUCKET_RAY_MARGIN,
+                    cx + 1.0 + BUCKET_RAY_MARGIN, y1Max + BUCKET_RAY_MARGIN, cz + 1.0 + BUCKET_RAY_MARGIN);
+            if (tExpanded <= 1.0) {
+                double tShrunk = enter(fx, fy, fz, dx, dy, dz,
+                        cx + BUCKET_RAY_MARGIN, cy + BUCKET_RAY_MARGIN, cz + BUCKET_RAY_MARGIN,
+                        cx + 1.0 - BUCKET_RAY_MARGIN, y1Safe - BUCKET_RAY_MARGIN, cz + 1.0 - BUCKET_RAY_MARGIN);
+                if (!(tShrunk < tEnd)) {
+                    return ambiguous;
+                }
+                if (bestSolidFace == null || tShrunk < bestSolidT) {
+                    return new BucketRayHit(cx, cy, cz, BlockFace.UP, state);
+                }
+            }
+        }
+        // Solid outline before fluid source misses pickup
+        return bestSolidFace == null ? null : ambiguous;
+    }
+
+    private static BlockFace enteredFace(double fx, double fy, double fz, double dx, double dy, double dz,
+            double x0, double y0, double z0, double x1, double y1, double z1) {
+        double tx = Math.abs(dx) > 1.0E-9 ? ((dx > 0 ? x0 : x1) - fx) / dx : Double.NEGATIVE_INFINITY;
+        double ty = Math.abs(dy) > 1.0E-9 ? ((dy > 0 ? y0 : y1) - fy) / dy : Double.NEGATIVE_INFINITY;
+        double tz = Math.abs(dz) > 1.0E-9 ? ((dz > 0 ? z0 : z1) - fz) / dz : Double.NEGATIVE_INFINITY;
+        if (tx >= ty && tx >= tz) {
+            if (tx - Math.max(ty, tz) <= BUCKET_FACE_MARGIN) {
+                return null;
+            }
+            return dx > 0 ? BlockFace.WEST : BlockFace.EAST;
+        }
+        if (ty >= tx && ty >= tz) {
+            if (ty - Math.max(tx, tz) <= BUCKET_FACE_MARGIN) {
+                return null;
+            }
+            return dy > 0 ? BlockFace.DOWN : BlockFace.UP;
+        }
+        if (tz - Math.max(tx, ty) <= BUCKET_FACE_MARGIN) {
+            return null;
+        }
+        return dz > 0 ? BlockFace.NORTH : BlockFace.SOUTH;
+    }
+
+    private boolean isUltrawarmDimension() {
+        if (dimension == null) {
+            return true;
+        }
+        if (dimension.fastLava() != null) {
+            return dimension.fastLava();
+        }
+        return !"minecraft:overworld".equals(dimension.key()) && !"minecraft:the_end".equals(dimension.key());
+    }
+
+    private boolean isPureFluidSource(int state) {
+        String block = states.block(state);
+        return ("minecraft:water".equals(block) || "minecraft:lava".equals(block))
+                && states.fluidAmount(state) == 8 && !states.fluidFalling(state);
+    }
+
+    private boolean bucketHitBlockSolidForLiquid(int state, boolean water) {
+        if (!states.has(state, BlockStates.FULL_BLOCK)
+                || states.has(state, BlockStates.REPLACEABLE | BlockStates.CUSTOM_REPLACING | BlockStates.INTERACTIVE)
+                || reacts(state)
+                || states.fluidKind(state) != BlockStates.FLUID_NONE) {
+            return false;
+        }
+        if (water) {
+            if (states.properties(state).contains("waterlogged=") || states.block(state).contains("sponge")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean bucketTargetAndNeighboursValid(int sequence, int tx, int ty, int tz, boolean pickup, boolean checkTargetAir) {
+        if (ty < minY() || ty >= minY() + height() || !isLoaded(tx >> 4, tz >> 4)) {
+            return false;
+        }
+        int[] target = possibleStatesBefore(tx, ty, tz, sequence);
+        if (target == null || target.length != 1) {
+            return false;
+        }
+        if (checkTargetAir && (!states.isAir(target[0]) || !"minecraft:air".equals(states.block(target[0])))) {
+            return false;
+        }
+        if (pickup && !isPureFluidSource(target[0])) {
+            return false;
+        }
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] o = PREDICTION_NEIGHBOURS[i];
+            int[] beside = possibleStatesBefore(tx + o[0], ty + o[1], tz + o[2], sequence);
+            if (beside == null || beside.length != 1) {
+                return false;
+            }
+            int ns = beside[0];
+            if (reacts(ns) || states.fluidKind(ns) != BlockStates.FLUID_NONE || states.block(ns).contains("sponge")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static double[] viewVector(float xRot, float yRot) {
+        float x = xRot * (float) (Math.PI / 180.0);
+        float y = -yRot * (float) (Math.PI / 180.0);
+        float cosY = VanillaMath.cos(y);
+        float sinY = VanillaMath.sin(y);
+        float cosX = VanillaMath.cos(x);
+        float sinX = VanillaMath.sin(x);
+        return new double[] {sinY * cosX, -sinX, cosY * cosX};
     }
 
     /**

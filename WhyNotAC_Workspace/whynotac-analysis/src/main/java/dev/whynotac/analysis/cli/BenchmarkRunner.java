@@ -65,7 +65,7 @@ import java.util.zip.Deflater;
  *       zero false positives and measuring per-event replay cost;</li>
  *   <li>All adversarial {@code *.wnrec} recordings in the {@code cheat-corpus} directory (when present),
  *       verifying zero false negatives;</li>
- *   <li>A built-in 20-scenario adversarial + legitimate benchmark matrix spanning {@code P-A},
+ *   <li>A built-in 22-scenario adversarial + legitimate benchmark matrix spanning {@code P-A},
  *       {@code P-M}, and {@code S} check families with per-scenario ticks-to-detect (TTD) and runtime.</li>
  * </ol>
  */
@@ -250,6 +250,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("honest-baseline-session", null, false, h -> scenarioHonest(h)));
         scenarioResults.add(measure("honest-lag-burst-with-pings", null, false, h -> scenarioHonestLagBurst(h)));
         scenarioResults.add(measure("honest-sprint-jump-motion", null, false, h -> scenarioHonestSprint(h)));
+        scenarioResults.add(measure("honest-water-bucket-place", null, false, h -> scenarioHonestWaterBucket(h)));
         // Deterministic P-A physics/combat checks
         scenarioResults.add(measure("reach-4.2b-violation", "attack-reach", true, h -> scenarioReach(h)));
         scenarioResults.add(measure("aim-off-target-violation", "attack-aim", true, h -> scenarioAimOffTarget(h)));
@@ -264,6 +265,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("unopened-container-click", "inventory-protocol", true, h -> scenarioUnopenedContainerClick(h)));
         scenarioResults.add(measure("interact-at-box-spoof", "interact-at-box", true, h -> scenarioInteractAtBox(h)));
         scenarioResults.add(measure("autoblock-noslow-same-tick", "use-item-state", true, h -> scenarioUseSlowdown(h)));
+        scenarioResults.add(measure("shield-autoblock-cross-tick", "use-item-state", true, h -> scenarioCrossTickShieldAutoBlock(h)));
         scenarioResults.add(measure("tick-framing-multi-move", "tick-framing", true, h -> scenarioTickFraming(h)));
         // Statistical S checks (ALERT only)
         scenarioResults.add(measure("constant-interval-autoclicker", "click-pattern", true, h -> scenarioAutoClicker(h)));
@@ -326,7 +328,8 @@ public final class BenchmarkRunner {
                     scenarioTickFraming(h);
                     scenarioTimerBalance(h);
                 }),
-                new CorpusEntry("cheat-ping-spoof.wnrec", BenchmarkRunner::scenarioPingSpoof));
+                new CorpusEntry("cheat-ping-spoof.wnrec", BenchmarkRunner::scenarioPingSpoof),
+                new CorpusEntry("cheat-shield-autoblock.wnrec", BenchmarkRunner::scenarioCrossTickShieldAutoBlock));
         for (CorpusEntry entry : entries) {
             Path file = outputDir.resolve(entry.fileName());
             writeScenarioRecording(file, entry.fileName(), entry.body());
@@ -440,6 +443,31 @@ public final class BenchmarkRunner {
         }
     }
 
+    private static void scenarioHonestWaterBucket(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:water_bucket", 1, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 2, inv, Stack.EMPTY));
+        h.syncPing();
+        // Aim slightly ahead onto stone (2, 63, 4) from (2.5, 65.62, 2.5) and place water cleanly
+        h.stepVanilla(Harness.KEYS_NONE, 0.0f, 39.0f);
+        h.in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0f, 39.0f));
+        h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        h.stepVanilla(Harness.KEYS_NONE, 0.0f, 39.0f);
+        List<Stack> after = new ArrayList<>(inv);
+        after.set(36, new Stack("minecraft:bucket", 1, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 3, after, Stack.EMPTY));
+        h.out(new ClientboundPacket.BlockUpdate(
+                new BlockPosition(2, 64, 4), BlockStates.vanilla().stateOf("minecraft:water", "level=0")));
+        h.out(new ClientboundPacket.BlockChangedAck(1));
+        h.syncPing();
+        for (int t = 0; t < 5; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+    }
+
     private static void scenarioReach(Harness h) {
         h.markCheatStart();
         h.spawnZombie(2, 2.5, 64.0, 7.2); // 4.7 blocks away (> 3.0 survival reach)
@@ -533,6 +561,25 @@ public final class BenchmarkRunner {
         h.markCheatStart();
         h.in(new ServerboundPacket.PlayerAction(
                 ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, new BlockPosition(0, 0, 0), BlockFace.DOWN, 0));
+        h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+        h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        h.tick();
+    }
+
+    private static void scenarioCrossTickShieldAutoBlock(Harness h) {
+        h.spawnZombie(2, 2.5, 64.0, 4.5);
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:diamond_sword", 1, List.of(), List.of(), null, false));
+        inv.set(45, new Stack("minecraft:shield", 1, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 2, inv, Stack.EMPTY));
+        h.syncPing();
+        h.in(new ServerboundPacket.UseItem(Hand.OFF_HAND, 1, 0.0f, 0.0f));
+        h.tick();
+        h.markCheatStart();
+        // Keep-using AutoBlock: attacks while offhand shield remains raised across ticks without release or swap
         h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
         h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
         h.tick();

@@ -1356,6 +1356,83 @@ class MovementCheckTest {
     }
 
     @Test
+    void placingStraightStairsRemainsExplained() throws Exception {
+        int oakStair = STATES.stateOf("minecraft:oak_stairs", "facing=west,half=bottom,shape=straight,waterlogged=false");
+        holdItem("minecraft:oak_stairs", 64);
+        ticks(3, NONE, 90.0F, 0.0F); // facing west (yaw = 90)
+        int before = ticks.size();
+        place(2, 64, 0, STONE);
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(2, 64, 0),
+                BlockFace.WEST, new Vec3d(2.0, 64.25, 0.5), false, false, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(1, 64, 0), oakStair);
+        int seqPlaced = blockSequence;
+        tick(NONE, 90.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(1, 64, 0), oakStair));
+        out(new ClientboundPacket.BlockChangedAck(seqPlaced));
+        sync();
+        ticks(6, NONE, 90.0F, 0.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(before, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void waterBucketPlacementAndPickupRemainExplained() throws Exception {
+        int water = STATES.stateOf("minecraft:water", "level=0");
+        // Player stands at (0.5, 64.0, 0.5) on stone below y=64; hold water_bucket in main hand and place at (0, 64, 0)
+        holdItem("minecraft:water_bucket", 1);
+        ticks(3, NONE, 0.0F, 90.0F);
+        int before = ticks.size();
+        keybinds.add(new ServerboundPacket.UseItem(Hand.MAIN_HAND, ++blockSequence, 0.0F, 90.0F));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(0, 64, 0), water);
+        int placeSeq = blockSequence;
+        tick(NONE, 0.0F, 90.0F, Vec3d.ZERO);
+        // Server replaces water_bucket with bucket and updates the placed water block
+        List<Stack> afterPlace = new ArrayList<>();
+        for (int i = 0; i < 46; i++) {
+            afterPlace.add(Stack.EMPTY);
+        }
+        afterPlace.set(36, new Stack("minecraft:bucket", 1, List.of(), List.of(), null, false));
+        out(new ClientboundPacket.ContainerSetContent(0, 2, afterPlace, Stack.EMPTY));
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(0, 64, 0), water));
+        out(new ClientboundPacket.BlockChangedAck(placeSeq));
+        sync();
+        // Scoop isolated water back with empty bucket
+        keybinds.add(new ServerboundPacket.UseItem(Hand.MAIN_HAND, ++blockSequence, 0.0F, 90.0F));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(0, 64, 0), AIR);
+        int scoopSeq = blockSequence;
+        tick(NONE, 0.0F, 90.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(0, 64, 0), AIR));
+        out(new ClientboundPacket.BlockChangedAck(scoopSeq));
+        sync();
+        ticks(4, NONE, 0.0F, 90.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(before, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void waterBucketInFastLavaDimensionFallsBackCleanlyWithoutFalsePositives() throws Exception {
+        ClientboundPacket.Dimension nether = new ClientboundPacket.Dimension("minecraft:the_nether", 0, 256, true);
+        out(new ClientboundPacket.Respawn(nether, 0, 0));
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) {
+                out(new ClientboundPacket.LevelChunk(x, z, chunk(nether.sections())));
+            }
+        }
+        teleport(0.5, 64.0, 0.5, 0.0F, 90.0F);
+        in(new ServerboundPacket.PlayerLoaded());
+        holdItem("minecraft:water_bucket", 1);
+        ticks(3, NONE, 0.0F, 90.0F);
+        keybinds.add(new ServerboundPacket.UseItem(Hand.MAIN_HAND, ++blockSequence, 0.0F, 90.0F));
+        tick(NONE, 0.0F, 90.0F, Vec3d.ZERO);
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
     void aTowerOfBlocksPlacedWhileJumpingIsJudged() throws Exception {
         holdStone(64);
         ticks(3, NONE, 0.0F, 90.0F);
