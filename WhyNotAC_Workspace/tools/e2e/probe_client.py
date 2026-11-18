@@ -592,18 +592,21 @@ def main():
         # Inventory, once the given items arrived: select hotbar slot 2 (the stick), then move the sword from hotbar 0
         # to hotbar 4 with two clicks, each listing the slots it changed as the vanilla client hashes them. As the
         # client: the hotbar slot goes out at the tick's start, the clicks between ticks, both before the movement.
+        clicked_this_tick = False
         if inventory_step == 0 and client.slots.get(36, (0, 0))[1] == ITEM_DIAMOND_SWORD and client.slots.get(38, (0, 0))[1] == ITEM_STICK:
             client.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", 2))
             inventory_step = 1
         elif inventory_step == 1:
             client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 36, {36: None}, (ITEM_DIAMOND_SWORD, 1)))
             inventory_step = 2
+            clicked_this_tick = True
         elif inventory_step == 2:
             client.send(PLAY_S_CONTAINER_CLICK, click(0, client.state_id, 40, {40: (ITEM_DIAMOND_SWORD, 1)}, None))
             inventory_step = 3
+            clicked_this_tick = True
         forward = (tick // 40) % 2 == 0  # toggle W every 2 seconds
         flags = 0x01 if forward else 0x00
-        if flags != sent_input:
+        if flags != sent_input and not (clicked_this_tick and flags != 0):
             client.send(PLAY_S_INPUT, bytes([flags]))
             sent_input = flags
             inputs_sent.append(flags)

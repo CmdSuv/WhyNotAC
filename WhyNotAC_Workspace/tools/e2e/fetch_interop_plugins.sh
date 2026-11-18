@@ -16,7 +16,7 @@ paths=()
 for entry in "${PLUGINS[@]}"; do
   read -r name url sha512 <<< "$entry"
   if [ ! -f "$DIR/$name" ]; then
-    curl -fsSL --max-time 300 -o "$DIR/$name.part" "$url"
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors --max-time 300 -o "$DIR/$name.part" "$url"
     mv "$DIR/$name.part" "$DIR/$name"
   fi
   echo "$sha512  $DIR/$name" | sha512sum -c --quiet - >&2

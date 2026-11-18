@@ -149,7 +149,19 @@ kill "$HOLDER" 2>/dev/null || true
 rm -f "$FIFO"
 
 AUDIT_JSON=$(java -cp "$PLUGIN_JAR" dev.whynotac.analysis.cli.Tool audit "$WORK_DIR/plugins/WhyNotAC/storage")
-DOSSIER=$(find "$WORK_DIR/plugins/WhyNotAC/cases" -name '*.json' | head -1)
+DOSSIER=$(python3 -c '
+import glob, json, sys
+files = sorted(glob.glob(sys.argv[1] + "/*.json"))
+for f in files:
+    try:
+        if json.load(open(f)).get("check") != "design-probe":
+            print(f)
+            sys.exit(0)
+    except Exception:
+        pass
+if files:
+    print(files[0])
+' "$WORK_DIR/plugins/WhyNotAC/cases")
 VERIFY_OUT=""
 EXPLAIN_OUT=""
 if [ -n "$DOSSIER" ]; then
