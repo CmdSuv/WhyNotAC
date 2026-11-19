@@ -2342,7 +2342,7 @@ public final class MovementTracker {
             if (prototype == null || prototype.places() == null) {
                 return "not a resolved block item";
             }
-            String facing = prototype.places().endsWith("_stairs") ? unanimousHorizontalFacing(in, starts) : null;
+            String facing = states.onlyStateOf(prototype.places()) < 0 ? unanimousHorizontalFacing(in, starts) : null;
             ClientWorld.Placement placed = world.placementForItem(use.sequence(), prototype.places(), facing);
             if (placed == null) {
                 return "the blocks or item state do not decide placement";

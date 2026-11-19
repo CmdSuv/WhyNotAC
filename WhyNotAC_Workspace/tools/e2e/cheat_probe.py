@@ -54,6 +54,9 @@ def main():
     split_tick_sent = False
     silent_killaura_sent = False
     packet_bounds_sent = False
+    inv_protocol_sent = False
+    use_slowdown_sent = False
+    interact_at_sent = False
     attacked_decoys = set()
 
     start = time.monotonic()
@@ -135,6 +138,44 @@ def main():
                     pos_sent_this_tick = True
                     break
 
+        # Phase 8 (tick 245): InvWalk / AutoTotem same-tick ContainerClick + Attack -> inventory-protocol (P-M)
+        if tick == 245 and not inv_protocol_sent:
+            aura_id = next((eid for eid, (et, ex, ey, ez) in client.entities.items()
+                            if et == pc.ENTITY_HUSK and math.dist((x, y, z), (ex, ey, ez)) < 3.5), None)
+            if aura_id is not None:
+                client.send(pc.PLAY_S_CONTAINER_CLICK, pc.click(0, client.state_id, 36, {}, None))
+                client.send(pc.PLAY_S_INTERACT, pc.varint(aura_id) + pc.varint(1) + b"\x00")
+                client.send(pc.PLAY_S_SWING, pc.varint(0))
+                inv_protocol_sent = True
+
+        # Phase 9 (tick 252): AutoBlock / NoSlow same-tick RELEASE_USE_ITEM + Attack -> use-item-state (P-M)
+        if tick == 252 and not use_slowdown_sent:
+            aura_id = next((eid for eid, (et, ex, ey, ez) in client.entities.items()
+                            if et == pc.ENTITY_HUSK and math.dist((x, y, z), (ex, ey, ez)) < 3.5), None)
+            if aura_id is not None:
+                client.send(pc.PLAY_S_PLAYER_ACTION, pc.varint(5) + struct.pack(">QB", 0, 0) + pc.varint(0))
+                client.send(pc.PLAY_S_INTERACT, pc.varint(aura_id) + pc.varint(1) + b"\x00")
+                client.send(pc.PLAY_S_SWING, pc.varint(0))
+                use_slowdown_sent = True
+
+        # Phase 10 (tick 258): InteractAtBox spoofed offset (2.5, 0.5, 0.0) -> interact-at-box (P-M)
+        if tick == 258 and not interact_at_sent:
+            aura_id = next((eid for eid, (et, ex, ey, ez) in client.entities.items()
+                            if et == pc.ENTITY_HUSK and math.dist((x, y, z), (ex, ey, ez)) < 3.5), None)
+            if aura_id is not None:
+                client.send(
+                    pc.PLAY_S_INTERACT,
+                    pc.varint(aura_id) + pc.varint(2) + struct.pack(">fff", 2.5, 0.5, 0.0) + pc.varint(0) + b"\x00"
+                )
+                interact_at_sent = True
+
+        # Phase 11 prep (ticks 263..264): ensure fresh ground anchor before server /damage knockback
+        if tick in (263, 264) and not pos_sent_this_tick:
+            client.send(pc.PLAY_S_MOVE_POS, struct.pack(">dddB", x, y, z, 1))
+            pos_sent_this_tick = True
+            reminder = 0
+            sent_on_ground = True
+
         if not pos_sent_this_tick:
             need_pos = (reminder + 1 >= 20)
             flags_changed = not sent_on_ground
@@ -165,9 +206,9 @@ def main():
                 client.send(pc.PLAY_S_TICK_END)
             clock_burst_sent = True
 
-        # Phase 7 (tick 235): Out-of-bounds UseItemOn cursor offset (2.5, 0.5, 0.5) -> packet-bounds (P-M)
+        # Phase 7 (tick 235): Out-of-bounds UseItemOn cursor offset (2.5, 0.5, 0.5) 3 blocks east -> packet-bounds (P-M)
         if tick == 235 and not packet_bounds_sent:
-            bx, by, bz = int(math.floor(x)), int(math.floor(y)) - 1, int(math.floor(z))
+            bx, by, bz = int(math.floor(x)) + 3, int(math.floor(y)) - 1, int(math.floor(z))
             block_pos_long = ((bx & 0x3FFFFFF) << 38) | ((bz & 0x3FFFFFF) << 12) | (by & 0xFFF)
             client.send(
                 pc.PLAY_S_USE_ITEM_ON,
@@ -191,6 +232,9 @@ def main():
         "split_tick_sent": split_tick_sent,
         "silent_killaura_sent": silent_killaura_sent,
         "clock_burst_sent": clock_burst_sent,
+        "inv_protocol_sent": inv_protocol_sent,
+        "use_slowdown_sent": use_slowdown_sent,
+        "interact_at_sent": interact_at_sent,
         "disconnect_reason": client.disconnect_reason,
     }
     print(json.dumps(summary))

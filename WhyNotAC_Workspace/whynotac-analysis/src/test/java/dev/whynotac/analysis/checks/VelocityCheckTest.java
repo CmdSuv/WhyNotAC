@@ -162,6 +162,92 @@ final class VelocityCheckTest {
     }
 
     @Test
+    void detectsPartialVerticalVelocityEvenWhenSpoofingOffGround() {
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.0, 0.42, 0.0))));
+        syncPing();
+        // Cheater takes only 30% vertical velocity (+0.126 < 0.42 * 0.65) and marks onGround=false
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.126, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.15, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals(EvidenceClass.ADVANTAGE_PROOF, evidence.get(0).evidenceClass());
+        assertEquals("partial-vertical-knockback", evidence.get(0).details().get("reason"));
+    }
+
+    @Test
+    void detectsExplosionKnockbackSuppressionAndPermitsHonestExplosionResponse() {
+        // Honest explosion response produces 0 evidence
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Explosion(new Vec3d(2.0, 64.0, 2.5), 4.0F, new Vec3d(0.45, 0.50, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.42, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        tick();
+        assertTrue(evidence.isEmpty(), "Honest explosion knockback must yield 0 evidence");
+
+        // Re-anchor on ground then cancel explosion knockback
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Explosion(new Vec3d(2.0, 64.0, 2.5), 4.0F, new Vec3d(0.45, 0.50, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("explosion", evidence.get(0).details().get("source"));
+        assertEquals("ignored-vertical-knockback", evidence.get(0).details().get("reason"));
+    }
+
+    @Test
+    void ceilingAtHitboxEdgeAndCustomGravityExemptVerticalCheck() {
+        // Player near x=2.85 overlaps block (3, 66, 2) on their 0.6-wide hitbox edge
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.BlockUpdate(new dev.whynotac.protocol.packet.BlockPosition(3, 66, 2), STONE)));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.85, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.85, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.0, 0.40, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.85, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        tick();
+        assertTrue(evidence.isEmpty(), "Hitbox-edge ceiling must exempt vertical velocity check");
+
+        // Custom gravity attribute also exempts check cleanly
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.BlockUpdate(new dev.whynotac.protocol.packet.BlockPosition(3, 66, 2), AIR)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.UpdateAttributes(SELF,
+                        List.of(new ClientboundPacket.UpdateAttributes.Attribute("minecraft:gravity", 0.20, List.of())))));
+        syncPing();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.0, 0.40, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.85, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        tick();
+        assertTrue(evidence.isEmpty(), "Custom gravity attribute must exempt velocity check");
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(VelocityCheck.VERSION, Checks.version(VelocityCheck.ID));
         assertNotNull(Checks.create(VelocityCheck.ID, (s, e) -> { }));

@@ -65,7 +65,7 @@ import java.util.zip.Deflater;
  *       zero false positives and measuring per-event replay cost;</li>
  *   <li>All adversarial {@code *.wnrec} recordings in the {@code cheat-corpus} directory (when present),
  *       verifying zero false negatives;</li>
- *   <li>A built-in 22-scenario adversarial + legitimate benchmark matrix spanning {@code P-A},
+ *   <li>A built-in 25-scenario adversarial + legitimate benchmark matrix spanning {@code P-A},
  *       {@code P-M}, and {@code S} check families with per-scenario ticks-to-detect (TTD) and runtime.</li>
  * </ol>
  */
@@ -251,6 +251,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("honest-lag-burst-with-pings", null, false, h -> scenarioHonestLagBurst(h)));
         scenarioResults.add(measure("honest-sprint-jump-motion", null, false, h -> scenarioHonestSprint(h)));
         scenarioResults.add(measure("honest-water-bucket-place", null, false, h -> scenarioHonestWaterBucket(h)));
+        scenarioResults.add(measure("honest-double-slab-merge", null, false, h -> scenarioHonestDoubleSlabMerge(h)));
         // Deterministic P-A physics/combat checks
         scenarioResults.add(measure("reach-4.2b-violation", "attack-reach", true, h -> scenarioReach(h)));
         scenarioResults.add(measure("aim-off-target-violation", "attack-aim", true, h -> scenarioAimOffTarget(h)));
@@ -258,6 +259,8 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("block-reach-6.5b-violation", "use-aim", true, h -> scenarioUseAimReach(h)));
         scenarioResults.add(measure("movement-step-fly-violation", "movement", true, h -> scenarioMovementFly(h)));
         scenarioResults.add(measure("vertical-anti-kb-0pct", "velocity-response", true, h -> scenarioZeroAntiKb(h)));
+        scenarioResults.add(measure("partial-vertical-anti-kb-30pct", "velocity-response", true, h -> scenarioPartialVerticalAntiKb(h)));
+        scenarioResults.add(measure("explosion-anti-kb", "velocity-response", true, h -> scenarioExplosionAntiKb(h)));
         scenarioResults.add(measure("horizontal-anti-kb-0pct", "velocity-response", true, h -> scenarioHorizontalAntiKb(h)));
         // Deterministic P-M grammar/protocol checks
         scenarioResults.add(measure("packet-bounds-hotbar-cursor", "packet-bounds", true, h -> scenarioPacketBounds(h)));
@@ -329,7 +332,11 @@ public final class BenchmarkRunner {
                     scenarioTimerBalance(h);
                 }),
                 new CorpusEntry("cheat-ping-spoof.wnrec", BenchmarkRunner::scenarioPingSpoof),
-                new CorpusEntry("cheat-shield-autoblock.wnrec", BenchmarkRunner::scenarioCrossTickShieldAutoBlock));
+                new CorpusEntry("cheat-shield-autoblock.wnrec", BenchmarkRunner::scenarioCrossTickShieldAutoBlock),
+                new CorpusEntry("cheat-partial-velocity-explosion.wnrec", h -> {
+                    scenarioPartialVerticalAntiKb(h);
+                    scenarioExplosionAntiKb(h);
+                }));
         for (CorpusEntry entry : entries) {
             Path file = outputDir.resolve(entry.fileName());
             writeScenarioRecording(file, entry.fileName(), entry.body());
@@ -468,6 +475,51 @@ public final class BenchmarkRunner {
         }
     }
 
+    private static void scenarioHonestDoubleSlabMerge(Harness h) {
+        BlockStates states = BlockStates.vanilla();
+        int bottomSlab = states.stateOf("minecraft:stone_slab", "type=bottom,waterlogged=false");
+        int doubleSlab = states.stateOf("minecraft:stone_slab", "type=double,waterlogged=false");
+        // Settle residual forward velocity from bootstrap() so the client eye is stationary at the click tick
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        int tx = (int) Math.floor(h.player.x());
+        int tz = (int) Math.floor(h.player.z()) + 2;
+        h.out(new ClientboundPacket.BlockUpdate(new BlockPosition(tx, 64, tz), bottomSlab));
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:stone_slab", 64, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 2, inv, Stack.EMPTY));
+        h.syncPing();
+        // Aim squarely at the top face (y=64.5) of the bottom slab and merge into type=double
+        double eyeX = h.player.x();
+        double eyeY = h.player.y() + 1.62;
+        double eyeZ = h.player.z();
+        double dx = (tx + 0.5) - eyeX;
+        double dy = 64.5 - eyeY;
+        double dz = (tz + 0.5) - eyeZ;
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(Math.atan2(-dy, Math.hypot(dx, dz)));
+        h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        eyeX = h.player.x();
+        eyeY = h.player.y() + 1.62;
+        eyeZ = h.player.z();
+        Vec3d look = Vec3d.viewVector(pitch, yaw);
+        double tHit = (64.5 - eyeY) / look.y();
+        Vec3d hit = new Vec3d(eyeX + look.x() * tHit, 64.5, eyeZ + look.z() * tHit);
+        h.in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(tx, 64, tz), BlockFace.UP, hit, false, false, 1));
+        h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        h.out(new ClientboundPacket.BlockUpdate(new BlockPosition(tx, 64, tz), doubleSlab));
+        h.out(new ClientboundPacket.BlockChangedAck(1));
+        h.syncPing();
+        for (int t = 0; t < 4; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        }
+    }
+
     private static void scenarioReach(Harness h) {
         h.markCheatStart();
         h.spawnZombie(2, 2.5, 64.0, 7.2); // 4.7 blocks away (> 3.0 survival reach)
@@ -513,6 +565,29 @@ public final class BenchmarkRunner {
     private static void scenarioZeroAntiKb(Harness h) {
         h.markCheatStart();
         h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.25, 0.42, 0.0)));
+        h.syncPing();
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y(), h.player.z(), 0.0f, 0.0f, true, false, true, false));
+        h.tick();
+        h.tick();
+    }
+
+    private static void scenarioPartialVerticalAntiKb(Harness h) {
+        h.markCheatStart();
+        h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.0, 0.42, 0.0)));
+        h.syncPing();
+        // Cheater takes only 30% vertical knockback (+0.126) and spoofs onGround=false
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y() + 0.126, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y() + 0.14, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+    }
+
+    private static void scenarioExplosionAntiKb(Harness h) {
+        h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        h.markCheatStart();
+        h.out(new ClientboundPacket.Explosion(
+                new Vec3d(h.player.x() - 1.0, h.player.y(), h.player.z()), 4.0f, new Vec3d(0.45, 0.50, 0.0)));
         h.syncPing();
         h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y(), h.player.z(), 0.0f, 0.0f, true, false, true, false));
         h.tick();

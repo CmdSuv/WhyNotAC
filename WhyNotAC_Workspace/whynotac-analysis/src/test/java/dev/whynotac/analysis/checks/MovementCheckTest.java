@@ -1378,6 +1378,42 @@ class MovementCheckTest {
     }
 
     @Test
+    void mergingDoubleSlabAndPlacingGlazedTerracottaRemainExplained() throws Exception {
+        int bottomSlab = STATES.stateOf("minecraft:stone_slab", "type=bottom,waterlogged=false");
+        int doubleSlab = STATES.stateOf("minecraft:stone_slab", "type=double,waterlogged=false");
+        int glazedEast = STATES.stateOf("minecraft:white_glazed_terracotta", "facing=east");
+        holdItem("minecraft:stone_slab", 64);
+        place(2, 64, 0, bottomSlab);
+        ticks(3, NONE, 90.0F, 0.0F);
+        int before = ticks.size();
+        // Click UP on bottom stone_slab at (2, 64, 0) -> merges into double slab at (2, 64, 0)
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(2, 64, 0),
+                BlockFace.UP, new Vec3d(2.5, 64.5, 0.5), false, false, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(2, 64, 0), doubleSlab);
+        int mergeSeq = blockSequence;
+        tick(NONE, 90.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 64, 0), doubleSlab));
+        out(new ClientboundPacket.BlockChangedAck(mergeSeq));
+        sync();
+        // Hold white_glazed_terracotta, face west (90 deg) and place on top of (2, 64, 0) -> facing=east
+        holdItem("minecraft:white_glazed_terracotta", 64);
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(2, 64, 0),
+                BlockFace.UP, new Vec3d(2.5, 65.0, 0.5), false, false, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(2, 65, 0), glazedEast);
+        int glazedSeq = blockSequence;
+        tick(NONE, 90.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 65, 0), glazedEast));
+        out(new ClientboundPacket.BlockChangedAck(glazedSeq));
+        sync();
+        ticks(4, NONE, 90.0F, 0.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(before, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
     void waterBucketPlacementAndPickupRemainExplained() throws Exception {
         int water = STATES.stateOf("minecraft:water", "level=0");
         // Player stands at (0.5, 64.0, 0.5) on stone below y=64; hold water_bucket in main hand and place at (0, 64, 0)

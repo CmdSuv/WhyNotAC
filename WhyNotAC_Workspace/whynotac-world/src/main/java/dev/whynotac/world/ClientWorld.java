@@ -1031,19 +1031,38 @@ public final class ClientWorld {
         int tx = c.x() + face.stepX();
         int ty = c.y() + face.stepY();
         int tz = c.z() + face.stepZ();
-        if (ty < minY() || ty >= minY() + height()) {
-            return null;
-        }
         int[][] before = useBefore.get(sequence);
         int[] clicked = before == null ? null : before[0];
         int[] target = before == null ? null : before[1];
         if (clicked == null || target == null) {
             return null;
         }
-        for (int s : clicked) {
-            if (states.has(s, BlockStates.INTERACTIVE | BlockStates.REPLACEABLE | BlockStates.CUSTOM_REPLACING)) {
+        // Variant B2: Merging same-type non-waterlogged SlabBlock into type=double at the clicked block itself
+        if (placedBlockKey.endsWith("_slab") && !use.inside()
+                && (face == BlockFace.UP || face == BlockFace.DOWN)
+                && c.y() >= minY() && c.y() < minY() + height()) {
+            String requiredHalf = face == BlockFace.UP ? "type=bottom,waterlogged=false" : "type=top,waterlogged=false";
+            boolean matchesHalf = true;
+            for (int s : clicked) {
+                if (!placedBlockKey.equals(states.block(s)) || !requiredHalf.equals(states.properties(s))) {
+                    matchesHalf = false;
+                    break;
+                }
+            }
+            if (matchesHalf) {
+                int doubleState = states.stateOf(placedBlockKey, "type=double,waterlogged=false");
+                if (doubleState >= 0 && !states.has(doubleState, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)
+                        && clickedNeighboursNonReactive(c, sequence)) {
+                    return new Placement(c, doubleState);
+                }
                 return null;
             }
+        }
+        if (ty < minY() || ty >= minY() + height()) {
+            return null;
+        }
+        if (!clickedAllowsPlacement(clicked, placedBlockKey)) {
+            return null;
         }
         // Variant A: RotatedPillarBlock (exact 3 states axis=x/y/z, all FULL_BLOCK, non-reactive)
         int first = states.firstStateOf(placedBlockKey);
@@ -1062,7 +1081,7 @@ public final class ClientWorld {
                 }
                 return new Placement(new BlockPosition(tx, ty, tz), chosen);
             }
-            // Variant B: Non-waterlogged SlabBlock into pure AIR (avoids waterlogging & double-slab merging)
+            // Variant B: Non-waterlogged SlabBlock into pure AIR (avoids waterlogging)
             if (placedBlockKey.endsWith("_slab") && use.location() != null) {
                 if (!pureAir(target)) {
                     return null;
@@ -1115,8 +1134,114 @@ public final class ClientWorld {
                     return new Placement(new BlockPosition(tx, ty, tz), chosen);
                 }
             }
+            // Variant D: 4-way HorizontalDirectionalBlock full cubes (glazed terracotta, carved_pumpkin, jack_o_lantern)
+            if (all.length == 4 && horizontalFacing != null && isPureHorizontalFacingFullBlock(all)) {
+                if (!targetReplaceableNonReactive(target, placedBlockKey) || !neighboursNonReactive(before)) {
+                    return null;
+                }
+                if ("minecraft:carved_pumpkin".equals(placedBlockKey) || "minecraft:jack_o_lantern".equals(placedBlockKey)) {
+                    int[] below = before[5]; // PREDICTION_NEIGHBOURS[4] = {0, -1, 0}
+                    if (below == null) {
+                        return null;
+                    }
+                    for (int s : below) {
+                        String b = states.block(s);
+                        if ("minecraft:snow_block".equals(b) || "minecraft:iron_block".equals(b)) {
+                            return null; // avoid golem spawn side effects
+                        }
+                    }
+                }
+                String opposite = oppositeHorizontalFacing(horizontalFacing);
+                int chosen = opposite == null ? -1 : states.stateOf(placedBlockKey, "facing=" + opposite);
+                if (chosen >= 0) {
+                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                }
+            }
+            // Variant E: Dry isolated FenceBlock (_fence) or WallBlock (_wall) in pure AIR with pure AIR horizontal surroundings
+            if ((placedBlockKey.endsWith("_fence") || placedBlockKey.endsWith("_wall")) && pureAir(target)) {
+                boolean isWall = placedBlockKey.endsWith("_wall");
+                boolean ok = true;
+                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+                    int[] beside = before[i + 1];
+                    if (beside == null) {
+                        ok = false;
+                        break;
+                    }
+                    int dy = PREDICTION_NEIGHBOURS[i][1];
+                    if (dy == 0 || (isWall && dy > 0)) {
+                        if (!pureAir(beside)) {
+                            ok = false;
+                            break;
+                        }
+                    } else {
+                        for (int s : beside) {
+                            if (reacts(s)) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if (!ok) {
+                            break;
+                        }
+                    }
+                }
+                if (ok) {
+                    String props = isWall
+                            ? "east=none,north=none,south=none,up=true,waterlogged=false,west=none"
+                            : "east=false,north=false,south=false,waterlogged=false,west=false";
+                    int chosen = states.stateOf(placedBlockKey, props);
+                    if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                        return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                    }
+                }
+            }
         }
         return null;
+    }
+
+    private boolean clickedNeighboursNonReactive(BlockPosition c, int sequence) {
+        int[][] aroundClicked = around(c.x(), c.y(), c.z(), sequence);
+        if (aroundClicked == null) {
+            return false;
+        }
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] beside = aroundClicked[i];
+            if (beside == null) {
+                return false;
+            }
+            for (int s : beside) {
+                if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE) && !isDrySlab(s)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean isPureHorizontalFacingFullBlock(int[] all) {
+        for (int s : all) {
+            if (!states.has(s, BlockStates.FULL_BLOCK)
+                    || states.has(s, BlockStates.INTERACTIVE | BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)
+                    || reacts(s)) {
+                return false;
+            }
+            String p = states.properties(s);
+            if (!"facing=north".equals(p) && !"facing=south".equals(p)
+                    && !"facing=east".equals(p) && !"facing=west".equals(p)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String oppositeHorizontalFacing(String facing) {
+        return switch (facing) {
+            case "north" -> "south";
+            case "south" -> "north";
+            case "east" -> "west";
+            case "west" -> "east";
+            default -> null;
+        };
     }
 
     private boolean pureAir(int[] possible) {
@@ -1168,6 +1293,18 @@ public final class ClientWorld {
         return true;
     }
 
+    private boolean clickedAllowsPlacement(int[] clicked, String placedBlockKey) {
+        for (int s : clicked) {
+            boolean slabCannotBeReplaced = states.block(s).endsWith("_slab")
+                    && (states.properties(s).startsWith("type=double,") || !placedBlockKey.equals(states.block(s)));
+            boolean customReplacing = states.has(s, BlockStates.CUSTOM_REPLACING) && !slabCannotBeReplaced;
+            if (states.has(s, BlockStates.INTERACTIVE | BlockStates.REPLACEABLE) || customReplacing) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public BlockPosition placement(int sequence, int state) {
         ServerboundPacket.UseItemOn use = uses.get(sequence);
         if (use == null || storage == null || hasUnlocatedPredictionBefore(sequence) || !states.isValid(state)
@@ -1188,10 +1325,8 @@ public final class ClientWorld {
         if (clicked == null || target == null) {
             return null;
         }
-        for (int s : clicked) {
-            if (states.has(s, BlockStates.INTERACTIVE | BlockStates.REPLACEABLE | BlockStates.CUSTOM_REPLACING)) {
-                return null;
-            }
+        if (!clickedAllowsPlacement(clicked, states.block(state))) {
+            return null;
         }
         for (int s : target) {
             if (!states.has(s, BlockStates.REPLACEABLE) || states.has(s, BlockStates.CUSTOM_REPLACING) || reacts(s)
@@ -1213,9 +1348,16 @@ public final class ClientWorld {
         return new BlockPosition(tx, ty, tz);
     }
 
+    /** A dry slab ({@code waterlogged=false}): {@code SlabBlock.updateShape} returns it unchanged and schedules no tick. */
+    private boolean isDrySlab(int state) {
+        return states.block(state).endsWith("_slab") && states.properties(state).endsWith("waterlogged=false");
+    }
+
     /** A change next to it may make it another block, or setting it may change others ({@link BlockStates#UPDATE_KEEPS_BLOCK} is neither). */
     private boolean reacts(int state) {
-        return states.has(state, BlockStates.NEIGHBOUR_REACTIVE) && !states.has(state, BlockStates.UPDATE_KEEPS_BLOCK);
+        return states.has(state, BlockStates.NEIGHBOUR_REACTIVE)
+                && !states.has(state, BlockStates.UPDATE_KEEPS_BLOCK)
+                && !isDrySlab(state);
     }
 
     /**
@@ -1236,23 +1378,27 @@ public final class ClientWorld {
             cells.put(blockKey(c.x() + face.stepX() + o[0], c.y() + face.stepY() + o[1], c.z() + face.stepZ() + o[2]), KEPT);
         }
         if (placed != null) {
-            if (placed.x() != c.x() + face.stepX() || placed.y() != c.y() + face.stepY() || placed.z() != c.z() + face.stepZ()) {
+            boolean atClicked = placed.x() == c.x() && placed.y() == c.y() && placed.z() == c.z();
+            boolean atTarget = placed.x() == c.x() + face.stepX() && placed.y() == c.y() + face.stepY() && placed.z() == c.z() + face.stepZ();
+            if (!atClicked && !atTarget) {
                 throw new IllegalArgumentException(placed + " is not where use " + sequence + " places");
             }
             cells.put(blockKey(placed.x(), placed.y(), placed.z()), state);
-            // the new block's neighbours get a shape update: one that keeps its block may still change its state
-            int[][] before = useBefore.get(sequence);
-            for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
-                int[] o = PREDICTION_NEIGHBOURS[i];
-                int[] beside = before == null ? null : before[i + 1];
-                long key = blockKey(placed.x() + o[0], placed.y() + o[1], placed.z() + o[2]);
-                if (beside == null) {
-                    cells.remove(key); // not known: not resolved there (placement would not have given this position)
-                    continue;
-                }
-                for (int s : beside) {
-                    if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE)) {
-                        cells.put(key, SAME_BLOCK);
+            if (atTarget) {
+                // the new block's neighbours get a shape update: one that keeps its block may still change its state
+                int[][] before = useBefore.get(sequence);
+                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+                    int[] o = PREDICTION_NEIGHBOURS[i];
+                    int[] beside = before == null ? null : before[i + 1];
+                    long key = blockKey(placed.x() + o[0], placed.y() + o[1], placed.z() + o[2]);
+                    if (beside == null) {
+                        cells.remove(key); // not known: not resolved there (placement would not have given this position)
+                        continue;
+                    }
+                    for (int s : beside) {
+                        if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE) && !isDrySlab(s)) {
+                            cells.put(key, SAME_BLOCK);
+                        }
                     }
                 }
             }

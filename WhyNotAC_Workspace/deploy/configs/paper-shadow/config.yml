@@ -39,6 +39,7 @@ observability:
   health-watchdog: true
   metrics-http-port: 9108
   alert-stream-file: "alerts-stream.jsonl"
+  webhook-url: ""
 
 network-bridge:
   enabled: false

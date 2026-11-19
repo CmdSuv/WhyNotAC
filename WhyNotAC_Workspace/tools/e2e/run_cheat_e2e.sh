@@ -116,7 +116,7 @@ done
 echo "paper up: $(grep -o 'Done ([^)]*)' "$WORK_DIR/cheat-server.log")"
 
 echo "gamerule spawn_monsters false" > "$FIFO"
-python3 -I "$HERE/cheat_probe.py" 127.0.0.1 "$PORT" CheatProbe 14 > "$WORK_DIR/cheat-probe.json" &
+python3 -I "$HERE/cheat_probe.py" 127.0.0.1 "$PORT" CheatProbe 17 > "$WORK_DIR/cheat-probe.json" &
 PROBE=$!
 
 for _ in $(seq 1 150); do
@@ -133,11 +133,15 @@ sleep 0.5
 # WhyNotAC CANCEL_IMPOSSIBLE_HIT keeps it alive across 8 hits!
 echo "give CheatProbe minecraft:diamond_sword" > "$FIFO"
 echo "execute at CheatProbe run summon minecraft:husk ~4.3 ~ ~ {NoAI:1b,PersistenceRequired:1b,Tags:[\"wn_target\"],Health:12.0f,attributes:[{id:\"minecraft:max_health\",base:12.0d}]}" > "$FIFO"
-echo "execute at CheatProbe run summon minecraft:husk ~ ~ ~2.8 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wn_aura\"],Health:20.0f,attributes:[{id:\"minecraft:max_health\",base:20.0d}]}" > "$FIFO"
+echo "execute at CheatProbe run summon minecraft:husk ~ ~ ~2.8 {NoAI:1b,PersistenceRequired:1b,Tags:[\"wn_aura\"],Health:100.0f,attributes:[{id:\"minecraft:max_health\",base:100.0d}]}" > "$FIFO"
 
 sleep 9
 echo "whynotac ai CheatProbe" > "$FIFO"
 echo "whynotac entities CheatProbe" > "$FIFO"
+
+# Phase 11 (around tick ~275): apply real knockback while CheatProbe stays anchored on ground (0% Anti-KB -> velocity-response)
+sleep 4.8
+echo "damage CheatProbe 1 minecraft:mob_attack by @e[tag=wn_aura,limit=1]" > "$FIFO"
 
 wait "$PROBE"
 sleep 1
@@ -203,6 +207,10 @@ check("CheatProbe client-clock (" in clean, "live ARMED client-clock detection f
 check("CheatProbe attack-aim (" in clean, "live ARMED attack-aim (Silent KillAura) detection fired")
 check("CheatProbe action-grammar (" in clean, "live ARMED action-grammar detection fired")
 check("CheatProbe packet-bounds (" in clean, "live ARMED packet-bounds (BadPackets cursor bounds) detection fired")
+check("CheatProbe inventory-protocol (" in clean, "live ARMED inventory-protocol (InvWalk/AutoTotem) detection fired")
+check("CheatProbe use-item-state (" in clean, "live ARMED use-item-state (AutoBlock/NoSlow) detection fired")
+check("CheatProbe interact-at-box (" in clean, "live ARMED interact-at-box (hitbox offset spoof) detection fired")
+check("CheatProbe velocity-response (" in clean, "live ARMED velocity-response (Anti-KB) detection fired")
 check("CheatProbe design-probe (" in clean, "live ARMED design-probe (behind-FOV decoy martingale) detection fired")
 check("WhyNotAC AI (non-punitive) for CheatProbe:" in clean and "intrinsicRisk=" in clean,
       "live /whynotac ai reported non-punitive session moments & intrinsicRisk")

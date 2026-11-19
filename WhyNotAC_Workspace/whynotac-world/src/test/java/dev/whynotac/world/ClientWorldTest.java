@@ -970,4 +970,64 @@ class ClientWorldTest {
         assertNull(world.bucketPlacement(1, "minecraft:water_bucket",
                 java.util.List.of(new Vec3d(3.5, 65.62, 0.5)), 0F, 90F, 4.5));
     }
+
+    @Test
+    void resolvesDoubleSlabMergeHorizontalDirectionalAndIsolatedFenceWall() {
+        stoneInTheAir();
+        // 1. Place bottom stone_slab at (5, 11, 5), then click UP on it to merge into double slab at (5, 11, 5)
+        int bottomSlab = STATES.stateOf("minecraft:stone_slab", "type=bottom,waterlogged=false");
+        int doubleSlab = STATES.stateOf("minecraft:stone_slab", "type=double,waterlogged=false");
+        put(5, 11, 5, bottomSlab);
+        sync();
+        useOn(5, 11, 5, BlockFace.UP, 20);
+        ClientWorld.Placement merged = world.placementForItem(20, "minecraft:stone_slab");
+        assertNotNull(merged);
+        assertEquals(new BlockPosition(5, 11, 5), merged.position());
+        assertEquals(doubleSlab, merged.state());
+        world.resolveUse(20, merged.position(), merged.state());
+        assertArrayEquals(new int[] {doubleSlab}, world.possibleStates(5, 11, 5));
+
+        // 2. 4-way HorizontalDirectionalBlock (white_glazed_terracotta): facing opposite player direction
+        put(5, 11, 5, doubleSlab);
+        out(new ClientboundPacket.BlockChangedAck(20));
+        sync();
+        useOn(5, 11, 5, BlockFace.UP, 21);
+        ClientWorld.Placement glazed = world.placementForItem(21, "minecraft:white_glazed_terracotta", "north");
+        assertNotNull(glazed);
+        assertEquals(new BlockPosition(5, 12, 5), glazed.position());
+        assertEquals(STATES.stateOf("minecraft:white_glazed_terracotta", "facing=south"), glazed.state());
+        world.resolveUse(21, glazed.position(), glazed.state());
+
+        // 3. carved_pumpkin above snow_block rejected (golem spawn side-effect guard)
+        put(7, 10, 5, STATES.onlyStateOf("minecraft:snow_block"));
+        out(new ClientboundPacket.BlockChangedAck(21));
+        sync();
+        useOn(7, 10, 5, BlockFace.UP, 22);
+        assertNull(world.placementForItem(22, "minecraft:carved_pumpkin", "east"));
+
+        // 4. Dry isolated oak_fence and cobblestone_wall resolve in open air, reject beside solid block
+        put(10, 10, 10, STONE);
+        out(new ClientboundPacket.BlockChangedAck(22));
+        sync();
+        useOn(10, 10, 10, BlockFace.UP, 23);
+        ClientWorld.Placement fence = world.placementForItem(23, "minecraft:oak_fence");
+        assertNotNull(fence);
+        assertEquals(STATES.stateOf("minecraft:oak_fence", "east=false,north=false,south=false,waterlogged=false,west=false"), fence.state());
+        world.resolveUse(23, fence.position(), fence.state());
+
+        put(13, 10, 10, STONE);
+        out(new ClientboundPacket.BlockChangedAck(23));
+        sync();
+        useOn(13, 10, 10, BlockFace.UP, 24);
+        ClientWorld.Placement wall = world.placementForItem(24, "minecraft:cobblestone_wall");
+        assertNotNull(wall);
+        assertEquals(STATES.stateOf("minecraft:cobblestone_wall", "east=none,north=none,south=none,up=true,waterlogged=false,west=none"), wall.state());
+
+        // Adjacent solid block at (12, 11, 10) disqualifies isolated wall
+        put(12, 11, 10, STONE);
+        out(new ClientboundPacket.BlockChangedAck(24));
+        sync();
+        useOn(13, 10, 10, BlockFace.UP, 25);
+        assertNull(world.placementForItem(25, "minecraft:cobblestone_wall"));
+    }
 }
