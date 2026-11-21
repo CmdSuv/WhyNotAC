@@ -4,10 +4,10 @@ Minecraft Java Edition **1.21.11** (Paper) için tamamen sunucu taraflı anomali
 Client'a hiçbir şey kurulmaz ve client'ın bilgisayarı okunmaz. Tüm analiz ağ paketleri, bit-tam
 fizik ve davranış modelleriyle sunucuda yapılır.
 
-> **Durum: Faz 1 – Faz 16 tamamlandı — Üretime Hazır (`SHADOW` varsayılan, `mitigate-pilot` / `ARMED` opt-in).**
-> - **21 analiz kontrolü + `design-probe` (`D`):** deterministik `P-A`/`P-M` kontroller (`attack-reach`, `attack-aim`, `use-aim`, `break-time`, `movement`, `velocity-response` v3, `tick-framing`, `client-clock`, `transaction-order`, `action-grammar`, `prediction-sequence`, `packet-bounds` v4, `inventory-protocol`, `interact-at-box`, `use-item-state` v2), cezasız istatistiksel `S` kontroller (`click-pattern`, `aim-pattern` v2, `container-timing`, `scaffold-pattern`, `timer-balance`, `ping-spoof`) ve Ville eşitsizliğine dayalı `design-probe` yem sondaları.
-> - **Sıfır Yanlış-Pozitif Sözleşmesi:** 3 gerçek resmi 1.21.11 istemci kaydında (`414.983` olay, `40.963` hareket tiki -> **%99,94 `EXPLAINED`**, `0 UNEXPLAINED`, `0` yanlış kanıt), **30/30** sentetik benchmark senaryosunda ve **9/9** kalıcı `.wnrec` hile korpusunda `0` FP / `0` FN.
-> - **Tam Yığın Mimari:** Netty kenar gözlemcisi (`WIRE`), bit-tam 1.21.11 dünya/varlık/envanter/öz-oyuncu/etiket replikaları, bağımsız `SecondVerifier`, SHA-256 `EvidenceCertificate`, `CircuitBreaker`, `FalseBanBudget`, `BanWaveQueue`, HMAC-SHA256 zincirli `AuditLedger`, dört-göz `ReviewWorkflow`, çok-değişkenli cezasız `whynotac-ai`, çift-yönlü yankısız `whynotac-velocity` (`whynotac:bridge`), OpenMetrics `/metrics` + `/health`, `alerts-stream.jsonl` + async webhook, `/whynotac reload` ve CycloneDX 1.5 SBOM.
+> **Durum: Faz 1 – Faz 17 tamamlandı — Üretime Hazır (`SHADOW` varsayılan, `paper-pvp-practice` / `paper-smp` / `mitigate-pilot` / `ARMED` opt-in).**
+> - **21 analiz kontrolü + `design-probe` (`D`):** deterministik `P-A`/`P-M` kontroller (`attack-reach`, `attack-aim`, `use-aim`, `break-time`, `movement`, `velocity-response` v3, `tick-framing`, `client-clock`, `transaction-order` v2, `action-grammar`, `prediction-sequence`, `packet-bounds` v4, `inventory-protocol`, `interact-at-box`, `use-item-state` v2), cezasız istatistiksel `S` kontroller (`click-pattern`, `aim-pattern` v2, `container-timing`, `scaffold-pattern`, `timer-balance`, `ping-spoof` v2) ve Ville eşitsizliğine dayalı `design-probe` yem sondaları.
+> - **Sıfır Yanlış-Pozitif Sözleşmesi:** 3 gerçek resmi 1.21.11 istemci kaydında (`414.983` olay, `40.963` hareket tiki -> **%99,94 `EXPLAINED`**, `0 UNEXPLAINED`, `0` yanlış kanıt), **32/32** sentetik benchmark senaryosunda ve **10/10** kalıcı `.wnrec` hile korpusunda `0` FP / `0` FN.
+> - **Tam Yığın Mimari:** Netty kenar gözlemcisi (`WIRE`), oturum başına `2 ms` adil analiz bütçesi + `Gap` patlaması telemetrisi, bit-tam 1.21.11 dünya/varlık/envanter/öz-oyuncu/etiket replikaları, bağımsız `SecondVerifier`, SHA-256 `EvidenceCertificate`, `CircuitBreaker`, `FalseBanBudget`, sıcak-yenileme korumalı `BanWaveQueue`, gerçek `fsync` + HMAC-SHA256 zincirli `AuditLedger`, disk-kalıcı dört-göz `ReviewWorkflow`, kalıcı Mahalanobis kovaryanslı `whynotac-ai`, çift-yönlü yankısız `whynotac-velocity` (`whynotac:bridge` + uzak `GDPR_FORGET`), OpenMetrics `/metrics` + `/health`, `alerts-stream.jsonl` + async webhook, `/whynotac reload`, 5 sunucu-türü yapılandırma seti ve CycloneDX 1.5 SBOM.
 > - **Varsayılan Güvenlik:** Kutudan çıktığında tüm kontroller `SHADOW` modundadır; hiçbir oyuncuya otomatik kick/ban uygulanmaz ([politika](docs/POLICY.md), [soundness](docs/SOUNDNESS.md), [operatör kılavuzu](docs/OPERATOR-GUIDE.md)).
 > Faz 2b-1: zaman çizelgesi ağın kenarında, client'ın gerçekten gönderdiği ve aldığı baytlardan
 > kaydedilir. Diğer eklentilerin eklediği, iptal ettiği veya yeniden yazdığı paketler görünür.
@@ -120,7 +120,8 @@ fizik ve davranış modelleriyle sunucuda yapılır.
 - [Operatör ve Canlı Pilot Kılavuzu](docs/OPERATOR-GUIDE.md): Paper, Velocity, `mitigate-pilot`, Prometheus/Grafana ve CLI araçları
 - [Çoklu-Sürüm Yükseltme Rehberi](docs/UPGRADE-GUIDE-PROD14.md): `PROD-14` protokol geçiş süreci
 - [Mimari ve ilkeler](docs/ARCHITECTURE.md): katmanlar, thread modeli, transaction sandviçi, sıfır yanlış-ban sözleşmesi
-- [Yol haritası](docs/ROADMAP.md) · [Faz 7–16 İleri Mühendislik Planı](docs/ROADMAP-PHASE-7-12.md)
+- [Yol haritası](docs/ROADMAP.md) · [Faz 7–17 İleri Mühendislik Planı](docs/ROADMAP-PHASE-7-12.md)
+- [Derin Zayıflık ve Eksiklik Analizi (2026-11-21)](docs/reviews/2026-11-21-weakness-analysis.md) ([ilk analiz: 2026-10-06](docs/reviews/2026-10-06-weakness-analysis.md))
 - [Gizlilik ve veri sahibi talepleri](docs/privacy/README.md): neyin saklandığı, `/whynotac privacy find|forget`
 - [Doğrulanmış vanilla 1.21.11 referansı](docs/reference/vanilla-1.21.11.md): decompile edilmiş kaynaktan okunan her sabit
 - Katman sözleşmeleri: [physics](whynotac-physics/README.md) · [analysis](whynotac-analysis/README.md) ·
@@ -149,7 +150,7 @@ Gereksinim: JDK 21. İlk derlemede paperweight, Paper dev-bundle'ını hazırlar
 ```bash
 ./gradlew build                                                # tüm modüller + tüm birim/regresyon/benchmark testleri + CycloneDX SBOM
 ./gradlew :whynotac-paper:jar :whynotac-velocity:jar           # Paper ve Velocity eklenti JAR'ları
-java -jar whynotac-paper/build/libs/whynotac-paper-0.1.0-SNAPSHOT.jar benchmark regression cheat-corpus  # 30 senaryo + 9 .wnrec + 3 gerçek kayıt
+java -jar whynotac-paper/build/libs/whynotac-paper-0.1.0-SNAPSHOT.jar benchmark regression cheat-corpus  # 32 senaryo + 10 .wnrec + 3 gerçek kayıt
 tools/e2e/run_e2e.sh /tmp/wnac-e2e                             # gerçek Paper 1.21.11 sunucusuyla canlı E2E
 EXTRA_PLUGINS="$(tools/e2e/fetch_interop_plugins.sh /tmp/wnac-plugins)" E2E_EXPECT_PLUGINS="ViaVersion packetevents" \
   tools/e2e/run_e2e.sh /tmp/wnac-e2e                           # ViaVersion + PacketEvents uyumluluk E2E

@@ -159,6 +159,47 @@ class TransactionOrderCheckTest {
     }
 
     @Test
+    void skippedTransactionProducesModificationProof() {
+        out(new ClientboundPacket.Ping(70001));
+        out(new ClientboundPacket.Ping(70002));
+        in(new ServerboundPacket.Pong(70002));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 70002, now, 1));
+        assertEquals(1, evidence.size());
+        Evidence e = evidence.getFirst();
+        assertEquals(TransactionOrderCheck.ID, e.check());
+        assertEquals(TransactionOrderCheck.VERSION, e.checkVersion());
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertEquals("skipped-transaction", e.details().get("reason"));
+        assertEquals("1", e.details().get("skippedCount"));
+    }
+
+    @Test
+    void duplicateTransactionProducesModificationProof() {
+        out(new ClientboundPacket.Ping(80001));
+        pong(80001);
+        assertTrue(evidence.isEmpty());
+        tick();
+        in(new ServerboundPacket.Pong(80001));
+        session.deliver(new TimelineEvent.Anomaly(seq++, now, TimelineEvent.Anomaly.Kind.DUPLICATE_TRANSACTION,
+                "pong " + Integer.toHexString(80001)));
+        assertEquals(1, evidence.size());
+        Evidence e = evidence.getFirst();
+        assertEquals(EvidenceClass.MODIFICATION_PROOF, e.evidenceClass());
+        assertEquals("duplicate-transaction", e.details().get("reason"));
+    }
+
+    @Test
+    void gapClearsPendingAndRememberedTransactionsSoNoFalsePositiveFollows() {
+        out(new ClientboundPacket.Ping(90001));
+        pong(90001);
+        session.deliver(new TimelineEvent.Gap(seq++, now, 10));
+        in(new ServerboundPacket.Pong(90001));
+        session.deliver(new TimelineEvent.Anomaly(seq++, now, TimelineEvent.Anomaly.Kind.DUPLICATE_TRANSACTION,
+                "pong " + Integer.toHexString(90001)));
+        assertTrue(evidence.isEmpty(), "duplicate after Gap must not produce evidence: " + evidence);
+    }
+
+    @Test
     void inadmissibleSessionIsRejectedNotAccepted() {
         initSession(Source.GAME);
         out(new ClientboundPacket.Ping(50));

@@ -80,6 +80,15 @@ final class BanWaveQueueTest {
             });
             assertTrue(futureLatch.await(2, TimeUnit.SECONDS));
             assertEquals(2, fired.get());
+
+            // Hot-reloading config to disable autoBan immediately suppresses pending waves before dispatch
+            UUID playerD = UUID.randomUUID();
+            PlayerSession sD = reg.open("127.0.0.1:4");
+            sD.bind(playerD, "ReloadedD", 4, 100L);
+            queue.enqueue(makeDecision(sD, 5000L), d -> fired.incrementAndGet());
+            queue.updateConfig(VerdictConfig.shadowDefaults());
+            Thread.sleep(180);
+            assertEquals(2, fired.get(), "hot-reloading autoBan=false must suppress already-queued ban waves");
         }
     }
 

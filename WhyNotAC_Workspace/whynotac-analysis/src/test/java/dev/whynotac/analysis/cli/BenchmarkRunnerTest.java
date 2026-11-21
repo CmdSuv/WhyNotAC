@@ -33,7 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 final class BenchmarkRunnerTest {
 
     @Test
-    void benchmarkSuitePassesAll30ScenariosWithZeroHonestFpAndZeroCheatFn(@TempDir Path tempCorpus) throws Exception {
+    void benchmarkSuitePassesAll32ScenariosWithZeroHonestFpAndZeroCheatFn(@TempDir Path tempCorpus) throws Exception {
         Path corpusDir = Path.of("../cheat-corpus");
         if (!java.nio.file.Files.isDirectory(corpusDir)) {
             corpusDir = tempCorpus;
@@ -41,9 +41,9 @@ final class BenchmarkRunnerTest {
         }
         BenchmarkRunner.BenchmarkReport report = BenchmarkRunner.run(Path.of("../regression"), corpusDir);
         assertEquals(0, report.honestFalsePositives(), "Honest recordings must produce 0 false positives");
-        assertTrue(report.cheatRecordings() >= 9, "Must replay at least 9 cheat corpus recordings");
+        assertTrue(report.cheatRecordings() >= 10, "Must replay at least 10 cheat corpus recordings");
         assertEquals(0, report.cheatFalseNegatives(), "Cheat corpus must produce 0 false negatives: " + report.scenarioFindings());
-        assertTrue(report.scenariosTotal() >= 30, "Must run at least 30 scenarios");
+        assertTrue(report.scenariosTotal() >= 32, "Must run at least 32 scenarios");
         assertEquals(report.scenariosTotal(), report.scenariosPassed(),
                 "All synthetic benchmark scenarios must pass: " + report.scenarioFindings());
         assertTrue(report.allPassed());

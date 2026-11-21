@@ -275,6 +275,8 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("autoblock-noslow-same-tick", "use-item-state", true, h -> scenarioUseSlowdown(h)));
         scenarioResults.add(measure("shield-autoblock-cross-tick", "use-item-state", true, h -> scenarioCrossTickShieldAutoBlock(h)));
         scenarioResults.add(measure("tick-framing-multi-move", "tick-framing", true, h -> scenarioTickFraming(h)));
+        scenarioResults.add(measure("transaction-skipped-ping", "transaction-order", true, h -> scenarioTransactionSkippedPing(h)));
+        scenarioResults.add(measure("transaction-duplicate-pong", "transaction-order", true, h -> scenarioTransactionDuplicatePong(h)));
         // Statistical S checks (ALERT only)
         scenarioResults.add(measure("constant-interval-autoclicker", "click-pattern", true, h -> scenarioAutoClicker(h)));
         scenarioResults.add(measure("oscillating-timer-balance", "timer-balance", true, h -> scenarioTimerBalance(h)));
@@ -349,6 +351,11 @@ public final class BenchmarkRunner {
                     scenarioPacketBoundsPitchFlip(h);
                     h.now += 2_000_000_000L;
                     scenarioPacketBoundsDuplicateHotbar(h);
+                }),
+                new CorpusEntry("cheat-transaction-skip-dup.wnrec", h -> {
+                    scenarioTransactionSkippedPing(h);
+                    h.now += 2_000_000_000L;
+                    scenarioTransactionDuplicatePong(h);
                 }));
         for (CorpusEntry entry : entries) {
             Path file = outputDir.resolve(entry.fileName());
@@ -768,6 +775,30 @@ public final class BenchmarkRunner {
         h.tick();
     }
 
+    private static void scenarioTransactionSkippedPing(Harness h) {
+        h.markCheatStart();
+        int p1 = ++h.pingId;
+        int p2 = ++h.pingId;
+        h.out(new ClientboundPacket.Ping(p1));
+        h.out(new ClientboundPacket.Ping(p2));
+        h.in(new ServerboundPacket.Pong(p2));
+        h.deliver(new TimelineEvent.Acknowledged(h.seq++, h.now, p2, h.now, 1));
+        h.tick();
+    }
+
+    private static void scenarioTransactionDuplicatePong(Harness h) {
+        int p1 = ++h.pingId;
+        h.out(new ClientboundPacket.Ping(p1));
+        h.in(new ServerboundPacket.Pong(p1));
+        h.deliver(new TimelineEvent.Acknowledged(h.seq++, h.now, p1, h.now, 0));
+        h.tick();
+        h.markCheatStart();
+        h.in(new ServerboundPacket.Pong(p1));
+        h.deliver(new TimelineEvent.Anomaly(h.seq++, h.now, TimelineEvent.Anomaly.Kind.DUPLICATE_TRANSACTION,
+                "pong " + Integer.toHexString(p1)));
+        h.tick();
+    }
+
     private static void scenarioAutoClicker(Harness h) {
         h.spawnZombie(2, 2.5, 64.0, 4.5);
         h.markCheatStart();
@@ -1045,7 +1076,7 @@ public final class BenchmarkRunner {
             int id = ++pingId;
             out(new ClientboundPacket.Ping(id));
             in(new ServerboundPacket.Pong(id));
-            deliver(new TimelineEvent.Acknowledged(seq++, now, id, now, tickCount));
+            deliver(new TimelineEvent.Acknowledged(seq++, now, id, now, 0));
         }
 
         void noteTick() {

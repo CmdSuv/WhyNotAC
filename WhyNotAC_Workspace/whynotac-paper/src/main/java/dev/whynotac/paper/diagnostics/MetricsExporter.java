@@ -40,7 +40,36 @@ public final class MetricsExporter implements AutoCloseable {
             double transactionMeanWallMicros,
             double transactionMaxWallMicros,
             Map<String, Margins.Margin> margins,
-            HealthModel.Evaluation health) {}
+            HealthModel.Evaluation health,
+            long sessionBudgetYields,
+            long sessionGapBursts) {
+
+        public Snapshot(
+                int sessionsLive,
+                long sessionsTotal,
+                long queuedEvents,
+                long inboundTotal,
+                long outboundTotal,
+                long lostEvents,
+                long inboundDivergences,
+                long outboundDivergences,
+                long listenerErrors,
+                long casesOpened,
+                long casesStored,
+                long casesDropped,
+                long recordingFailed,
+                long recordingRejectedBlocks,
+                int banWavePending,
+                double transactionMeanWallMicros,
+                double transactionMaxWallMicros,
+                Map<String, Margins.Margin> margins,
+                HealthModel.Evaluation health) {
+            this(sessionsLive, sessionsTotal, queuedEvents, inboundTotal, outboundTotal, lostEvents,
+                    inboundDivergences, outboundDivergences, listenerErrors, casesOpened, casesStored,
+                    casesDropped, recordingFailed, recordingRejectedBlocks, banWavePending,
+                    transactionMeanWallMicros, transactionMaxWallMicros, margins, health, 0L, 0L);
+        }
+    }
 
     /** Detects state transitions (GREEN <-> DEGRADED <-> CRITICAL) for operator alerting without spam. */
     public static final class HealthWatchdog {
@@ -133,6 +162,8 @@ public final class MetricsExporter implements AutoCloseable {
         gauge(out, "whynotac_ban_wave_pending", "Queued delayed temporary bans", s.banWavePending());
         gauge(out, "whynotac_transaction_loop_mean_wall_micros", "Mean main-thread tick transaction wall time (us)", s.transactionMeanWallMicros());
         gauge(out, "whynotac_transaction_loop_max_wall_micros", "Max main-thread tick transaction wall time (us)", s.transactionMaxWallMicros());
+        counter(out, "whynotac_session_budget_yields_total", "Per-session analysis slice budget yields (fairness protection)", s.sessionBudgetYields());
+        counter(out, "whynotac_session_gap_bursts_total", "Per-session repeated Gap blinding bursts (>=3 gaps in 60s)", s.sessionGapBursts());
 
         if (s.margins() != null && !s.margins().isEmpty()) {
             out.append("# HELP whynotac_check_min_margin Smallest honest safety margin observed per check.\n");

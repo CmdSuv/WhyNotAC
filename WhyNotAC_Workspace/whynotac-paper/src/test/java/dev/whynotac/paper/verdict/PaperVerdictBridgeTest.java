@@ -80,7 +80,8 @@ class PaperVerdictBridgeTest {
         };
         capturing.addHandler(handler);
         try {
-            for (String profile : List.of("paper-shadow", "paper-mitigate-pilot", "paper-velocity-backend")) {
+            for (String profile : List.of("paper-shadow", "paper-mitigate-pilot", "paper-velocity-backend",
+                    "paper-pvp-practice", "paper-smp")) {
                 Path cfgPath = Path.of("..", "deploy", "configs", profile, "config.yml").normalize();
                 if (!Files.exists(cfgPath)) {
                     cfgPath = Path.of("deploy", "configs", profile, "config.yml");
@@ -96,6 +97,16 @@ class PaperVerdictBridgeTest {
                     assertEquals(11, cfg.armedChecks().size());
                     assertTrue(cfg.armedChecks().contains("velocity-response"));
                     assertTrue(cfg.armedChecks().contains("inventory-protocol"));
+                } else if (profile.equals("paper-pvp-practice")) {
+                    assertTrue(cfg.mitigationsEnabled());
+                    assertTrue(cfg.hidesInformationEnabled());
+                    assertEquals(12, cfg.armedChecks().size());
+                    assertTrue(cfg.armedChecks().contains("transaction-order"));
+                } else if (profile.equals("paper-smp")) {
+                    assertTrue(cfg.mitigationsEnabled());
+                    assertFalse(cfg.hidesInformationEnabled());
+                    assertEquals(9, cfg.armedChecks().size());
+                    assertTrue(cfg.armedChecks().contains("movement"));
                 } else {
                     assertTrue(cfg.armedChecks().isEmpty(), profile + " must default to SHADOW");
                     assertFalse(cfg.mitigationsEnabled());

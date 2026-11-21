@@ -256,12 +256,15 @@ def verify_cases(probe, log, work_dir, check):
     finishes = probe.get("finishes", [])
     check(len(finishes) == 1 and len(digs) == 2 and finishes[0]["tick"] == digs[0]["tick"] + 1,
           f"the probe finished its honest dig the tick after starting it: {finishes}")
-    check(len(dossiers) == 11 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
+    check(len(dossiers) == 13 and len(by_check.get("tick-framing", [])) == 1 and len(by_check.get("client-clock", [])) == 1
           and len(by_check.get("attack-reach", [])) == 1 and len(by_check.get("action-grammar", [])) == 1
           and len(by_check.get("attack-aim", [])) == 2 and len(by_check.get("use-aim", [])) == 3 and len(by_check.get("break-time", [])) == 1
-          and len(by_check.get("prediction-sequence", [])) == 1,
-          f"exactly eleven cases opened, one per violation (none for the attacks in reach and in the look, the honest use, click and dig): "
+          and len(by_check.get("prediction-sequence", [])) == 1 and len(by_check.get("transaction-order", [])) == 2,
+          f"exactly thirteen cases opened, one per violation (including skipped & duplicate transaction-order, none for honest actions): "
           f"{sorted((d['check'], d['summary']) for d in dossiers)}")
+    tx_reasons = {d["details"].get("reason") for d in by_check.get("transaction-order", [])}
+    check(tx_reasons == {"skipped-transaction", "duplicate-transaction"},
+          f"transaction-order caught both skipped and duplicate transactions (P-M): {sorted(tx_reasons)}")
     broken = by_check.get("break-time", [None])[0]
     if broken and finishes:
         dd = broken["details"]
@@ -350,11 +353,11 @@ def verify_cases(probe, log, work_dir, check):
               f"a shadow alert for {d['check']} went to the console (and to whynotac.alerts.shadow)")
     verified = [json.loads(line) for line in open(os.path.join(work_dir, "e2e-verify.jsonl"))] \
         if os.path.exists(os.path.join(work_dir, "e2e-verify.jsonl")) else []
-    # a re-run finds every finding of the dossier's check in the recording: attack-aim has two
-    check(len(verified) == len(dossiers) == 11 and all(v["verified"] is True
+    # a re-run finds every finding of the dossier's check in the recording: attack-aim & transaction-order have two, use-aim has three
+    check(len(verified) == len(dossiers) == 13 and all(v["verified"] is True
                                                       and v["evidenceInRecording"] == len(by_check.get(v["expected"].split("@")[0], [])) for v in verified),
           f"`verify` re-ran each check over the recording, independently, and found the same evidence: {verified}")
-    # the command lists the ten newest (of the eleven)
+    # the command lists the ten newest (of the thirteen)
     newest = sorted(dossiers, key=lambda d: d["created"], reverse=True)[:10]
     check(re.search(r"WhyNotAC cases \(newest first\): 10", log) is not None
           and all(re.search(re.escape(d["id"][:8]) + r" WhyNotProbe " + re.escape(d["check"]) + " " + re.escape(d["evidenceClass"]) + r" SHADOW", log)

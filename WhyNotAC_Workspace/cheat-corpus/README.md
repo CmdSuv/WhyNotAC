@@ -13,6 +13,7 @@ Deterministic `.wnrec` recordings exercising WhyNotAC's core deterministic (`P-A
 - `cheat-shield-autoblock.wnrec` — Cross-tick offhand `minecraft:shield` keep-using `AutoBlock` attack (`use-item-state` v2)
 - `cheat-partial-velocity-explosion.wnrec` — 30% partial vertical Velocity spoofing `onGround=false`, suppressed `Explosion` knockback, and 30% stationary partial horizontal Velocity (`velocity-response` v3)
 - `cheat-pitch-hotbar-spam.wnrec` — Out-of-bounds `pitch = 105°` Derp/Pitch-Flip and duplicate consecutive `SetCarriedItem` NoSlow slot-spam (`packet-bounds` v4)
+- `cheat-transaction-skip-dup.wnrec` — Skipped WhyNotAC transaction (`skipped-transaction`) and duplicate/replayed `Pong` (`duplicate-transaction`) (`transaction-order` v2)
 
 Regenerate cleanly anytime from `WhyNotAC_Workspace/`:
 

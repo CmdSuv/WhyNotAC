@@ -57,4 +57,22 @@ class ReviewWorkflowTest {
         assertTrue(explanation.contains("attack-reach (P-A, group attack-reach)"));
         assertTrue(explanation.contains("VERIFIED"));
     }
+
+    @Test
+    void persistsAndReloadsFourEyesStateAcrossRestarts(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path storeFile = dir.resolve("reviews.jsonl");
+        ReviewWorkflow first = new ReviewWorkflow(storeFile);
+        first.recordFirstReview("case-abc", "Alice", "clip \"1\"\nline2", 1000L);
+        first.confirmSecondReview("case-abc", "Bob", "confirmed", 2000L);
+
+        ReviewWorkflow reloaded = new ReviewWorkflow(storeFile);
+        ReviewWorkflow.ReviewRecord rec = reloaded.status("case-abc").orElseThrow();
+        assertEquals(ReviewWorkflow.Status.CONFIRMED_FOUR_EYES, rec.status());
+        assertEquals("Alice", rec.primaryReviewer());
+        assertEquals("Bob", rec.secondaryReviewer());
+        assertTrue(rec.notes().contains("clip \"1\"\nline2"));
+        assertTrue(rec.notes().contains("confirmed"));
+        assertThrows(IllegalArgumentException.class,
+                () -> reloaded.resolveAppeal("case-abc", "Alice", true, "self uphold", 3000L));
+    }
 }

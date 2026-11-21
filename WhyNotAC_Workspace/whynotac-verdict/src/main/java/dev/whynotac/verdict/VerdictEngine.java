@@ -99,7 +99,9 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
 
     /** Atomically updates the active verdict configuration without resetting session states. */
     public void updateConfig(VerdictConfig newConfig) {
-        this.config = Objects.requireNonNull(newConfig, "newConfig");
+        VerdictConfig checked = Objects.requireNonNull(newConfig, "newConfig");
+        this.config = checked;
+        this.banWaveQueue.updateConfig(checked);
     }
 
     public CircuitBreaker circuitBreaker() {

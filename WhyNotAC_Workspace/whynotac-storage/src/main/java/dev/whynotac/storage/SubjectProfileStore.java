@@ -26,6 +26,23 @@ public final class SubjectProfileStore {
 
     public record FeatureSummary(long count, double mean, double sampleVariance) {}
 
+    public record CovarianceSummary(int dim, long count, double[] mean, double[] flatCoMoments) {
+        public CovarianceSummary {
+            mean = mean == null ? new double[0] : mean.clone();
+            flatCoMoments = flatCoMoments == null ? new double[0] : flatCoMoments.clone();
+        }
+
+        @Override
+        public double[] mean() {
+            return mean.clone();
+        }
+
+        @Override
+        public double[] flatCoMoments() {
+            return flatCoMoments.clone();
+        }
+    }
+
     public record SubjectProfile(
             UUID playerId,
             long lastSeenEpochMillis,
@@ -34,7 +51,8 @@ public final class SubjectProfileStore {
             long overturnedCount,
             Map<String, Long> casesByCheck,
             List<Long> falseBanIncidentTimestamps,
-            Map<String, FeatureSummary> baselineFeatures) {
+            Map<String, FeatureSummary> baselineFeatures,
+            CovarianceSummary combatCovariance) {
 
         public SubjectProfile(
                 UUID playerId,
@@ -45,7 +63,20 @@ public final class SubjectProfileStore {
                 Map<String, Long> casesByCheck,
                 List<Long> falseBanIncidentTimestamps) {
             this(playerId, lastSeenEpochMillis, totalCases, autoBansIssued, overturnedCount,
-                    casesByCheck, falseBanIncidentTimestamps, Map.of());
+                    casesByCheck, falseBanIncidentTimestamps, Map.of(), null);
+        }
+
+        public SubjectProfile(
+                UUID playerId,
+                long lastSeenEpochMillis,
+                long totalCases,
+                long autoBansIssued,
+                long overturnedCount,
+                Map<String, Long> casesByCheck,
+                List<Long> falseBanIncidentTimestamps,
+                Map<String, FeatureSummary> baselineFeatures) {
+            this(playerId, lastSeenEpochMillis, totalCases, autoBansIssued, overturnedCount,
+                    casesByCheck, falseBanIncidentTimestamps, baselineFeatures, null);
         }
 
         public SubjectProfile {
@@ -75,14 +106,15 @@ public final class SubjectProfileStore {
                 current.overturnedCount(),
                 byCheck,
                 current.falseBanIncidentTimestamps(),
-                current.baselineFeatures());
+                current.baselineFeatures(),
+                current.combatCovariance());
         write(updated);
         return updated;
     }
 
     public synchronized SubjectProfile recordAutoBan(UUID playerId, long epochMillis) throws IOException {
         SubjectProfile current = find(playerId).orElseGet(() ->
-                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of(), null));
         SubjectProfile updated = new SubjectProfile(
                 playerId,
                 Math.max(current.lastSeenEpochMillis(), epochMillis),
@@ -91,14 +123,15 @@ public final class SubjectProfileStore {
                 current.overturnedCount(),
                 current.casesByCheck(),
                 current.falseBanIncidentTimestamps(),
-                current.baselineFeatures());
+                current.baselineFeatures(),
+                current.combatCovariance());
         write(updated);
         return updated;
     }
 
     public synchronized SubjectProfile recordFalseBanIncident(UUID playerId, long epochMillis) throws IOException {
         SubjectProfile current = find(playerId).orElseGet(() ->
-                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of(), null));
         List<Long> incidents = new ArrayList<>(current.falseBanIncidentTimestamps());
         incidents.add(epochMillis);
         SubjectProfile updated = new SubjectProfile(
@@ -109,7 +142,8 @@ public final class SubjectProfileStore {
                 current.overturnedCount() + 1L,
                 current.casesByCheck(),
                 incidents,
-                current.baselineFeatures());
+                current.baselineFeatures(),
+                current.combatCovariance());
         write(updated);
         return updated;
     }
@@ -117,8 +151,15 @@ public final class SubjectProfileStore {
     /** Atomically updates persisted per-feature baseline moments for an authenticated account (AI-02 / STO-03). */
     public synchronized SubjectProfile saveBaselineFeatures(
             UUID playerId, Map<String, FeatureSummary> baselineFeatures, long epochMillis) throws IOException {
+        return saveBaselineFeatures(playerId, baselineFeatures, null, epochMillis);
+    }
+
+    /** Atomically updates persisted per-feature moments and optional multivariate combat covariance (AI-02 / STO-03). */
+    public synchronized SubjectProfile saveBaselineFeatures(
+            UUID playerId, Map<String, FeatureSummary> baselineFeatures, CovarianceSummary combatCovariance, long epochMillis)
+            throws IOException {
         SubjectProfile current = find(playerId).orElseGet(() ->
-                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of()));
+                new SubjectProfile(playerId, epochMillis, 0L, 0L, 0L, Map.of(), List.of(), Map.of(), null));
         SubjectProfile updated = new SubjectProfile(
                 playerId,
                 Math.max(current.lastSeenEpochMillis(), epochMillis),
@@ -127,7 +168,8 @@ public final class SubjectProfileStore {
                 current.overturnedCount(),
                 current.casesByCheck(),
                 current.falseBanIncidentTimestamps(),
-                baselineFeatures);
+                baselineFeatures,
+                combatCovariance != null ? combatCovariance : current.combatCovariance());
         write(updated);
         return updated;
     }
@@ -232,7 +274,32 @@ public final class SubjectProfileStore {
                     escape(fe.getKey()), fe.getValue().count(), fe.getValue().mean(), var));
             firstFeat = false;
         }
-        sb.append("}\n}\n");
+        sb.append("}");
+        CovarianceSummary cov = p.combatCovariance();
+        if (cov != null && cov.dim() > 0 && cov.count() > 0
+                && cov.mean().length == cov.dim()
+                && cov.flatCoMoments().length == cov.dim() * cov.dim()) {
+            sb.append(",\n  \"combatCovariance\": {\"dim\": ").append(cov.dim())
+                    .append(", \"count\": ").append(cov.count())
+                    .append(", \"mean\": [");
+            double[] mean = cov.mean();
+            for (int i = 0; i < mean.length; i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(String.format(Locale.ROOT, "%.12g", Double.isFinite(mean[i]) ? mean[i] : 0.0));
+            }
+            sb.append("], \"coMoments\": [");
+            double[] cm = cov.flatCoMoments();
+            for (int i = 0; i < cm.length; i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(String.format(Locale.ROOT, "%.12g", Double.isFinite(cm[i]) ? cm[i] : 0.0));
+            }
+            sb.append("]}");
+        }
+        sb.append("\n}\n");
         return sb.toString();
     }
 
@@ -259,10 +326,12 @@ public final class SubjectProfileStore {
         }
         Map<String, FeatureSummary> baseline = new TreeMap<>();
         int bfStart = json.indexOf("\"baselineFeatures\"");
+        int covStart = json.indexOf("\"combatCovariance\"");
         if (bfStart >= 0) {
+            String bfSlice = covStart > bfStart ? json.substring(bfStart, covStart) : json.substring(bfStart);
             Matcher feat = Pattern.compile(
                     "\"((?:[^\"\\\\]|\\\\.)*)\"\\s*:\\s*\\{\\s*\"count\"\\s*:\\s*(\\d+)\\s*,\\s*\"mean\"\\s*:\\s*([^,\\s}]+)\\s*,\\s*\"var\"\\s*:\\s*([^}\\s]+)\\s*}")
-                    .matcher(json.substring(bfStart));
+                    .matcher(bfSlice);
             while (feat.find()) {
                 try {
                     long count = Long.parseLong(feat.group(2));
@@ -274,7 +343,43 @@ public final class SubjectProfileStore {
                 } catch (NumberFormatException ignored) { }
             }
         }
-        return new SubjectProfile(expectedId, lastSeen, totalCases, autoBans, overturned, byCheck, incidents, baseline);
+        CovarianceSummary covSummary = null;
+        if (covStart >= 0) {
+            String covSlice = json.substring(covStart);
+            int dim = (int) parseLong(covSlice, "dim");
+            long count = parseLong(covSlice, "count");
+            double[] mean = parseDoubleArray(covSlice, "mean");
+            double[] cm = parseDoubleArray(covSlice, "coMoments");
+            if (dim > 0 && count > 0 && mean.length == dim && cm.length == dim * dim) {
+                covSummary = new CovarianceSummary(dim, count, mean, cm);
+            }
+        }
+        return new SubjectProfile(expectedId, lastSeen, totalCases, autoBans, overturned, byCheck, incidents, baseline, covSummary);
+    }
+
+    private static double[] parseDoubleArray(String json, String field) {
+        Matcher m = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\\[([^\\]]*)]").matcher(json);
+        if (!m.find()) {
+            return new double[0];
+        }
+        String body = m.group(1).trim();
+        if (body.isEmpty()) {
+            return new double[0];
+        }
+        String[] parts = body.split(",");
+        double[] out = new double[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            try {
+                double v = Double.parseDouble(parts[i].trim());
+                if (!Double.isFinite(v)) {
+                    return new double[0];
+                }
+                out[i] = v;
+            } catch (NumberFormatException ignored) {
+                return new double[0];
+            }
+        }
+        return out;
     }
 
     private static long parseLong(String json, String field) {

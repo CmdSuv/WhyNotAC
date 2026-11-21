@@ -150,6 +150,20 @@ public final class AccountBaselineModel {
         });
     }
 
+    /** Seeds persisted multivariate combat covariance once (no-op if already loaded in memory). */
+    public void seedCovarianceIfEmpty(UUID subject, RunningCovarianceMatrix persisted) {
+        if (subject == null || persisted == null || persisted.count() <= 0) {
+            return;
+        }
+        covarianceBaselines.computeIfAbsent(subject, id -> persisted.copy());
+    }
+
+    /** Returns an isolated copy of {@code subject}'s persisted multivariate combat covariance, or null if absent. */
+    public RunningCovarianceMatrix covarianceSnapshot(UUID subject) {
+        RunningCovarianceMatrix cov = subject == null ? null : covarianceBaselines.get(subject);
+        return cov == null ? null : cov.copy();
+    }
+
     public Map<String, RunningMoments> baselineSnapshot(UUID subject) {
         Map<String, RunningMoments> history = baselines.get(subject);
         if (history == null) {

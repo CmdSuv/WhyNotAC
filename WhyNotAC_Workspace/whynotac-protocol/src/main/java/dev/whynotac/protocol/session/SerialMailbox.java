@@ -36,19 +36,32 @@ final class SerialMailbox {
 
     /** Events processed per drain before yielding the thread to other sessions. */
     private static final int BATCH = 256;
+    /**
+     * Maximum wall-clock time spent draining a single session slice before yielding the shared
+     * executor thread to other sessions (always delivers at least 1 event so progress is guaranteed).
+     */
+    static final long MAX_DRAIN_NANOS = 2_000_000L;
     /** Payload bytes per additional unit of weight. */
     static final int BYTES_PER_UNIT = 128;
 
     private final Queue<TimelineEvent> queue = new ConcurrentLinkedQueue<>();
     private final AtomicInteger size = new AtomicInteger();
     private final AtomicBoolean scheduled = new AtomicBoolean();
+    private final AtomicLong totalDrainNanos = new AtomicLong();
+    private final AtomicLong budgetYields = new AtomicLong();
     private final Executor executor;
     private final Consumer<TimelineEvent> consumer;
     private final int capacity;
     private final AtomicLong globalSize;
     private final long globalCapacity;
+    private final long maxDrainNanos;
 
     SerialMailbox(Executor executor, int capacity, AtomicLong globalSize, long globalCapacity, Consumer<TimelineEvent> consumer) {
+        this(executor, capacity, globalSize, globalCapacity, MAX_DRAIN_NANOS, consumer);
+    }
+
+    SerialMailbox(Executor executor, int capacity, AtomicLong globalSize, long globalCapacity, long maxDrainNanos,
+                  Consumer<TimelineEvent> consumer) {
         if (capacity < 2) {
             throw new IllegalArgumentException("capacity must be at least 2 (a gap marker travels with the next event)");
         }
@@ -56,6 +69,7 @@ final class SerialMailbox {
         this.capacity = capacity;
         this.globalSize = globalSize;
         this.globalCapacity = globalCapacity;
+        this.maxDrainNanos = maxDrainNanos <= 0 ? Long.MAX_VALUE : maxDrainNanos;
         this.consumer = consumer;
     }
 
@@ -97,12 +111,28 @@ final class SerialMailbox {
         return size.get() == 0 && !scheduled.get();
     }
 
+    /** Cumulative wall-clock nanoseconds spent draining this session's events. */
+    long totalDrainNanos() {
+        return totalDrainNanos.get();
+    }
+
+    /** Number of times this mailbox yielded early to stay within its per-slice analysis time budget. */
+    long budgetYields() {
+        return budgetYields.get();
+    }
+
     private void drain() {
         boolean continueInline;
         do {
             continueInline = false;
+            long drainStart = System.nanoTime();
+            boolean checkBudget = maxDrainNanos < Long.MAX_VALUE;
             try {
                 for (int i = 0; i < BATCH; i++) {
+                    if (i > 0 && checkBudget && System.nanoTime() - drainStart >= maxDrainNanos) {
+                        budgetYields.incrementAndGet();
+                        break;
+                    }
                     TimelineEvent event = queue.poll();
                     if (event == null) {
                         break;
@@ -113,6 +143,7 @@ final class SerialMailbox {
                     consumer.accept(event);
                 }
             } finally {
+                totalDrainNanos.addAndGet(Math.max(0L, System.nanoTime() - drainStart));
                 scheduled.set(false);
             }
             if (!queue.isEmpty() && scheduled.compareAndSet(false, true)) {

@@ -1,6 +1,9 @@
 package dev.whynotac.storage;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,7 +14,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -119,61 +121,70 @@ public final class AuditLedger implements AutoCloseable {
         if (parent != null) {
             Files.createDirectories(parent);
         }
-        Files.writeString(ledgerFile, toJsonLine(entry) + "\n", StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
+        byte[] bytes = (toJsonLine(entry) + "\n").getBytes(StandardCharsets.UTF_8);
+        try (FileChannel channel = FileChannel.open(ledgerFile,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+            ByteBuffer buf = ByteBuffer.wrap(bytes);
+            while (buf.hasRemaining()) {
+                channel.write(buf);
+            }
+            channel.force(true);
+        }
         nextSequence = seq + 1L;
         headHash = entryHash;
         return entry;
     }
 
-    /** Re-reads and cryptographically verifies every entry from genesis to tail. */
+    /** Re-reads and cryptographically verifies every entry from genesis to tail in O(1) memory. */
     public synchronized ChainVerification verify() throws IOException {
         if (!Files.exists(ledgerFile)) {
             return new ChainVerification(true, 0L, -1L, GENESIS_HASH, "");
         }
-        List<String> lines = Files.readAllLines(ledgerFile, StandardCharsets.UTF_8);
         String expectedPrev = GENESIS_HASH;
         long expectedSeq = 0L;
         long count = 0L;
         long lastSeq = -1L;
 
-        for (String line : lines) {
-            if (line.isBlank()) {
-                continue;
+        try (BufferedReader reader = Files.newBufferedReader(ledgerFile, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                LedgerEntry parsed;
+                try {
+                    parsed = parseJsonLine(line);
+                } catch (RuntimeException e) {
+                    return new ChainVerification(false, count, lastSeq, expectedPrev,
+                            "malformed entry at seq " + expectedSeq + ": " + e.getMessage());
+                }
+                if (parsed.sequence() != expectedSeq) {
+                    return new ChainVerification(false, count, lastSeq, expectedPrev,
+                            "sequence gap at " + expectedSeq + " (found " + parsed.sequence() + ")");
+                }
+                if (!expectedPrev.equals(parsed.prevHash())) {
+                    return new ChainVerification(false, count, lastSeq, expectedPrev,
+                            "prevHash mismatch at seq " + parsed.sequence());
+                }
+                String expectedHash = computeEntryHash(parsed.sequence(), parsed.timestampMillis(), parsed.kind(),
+                        parsed.caseId(), parsed.certificateDigest(), parsed.buildTag(), parsed.subjectToken(),
+                        parsed.summary(), parsed.prevHash());
+                if (!MessageDigest.isEqual(expectedHash.getBytes(StandardCharsets.US_ASCII),
+                        parsed.entryHash().getBytes(StandardCharsets.US_ASCII))) {
+                    return new ChainVerification(false, count, lastSeq, expectedPrev,
+                            "entryHash mismatch at seq " + parsed.sequence());
+                }
+                String expectedHmac = hmacHex(secretKey, expectedHash);
+                if (!MessageDigest.isEqual(expectedHmac.getBytes(StandardCharsets.US_ASCII),
+                        parsed.hmacTag().getBytes(StandardCharsets.US_ASCII))) {
+                    return new ChainVerification(false, count, lastSeq, expectedPrev,
+                            "hmacTag mismatch at seq " + parsed.sequence());
+                }
+                expectedPrev = parsed.entryHash();
+                lastSeq = parsed.sequence();
+                expectedSeq++;
+                count++;
             }
-            LedgerEntry parsed;
-            try {
-                parsed = parseJsonLine(line);
-            } catch (RuntimeException e) {
-                return new ChainVerification(false, count, lastSeq, expectedPrev,
-                        "malformed entry at seq " + expectedSeq + ": " + e.getMessage());
-            }
-            if (parsed.sequence() != expectedSeq) {
-                return new ChainVerification(false, count, lastSeq, expectedPrev,
-                        "sequence gap at " + expectedSeq + " (found " + parsed.sequence() + ")");
-            }
-            if (!expectedPrev.equals(parsed.prevHash())) {
-                return new ChainVerification(false, count, lastSeq, expectedPrev,
-                        "prevHash mismatch at seq " + parsed.sequence());
-            }
-            String expectedHash = computeEntryHash(parsed.sequence(), parsed.timestampMillis(), parsed.kind(),
-                    parsed.caseId(), parsed.certificateDigest(), parsed.buildTag(), parsed.subjectToken(),
-                    parsed.summary(), parsed.prevHash());
-            if (!MessageDigest.isEqual(expectedHash.getBytes(StandardCharsets.US_ASCII),
-                    parsed.entryHash().getBytes(StandardCharsets.US_ASCII))) {
-                return new ChainVerification(false, count, lastSeq, expectedPrev,
-                        "entryHash mismatch at seq " + parsed.sequence());
-            }
-            String expectedHmac = hmacHex(secretKey, expectedHash);
-            if (!MessageDigest.isEqual(expectedHmac.getBytes(StandardCharsets.US_ASCII),
-                    parsed.hmacTag().getBytes(StandardCharsets.US_ASCII))) {
-                return new ChainVerification(false, count, lastSeq, expectedPrev,
-                        "hmacTag mismatch at seq " + parsed.sequence());
-            }
-            expectedPrev = parsed.entryHash();
-            lastSeq = parsed.sequence();
-            expectedSeq++;
-            count++;
         }
         return new ChainVerification(true, count, lastSeq, expectedPrev, "");
     }

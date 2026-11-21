@@ -22,7 +22,9 @@ final class SubjectProfileStoreTest {
         Map<String, SubjectProfileStore.FeatureSummary> baseline = Map.of(
                 "click_interval_ticks", new SubjectProfileStore.FeatureSummary(120L, 4.85, 0.36),
                 "aim_angular_step_deg", new SubjectProfileStore.FeatureSummary(450L, 3.125, 1.44));
-        store.saveBaselineFeatures(player, baseline, 1000L);
+        SubjectProfileStore.CovarianceSummary cov = new SubjectProfileStore.CovarianceSummary(
+                2, 40L, new double[] {2.5, 0.4}, new double[] {12.0, 1.5, 1.5, 3.2});
+        store.saveBaselineFeatures(player, baseline, cov, 1000L);
         store.recordCase(player, "click-pattern", 2000L);
 
         Optional<SubjectProfileStore.SubjectProfile> loaded = store.find(player);
@@ -34,6 +36,11 @@ final class SubjectProfileStoreTest {
         assertEquals(120L, p.baselineFeatures().get("click_interval_ticks").count());
         assertEquals(4.85, p.baselineFeatures().get("click_interval_ticks").mean(), 1e-6);
         assertEquals(0.36, p.baselineFeatures().get("click_interval_ticks").sampleVariance(), 1e-6);
+        assertTrue(p.combatCovariance() != null);
+        assertEquals(2, p.combatCovariance().dim());
+        assertEquals(40L, p.combatCovariance().count());
+        assertEquals(2.5, p.combatCovariance().mean()[0], 1e-6);
+        assertEquals(1.5, p.combatCovariance().flatCoMoments()[1], 1e-6);
 
         assertTrue(store.forget(player));
         assertFalse(store.find(player).isPresent());

@@ -13,12 +13,17 @@ import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Trust;
 import dev.whynotac.protocol.session.TimelineListener;
 import dev.whynotac.verdict.VerdictCase;
 import dev.whynotac.verdict.VerdictEngine;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Advisory AI facade uniting {@link BehavioralFeatureExtractor}, {@link AccountBaselineModel},
@@ -49,16 +54,50 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
                 Map<String, RunningMoments> updatedBaseline);
     }
 
+    /** Upper bound on cached per-case priority entries to prevent unbounded long-running heap growth. */
+    static final int MAX_TRACKED_CASES = 10_000;
+    /** Sliding window for per-session Gap burst (deliberate blinding) advisory telemetry. */
+    static final long GAP_BURST_WINDOW_NANOS = 60_000_000_000L;
+    static final int GAP_BURST_THRESHOLD = 3;
+
+    private static final PlayerSession.AttachmentKey GAP_STATE = new PlayerSession.AttachmentKey();
+
+    private static final class GapState {
+        final Deque<Long> recentGapNanos = new ArrayDeque<>(8);
+        boolean burstCountedInWindow;
+
+        boolean recordGap(long nanoTime) {
+            while (!recentGapNanos.isEmpty() && nanoTime - recentGapNanos.peekFirst() > GAP_BURST_WINDOW_NANOS) {
+                recentGapNanos.removeFirst();
+            }
+            if (recentGapNanos.size() < GAP_BURST_THRESHOLD) {
+                burstCountedInWindow = false;
+            }
+            recentGapNanos.addLast(nanoTime);
+            if (recentGapNanos.size() >= GAP_BURST_THRESHOLD && !burstCountedInWindow) {
+                burstCountedInWindow = true;
+                return true;
+            }
+            return false;
+        }
+
+        int recentCount() {
+            return recentGapNanos.size();
+        }
+    }
+
     private final BehavioralFeatureExtractor extractor = new BehavioralFeatureExtractor();
     private final AccountBaselineModel baselineModel = new AccountBaselineModel();
     private final ProbeScheduler probeScheduler;
     private final DesignProbeEngine designProbeEngine;
     private final Map<String, CasePriority> prioritizedCases = new ConcurrentHashMap<>();
     private final Map<String, UUID> caseSubjects = new ConcurrentHashMap<>();
+    private final Queue<String> caseOrder = new ConcurrentLinkedQueue<>();
     private final Set<Long> flaggedConnections = ConcurrentHashMap.newKeySet();
     private final Set<Long> mergedConnections = ConcurrentHashMap.newKeySet();
     private final Map<Long, Identity> authenticatedConnections = new ConcurrentHashMap<>();
     private final List<CleanSessionObserver> cleanObservers = new CopyOnWriteArrayList<>();
+    private final AtomicLong sessionGapBursts = new AtomicLong();
 
     public AiAdvisor() {
         this((s, e) -> { });
@@ -95,6 +134,23 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
         return probeScheduler;
     }
 
+    /** Total per-session Gap burst incidents (repeated mailbox overflows within 60 s, non-punitive telemetry). */
+    public long sessionGapBursts() {
+        return sessionGapBursts.get();
+    }
+
+    /** Number of recent Gap events in the active 60 s window for {@code session} (analysis thread). */
+    public int recentSessionGaps(PlayerSession session) {
+        if (session == null) {
+            return 0;
+        }
+        return session.attachment(GAP_STATE, GapState::new).recentCount();
+    }
+
+    int trackedCaseCount() {
+        return prioritizedCases.size();
+    }
+
     @Override
     public boolean readsEntityMotion() {
         return false;
@@ -104,7 +160,12 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
     public void onEvent(PlayerSession session, TimelineEvent event) {
         extractor.onEvent(session, event);
         designProbeEngine.onEvent(session, event);
-        if (event instanceof ClientFact fact && fact.fact() == Fact.IDENTITY && fact.trust() == Trust.AUTHENTIC) {
+        if (event instanceof TimelineEvent.Gap gap) {
+            GapState gs = session.attachment(GAP_STATE, GapState::new);
+            if (gs.recordGap(gap.nanoTime())) {
+                sessionGapBursts.incrementAndGet();
+            }
+        } else if (event instanceof ClientFact fact && fact.fact() == Fact.IDENTITY && fact.trust() == Trust.AUTHENTIC) {
             try {
                 Identity parsed = Identity.valueOf(fact.value());
                 if (NetworkEnvelope.isLongLivedAuthenticated(parsed)) {
@@ -137,6 +198,7 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
         AccountBaselineModel.ShiftAssessment shift = new AccountBaselineModel.ShiftAssessment(true, 0.0, "", 0.0);
         IntrinsicRiskAssessment intrinsic = new IntrinsicRiskAssessment(0.0, "none");
         double wealth = 1.0;
+        double gapBurstBoost = 0.0;
         if (playerId != null && session != null) {
             if (c.evidence().evidenceClass() == EvidenceClass.ADVANTAGE_PROOF
                     || c.evidence().evidenceClass() == EvidenceClass.MODIFICATION_PROOF) {
@@ -145,14 +207,27 @@ public final class AiAdvisor implements TimelineListener, VerdictEngine.CaseList
             BehavioralFeatureExtractor.Snapshot snap = extractor.snapshot(session);
             shift = baselineModel.assess(playerId, snap);
             intrinsic = assessIntrinsicRisk(snap);
+            if (recentSessionGaps(session) >= GAP_BURST_THRESHOLD) {
+                gapBurstBoost = 10.0;
+            }
             EValueProcess ep = probeScheduler.processFor(playerId);
             if (ep != null) {
                 wealth = ep.wealth();
             }
             caseSubjects.put(c.id(), playerId);
         }
-        double score = Math.min(100.0, computePriorityScore(c, shift, wealth) + Math.min(15.0, intrinsic.score0To100() * 0.25));
+        double score = Math.min(100.0,
+                computePriorityScore(c, shift, wealth) + Math.min(15.0, intrinsic.score0To100() * 0.25) + gapBurstBoost);
         prioritizedCases.put(c.id(), new CasePriority(c.id(), score, shift, wealth));
+        caseOrder.add(c.id());
+        while (prioritizedCases.size() > MAX_TRACKED_CASES) {
+            String evicted = caseOrder.poll();
+            if (evicted == null) {
+                break;
+            }
+            prioritizedCases.remove(evicted);
+            caseSubjects.remove(evicted);
+        }
     }
 
     public CasePriority priorityOf(String caseId) {

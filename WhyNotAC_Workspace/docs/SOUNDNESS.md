@@ -8,7 +8,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 - **Atlatma / Geri Çekilme Sınırı:** Bilinen kaçınma pencereleri ve bunlara karşı etkisizleştirme / ikincil kontrol kapsamı.
 
 > **Kabul edilebilirlik önkoşulu (`AdmissibilityTracker`):** Çoğu kontrol yalnızca kenarda (`WIRE`/`WIRE`), yerel 1.21.11 (`NATIVE_PROTOCOL=774`), çeviricisiz (`TRANSLATOR=none`), `TRANSACTION_ORIGIN=CLIENT`, Bedrock dışı (`!GEYSER_LOCAL`) ve pencere içinde `Gap` / `Untranslatable` olmayan aralıklarda kanıt üretir.
-> (`client-clock`, `transaction-order`, `timer-balance`, `ping-spoof` ve `packet-bounds` seçili çeviri-güvenli alt kuralları (`non-finite-movement`, `invalid-pitch`, `invalid-hotbar-slot`, `self-interaction`) `evaluateTranslatorSafe` ile çalışır; `client-clock` ek olarak `ServerClock` sapmasının `<= %0,5` olmasını şart koşar.)
+> (`transaction-order`, `timer-balance`, `ping-spoof` ve `packet-bounds` seçili çeviri-güvenli alt kuralları (`non-finite-movement`, `invalid-pitch`, `invalid-hotbar-slot`, `self-interaction`) `evaluateTranslatorSafe` ile çalışır; `client-clock` sıkı yerel `774` kabul edilebilirliğine ek olarak `ServerClock` sapmasının `<= %0,5` olmasını şart koşar.)
 
 ---
 
@@ -22,7 +22,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 | `break-time` | `P-M` | `BLOCK_TIMING` | Float toplam `1.0F` sınırı (`0` tolerans; en büyük çarpanlarla) | `CANCEL_IMPOSSIBLE_BLOCK_ACTION` | [Aşağıda §2.4](#24-break-time-p-m) |
 | `tick-framing` | `P-M` | `CLOCK_AND_FRAMING` | Tik başına 1 hareket + eşlenmiş teleport/dönüş/araç yanıt token'ı | `NONE` (otomatik değil; opt-in `KICK`) | [Aşağıda §2.5](#25-tick-framing-p-m) |
 | `client-clock` | `P-M` | `CLOCK_AND_FRAMING` | `SLACK_TICKS = 22.0`, `DRIFT = %1` (`ServerClock <= %0,5`) | `NONE` (opt-in `KICK`) | [Aşağıda §2.6](#26-client-clock-p-m) |
-| `transaction-order` | `P-M` | `CLOCK_AND_FRAMING` | `MAX_TICKS_AFTER_KEEPALIVE = 12`; tek TCP akışı + `PacketProcessor` sırası | `NONE` (opt-in `KICK`) | [Aşağıda §2.7](#27-transaction-order-p-m) |
+| `transaction-order` | `P-M` | `CLOCK_AND_FRAMING` | `MAX_TICKS_AFTER_KEEPALIVE = 12`; tek TCP akışı + `PacketProcessor` sırası + `skipped`/`duplicate` (v2) | `NONE` (opt-in `KICK`) | [Aşağıda §2.7](#27-transaction-order-p-m-v2) |
 | `action-grammar` | `P-M` | `PACKET_GRAMMAR` | `handleKeybinds` -> `tickEntities`, saldırı/STAB sonrası `Swing`, açık menü | `NONE` (opt-in `KICK`) | [Aşağıda §2.8](#28-action-grammar-p-m) |
 | `prediction-sequence` | `P-M` | `PACKET_GRAMMAR` | `BlockStatePredictionHandler` seviye aralığı `[levelsLow, levelsHigh]` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9](#29-prediction-sequence-p-m) |
 | `packet-bounds` | `P-M` | `PACKET_GRAMMAR` | Sonlu hareket, `|pitch| <= 90°`, hotbar `0..8` + tekrarlı slot, `entityId != selfId`, imleç `[-1, 2]`, `ContainerClick` yuva/tuş, `PlayerCommand`/`ChunkBatch` | `NONE` (opt-in `KICK`) | [Aşağıda §2.9b](#29b-packet-bounds-p-m) |
@@ -80,12 +80,14 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 - **Dışlanan Durumlar:** `ServerClock` %0,5 kayma sınırını aştığında aday reddedilir (`clock.trusted() == false`).
 - **Atlatma / Sınır:** `%1` altı mikro-timer (`1.005x`) kasten %1 kuvars payının altında kalır (algoritmik sınır). `+5%` (`~30 sn`) ve `+50%` (`~1,5 sn`) timer deterministik yakalanır; ağ gecikmesi/donma sıçramaları 22 tick payı nedeniyle sıfır yanlış pozitif üretir.
 
-### 2.7 `transaction-order` (`P-M`)
-- **Dayanak:** Tek sıralı TCP akışı + `PacketProcessor.processQueuedPackets()` (`TransactionOrderCheck.java`).
+### 2.7 `transaction-order` (`P-M`, v2)
+- **Dayanak:** Tek sıralı TCP akışı + `PacketProcessor.processQueuedPackets()` + `TransactionTracker` (`SecureRandom` 32-bit kimlikler, `[-32768, 32767]` dışı) (`TransactionOrderCheck.java` v2).
   1. `ping-after-later-teleport-accept`: Aynı ana iş parçacığı drenajında işlenen önceki `Ping` yanıtı, kendisinden sonra gönderilen bir `PlayerPosition` için dönen `AcceptTeleportation` paketinden sonraya kalamaz.
   2. `ping-delayed-past-keepalive`: Ağ iş parçacığında işlenen `KeepAlive` yanıtı döndüğünde aynı TCP akışında önündeki `Ping` zaten sokete girmiştir; aktif karedeki en fazla 10 yetişme tick'i + 2 yazma-sırası payı (`MAX_TICKS_AFTER_KEEPALIVE = 12`) içinde `Pong` dönmelidir.
-- **Dışlanan Durumlar:** `PlayerLoaded` öncesi, `Login`/`Respawn` sıfırlamaları, `Pong`'u tamamen düşüren ama hiç cevaplamayan durumda `SKIPPED_TRANSACTION` (bu durum `SessionRegistry` anomalisi olarak izlenir; sahte gecikme cezası kesilmez).
-- **Atlatma / Sınır:** Anti-KB/blink için seçici olarak `Pong` tutarken `KeepAlive` veya yeni `AcceptTeleportation` geçiren istemcileri 12 tick içinde yakalar.
+  3. `skipped-transaction`: Aynı oyun oturumu içinde (`Login`/`Respawn`/`Gap` olmadan) daha önce ağ kenarından gönderilmiş bir WhyNotAC `Ping` yanıtlanmadan daha yeni bir WhyNotAC `Ping`'in yanıtlanması (`Acknowledged.skipped() > 0`) sıralı TCP üzerinde vanilla 1.21.11 için imkânsızdır.
+  4. `duplicate-transaction`: Aynı oturumda daha önce yanıtlanmış veya atlanmış (`remembered`) bir WhyNotAC 32-bit rastgele `Ping` kimliğinin ikinci kez ya da FIFO sırası dışında yeniden yanıtlanması (`DUPLICATE_TRANSACTION`) vanilla 1.21.11 için imkânsızdır.
+- **Dışlanan Durumlar:** `PlayerLoaded` öncesi, `Login`/`Respawn`/`Gap` sıfırlamaları (geçmiş bekleyen/hatırlanan kimlikler temizlenir), diğer eklentilere ayrılan `[-32768, 32767]` aralığı ve kabul edilemez pencereler.
+- **Atlatma / Sınır:** Seçici `Pong` tutma, atlama, yeniden sıralama veya tekrar oynatma girişimlerini 1–12 tick içinde deterministik `P-M` olarak yakalar.
 
 ### 2.8 `action-grammar` (`P-M`)
 - **Dayanak:** `Minecraft.handleKeybinds` -> `level.tickEntities()` -> `ClientTickEnd` sırası (`ActionGrammarCheck.java`, `MenuScreen.java`).

@@ -5,10 +5,12 @@ import dev.whynotac.analysis.policy.ActionPolicy.Action;
 import dev.whynotac.analysis.policy.ActionPolicy.Lifecycle;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -26,12 +28,15 @@ import java.util.function.Consumer;
  */
 public final class BanWaveQueue implements AutoCloseable {
 
-    private final VerdictConfig config;
+    private static final int MAX_CANCELLED_SUBJECTS = 10_000;
+
+    private volatile VerdictConfig config;
     private final CircuitBreaker circuitBreaker;
     private final FalseBanBudget falseBanBudget;
     private final ScheduledExecutorService scheduler;
     private final SplittableRandom rng;
     private final Map<UUID, Long> cancelledBeforeMillis = new ConcurrentHashMap<>();
+    private final Queue<UUID> cancelledOrder = new ConcurrentLinkedQueue<>();
     private final Set<ScheduledFuture<?>> pendingFutures = ConcurrentHashMap.newKeySet();
     private final AtomicInteger pendingCount = new AtomicInteger();
 
@@ -77,10 +82,27 @@ public final class BanWaveQueue implements AutoCloseable {
         pendingFutures.add(future);
     }
 
+    /** Atomically updates the active verdict config so hot-reloads immediately govern pending waves. */
+    public void updateConfig(VerdictConfig newConfig) {
+        this.config = Objects.requireNonNull(newConfig, "newConfig");
+    }
+
     /** Prevents any queued ban opened at or before {@code cancelledAtMillis} from firing (e.g. overturn/GDPR). */
     public void cancelSubject(UUID playerId, long cancelledAtMillis) {
         if (playerId != null) {
-            cancelledBeforeMillis.merge(playerId, cancelledAtMillis, Math::max);
+            boolean isNew = cancelledBeforeMillis.putIfAbsent(playerId, cancelledAtMillis) == null;
+            if (isNew) {
+                cancelledOrder.add(playerId);
+                while (cancelledBeforeMillis.size() > MAX_CANCELLED_SUBJECTS) {
+                    UUID evicted = cancelledOrder.poll();
+                    if (evicted == null) {
+                        break;
+                    }
+                    cancelledBeforeMillis.remove(evicted);
+                }
+            } else {
+                cancelledBeforeMillis.merge(playerId, cancelledAtMillis, Math::max);
+            }
         }
     }
 
@@ -97,7 +119,8 @@ public final class BanWaveQueue implements AutoCloseable {
     }
 
     private void executeIfSafe(VerdictDecision decision, Consumer<VerdictDecision> executor) {
-        if (!config.autoBanEnabled() || !decision.certificate().verifyIntegrity()) {
+        VerdictConfig active = this.config;
+        if (!active.autoBanEnabled() || !decision.certificate().verifyIntegrity()) {
             return;
         }
         if (circuitBreaker.isSuppressed() || falseBanBudget.isLocked()) {
@@ -112,7 +135,7 @@ public final class BanWaveQueue implements AutoCloseable {
                 return;
             }
         }
-        boolean allowed = config.armedChecks().contains(decision.evidence().check())
+        boolean allowed = active.armedChecks().contains(decision.evidence().check())
                 && ActionPolicy.enabled(decision.evidence().evidenceClass(), Action.TEMP_BAN,
                         decision.evidence().admissibility().identity(), Lifecycle.ARMED, true);
         if (!allowed) {

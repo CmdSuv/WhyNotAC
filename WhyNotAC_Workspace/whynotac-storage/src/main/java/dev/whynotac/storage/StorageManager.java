@@ -39,7 +39,7 @@ public final class StorageManager implements VerdictEngine.CaseListener, Verdict
                 dataDirectory.resolve("audit-secret.key"),
                 buildTag);
         this.profiles = new SubjectProfileStore(dataDirectory.resolve("profiles"));
-        this.reviews = new ReviewWorkflow();
+        this.reviews = new ReviewWorkflow(dataDirectory.resolve("reviews.jsonl"));
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
@@ -145,12 +145,21 @@ public final class StorageManager implements VerdictEngine.CaseListener, Verdict
 
     /** Persists updated behavioral baseline moments asynchronously for an authenticated account. */
     public void saveBehavioralBaselineAsync(UUID playerId, java.util.Map<String, SubjectProfileStore.FeatureSummary> features, long epochMillis) {
-        if (playerId == null || features == null || features.isEmpty()) {
+        saveBehavioralBaselineAsync(playerId, features, null, epochMillis);
+    }
+
+    /** Persists updated behavioral baseline moments and optional multivariate combat covariance asynchronously. */
+    public void saveBehavioralBaselineAsync(
+            UUID playerId,
+            java.util.Map<String, SubjectProfileStore.FeatureSummary> features,
+            SubjectProfileStore.CovarianceSummary combatCovariance,
+            long epochMillis) {
+        if (playerId == null || ((features == null || features.isEmpty()) && combatCovariance == null)) {
             return;
         }
         writer.execute(() -> {
             try {
-                profiles.saveBaselineFeatures(playerId, features, epochMillis);
+                profiles.saveBaselineFeatures(playerId, features == null ? java.util.Map.of() : features, combatCovariance, epochMillis);
             } catch (IOException e) {
                 logger.log(Level.WARNING, "WhyNotAC failed to persist behavioral baseline", e);
             }

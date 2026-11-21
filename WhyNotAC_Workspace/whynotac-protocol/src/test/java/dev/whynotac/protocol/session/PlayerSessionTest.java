@@ -338,4 +338,32 @@ class PlayerSessionTest {
             assertEquals(i, sequences.get(i), "out of order at " + i);
         }
     }
+
+    @Test
+    void perSessionAnalysisBudgetYieldsBetweenSlowEventsToPreventStarvation() {
+        ManualExecutor executor = new ManualExecutor();
+        SessionRegistry registry = new SessionRegistry(executor, 64, (s, e, t) -> { throw new AssertionError(t); });
+        List<String> order = new ArrayList<>();
+        registry.addListener((session, event) -> {
+            order.add(session.remoteAddress());
+            if ("heavy".equals(session.remoteAddress())) {
+                long end = System.nanoTime() + SerialMailbox.MAX_DRAIN_NANOS + 500_000L;
+                while (System.nanoTime() < end) {
+                    Thread.onSpinWait();
+                }
+            }
+        });
+        PlayerSession heavy = registry.open("heavy");
+        PlayerSession fast = registry.open("fast");
+        for (int i = 0; i < 4; i++) {
+            heavy.onInbound(MOVE, i);
+        }
+        fast.onInbound(MOVE, 1);
+        executor.runAll();
+        assertEquals(5, order.size());
+        assertTrue(heavy.budgetYields() >= 2, "heavy session must yield worker after hitting slice budget: " + heavy.budgetYields());
+        assertTrue(heavy.analysisNanos() > 0L);
+        assertTrue(order.indexOf("fast") < order.lastIndexOf("heavy"),
+                "fast session must be serviced before heavy session finishes all events: " + order);
+    }
 }

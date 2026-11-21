@@ -204,11 +204,12 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek çok-süreçli Velocity 3.4.0 + Paper 1.21.11 E2E testleri
   `tools/e2e/run_proxy_e2e.sh` ve CI `e2e-proxy` işiyle doğrulanır.
 
-## Faz 7 – Faz 16 — İleri Mühendislik, Sertleştirme ve Tam Kapsam Yol Haritası (Tamamlandı)
+## Faz 7 – Faz 17 — İleri Mühendislik, Sertleştirme, Zayıflık Kapatma ve Tam Kapsam Yol Haritası (Tamamlandı)
 
-Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) gerçek 40.963 tiklik resmi istemci kayıtlarında **%99,94 `EXPLAINED` / `0 UNEXPLAINED`** düzeyine çıkarılması (tek-durumlu bloklar, sütun/kütük, yarım blok `_slab` ve `type=double` birleştirme, düz merdiven `_stairs`, 4-yönlü tam küpler, izole kuru `_fence`/`_wall`/`iron_bars`/`*_glass_pane`, kuru `*_chain`, `end_rod`, hayatta kalma sıfır-sertlikli `START_DESTROY_BLOCK` anında-kırma, kalkan/dürbün `UseItem` temizlemesi ve deterministik `water_bucket`/`lava_bucket`/`bucket` ışın çözümü dâhil), yeni nesil deterministik kontroller (`VelocityCheck` v3 kısmi dikey + `Explosion` + durağan kısmi yatay + vanilla PvP Jump-Reset `0` FP koruması, `PacketBoundsCheck` v4 `invalid-pitch` + `duplicate-hotbar-slot` + konteyner tuşları, `InventoryActionCheck`, `UseSlowdownCheck` v2, `TimerBalanceCheck`, `PingSpoofCheck`, `InteractAtBoxCheck`), 2. nesil çok-değişkenli `whynotac-ai`, `WhyNotAC.jar benchmark` CLI + **30** senaryo + **9** kalıcı `.wnrec` hile korpusu (`DATA-02`), 12-kontrol canlı `ARMED` hile E2E (`tools/e2e/run_cheat_e2e.sh`), çift-yönlü yankısız Velocity proxy köprüsü (`tools/e2e/run_proxy_e2e.sh`), RFC 8259 `alerts-stream.jsonl` / `/whynotac reload` + tam kapanış/gizleme temizliği ve çoklu-sürüm (`PROD-14`) mimarisini kapsayan ayrıntılı master plan için bkz.:
+Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) gerçek 40.963 tiklik resmi istemci kayıtlarında **%99,94 `EXPLAINED` / `0 UNEXPLAINED`** düzeyine çıkarılması, 21 kontrol (`VelocityCheck` v3, `PacketBoundsCheck` v4, `UseSlowdownCheck` v2, `TransactionOrderCheck` v2 `skipped`/`duplicate`, `PingSpoofCheck` v2, `InventoryActionCheck`, `TimerBalanceCheck`, `InteractAtBoxCheck`), oturum başına `2 ms` adil analiz bütçesi + `Gap` patlaması telemetrisi, `AuditLedger` gerçek `fsync` + `ReviewWorkflow` & `RunningCovarianceMatrix` kalıcılığı, `BanWaveQueue` sıcak yenileme koruması, uzak `GDPR_FORGET` yerel silme kancası, 5 sunucu-türü yapılandırma profili (`paper-pvp-practice` / `paper-smp` dâhil), **32** senaryo + **10** kalıcı `.wnrec` hile korpusu ve Faz 17 sonrası güncel bit-bit zayıflık analizi için bkz.:
 
-- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 16 Ayrıntılı Teknik Yol Haritası**
+- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 17 Ayrıntılı Teknik Yol Haritası**
+- **[2026-11-21 Derin Zayıflık ve Eksiklik Analizi](reviews/2026-11-21-weakness-analysis.md)**
 
 ## Sahibin kararını bekleyenler
 

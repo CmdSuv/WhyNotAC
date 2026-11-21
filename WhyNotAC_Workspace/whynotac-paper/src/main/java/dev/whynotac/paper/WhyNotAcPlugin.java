@@ -3,6 +3,7 @@ package dev.whynotac.paper;
 import dev.whynotac.ai.AiAdvisor;
 import dev.whynotac.analysis.checks.Checks;
 import dev.whynotac.analysis.evidence.ServerClock;
+import dev.whynotac.math.stats.RunningCovarianceMatrix;
 import dev.whynotac.math.stats.RunningMoments;
 import dev.whynotac.paper.ai.LiveProbeDriver;
 import dev.whynotac.paper.cases.Alerts;
@@ -278,6 +279,21 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                             }
                         },
                         System::currentTimeMillis, getLogger());
+                networkBridge.setRemoteErasureHandler(subject -> {
+                    aiAdvisor.forget(subject);
+                    if (cases != null) {
+                        cases.subject(subject, true, r -> { });
+                    }
+                    if (storage != null) {
+                        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                            try {
+                                storage.forgetSubject(subject, System.currentTimeMillis());
+                            } catch (IOException ex) {
+                                getLogger().log(Level.WARNING, "WhyNotAC remote GDPR erasure failed for " + subject, ex);
+                            }
+                        });
+                    }
+                });
                 PaperNetworkBridge.registerBukkitChannels(this, networkBridge);
                 getLogger().info("WhyNotAC Velocity companion network bridge enabled (" + NetworkEnvelope.CHANNEL + ")");
             } catch (IOException e) {
@@ -294,7 +310,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         summaries.put(k, new SubjectProfileStore.FeatureSummary(m.count(), m.mean(), var));
                     }
                 });
-                storage.saveBehavioralBaselineAsync(playerId, summaries, System.currentTimeMillis());
+                RunningCovarianceMatrix cov = aiAdvisor.baselineModel().covarianceSnapshot(playerId);
+                SubjectProfileStore.CovarianceSummary covSummary = (cov != null && cov.count() > 0)
+                        ? new SubjectProfileStore.CovarianceSummary(cov.dim(), cov.count(), cov.mean(), cov.flatCoMoments())
+                        : null;
+                storage.saveBehavioralBaselineAsync(playerId, summaries, covSummary, System.currentTimeMillis());
             }
             if (networkBridge != null) {
                 sessionSnapshot.features().forEach((name, moments) ->
@@ -411,10 +431,12 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         long now = System.nanoTime();
         int pendingMax = 0;
         long withheld = 0;
+        long budgetYields = 0;
         for (PlayerSession session : registry.sessions()) {
             LatencySnapshot latency = session.latency(now);
             pendingMax = Math.max(pendingMax, latency.pending());
             withheld += latency.withheld() ? 1 : 0;
+            budgetYields += session.budgetYields();
         }
         StringBuilder margins = new StringBuilder();
         verdict.margins().forEach((check, m) -> margins.append(margins.isEmpty() ? "" : ",").append(String.format(Locale.ROOT,
@@ -426,7 +448,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         HealthModel.Evaluation healthEval = health();
         return String.format(Locale.ROOT, "{\"sessionsLive\":%d,\"queuedEvents\":%d,\"sessions\":%d,\"ended\":%d,\"inbound\":%d,"
                         + "\"outbound\":%d,\"lostEvents\":%d,\"inboundDivergences\":%d,\"outboundDivergences\":%d,\"anomalies\":{%s},"
-                        + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
+                        + "\"pendingTransactionsMax\":%d,\"withheldNow\":%d,\"budgetYieldsLive\":%d,\"sessionGapBursts\":%d,\"listenerErrors\":%d,\"recordingRejectedBlocks\":%d,"
                         + "\"recordingFailed\":%d,\"transactionLoop\":{\"runs\":%d,\"meanWallMicros\":%.3f,\"meanCpuMicros\":%.3f,\"maxWallMicros\":%.3f},"
                         + "\"cases\":{\"opened\":%d,\"stored\":%d,\"dropped\":%d,\"rejectedCandidates\":%d},\"margins\":{%s},\"serverClock\":{\"divergence\":%s,\"trusted\":%b},"
                         + "\"world\":{\"retainedBytes\":%d,\"sharedSections\":%d,\"worlds\":%d},"
@@ -434,7 +456,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         + "\"banWavePending\":%d,\"health\":%s}",
                 registry.sessions().size(), registry.queuedEvents(), totals.sessions(), totals.ended(), totals.inbound(),
                 totals.outbound(), totals.lostEvents(), totals.inboundDivergences(), totals.outboundDivergences(), anomalies,
-                pendingMax, withheld, listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
+                pendingMax, withheld, budgetYields, aiAdvisor == null ? 0L : aiAdvisor.sessionGapBursts(), listenerErrors.get(), recordings == null ? 0 : recordings.rejectedBlocks(),
                 recordings == null ? 0 : recordings.failedRecordings(), transactionLoop.runs(), transactionLoop.meanWallMicros(),
                 transactionLoop.meanCpuMicros(), transactionLoop.maxWallMicros(),
                 verdict.cases(), cases == null ? 0 : cases.storedCount(), cases == null ? 0 : cases.droppedCount(),
@@ -470,6 +492,10 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
     private MetricsExporter.Snapshot metricsSnapshot() {
         Diagnostics.Totals totals = diagnostics.totals();
+        long liveBudgetYields = 0L;
+        for (PlayerSession session : registry.sessions()) {
+            liveBudgetYields += session.budgetYields();
+        }
         return new MetricsExporter.Snapshot(
                 registry.sessions().size(),
                 totals.sessions(),
@@ -489,7 +515,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 transactionLoop.meanWallMicros(),
                 transactionLoop.maxWallMicros(),
                 verdict.margins(),
-                health());
+                health(),
+                liveBudgetYields,
+                aiAdvisor == null ? 0L : aiAdvisor.sessionGapBursts());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -530,6 +558,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         profile.baselineFeatures().forEach((name, fs) ->
                                 restored.put(name, RunningMoments.fromSummary(fs.count(), fs.mean(), fs.sampleVariance())));
                         aiAdvisor.baselineModel().seedBaselineIfEmpty(playerId, restored);
+                    }
+                    SubjectProfileStore.CovarianceSummary cov = profile.combatCovariance();
+                    if (cov != null && cov.dim() > 0 && cov.count() > 0) {
+                        aiAdvisor.baselineModel().seedCovarianceIfEmpty(playerId,
+                                RunningCovarianceMatrix.fromSummary(cov.dim(), cov.count(), cov.mean(), cov.flatCoMoments()));
                     }
                 });
             } catch (IOException e) {

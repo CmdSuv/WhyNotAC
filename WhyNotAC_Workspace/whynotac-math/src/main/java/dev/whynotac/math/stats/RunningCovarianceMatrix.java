@@ -116,6 +116,43 @@ public final class RunningCovarianceMatrix {
         return Arrays.copyOf(mean, dim);
     }
 
+    /** Flattened row-major copy of raw sum-of-products co-moments ({@code dim * dim} doubles) for exact persistence. */
+    public double[] flatCoMoments() {
+        double[] flat = new double[dim * dim];
+        for (int i = 0; i < dim; i++) {
+            System.arraycopy(coMoments[i], 0, flat, i * dim, dim);
+        }
+        return flat;
+    }
+
+    /** Reconstructs an accumulator from persisted summary statistics ({@code count}, {@code mean}, row-major {@code flatCoMoments}). */
+    public static RunningCovarianceMatrix fromSummary(int dim, long count, double[] mean, double[] flatCoMoments) {
+        RunningCovarianceMatrix m = new RunningCovarianceMatrix(dim);
+        if (count <= 0 || mean == null || mean.length != dim || flatCoMoments == null || flatCoMoments.length != dim * dim) {
+            return m;
+        }
+        for (double v : mean) {
+            if (!Double.isFinite(v)) {
+                return m;
+            }
+        }
+        for (double v : flatCoMoments) {
+            if (!Double.isFinite(v)) {
+                return m;
+            }
+        }
+        m.count = count;
+        System.arraycopy(mean, 0, m.mean, 0, dim);
+        for (int i = 0; i < dim; i++) {
+            for (int j = 0; j < dim; j++) {
+                // Symmetrize defensively in case of text rounding
+                double sym = 0.5 * (flatCoMoments[i * dim + j] + flatCoMoments[j * dim + i]);
+                m.coMoments[i][j] = (i == j) ? Math.max(0.0, sym) : sym;
+            }
+        }
+        return m;
+    }
+
     /** Returns {@code (coMoments[i][j] / (count - 1))}, or zero matrix if {@code count < 2}. */
     public double[][] sampleCovariance() {
         double[][] cov = new double[dim][dim];

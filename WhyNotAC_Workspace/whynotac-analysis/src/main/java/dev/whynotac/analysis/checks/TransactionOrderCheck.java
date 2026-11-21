@@ -16,9 +16,9 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Transaction causality ({@code transaction-order}, P-M, SHADOW): detects selective transaction holding
- * (anti-knockback / ping-spoof / blink cheats that delay {@code Pong} while answering later server packets or
- * continuing to tick).
+ * Transaction causality ({@code transaction-order}, P-M, SHADOW): detects selective transaction holding,
+ * skipped transactions, and duplicate/out-of-order transaction answers (anti-knockback / ping-spoof / blink
+ * cheats that hold, drop, reorder, or replay {@code Pong} packets).
  *
  * <p>Soundness (decompiled 1.21.11 client):
  * <ul>
@@ -35,14 +35,20 @@ import java.util.TreeMap;
  *       ordering) can end with {@code ClientTickEnd} before the next frame's {@code processQueuedPackets()} drains and
  *       answers {@code Ping(p)} ({@code ping-delayed-past-keepalive}). Client freezes drop 0 {@code ClientTickEnd}s
  *       during the freeze and never violate this bound.</li>
+ *   <li>Every WhyNotAC {@code Ping} carries a unique {@code SecureRandom} 32-bit id outside {@code [-32768, 32767]}.
+ *       Over ordered TCP, {@code handlePing} answers every {@code Ping} strictly once in FIFO order: answering a later
+ *       WhyNotAC {@code Ping} while skipping an earlier one sent in the same play lifecycle
+ *       ({@code skipped-transaction}), or answering the same WhyNotAC {@code Ping} twice / out of order after it was
+ *       already acknowledged or skipped ({@code duplicate-transaction}), is impossible for vanilla 1.21.11.</li>
  * </ul>
  */
 public final class TransactionOrderCheck implements TimelineListener {
 
     public static final String ID = "transaction-order";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final int MAX_TICKS_AFTER_KEEPALIVE = 12;
     static final int MAX_PENDING_PINGS = 4_096;
+    static final int MAX_ACKNOWLEDGED_PINGS = 512;
     static final int MAX_PENDING_TELEPORTS = 1_024;
     static final int MAX_PENDING_KEEPALIVES = 256;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
@@ -70,9 +76,12 @@ public final class TransactionOrderCheck implements TimelineListener {
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
         final Map<Integer, TrackedPing> pendingPings = boundedMap(MAX_PENDING_PINGS);
+        final Map<Integer, TrackedPing> rememberedPings = boundedMap(MAX_ACKNOWLEDGED_PINGS);
         final Map<Integer, Long> pendingTeleports = boundedMap(MAX_PENDING_TELEPORTS);
         final Map<Long, Long> pendingKeepAlives = boundedMap(MAX_PENDING_KEEPALIVES);
         boolean loaded;
+        boolean hasLastPongId;
+        int lastPongId;
         long acceptedTeleportSeq = Long.MIN_VALUE;
         long lastReportNanos = Long.MIN_VALUE;
     }
@@ -96,9 +105,11 @@ public final class TransactionOrderCheck implements TimelineListener {
         State state = session.attachment(STATE, State::new);
         state.admissibility.onEvent(event);
         switch (event) {
+            case TimelineEvent.Gap ignored -> clearPendingAndRemembered(state);
             case TimelineEvent.Outbound out -> onOutbound(state, out);
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             case TimelineEvent.Acknowledged ack -> onAcknowledged(session, state, ack);
+            case TimelineEvent.Anomaly anomaly -> onAnomaly(session, state, anomaly);
             default -> { }
         }
     }
@@ -117,6 +128,10 @@ public final class TransactionOrderCheck implements TimelineListener {
     private void onInbound(PlayerSession session, State state, TimelineEvent.Inbound in) {
         switch (in.packet()) {
             case ServerboundPacket.PlayerLoaded ignored -> state.loaded = true;
+            case ServerboundPacket.Pong pong -> {
+                state.hasLastPongId = true;
+                state.lastPongId = pong.id();
+            }
             case ServerboundPacket.AcceptTeleportation accept -> {
                 Long teleportSeq = state.pendingTeleports.remove(accept.teleportId());
                 if (teleportSeq != null && teleportSeq > state.acceptedTeleportSeq) {
@@ -172,9 +187,29 @@ public final class TransactionOrderCheck implements TimelineListener {
         if (ping == null) {
             return;
         }
-        // Any earlier pending pings were permanently skipped (handled by TransactionTracker as SKIPPED_TRANSACTION),
-        // not selectively held past a KeepAlive.
-        state.pendingPings.entrySet().removeIf(e -> e.getValue().sentSeq < ping.sentSeq);
+        state.rememberedPings.put(ack.transactionId(), ping);
+        TrackedPing earliestSkipped = null;
+        Iterator<Map.Entry<Integer, TrackedPing>> it = state.pendingPings.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Integer, TrackedPing> entry = it.next();
+            if (entry.getValue().sentSeq < ping.sentSeq) {
+                if (earliestSkipped == null || entry.getValue().sentSeq < earliestSkipped.sentSeq) {
+                    earliestSkipped = entry.getValue();
+                }
+                state.rememberedPings.put(entry.getKey(), entry.getValue());
+                it.remove();
+            }
+        }
+        if (state.loaded && ack.skipped() > 0 && earliestSkipped != null) {
+            Map<String, String> details = new TreeMap<>();
+            details.put("reason", "skipped-transaction");
+            details.put("skippedCount", Integer.toString(ack.skipped()));
+            details.put("skippedPingSentSequence", Long.toString(earliestSkipped.sentSeq));
+            details.put("answeredPingSequence", Long.toString(ping.sentSeq));
+            report(session, state, earliestSkipped.sentSeq, earliestSkipped.sentNano, ack.sequence(), ack.nanoTime(),
+                    "answered a newer transaction while skipping " + ack.skipped() + " earlier unanswered transaction(s)",
+                    details);
+        }
         if (ping.sentSeq < state.acceptedTeleportSeq) {
             Map<String, String> details = new TreeMap<>();
             details.put("reason", "ping-after-later-teleport-accept");
@@ -182,6 +217,38 @@ public final class TransactionOrderCheck implements TimelineListener {
             details.put("acceptedTeleportSequence", Long.toString(state.acceptedTeleportSeq));
             report(session, state, ping.sentSeq, ping.sentNano, ack.sequence(), ack.nanoTime(),
                     "answered transaction after accepting a teleport that was sent after it", details);
+        }
+    }
+
+    private void onAnomaly(PlayerSession session, State state, TimelineEvent.Anomaly anomaly) {
+        if (!state.loaded || anomaly.kind() != TimelineEvent.Anomaly.Kind.DUPLICATE_TRANSACTION) {
+            return;
+        }
+        Integer dupId = state.hasLastPongId ? state.lastPongId : parseDuplicatePongId(anomaly.detail());
+        if (dupId == null) {
+            return;
+        }
+        TrackedPing prior = state.rememberedPings.get(dupId);
+        if (prior == null) {
+            return;
+        }
+        Map<String, String> details = new TreeMap<>();
+        details.put("reason", "duplicate-transaction");
+        details.put("transactionId", Integer.toHexString(dupId));
+        details.put("firstSentSequence", Long.toString(prior.sentSeq));
+        report(session, state, prior.sentSeq, prior.sentNano, anomaly.sequence(), anomaly.nanoTime(),
+                "answered transaction " + Integer.toHexString(dupId) + " more than once or out of FIFO order",
+                details);
+    }
+
+    private static Integer parseDuplicatePongId(String detail) {
+        if (detail == null || !detail.startsWith("pong ")) {
+            return null;
+        }
+        try {
+            return (int) Long.parseLong(detail.substring(5).trim(), 16);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
@@ -200,11 +267,17 @@ public final class TransactionOrderCheck implements TimelineListener {
         state.lastReportNanos = toNano;
     }
 
-    private static void reset(State state) {
-        state.loaded = false;
+    private static void clearPendingAndRemembered(State state) {
         state.pendingPings.clear();
+        state.rememberedPings.clear();
         state.pendingTeleports.clear();
         state.pendingKeepAlives.clear();
+        state.hasLastPongId = false;
         state.acceptedTeleportSeq = Long.MIN_VALUE;
+    }
+
+    private static void reset(State state) {
+        state.loaded = false;
+        clearPendingAndRemembered(state);
     }
 }

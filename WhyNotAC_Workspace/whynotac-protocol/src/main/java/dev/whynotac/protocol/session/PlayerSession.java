@@ -65,7 +65,9 @@ public final class PlayerSession {
         this.remoteAddress = remoteAddress;
         this.replay = replay;
         this.mailbox = new SerialMailbox(registry.executor(), mailboxCapacity, registry.globalQueued(),
-                replay ? Long.MAX_VALUE : registry.globalQueueCapacity(), event -> registry.dispatch(this, event));
+                replay ? Long.MAX_VALUE : registry.globalQueueCapacity(),
+                replay ? Long.MAX_VALUE : SerialMailbox.MAX_DRAIN_NANOS,
+                event -> registry.dispatch(this, event));
     }
 
     // --- platform side ---------------------------------------------------------------------------
@@ -331,6 +333,16 @@ public final class PlayerSession {
     /** Closed and every queued event delivered to the listeners. */
     public boolean isFullyDelivered() {
         return isClosed() && mailbox.isIdle();
+    }
+
+    /** Cumulative wall-clock nanoseconds spent analyzing this session's timeline. */
+    public long analysisNanos() {
+        return mailbox.totalDrainNanos();
+    }
+
+    /** Number of times this session yielded its worker thread after hitting the per-slice analysis time budget. */
+    public long budgetYields() {
+        return mailbox.budgetYields();
     }
 
     // --- analysis side ---------------------------------------------------------------------------

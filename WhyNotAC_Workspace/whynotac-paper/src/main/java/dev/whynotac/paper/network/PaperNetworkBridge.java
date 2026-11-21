@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.logging.Level;
@@ -40,6 +41,7 @@ public final class PaperNetworkBridge implements PluginMessageListener {
     private final FrameSender frameSender;
     private final LongSupplier wallClockMillis;
     private final Logger logger;
+    private volatile Consumer<UUID> remoteErasureHandler;
 
     private final AtomicLong receivedValid = new AtomicLong();
     private final AtomicLong rejectedInvalid = new AtomicLong();
@@ -67,6 +69,11 @@ public final class PaperNetworkBridge implements PluginMessageListener {
     public static void registerBukkitChannels(Plugin plugin, PaperNetworkBridge bridge) {
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, NetworkEnvelope.CHANNEL, bridge);
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, NetworkEnvelope.CHANNEL);
+    }
+
+    /** Optional hook run when a signed remote {@code GDPR_FORGET} notice arrives from another backend via proxy. */
+    public void setRemoteErasureHandler(Consumer<UUID> handler) {
+        this.remoteErasureHandler = handler;
     }
 
     @Override
@@ -109,8 +116,14 @@ public final class PaperNetworkBridge implements PluginMessageListener {
                     if (banWaveQueue != null && ("OVERTURN".equals(notice.kind()) || "GDPR_FORGET".equals(notice.kind()))) {
                         banWaveQueue.cancelSubject(notice.playerId(), notice.issuedAtMillis());
                     }
-                    if (baselineModel != null && "GDPR_FORGET".equals(notice.kind())) {
-                        baselineModel.forget(notice.playerId());
+                    if ("GDPR_FORGET".equals(notice.kind())) {
+                        if (baselineModel != null) {
+                            baselineModel.forget(notice.playerId());
+                        }
+                        Consumer<UUID> erasure = remoteErasureHandler;
+                        if (erasure != null) {
+                            erasure.accept(notice.playerId());
+                        }
                     }
                 }
             }

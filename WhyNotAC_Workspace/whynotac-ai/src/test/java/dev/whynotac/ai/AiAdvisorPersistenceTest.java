@@ -60,6 +60,35 @@ final class AiAdvisorPersistenceTest {
         restarted.seedBaselineIfEmpty(authedPlayer,
                 Map.of(BehavioralFeatureExtractor.TICK_DELTA_MS, RunningMoments.fromSummary(999L, 1.0, 1.0)));
         assertEquals(25L, restarted.baselineSnapshot(authedPlayer).get(BehavioralFeatureExtractor.TICK_DELTA_MS).count());
+
+        // 4) Multivariate covariance persistence round-trip via RunningCovarianceMatrix.fromSummary
+        dev.whynotac.math.stats.RunningCovarianceMatrix cov = new dev.whynotac.math.stats.RunningCovarianceMatrix(4);
+        for (int i = 0; i < 20; i++) {
+            cov.add(2.0 + i * 0.1, 0.5 + (i % 3) * 0.1, 4.0 + (i % 2) * 0.5, 1.2 + i * 0.05);
+        }
+        dev.whynotac.math.stats.RunningCovarianceMatrix restoredCov = dev.whynotac.math.stats.RunningCovarianceMatrix.fromSummary(
+                cov.dim(), cov.count(), cov.mean(), cov.flatCoMoments());
+        restarted.seedCovarianceIfEmpty(authedPlayer, restoredCov);
+        assertEquals(20L, restarted.covarianceSnapshot(authedPlayer).count());
+        assertEquals(cov.mahalanobisDistance(new double[] {9.0, 0.01, 2.0, 10.0}, 0.05),
+                restarted.covarianceSnapshot(authedPlayer).mahalanobisDistance(new double[] {9.0, 0.01, 2.0, 10.0}, 0.05),
+                1e-9);
+    }
+
+    @Test
+    void tracksPerSessionGapBlindingBurstsAndBoundsCachedCases() {
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 4096, (s, e, err) -> {
+            throw new AssertionError("Listener error", err);
+        });
+        AiAdvisor advisor = new AiAdvisor();
+        registry.addListener(advisor);
+        PlayerSession s = registry.openReplay("blinding-test");
+        s.deliver(new dev.whynotac.protocol.session.TimelineEvent.Gap(1, 1_000_000_000L, 50));
+        s.deliver(new dev.whynotac.protocol.session.TimelineEvent.Gap(2, 2_000_000_000L, 50));
+        assertEquals(0L, advisor.sessionGapBursts());
+        s.deliver(new dev.whynotac.protocol.session.TimelineEvent.Gap(3, 3_000_000_000L, 50));
+        assertEquals(1L, advisor.sessionGapBursts());
+        assertEquals(3, advisor.recentSessionGaps(s));
     }
 
     private static void feedTicks(PlayerSession s, int count) {
