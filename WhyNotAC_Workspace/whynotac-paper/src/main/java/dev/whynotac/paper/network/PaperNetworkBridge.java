@@ -2,6 +2,7 @@ package dev.whynotac.paper.network;
 
 import dev.whynotac.ai.AccountBaselineModel;
 import dev.whynotac.ai.BehavioralFeatureExtractor;
+import dev.whynotac.math.stats.RunningCovarianceMatrix;
 import dev.whynotac.math.stats.RunningMoments;
 import dev.whynotac.protocol.network.NetworkEnvelope;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -112,6 +113,15 @@ public final class PaperNetworkBridge implements PluginMessageListener {
                                 new BehavioralFeatureExtractor.Snapshot(Map.of(sync.featureName(), rm)));
                     }
                 }
+                case NetworkEnvelope.CovarianceSummarySync cov -> {
+                    if (baselineModel != null && NetworkEnvelope.isLongLivedAuthenticated(cov.identity())
+                            && cov.dim() == BehavioralFeatureExtractor.COMBAT_COVARIANCE_DIM) {
+                        RunningCovarianceMatrix matrix = RunningCovarianceMatrix.fromSummary(
+                                cov.dim(), cov.sampleCount(), cov.mean(), cov.flatCoMoments());
+                        baselineModel.mergeSession(cov.playerId(),
+                                new BehavioralFeatureExtractor.Snapshot(Map.of(), 0.0, matrix));
+                    }
+                }
                 case NetworkEnvelope.EnforcementNotice notice -> {
                     if (banWaveQueue != null && ("OVERTURN".equals(notice.kind()) || "GDPR_FORGET".equals(notice.kind()))) {
                         banWaveQueue.cancelSubject(notice.playerId(), notice.issuedAtMillis());
@@ -145,6 +155,17 @@ public final class PaperNetworkBridge implements PluginMessageListener {
         byte[] frame = NetworkEnvelope.encode(new NetworkEnvelope.ProfileSummarySync(
                 wallClockMillis.getAsLong(), playerId, identity, featureName,
                 moments.count(), moments.mean(), moments.sampleVariance(), falseBanIncidents), secret);
+        frameSender.send(frame);
+        sentFrames.incrementAndGet();
+    }
+
+    /** Signs and transmits an authenticated multivariate combat covariance summary to the proxy for cross-server sync. */
+    public void sendCovarianceSummary(UUID playerId, Identity identity, RunningCovarianceMatrix cov) {
+        if (!NetworkEnvelope.isLongLivedAuthenticated(identity) || cov == null || cov.count() <= 0) {
+            return;
+        }
+        byte[] frame = NetworkEnvelope.encode(new NetworkEnvelope.CovarianceSummarySync(
+                wallClockMillis.getAsLong(), playerId, identity, cov.dim(), cov.count(), cov.mean(), cov.flatCoMoments()), secret);
         frameSender.send(frame);
         sentFrames.incrementAndGet();
     }

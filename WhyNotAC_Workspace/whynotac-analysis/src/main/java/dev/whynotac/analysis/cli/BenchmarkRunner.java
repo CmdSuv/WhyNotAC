@@ -265,6 +265,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("explosion-anti-kb", "velocity-response", true, h -> scenarioExplosionAntiKb(h)));
         scenarioResults.add(measure("horizontal-anti-kb-0pct", "velocity-response", true, h -> scenarioHorizontalAntiKb(h)));
         scenarioResults.add(measure("partial-horizontal-anti-kb-30pct", "velocity-response", true, h -> scenarioPartialHorizontalAntiKb(h)));
+        scenarioResults.add(measure("ground-strafe-anti-kb", "velocity-response", true, h -> scenarioGroundStrafeAntiKb(h)));
         // Deterministic P-M grammar/protocol checks
         scenarioResults.add(measure("packet-bounds-hotbar-cursor", "packet-bounds", true, h -> scenarioPacketBounds(h)));
         scenarioResults.add(measure("packet-bounds-pitch-flip", "packet-bounds", true, h -> scenarioPacketBoundsPitchFlip(h)));
@@ -274,6 +275,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("interact-at-box-spoof", "interact-at-box", true, h -> scenarioInteractAtBox(h)));
         scenarioResults.add(measure("autoblock-noslow-same-tick", "use-item-state", true, h -> scenarioUseSlowdown(h)));
         scenarioResults.add(measure("shield-autoblock-cross-tick", "use-item-state", true, h -> scenarioCrossTickShieldAutoBlock(h)));
+        scenarioResults.add(measure("golden-apple-noslow-sprint", "use-item-state", true, h -> scenarioGoldenAppleNoSlowSprint(h)));
         scenarioResults.add(measure("tick-framing-multi-move", "tick-framing", true, h -> scenarioTickFraming(h)));
         scenarioResults.add(measure("transaction-skipped-ping", "transaction-order", true, h -> scenarioTransactionSkippedPing(h)));
         scenarioResults.add(measure("transaction-duplicate-pong", "transaction-order", true, h -> scenarioTransactionDuplicatePong(h)));
@@ -282,6 +284,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("oscillating-timer-balance", "timer-balance", true, h -> scenarioTimerBalance(h)));
         scenarioResults.add(measure("ping-spoof-backtrack-rtt", "ping-spoof", true, h -> scenarioPingSpoof(h)));
         scenarioResults.add(measure("combat-rtt-drop-backtrack", "ping-spoof", true, h -> scenarioCombatRttDrop(h)));
+        scenarioResults.add(measure("symmetric-backtrack-rtt-drop", "ping-spoof", true, h -> scenarioSymmetricCombatRttDrop(h)));
 
         int passed = 0;
         for (ScenarioResult r : scenarioResults) {
@@ -356,6 +359,13 @@ public final class BenchmarkRunner {
                     scenarioTransactionSkippedPing(h);
                     h.now += 2_000_000_000L;
                     scenarioTransactionDuplicatePong(h);
+                }),
+                new CorpusEntry("cheat-meteor-grim-combo.wnrec", h -> {
+                    scenarioGroundStrafeAntiKb(h);
+                    h.now += 2_000_000_000L;
+                    scenarioGoldenAppleNoSlowSprint(h);
+                    h.now += 2_000_000_000L;
+                    scenarioSymmetricCombatRttDrop(h);
                 }));
         for (CorpusEntry entry : entries) {
             Path file = outputDir.resolve(entry.fileName());
@@ -698,6 +708,22 @@ public final class BenchmarkRunner {
         h.tick();
     }
 
+    private static void scenarioGroundStrafeAntiKb(Harness h) {
+        // Player holds W (forward) on the ground WITHOUT jumping (no Jump-Reset possible)
+        PlayerState.Keys forwardOnly = new PlayerState.Keys(true, false, false, false, false, false, true);
+        h.stepVanilla(forwardOnly, 90.0f, 0.0f);
+        h.stepVanilla(forwardOnly, 90.0f, 0.0f);
+        h.markCheatStart();
+        // Standard sword horizontal KB (0.38 >= 0.28 strafe threshold; expected min = 0.38 - 0.16 = 0.22)
+        h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.38, 0.36, 0.0)));
+        h.syncPing();
+        // Cheater takes vertical rise (+0.36) but suppresses horizontal KB down to 0.08 (< 0.22)
+        h.in(new ServerboundPacket.MovePlayer(h.player.x() + 0.08, h.player.y() + 0.36, h.player.z(), 90.0f, 0.0f, true, false, false, false));
+        h.tick();
+        h.in(new ServerboundPacket.MovePlayer(h.player.x() + 0.08, h.player.y() + 0.60, h.player.z(), 90.0f, 0.0f, true, false, false, false));
+        h.tick();
+    }
+
     private static void scenarioPacketBounds(Harness h) {
         h.markCheatStart();
         h.in(new ServerboundPacket.SetCarriedItem(9));
@@ -765,6 +791,23 @@ public final class BenchmarkRunner {
         // Keep-using AutoBlock: attacks while offhand shield remains raised across ticks without release or swap
         h.in(new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
         h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        h.tick();
+    }
+
+    private static void scenarioGoldenAppleNoSlowSprint(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:golden_apple", 8, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 3, inv, Stack.EMPTY));
+        h.syncPing();
+        h.in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0f, 0.0f));
+        h.tick();
+        h.tick();
+        h.markCheatStart();
+        // Cheater starts sprinting while still within the guaranteed 24-tick golden_apple consumption hold window
+        h.in(new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0));
         h.tick();
     }
 
@@ -876,6 +919,55 @@ public final class BenchmarkRunner {
             long dropAckTime = dropPingSent + 30_000_000L;
             h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropId)));
             h.deliver(new TimelineEvent.Acknowledged(h.seq++, dropAckTime, dropId, dropPingSent, 0));
+        }
+    }
+
+    private static void scenarioSymmetricCombatRttDrop(Harness h) {
+        // 1. Establish clean low-RTT session baseline (KeepAlive ~25ms, Ping ~25ms across 6 active ticks)
+        for (int i = 0; i < 6; i++) {
+            long kaId = 200L + i;
+            long sent = h.now;
+            h.out(new ClientboundPacket.KeepAlive(kaId));
+            int pid = ++h.pingId;
+            h.out(new ClientboundPacket.Ping(pid));
+            h.tick();
+            long ackAt = sent + 25_000_000L;
+            h.deliver(new TimelineEvent.Inbound(h.seq++, ackAt, 0, new ServerboundPacket.KeepAlive(kaId)));
+            h.deliver(new TimelineEvent.Inbound(h.seq++, ackAt, 0, new ServerboundPacket.Pong(pid)));
+            h.deliver(new TimelineEvent.Acknowledged(h.seq++, ackAt, pid, sent, 0));
+        }
+        h.markCheatStart();
+        // 2. Cheater delays BOTH KeepAlive and Ping symmetrically (260ms) and flushes both down to 30ms upon ATTACK
+        for (int cycle = 0; cycle < 2; cycle++) {
+            if (cycle == 1) {
+                for (int t = 0; t < 12; t++) {
+                    h.tick();
+                }
+            }
+            for (int i = 0; i < 5; i++) {
+                long sent = h.now;
+                long kaId = 300L + cycle * 10L + i;
+                int pid = ++h.pingId;
+                h.out(new ClientboundPacket.KeepAlive(kaId));
+                h.out(new ClientboundPacket.Ping(pid));
+                h.tick();
+                long ackTime = sent + 260_000_000L;
+                h.deliver(new TimelineEvent.Inbound(h.seq++, ackTime, 0, new ServerboundPacket.KeepAlive(kaId)));
+                h.deliver(new TimelineEvent.Inbound(h.seq++, ackTime, 0, new ServerboundPacket.Pong(pid)));
+                h.deliver(new TimelineEvent.Acknowledged(h.seq++, ackTime, pid, sent, 0));
+            }
+            long dropSent = h.now;
+            long dropKaId = 400L + cycle;
+            int dropPid = ++h.pingId;
+            h.out(new ClientboundPacket.KeepAlive(dropKaId));
+            h.out(new ClientboundPacket.Ping(dropPid));
+            h.deliver(new TimelineEvent.Inbound(h.seq++, dropSent + 10_000_000L, 0,
+                    new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+            h.tick();
+            long dropAckTime = dropSent + 30_000_000L;
+            h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.KeepAlive(dropKaId)));
+            h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropPid)));
+            h.deliver(new TimelineEvent.Acknowledged(h.seq++, dropAckTime, dropPid, dropSent, 0));
         }
     }
 

@@ -29,7 +29,7 @@ public final class NetworkEnvelope {
     private static final int HMAC_LEN = 32;
     private static final int MAX_PAYLOAD_BYTES = 16_384;
 
-    public sealed interface Payload permits ProxyClientEdge, ProfileSummarySync, EnforcementNotice {
+    public sealed interface Payload permits ProxyClientEdge, ProfileSummarySync, EnforcementNotice, CovarianceSummarySync {
         long issuedAtMillis();
     }
 
@@ -71,9 +71,43 @@ public final class NetworkEnvelope {
             long durationMillis,
             String reason) implements Payload {}
 
+    /** Authenticated multivariate combat covariance summary synced across servers behind the proxy (NET-22). */
+    public record CovarianceSummarySync(
+            long issuedAtMillis,
+            UUID playerId,
+            Identity identity,
+            int dim,
+            long sampleCount,
+            double[] mean,
+            double[] flatCoMoments) implements Payload {
+
+        public CovarianceSummarySync {
+            if (!isLongLivedAuthenticated(identity)) {
+                throw new IllegalArgumentException("Unauthenticated identity cannot be synced across servers: " + identity);
+            }
+            if (dim <= 0 || dim > 16 || mean == null || mean.length != dim
+                    || flatCoMoments == null || flatCoMoments.length != dim * dim) {
+                throw new IllegalArgumentException("Invalid covariance summary dimensions: dim=" + dim);
+            }
+            mean = mean.clone();
+            flatCoMoments = flatCoMoments.clone();
+        }
+
+        @Override
+        public double[] mean() {
+            return mean.clone();
+        }
+
+        @Override
+        public double[] flatCoMoments() {
+            return flatCoMoments.clone();
+        }
+    }
+
     private static final byte TYPE_PROXY_EDGE = 1;
     private static final byte TYPE_PROFILE_SYNC = 2;
     private static final byte TYPE_ENFORCEMENT = 3;
+    private static final byte TYPE_COVARIANCE_SYNC = 4;
 
     private NetworkEnvelope() {}
 
@@ -126,6 +160,21 @@ public final class NetworkEnvelope {
                     writeStr(out, notice.certificateDigest());
                     out.writeLong(notice.durationMillis());
                     writeStr(out, notice.reason());
+                }
+                case CovarianceSummarySync cov -> {
+                    out.writeByte(TYPE_COVARIANCE_SYNC);
+                    out.writeLong(cov.issuedAtMillis());
+                    out.writeLong(cov.playerId().getMostSignificantBits());
+                    out.writeLong(cov.playerId().getLeastSignificantBits());
+                    writeStr(out, cov.identity().name());
+                    out.writeInt(cov.dim());
+                    out.writeLong(cov.sampleCount());
+                    for (double v : cov.mean()) {
+                        out.writeDouble(v);
+                    }
+                    for (double v : cov.flatCoMoments()) {
+                        out.writeDouble(v);
+                    }
                 }
             }
             out.flush();
@@ -199,6 +248,23 @@ public final class NetworkEnvelope {
                 long duration = in.readLong();
                 String reason = readStr(in);
                 yield new EnforcementNotice(issuedAt, playerId, kind, caseId, digest, duration, reason);
+            }
+            case TYPE_COVARIANCE_SYNC -> {
+                Identity identity = Identity.valueOf(readStr(in));
+                int dim = in.readInt();
+                if (dim <= 0 || dim > 16) {
+                    throw new IOException("Invalid covariance dim: " + dim);
+                }
+                long count = in.readLong();
+                double[] mean = new double[dim];
+                for (int i = 0; i < dim; i++) {
+                    mean[i] = in.readDouble();
+                }
+                double[] cm = new double[dim * dim];
+                for (int i = 0; i < cm.length; i++) {
+                    cm[i] = in.readDouble();
+                }
+                yield new CovarianceSummarySync(issuedAt, playerId, identity, dim, count, mean, cm);
             }
             default -> throw new IOException("Unknown envelope type: " + type);
         };

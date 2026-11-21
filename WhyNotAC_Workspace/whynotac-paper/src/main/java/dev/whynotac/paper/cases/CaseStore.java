@@ -357,6 +357,8 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
             Files.createDirectories(database.getParent());
             connection = DriverManager.getConnection("jdbc:sqlite:" + database);
             try (Statement s = connection.createStatement()) {
+                s.execute("PRAGMA journal_mode=WAL");
+                s.execute("PRAGMA synchronous=NORMAL");
                 s.executeUpdate("CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, check_id TEXT NOT NULL, "
                         + "check_version INTEGER NOT NULL, evidence_class TEXT NOT NULL, lifecycle TEXT NOT NULL, player_name TEXT, player_id TEXT, "
                         + "identity TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER NOT NULL, summary TEXT NOT NULL, "

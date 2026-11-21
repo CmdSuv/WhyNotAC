@@ -16,10 +16,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -29,12 +32,15 @@ import java.util.logging.Logger;
  */
 public final class AlertStreamExporter implements CaseListener, AutoCloseable {
 
+    static final int MAX_WEBHOOK_QUEUE = 512;
+
     private final Path outputFile;
     private final AiAdvisor aiAdvisor;
     private final Logger logger;
     private final URI webhookUri;
     private final ExecutorService webhookExecutor;
     private final HttpClient httpClient;
+    private final AtomicLong droppedWebhooks = new AtomicLong();
     private BufferedWriter writer;
 
     public AlertStreamExporter(Path outputFile, AiAdvisor aiAdvisor, Logger logger) {
@@ -48,11 +54,15 @@ public final class AlertStreamExporter implements CaseListener, AutoCloseable {
         URI parsed = parseWebhookUri(webhookUrl, logger);
         this.webhookUri = parsed;
         if (parsed != null) {
-            this.webhookExecutor = Executors.newSingleThreadExecutor(r -> {
-                Thread t = new Thread(r, "WhyNotAC-AlertWebhook");
-                t.setDaemon(true);
-                return t;
-            });
+            this.webhookExecutor = new ThreadPoolExecutor(
+                    1, 1, 0L, TimeUnit.MILLISECONDS,
+                    new ArrayBlockingQueue<>(MAX_WEBHOOK_QUEUE),
+                    r -> {
+                        Thread t = new Thread(r, "WhyNotAC-AlertWebhook");
+                        t.setDaemon(true);
+                        return t;
+                    },
+                    (r, exec) -> droppedWebhooks.incrementAndGet());
             this.httpClient = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
                     .executor(this.webhookExecutor)
@@ -61,6 +71,10 @@ public final class AlertStreamExporter implements CaseListener, AutoCloseable {
             this.webhookExecutor = null;
             this.httpClient = null;
         }
+    }
+
+    public long droppedWebhooks() {
+        return droppedWebhooks.get();
     }
 
     private static URI parseWebhookUri(String webhookUrl, Logger logger) {
@@ -141,22 +155,36 @@ public final class AlertStreamExporter implements CaseListener, AutoCloseable {
             }
         }
         if (httpClient != null && webhookUri != null) {
-            HttpRequest request = HttpRequest.newBuilder(webhookUri)
-                    .timeout(Duration.ofSeconds(5))
-                    .header("Content-Type", "application/json; charset=utf-8")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonLine, StandardCharsets.UTF_8))
-                    .build();
+            dispatchWebhookWithRetry(c.id(), jsonLine, 0);
+        }
+    }
+
+    private void dispatchWebhookWithRetry(String caseId, String jsonLine, int attempt) {
+        HttpRequest request = HttpRequest.newBuilder(webhookUri)
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonLine, StandardCharsets.UTF_8))
+                .build();
+        try {
             CompletableFuture<HttpResponse<Void>> fut = httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding());
             fut.whenComplete((resp, err) -> {
+                boolean retryable = err != null || (resp != null && (resp.statusCode() == 429 || resp.statusCode() >= 500));
+                if (retryable && attempt == 0 && webhookExecutor != null && !webhookExecutor.isShutdown()) {
+                    CompletableFuture.delayedExecutor(250L, TimeUnit.MILLISECONDS, webhookExecutor)
+                            .execute(() -> dispatchWebhookWithRetry(caseId, jsonLine, 1));
+                    return;
+                }
                 if (logger == null) {
                     return;
                 }
                 if (err != null) {
-                    logger.log(Level.FINE, "Alert webhook delivery failed for case " + c.id(), err);
+                    logger.log(Level.FINE, "Alert webhook delivery failed for case " + caseId, err);
                 } else if (resp != null && resp.statusCode() >= 400) {
-                    logger.warning("Alert webhook HTTP " + resp.statusCode() + " for case " + c.id());
+                    logger.warning("Alert webhook HTTP " + resp.statusCode() + " for case " + caseId);
                 }
             });
+        } catch (RejectedExecutionException rejected) {
+            droppedWebhooks.incrementAndGet();
         }
     }
 

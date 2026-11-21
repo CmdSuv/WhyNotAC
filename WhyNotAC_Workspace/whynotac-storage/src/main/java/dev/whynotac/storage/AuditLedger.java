@@ -15,6 +15,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,6 +33,8 @@ import javax.crypto.spec.SecretKeySpec;
 public final class AuditLedger implements AutoCloseable {
 
     public static final String GENESIS_HASH = "0".repeat(64);
+    public static final long DEFAULT_MAX_SEGMENT_ENTRIES = 100_000L;
+    private static final String CHECKPOINT_PREFIX = "#checkpoint ";
 
     public enum EntryKind {
         CASE_OPENED,
@@ -93,7 +96,7 @@ public final class AuditLedger implements AutoCloseable {
         if (!verification.valid()) {
             throw new IOException("Audit ledger integrity check failed: " + verification.failureReason());
         }
-        this.nextSequence = verification.entryCount() == 0 ? 0L : verification.lastSequence() + 1L;
+        this.nextSequence = verification.lastSequence() < 0 ? 0L : verification.lastSequence() + 1L;
         this.headHash = verification.headHash();
     }
 
@@ -151,6 +154,16 @@ public final class AuditLedger implements AutoCloseable {
                 if (line.isBlank()) {
                     continue;
                 }
+                if (count == 0L && line.startsWith(CHECKPOINT_PREFIX)) {
+                    String cpFailure = verifyCheckpointHeader(line);
+                    if (cpFailure != null) {
+                        return new ChainVerification(false, 0L, -1L, expectedPrev, cpFailure);
+                    }
+                    expectedSeq = extractLongField(line, "startSeq");
+                    expectedPrev = extractStringField(line, "prevHash");
+                    lastSeq = expectedSeq - 1L;
+                    continue;
+                }
                 LedgerEntry parsed;
                 try {
                     parsed = parseJsonLine(line);
@@ -195,6 +208,69 @@ public final class AuditLedger implements AutoCloseable {
 
     public synchronized long size() {
         return nextSequence;
+    }
+
+    /**
+     * Rotates the active ledger file to {@code audit-ledger-<epochMillis>.jsonl} when {@link #size()} reaches
+     * {@code maxEntries}, seeding the fresh active ledger with an HMAC-signed {@code #checkpoint} header carrying
+     * the previous segment's {@code headHash} and {@code nextSequence} so startup verification stays O(active segment).
+     */
+    public synchronized Optional<Path> rotateIfExceeds(long maxEntries, long epochMillis) throws IOException {
+        if (maxEntries <= 0 || nextSequence < maxEntries || !Files.exists(ledgerFile)) {
+            return Optional.empty();
+        }
+        ChainVerification current = verify();
+        if (!current.valid() || current.entryCount() < maxEntries) {
+            return Optional.empty();
+        }
+        String archiveName = "audit-ledger-" + epochMillis + "-seq" + current.lastSequence() + ".jsonl";
+        Path archived = ledgerFile.resolveSibling(archiveName);
+        Files.move(ledgerFile, archived, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+        String cpPayload = "startSeq=" + nextSequence + "|prevHash=" + headHash + "|buildTag=" + buildTag;
+        String cpHmac = hmacHex(secretKey, "checkpoint:" + cpPayload);
+        String header = CHECKPOINT_PREFIX + "{\"startSeq\":" + nextSequence
+                + ",\"prevHash\":\"" + headHash
+                + "\",\"buildTag\":\"" + escape(buildTag)
+                + "\",\"hmacTag\":\"" + cpHmac + "\"}\n";
+        byte[] bytes = header.getBytes(StandardCharsets.UTF_8);
+        try (FileChannel channel = FileChannel.open(ledgerFile,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            ByteBuffer buf = ByteBuffer.wrap(bytes);
+            while (buf.hasRemaining()) {
+                channel.write(buf);
+            }
+            channel.force(true);
+        }
+        return Optional.of(archived);
+    }
+
+    private String verifyCheckpointHeader(String line) {
+        try {
+            long startSeq = extractLongField(line, "startSeq");
+            String prev = extractStringField(line, "prevHash");
+            String tag = extractStringField(line, "buildTag");
+            String hmac = extractStringField(line, "hmacTag");
+            if (startSeq <= 0 || prev == null || prev.length() != 64 || tag == null || hmac == null) {
+                return "malformed checkpoint header";
+            }
+            String expectedHmac = hmacHex(secretKey, "checkpoint:startSeq=" + startSeq + "|prevHash=" + prev + "|buildTag=" + tag);
+            if (!MessageDigest.isEqual(expectedHmac.getBytes(StandardCharsets.US_ASCII),
+                    hmac.getBytes(StandardCharsets.US_ASCII))) {
+                return "checkpoint hmacTag mismatch";
+            }
+            return null;
+        } catch (RuntimeException ex) {
+            return "malformed checkpoint header: " + ex.getMessage();
+        }
+    }
+
+    private static long extractLongField(String line, String key) {
+        return Long.parseLong(requireNumber(line, key));
+    }
+
+    private static String extractStringField(String line, String key) {
+        return requireString(line, key);
     }
 
     public String pseudonymFor(UUID playerUuid) {

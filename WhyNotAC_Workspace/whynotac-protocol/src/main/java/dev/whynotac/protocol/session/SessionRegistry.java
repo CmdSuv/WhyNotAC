@@ -114,6 +114,7 @@ public final class SessionRegistry {
 
     /** Runs on the analysis executor, in per-session order. */
     void dispatch(PlayerSession session, TimelineEvent event) {
+        session.recordRecentEvent(event);
         if (event instanceof TimelineEvent.Bound bound) {
             byPlayer.put(bound.playerId(), session);
         } else if (event instanceof TimelineEvent.Outbound out

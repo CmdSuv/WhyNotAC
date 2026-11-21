@@ -2065,6 +2065,21 @@ public final class ClientEntities {
             result.add(s);
         }
         if (result.size() > MAX_CANDIDATES) {
+            List<State> coarse = new ArrayList<>(MAX_CANDIDATES);
+            coarseOuter:
+            for (State s : result) {
+                for (State r : coarse) {
+                    if (r.mergeableCoarse(s)) {
+                        r.absorbCoarse(s);
+                        merges++;
+                        continue coarseOuter;
+                    }
+                }
+                coarse.add(s);
+            }
+            result = coarse;
+        }
+        if (result.size() > MAX_CANDIDATES) {
             // Too many: nothing is claimed until the server adds or removes the entity after every member's
             // last processed op (ops before that may be behind some members already).
             overflows++;
@@ -3371,6 +3386,39 @@ public final class ClientEntities {
 
         /** Same discrete state and the same targets: the client cannot tell them apart from now on but by where they are. */
         boolean mergeable(State o) {
+            if (!sameDiscreteState(o)) {
+                return false;
+            }
+            if (!present || lostAll || lostPosition) {
+                return true;
+            }
+            return steps == o.steps && headSteps == o.headSteps && hasPrevPos == o.hasPrevPos && hasPrevRot == o.hasPrevRot
+                    && posMoved == o.posMoved && rotMoved == o.rotMoved
+                    && (!posMoved || Double.compare(px, o.px) == 0 && Double.compare(py, o.py) == 0 && Double.compare(pz, o.pz) == 0 && rPrev == o.rPrev)
+                    && (!rotMoved || Float.compare(pxRot, o.pxRot) == 0 && Float.compare(pyRot, o.pyRot) == 0 && rPrevRot == o.rPrevRot)
+                    && Double.compare(tx, o.tx) == 0 && Double.compare(ty, o.ty) == 0 && Double.compare(tz, o.tz) == 0
+                    && Float.compare(tyRot, o.tyRot) == 0 && Float.compare(txRot, o.txRot) == 0 && rTarget == o.rTarget && rTargetRot == o.rTargetRot
+                    && Double.compare(headTarget, o.headTarget) == 0;
+        }
+
+        /**
+         * Fallback bounding-box merge predicate used only when exact candidate count exceeds {@link #MAX_CANDIDATES}:
+         * requires identical discrete state and interpolation step counters, folding distinct interpolation target
+         * branches into a single sound bounding interval via {@link #absorbCoarse(State)} instead of discarding the entity.
+         */
+        boolean mergeableCoarse(State o) {
+            if (!sameDiscreteState(o)) {
+                return false;
+            }
+            if (!present || lostAll || lostPosition) {
+                return true;
+            }
+            return steps == o.steps && headSteps == o.headSteps && hasPrevPos == o.hasPrevPos && hasPrevRot == o.hasPrevRot
+                    && posMoved == o.posMoved && rotMoved == o.rotMoved
+                    && Double.compare(headTarget, o.headTarget) == 0;
+        }
+
+        private boolean sameDiscreteState(State o) {
             if (applied != o.applied || present != o.present || lostAll != o.lostAll) {
                 return false;
             }
@@ -3397,16 +3445,7 @@ public final class ClientEntities {
                     || hasGround && (Double.compare(gx, o.gx) != 0 || Double.compare(gy, o.gy) != 0 || Double.compare(gz, o.gz) != 0 || rGround != o.rGround))) {
                 return false; // what the movement check reads at a mount
             }
-            if (lostPosition) {
-                return true;
-            }
-            return steps == o.steps && headSteps == o.headSteps && hasPrevPos == o.hasPrevPos && hasPrevRot == o.hasPrevRot
-                    && posMoved == o.posMoved && rotMoved == o.rotMoved
-                    && (!posMoved || Double.compare(px, o.px) == 0 && Double.compare(py, o.py) == 0 && Double.compare(pz, o.pz) == 0 && rPrev == o.rPrev)
-                    && (!rotMoved || Float.compare(pxRot, o.pxRot) == 0 && Float.compare(pyRot, o.pyRot) == 0 && rPrevRot == o.rPrevRot)
-                    && Double.compare(tx, o.tx) == 0 && Double.compare(ty, o.ty) == 0 && Double.compare(tz, o.tz) == 0
-                    && Float.compare(tyRot, o.tyRot) == 0 && Float.compare(txRot, o.txRot) == 0 && rTarget == o.rTarget && rTargetRot == o.rTargetRot
-                    && Double.compare(headTarget, o.headTarget) == 0;
+            return true;
         }
 
         /** Widens this candidate's radii to cover {@code o} as well (see {@link #mergeable}). */
@@ -3431,6 +3470,26 @@ public final class ClientEntities {
             rHead = Math.max(rHead, angle(yHeadRot, o.yHeadRot) + o.rHead);
             if (!rotMoved) {
                 rPrevRot = rRot;
+            }
+        }
+
+        /** Widens position, target, and previous interpolation radii to soundly enclose {@code o}. */
+        void absorbCoarse(State o) {
+            absorb(o);
+            if (!present || lostAll || lostPosition) {
+                return;
+            }
+            double dt = Math.max(apart(tx, o.tx), Math.max(apart(ty, o.ty), apart(tz, o.tz)));
+            rTarget = Math.max(rTarget, dt + o.rTarget);
+            float at = Math.max(angle(tyRot, o.tyRot), angle(txRot, o.txRot));
+            rTargetRot = Math.max(rTargetRot, at + o.rTargetRot);
+            if (posMoved) {
+                double dp = Math.max(apart(px, o.px), Math.max(apart(py, o.py), apart(pz, o.pz)));
+                rPrev = Math.max(rPrev, dp + o.rPrev);
+            }
+            if (rotMoved) {
+                float ap = Math.max(angle(pyRot, o.pyRot), angle(pxRot, o.pxRot));
+                rPrevRot = Math.max(rPrevRot, ap + o.rPrevRot);
             }
         }
 

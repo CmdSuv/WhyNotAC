@@ -70,4 +70,34 @@ class AuditLedgerTest {
             assertTrue(sm.ledger().verify().valid());
         }
     }
+
+    @Test
+    void rotatesLedgerWithSignedCheckpointAndVerifiesSubsequentChainCleanly() throws Exception {
+        Path ledgerFile = tempDir.resolve("rot-ledger.jsonl");
+        Path keyFile = tempDir.resolve("rot-secret.key");
+        UUID player = UUID.randomUUID();
+
+        try (AuditLedger ledger = new AuditLedger(ledgerFile, keyFile, "0.1.0-p774")) {
+            ledger.append(AuditLedger.EntryKind.CASE_OPENED, 1000L, "c1", "cert1", player, "s1");
+            ledger.append(AuditLedger.EntryKind.CASE_OPENED, 2000L, "c2", "cert2", player, "s2");
+            ledger.append(AuditLedger.EntryKind.CASE_OPENED, 3000L, "c3", "cert3", player, "s3");
+
+            java.util.Optional<Path> archived = ledger.rotateIfExceeds(2L, 4000L);
+            assertTrue(archived.isPresent() && Files.isRegularFile(archived.get()));
+            assertTrue(ledger.verify().valid());
+
+            AuditLedger.LedgerEntry e3 = ledger.append(AuditLedger.EntryKind.TEMP_BAN_ISSUED, 5000L, "c4", "cert4", player, "s4");
+            assertEquals(3L, e3.sequence());
+            assertTrue(ledger.verify().valid());
+        }
+
+        // Reopen rotated ledger from disk -> verifies signed #checkpoint header and continues at seq=4
+        try (AuditLedger reopened = new AuditLedger(ledgerFile, keyFile, "0.1.0-p774")) {
+            AuditLedger.ChainVerification v = reopened.verify();
+            assertTrue(v.valid());
+            assertEquals(1L, v.entryCount());
+            AuditLedger.LedgerEntry e4 = reopened.append(AuditLedger.EntryKind.SUBJECT_FORGOTTEN, 6000L, "c4", "cert4", player, "s5");
+            assertEquals(4L, e4.sequence());
+        }
+    }
 }

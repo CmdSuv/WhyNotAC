@@ -94,13 +94,17 @@ public final class AdmissibilityTracker {
 
     /**
      * Evaluates admissibility for protocol-translator-invariant checks (e.g., non-finite coordinates,
-     * transaction ordering, statistical cadence), requiring edge wire observation, client-origin
-     * transactions, non-Bedrock topology, and zero gap/loss in the window, while allowing known
-     * Java protocol translators (such as ViaVersion) when {@code translator != null}.
+     * transaction ordering, statistical cadence), requiring either edge wire observation ({@code Source.WIRE})
+     * or game observation when a known local Java protocol translator (such as ViaVersion) is established,
+     * client-origin transactions, non-Bedrock topology, and zero gap/loss in the window.
      */
     public Admissibility evaluateTranslatorSafe(long fromSequence) {
         List<String> reasons = new ArrayList<>();
-        if (inbound != Source.WIRE || outbound != Source.WIRE) {
+        boolean wireObserved = inbound == Source.WIRE && outbound == Source.WIRE;
+        boolean localTranslatorGameObserved = inbound == Source.GAME && outbound == Source.GAME
+                && translator != null && !"none".equals(translator)
+                && SupportedProtocols.supportsTranslatorSafe(translator, bedrock);
+        if (!wireObserved && !localTranslatorGameObserved) {
             reasons.add("not observed at the network edge (" + inbound + "/" + outbound + ")");
         }
         if (observationSequence >= fromSequence) {

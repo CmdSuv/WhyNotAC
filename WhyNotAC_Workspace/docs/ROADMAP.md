@@ -204,12 +204,12 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek çok-süreçli Velocity 3.4.0 + Paper 1.21.11 E2E testleri
   `tools/e2e/run_proxy_e2e.sh` ve CI `e2e-proxy` işiyle doğrulanır.
 
-## Faz 7 – Faz 17 — İleri Mühendislik, Sertleştirme, Zayıflık Kapatma ve Tam Kapsam Yol Haritası (Tamamlandı)
+## Faz 7 – Faz 19 — İleri Mühendislik, Sertleştirme, Zayıflık Kapatma ve Tam Kapsam Yol Haritası (Tamamlandı)
 
-Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) gerçek 40.963 tiklik resmi istemci kayıtlarında **%99,94 `EXPLAINED` / `0 UNEXPLAINED`** düzeyine çıkarılması, 21 kontrol (`VelocityCheck` v3, `PacketBoundsCheck` v4, `UseSlowdownCheck` v2, `TransactionOrderCheck` v2 `skipped`/`duplicate`, `PingSpoofCheck` v2, `InventoryActionCheck`, `TimerBalanceCheck`, `InteractAtBoxCheck`), oturum başına `2 ms` adil analiz bütçesi + `Gap` patlaması telemetrisi, `AuditLedger` gerçek `fsync` + `ReviewWorkflow` & `RunningCovarianceMatrix` kalıcılığı, `BanWaveQueue` sıcak yenileme koruması, uzak `GDPR_FORGET` yerel silme kancası, 5 sunucu-türü yapılandırma profili (`paper-pvp-practice` / `paper-smp` dâhil), **32** senaryo + **10** kalıcı `.wnrec` hile korpusu ve Faz 17 sonrası güncel bit-bit zayıflık analizi için bkz.:
+Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) gerçek 40.963 tiklik resmi istemci kayıtlarında **%99,94 `EXPLAINED` / `0 UNEXPLAINED`** düzeyine çıkarılması, 21 kontrol (`VelocityCheck` v4, `PacketBoundsCheck` v4, `UseSlowdownCheck` v3, `TransactionOrderCheck` v2 `skipped`/`duplicate`, `PingSpoofCheck` v3, `InventoryActionCheck`, `TimerBalanceCheck`, `InteractAtBoxCheck`), `ClientEntities` taşma önleyici `mergeableCoarse` zarf birleştirmesi, `ClientWorld` su-içi (`waterlogged`) ve tuzak kapısı (`_trapdoor`) yerleşimleri, `LiveProbeDriver` polimorfik rastgele yem sondaları, `WhyNotAcVelocityPlugin` çevrimdışı hedef kuyruğu + `CovarianceSummarySync`, `PaperVerdictBridge` ana-thread oklüzyon bütçesi + simülasyon setback, `SecondVerifier` bellek-içi halka tamponu, kalıcı `ban-wave-queue.jsonl`, çık-gir korelasyon hafızası, `MetricsExporter` Bearer auth, `AlertStreamExporter` sınırlı kuyruk/retry, `AuditLedger` `#checkpoint` döndürme, `verifyDependencyIntegrity` (`REL-02`), **35** senaryo + **11** kalıcı `.wnrec` hile korpusu ve Faz 18–19 zayıflık kapatma raporu için bkz.:
 
-- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 17 Ayrıntılı Teknik Yol Haritası**
-- **[2026-11-21 Derin Zayıflık ve Eksiklik Analizi](reviews/2026-11-21-weakness-analysis.md)**
+- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 19 Ayrıntılı Teknik Yol Haritası**
+- **[2026-11-21 Derin Zayıflık ve Eksiklik Analizi ve Kökten Çözüm Raporu](reviews/2026-11-21-weakness-analysis.md)**
 
 ## Sahibin kararını bekleyenler
 

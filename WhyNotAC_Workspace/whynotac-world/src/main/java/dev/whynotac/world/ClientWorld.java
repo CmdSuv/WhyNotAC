@@ -1096,9 +1096,11 @@ public final class ClientWorld {
                 }
                 return new Placement(new BlockPosition(tx, ty, tz), chosen);
             }
-            // Variant B: Non-waterlogged SlabBlock into pure AIR (avoids waterlogging)
+            boolean inAir = pureAir(target);
+            boolean inWater = !inAir && pureWaterSource(target);
+            // Variant B: SlabBlock into pure AIR or settled water source
             if (placedBlockKey.endsWith("_slab") && use.location() != null) {
-                if (!pureAir(target)) {
+                if (!inAir && !inWater) {
                     return null;
                 }
                 for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
@@ -1114,7 +1116,8 @@ public final class ClientWorld {
                 }
                 boolean bottom = face == BlockFace.UP
                         || (face != BlockFace.DOWN && (use.location().y() - ty) <= 0.5);
-                String props = bottom ? "type=bottom,waterlogged=false" : "type=top,waterlogged=false";
+                String wl = inWater ? "true" : "false";
+                String props = (bottom ? "type=bottom,waterlogged=" : "type=top,waterlogged=") + wl;
                 int chosen = states.stateOf(placedBlockKey, props);
                 if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
                     return new Placement(new BlockPosition(tx, ty, tz), chosen);
@@ -1122,7 +1125,7 @@ public final class ClientWorld {
             }
             // Variant C: Straight non-waterlogged StairBlock into pure AIR with no orthogonal stair or reactive neighbour
             if (placedBlockKey.endsWith("_stairs") && horizontalFacing != null && use.location() != null) {
-                if (!pureAir(target)) {
+                if (!inAir) {
                     return null;
                 }
                 for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
@@ -1172,11 +1175,11 @@ public final class ClientWorld {
                     return new Placement(new BlockPosition(tx, ty, tz), chosen);
                 }
             }
-            // Variant E: Dry isolated FenceBlock (_fence), WallBlock (_wall), IronBarsBlock / StainedGlassPaneBlock in pure AIR
+            // Variant E: Isolated FenceBlock (_fence), WallBlock (_wall), IronBarsBlock / StainedGlassPaneBlock in pure AIR or settled water source
             if ((placedBlockKey.endsWith("_fence") || placedBlockKey.endsWith("_wall")
                     || "minecraft:iron_bars".equals(placedBlockKey)
                     || "minecraft:glass_pane".equals(placedBlockKey)
-                    || placedBlockKey.endsWith("_stained_glass_pane")) && pureAir(target)) {
+                    || placedBlockKey.endsWith("_stained_glass_pane")) && (inAir || inWater)) {
                 boolean isWall = placedBlockKey.endsWith("_wall");
                 boolean ok = true;
                 for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
@@ -1204,21 +1207,23 @@ public final class ClientWorld {
                     }
                 }
                 if (ok) {
+                    String wl = inWater ? "true" : "false";
                     String props = isWall
-                            ? "east=none,north=none,south=none,up=true,waterlogged=false,west=none"
-                            : "east=false,north=false,south=false,waterlogged=false,west=false";
+                            ? "east=none,north=none,south=none,up=true,waterlogged=" + wl + ",west=none"
+                            : "east=false,north=false,south=false,waterlogged=" + wl + ",west=false";
                     int chosen = states.stateOf(placedBlockKey, props);
                     if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
                         return new Placement(new BlockPosition(tx, ty, tz), chosen);
                     }
                 }
             }
-            // Variant F: Dry ChainBlock (*_chain: axis=x|y|z,waterlogged=false) into pure AIR with non-reactive neighbours
-            if (placedBlockKey.endsWith("_chain") && pureAir(target) && neighboursNonReactive(before)) {
+            // Variant F: ChainBlock (*_chain: axis=x|y|z,waterlogged=true|false) into pure AIR or settled water source with non-reactive neighbours
+            if (placedBlockKey.endsWith("_chain") && (inAir || inWater) && neighboursNonReactive(before)) {
+                String wl = inWater ? "true" : "false";
                 String axisProp = switch (face) {
-                    case UP, DOWN -> "axis=y,waterlogged=false";
-                    case NORTH, SOUTH -> "axis=z,waterlogged=false";
-                    case EAST, WEST -> "axis=x,waterlogged=false";
+                    case UP, DOWN -> "axis=y,waterlogged=" + wl;
+                    case NORTH, SOUTH -> "axis=z,waterlogged=" + wl;
+                    case EAST, WEST -> "axis=x,waterlogged=" + wl;
                     default -> null;
                 };
                 int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
@@ -1227,7 +1232,7 @@ public final class ClientWorld {
                 }
             }
             // Variant G: EndRodBlock (minecraft:end_rod) into pure AIR against a non-end_rod clicked block
-            if ("minecraft:end_rod".equals(placedBlockKey) && pureAir(target) && neighboursNonReactive(before)) {
+            if ("minecraft:end_rod".equals(placedBlockKey) && inAir && neighboursNonReactive(before)) {
                 boolean clickedIsEndRod = false;
                 for (int s : clicked) {
                     if ("minecraft:end_rod".equals(states.block(s))) {
@@ -1245,6 +1250,30 @@ public final class ClientWorld {
                         case EAST -> "facing=east";
                     };
                     int chosen = states.stateOf(placedBlockKey, dirProp);
+                    if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                        return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                    }
+                }
+            }
+            // Variant H: Non-iron TrapDoorBlock (*_trapdoor) into pure AIR or settled water source with non-reactive neighbours
+            if (placedBlockKey.endsWith("_trapdoor") && !"minecraft:iron_trapdoor".equals(placedBlockKey)
+                    && (inAir || inWater) && neighboursNonReactive(before)) {
+                String trapFacing = null;
+                String trapHalf = null;
+                if (face == BlockFace.UP || face == BlockFace.DOWN) {
+                    trapFacing = horizontalFacing == null ? null : oppositeHorizontalFacing(horizontalFacing);
+                    trapHalf = face == BlockFace.UP ? "bottom" : "top";
+                } else if (use.location() != null) {
+                    double localY = use.location().y() - ty;
+                    if (Math.abs(localY - 0.5) > 1.0E-5) {
+                        trapFacing = face.name().toLowerCase(java.util.Locale.ROOT);
+                        trapHalf = localY > 0.5 ? "top" : "bottom";
+                    }
+                }
+                if (trapFacing != null && trapHalf != null) {
+                    String props = "facing=" + trapFacing + ",half=" + trapHalf
+                            + ",open=false,powered=false,waterlogged=" + (inWater ? "true" : "false");
+                    int chosen = states.stateOf(placedBlockKey, props);
                     if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
                         return new Placement(new BlockPosition(tx, ty, tz), chosen);
                     }
@@ -1302,6 +1331,19 @@ public final class ClientWorld {
     private boolean pureAir(int[] possible) {
         for (int s : possible) {
             if (!states.isAir(s)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean pureWaterSource(int[] possible) {
+        int waterSource = states.stateOf("minecraft:water", "level=0");
+        if (waterSource < 0 || possible == null || possible.length == 0) {
+            return false;
+        }
+        for (int s : possible) {
+            if (s != waterSource) {
                 return false;
             }
         }

@@ -17,9 +17,11 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
@@ -57,6 +59,7 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
     private static final double REVIEW_WEIGHT_DESIGN_STATISTIC = 0.25;
     private static final double REVIEW_WEIGHT_NOMINAL_STATISTIC = 0.15;
     private static final double REVIEW_WEIGHT_CONTEXT = 0.05;
+    private static final int MAX_RECONNECT_SUBJECTS = 10_000;
 
     private static final class SessionState {
         final Map<DependencyGroup, Double> groupScores = new EnumMap<>(DependencyGroup.class);
@@ -65,7 +68,16 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
         long lastNanoTime = Long.MIN_VALUE;
         double reviewPriorityScore;
         boolean banDispatchedOrPending;
+        boolean seededFromReconnect;
     }
+
+    private record SubjectCorrelationSnapshot(
+            Map<DependencyGroup, Double> groupScores,
+            Set<DependencyGroup> advantageProofGroups,
+            List<String> corroboratingFingerprints,
+            long lastNanoTime,
+            double reviewPriorityScore,
+            long lastConnectionId) {}
 
     private volatile VerdictConfig config;
     private final CircuitBreaker circuitBreaker;
@@ -77,6 +89,8 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
     private final List<EnforcementListener> enforcementListeners = new CopyOnWriteArrayList<>();
     private final Margins margins = new Margins();
     private final Map<String, Long> rejectionsByCheck = new ConcurrentHashMap<>();
+    private final Map<UUID, SubjectCorrelationSnapshot> subjectCorrelations = new ConcurrentHashMap<>();
+    private final Queue<UUID> subjectCorrelationOrder = new ConcurrentLinkedQueue<>();
     private final AtomicLong totalAccepted = new AtomicLong();
     private final AtomicLong totalRejected = new AtomicLong();
 
@@ -116,6 +130,28 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
         return banWaveQueue;
     }
 
+    /** Clears cross-reconnect correlation state and pending ban wave entries for {@code playerId} (GDPR / overturn). */
+    public void forgetSubject(UUID playerId, long nowMillis) {
+        if (playerId != null) {
+            subjectCorrelations.remove(playerId);
+            banWaveQueue.cancelSubject(playerId, nowMillis);
+        }
+    }
+
+    private void saveReconnectSnapshot(UUID playerId, SubjectCorrelationSnapshot snap) {
+        boolean isNew = subjectCorrelations.put(playerId, snap) == null;
+        if (isNew) {
+            subjectCorrelationOrder.add(playerId);
+            while (subjectCorrelations.size() > MAX_RECONNECT_SUBJECTS) {
+                UUID evicted = subjectCorrelationOrder.poll();
+                if (evicted == null) {
+                    break;
+                }
+                subjectCorrelations.remove(evicted);
+            }
+        }
+    }
+
     public void addCaseListener(CaseListener listener) {
         caseListeners.add(Objects.requireNonNull(listener, "listener"));
     }
@@ -141,8 +177,21 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
         int distinctAdvantageGroups;
         List<String> groupNames;
         List<String> fingerprintsSnapshot;
+        UUID authenticatedUuid = (identity == IdentityTier.AUTHENTICATED || identity == IdentityTier.AUTH_PLUGIN_CONFIRMED)
+                && session.identity() != null ? session.identity().playerId() : null;
 
         synchronized (state) {
+            if (!state.seededFromReconnect && authenticatedUuid != null) {
+                state.seededFromReconnect = true;
+                SubjectCorrelationSnapshot prior = subjectCorrelations.get(authenticatedUuid);
+                if (prior != null && prior.lastConnectionId() != session.connectionId()) {
+                    state.groupScores.putAll(prior.groupScores());
+                    state.advantageProofGroups.addAll(prior.advantageProofGroups());
+                    state.corroboratingFingerprints.addAll(prior.corroboratingFingerprints());
+                    state.lastNanoTime = prior.lastNanoTime();
+                    state.reviewPriorityScore = prior.reviewPriorityScore();
+                }
+            }
             decay(state, evidence.toNanoTime(), config.correlationHalfLifeNanos());
             double weight = enforcementWeight(evidenceClass);
             if (weight > 0.0) {
@@ -156,7 +205,7 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
                 state.reviewPriorityScore += reviewWeight(evidenceClass);
             }
             state.corroboratingFingerprints.add(evidence.fingerprint());
-            if (state.corroboratingFingerprints.size() > 32) {
+            while (state.corroboratingFingerprints.size() > 32) {
                 state.corroboratingFingerprints.removeFirst();
             }
 
@@ -174,6 +223,17 @@ public final class VerdictEngine implements EvidenceSink, AutoCloseable {
                 groupNames.add(group.id());
             }
             fingerprintsSnapshot = List.copyOf(state.corroboratingFingerprints);
+            if (authenticatedUuid != null) {
+                saveReconnectSnapshot(authenticatedUuid, new SubjectCorrelationSnapshot(
+                        new EnumMap<>(state.groupScores),
+                        EnumSet.copyOf(state.advantageProofGroups.isEmpty()
+                                ? EnumSet.noneOf(DependencyGroup.class)
+                                : state.advantageProofGroups),
+                        fingerprintsSnapshot,
+                        state.lastNanoTime,
+                        state.reviewPriorityScore,
+                        session.connectionId()));
+            }
         }
 
         Set<Action> permitted = permittedActions(evidenceClass, identity, effectiveLifecycle);

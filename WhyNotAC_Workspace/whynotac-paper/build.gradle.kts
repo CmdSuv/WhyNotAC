@@ -77,6 +77,12 @@ abstract class GenerateCycloneDxSbom : DefaultTask() {
             val grp = parts.getOrElse(0) { "" }
             val name = parts.getOrElse(1) { coord }
             val ver = parts.getOrElse(2) { "" }
+            check(sha256.matches(Regex("^[0-9a-f]{64}$"))) {
+                "REL-02 violation: dependency $coord has invalid SHA-256 digest '$sha256'"
+            }
+            check(grp == "dev.whynotac" || grp == "io.papermc.paper" || !ver.endsWith("-SNAPSHOT")) {
+                "REL-02 violation: unpinned external SNAPSHOT dependency $coord"
+            }
             if (!first) sb.append(",\n")
             first = false
             sb.append("    {\n")
@@ -111,6 +117,22 @@ val generateSbom = tasks.register<GenerateCycloneDxSbom>("generateSbom") {
     outputFile.set(layout.buildDirectory.file("reports/whynotac-sbom.cdx.json"))
 }
 
-tasks.check {
+val verifyDependencyIntegrity = tasks.register("verifyDependencyIntegrity") {
+    description = "Verifies SHA-256 checksums and version pinning for all runtime dependencies in the CycloneDX SBOM (REL-02)."
+    group = "verification"
     dependsOn(generateSbom)
+    doLast {
+        val sbomFile = generateSbom.get().outputFile.get().asFile
+        check(sbomFile.isFile && sbomFile.length() > 64) {
+            "REL-02/REL-03 violation: CycloneDX SBOM missing or empty at ${sbomFile.absolutePath}"
+        }
+        val text = sbomFile.readText()
+        check(text.contains("\"alg\": \"SHA-256\"")) {
+            "REL-02 violation: CycloneDX SBOM does not contain SHA-256 component hashes"
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(generateSbom, verifyDependencyIntegrity)
 }

@@ -38,9 +38,10 @@ import java.util.TreeMap;
 public final class PingSpoofCheck implements TimelineListener {
 
     public static final String ID = "ping-spoof";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final int REQUIRED_INFLATED_SAMPLES = 15;
     static final double MIN_INFLATION_MS = 200.0;
+    static final int REQUIRED_BASELINE_SAMPLES = 5;
     static final int REQUIRED_PRE_ATTACK_INFLATED = 4;
     static final double PRE_ATTACK_INFLATION_MS = 160.0;
     static final double MIN_COMBAT_DROP_MS = 120.0;
@@ -86,6 +87,16 @@ public final class PingSpoofCheck implements TimelineListener {
         long firstCombatDropSeq = -1L;
         long firstCombatDropNano = Long.MIN_VALUE;
         long lastCombatDropNano = Long.MIN_VALUE;
+        int cleanBaselineSamples;
+        double minBaselinePingRttMs = Double.POSITIVE_INFINITY;
+        int symPreDropHighSamples;
+        double symPreDropBaselinePingMs = Double.NaN;
+        long symPreDropStartSeq = -1L;
+        long symPreDropStartNano;
+        int symCombatDropCount;
+        long firstSymCombatDropSeq = -1L;
+        long firstSymCombatDropNano = Long.MIN_VALUE;
+        long lastSymCombatDropNano = Long.MIN_VALUE;
         long lastReportNanos = Long.MIN_VALUE;
 
         void reset() {
@@ -95,8 +106,12 @@ public final class PingSpoofCheck implements TimelineListener {
             lastTickEndNano = Long.MIN_VALUE;
             latestKeepAliveRttMs = Double.NaN;
             ticksSinceAttack = Long.MAX_VALUE / 4;
+            cleanBaselineSamples = 0;
+            minBaselinePingRttMs = Double.POSITIVE_INFINITY;
             resetCombatDrops();
+            resetSymCombatDrops();
             resetPreDrop();
+            resetSymPreDrop();
             resetStreak();
         }
 
@@ -112,11 +127,24 @@ public final class PingSpoofCheck implements TimelineListener {
             preDropStartSeq = -1L;
         }
 
+        void resetSymPreDrop() {
+            symPreDropHighSamples = 0;
+            symPreDropBaselinePingMs = Double.NaN;
+            symPreDropStartSeq = -1L;
+        }
+
         void resetCombatDrops() {
             combatDropCount = 0;
             firstCombatDropSeq = -1L;
             firstCombatDropNano = Long.MIN_VALUE;
             lastCombatDropNano = Long.MIN_VALUE;
+        }
+
+        void resetSymCombatDrops() {
+            symCombatDropCount = 0;
+            firstSymCombatDropSeq = -1L;
+            firstSymCombatDropNano = Long.MIN_VALUE;
+            lastSymCombatDropNano = Long.MIN_VALUE;
         }
     }
 
@@ -147,6 +175,7 @@ public final class PingSpoofCheck implements TimelineListener {
                                 && in.nanoTime() - state.lastTickEndNano > MAX_TICK_WALL_GAP_NANOS) {
                             // Wall-clock stall (GC pause, alt-tab, or CPU/network burst): clear transient backlog streaks
                             state.resetPreDrop();
+                            state.resetSymPreDrop();
                             state.resetStreak();
                         }
                         state.lastTickEndNano = in.nanoTime();
@@ -181,6 +210,11 @@ public final class PingSpoofCheck implements TimelineListener {
         // Require the client to actually be ticking (not frozen/loading a huge chunk batch)
         boolean activeTicking = state.ticksSinceLastAck >= 1;
         state.ticksSinceLastAck = 0;
+        if (activeTicking && pingRttMs > 0.0 && pingRttMs < MAX_KEEPALIVE_FOR_DROP_MS
+                && Math.abs(diffMs) <= MAX_POST_DROP_ABOVE_KA_MS) {
+            state.cleanBaselineSamples++;
+            state.minBaselinePingRttMs = Math.min(state.minBaselinePingRttMs, pingRttMs);
+        }
         if (state.preDropHighSamples >= REQUIRED_PRE_ATTACK_INFLATED
                 && state.ticksSinceAttack <= ATTACK_DROP_WINDOW_TICKS
                 && state.latestKeepAliveRttMs < MAX_KEEPALIVE_FOR_DROP_MS
@@ -190,6 +224,7 @@ public final class PingSpoofCheck implements TimelineListener {
             long fromNano = state.preDropStartNano;
             double baselinePingMs = state.preDropBaselinePingMs;
             state.resetPreDrop();
+            state.resetSymPreDrop();
             state.resetStreak();
             if (state.firstCombatDropNano != Long.MIN_VALUE
                     && ack.nanoTime() - state.firstCombatDropNano > COMBAT_DROP_WINDOW_NANOS) {
@@ -212,10 +247,62 @@ public final class PingSpoofCheck implements TimelineListener {
                 if (state.lastReportNanos == Long.MIN_VALUE
                         || ack.nanoTime() - state.lastReportNanos >= REPORT_INTERVAL_NANOS) {
                     emitCombatDrop(session, state, reportFromSeq, reportFromNano, ack, baselinePingMs, pingRttMs,
-                            state.latestKeepAliveRttMs, dropCount);
+                            state.latestKeepAliveRttMs, dropCount, "combat-rtt-drop");
                 }
             }
             return;
+        }
+        if (state.cleanBaselineSamples >= REQUIRED_BASELINE_SAMPLES
+                && state.symPreDropHighSamples >= REQUIRED_PRE_ATTACK_INFLATED
+                && state.ticksSinceAttack <= ATTACK_DROP_WINDOW_TICKS
+                && pingRttMs <= state.minBaselinePingRttMs + MAX_POST_DROP_ABOVE_KA_MS
+                && state.symPreDropBaselinePingMs - pingRttMs >= MIN_COMBAT_DROP_MS) {
+            long fromSeq = state.symPreDropStartSeq;
+            long fromNano = state.symPreDropStartNano;
+            double baselinePingMs = state.symPreDropBaselinePingMs;
+            state.resetSymPreDrop();
+            state.resetPreDrop();
+            state.resetStreak();
+            if (state.firstSymCombatDropNano != Long.MIN_VALUE
+                    && ack.nanoTime() - state.firstSymCombatDropNano > COMBAT_DROP_WINDOW_NANOS) {
+                state.resetSymCombatDrops();
+            }
+            if (state.lastSymCombatDropNano == Long.MIN_VALUE
+                    || ack.nanoTime() - state.lastSymCombatDropNano >= MIN_COMBAT_DROP_SEPARATION_NANOS) {
+                if (state.symCombatDropCount == 0) {
+                    state.firstSymCombatDropSeq = fromSeq;
+                    state.firstSymCombatDropNano = fromNano;
+                }
+                state.symCombatDropCount++;
+                state.lastSymCombatDropNano = ack.nanoTime();
+            }
+            if (state.symCombatDropCount >= REQUIRED_COMBAT_DROPS) {
+                long reportFromSeq = state.firstSymCombatDropSeq;
+                long reportFromNano = state.firstSymCombatDropNano;
+                int dropCount = state.symCombatDropCount;
+                state.resetSymCombatDrops();
+                if (state.lastReportNanos == Long.MIN_VALUE
+                        || ack.nanoTime() - state.lastReportNanos >= REPORT_INTERVAL_NANOS) {
+                    emitCombatDrop(session, state, reportFromSeq, reportFromNano, ack, baselinePingMs, pingRttMs,
+                            state.latestKeepAliveRttMs, dropCount, "symmetric-combat-rtt-drop");
+                }
+            }
+            return;
+        }
+        if (activeTicking && state.cleanBaselineSamples >= REQUIRED_BASELINE_SAMPLES
+                && pingRttMs >= state.minBaselinePingRttMs + PRE_ATTACK_INFLATION_MS
+                && pingRttMs <= 2_500.0) {
+            if (state.symPreDropHighSamples == 0) {
+                state.symPreDropStartSeq = ack.sequence();
+                state.symPreDropStartNano = ack.nanoTime();
+                state.symPreDropBaselinePingMs = pingRttMs;
+            } else {
+                state.symPreDropBaselinePingMs = Math.min(state.symPreDropBaselinePingMs, pingRttMs);
+            }
+            state.symPreDropHighSamples++;
+        } else if (state.cleanBaselineSamples >= REQUIRED_BASELINE_SAMPLES
+                && pingRttMs < state.minBaselinePingRttMs + PRE_ATTACK_INFLATION_MS * 0.5) {
+            state.resetSymPreDrop();
         }
         if (activeTicking && diffMs >= PRE_ATTACK_INFLATION_MS && pingRttMs <= 2_500.0
                 && state.latestKeepAliveRttMs < MAX_KEEPALIVE_FOR_DROP_MS) {
@@ -253,24 +340,28 @@ public final class PingSpoofCheck implements TimelineListener {
     }
 
     private void emitCombatDrop(PlayerSession session, State state, long fromSeq, long fromNano,
-            TimelineEvent.Acknowledged at, double baselinePingMs, double dropPingMs, double kaMs, int dropCount) {
+            TimelineEvent.Acknowledged at, double baselinePingMs, double dropPingMs, double kaMs, int dropCount,
+            String reason) {
         Admissibility admissibility = state.admissibility.evaluateTranslatorSafe(fromSeq);
         if (!admissibility.admissible()) {
             sink.rejected(session, ID, admissibility);
             return;
         }
         Map<String, String> details = new TreeMap<>();
-        details.put("reason", "combat-rtt-drop");
+        details.put("reason", reason);
         details.put("combatDrops", Integer.toString(dropCount));
         details.put("baselinePingMs", String.format(Locale.ROOT, "%.1f", baselinePingMs));
         details.put("droppedPingMs", String.format(Locale.ROOT, "%.1f", dropPingMs));
         details.put("dropDeltaMs", String.format(Locale.ROOT, "%.1f", baselinePingMs - dropPingMs));
         details.put("keepAliveRttMs", String.format(Locale.ROOT, "%.1f", kaMs));
+        if (Double.isFinite(state.minBaselinePingRttMs)) {
+            details.put("sessionMinPingMs", String.format(Locale.ROOT, "%.1f", state.minBaselinePingRttMs));
+        }
         sink.accept(session,
                 new Evidence(ID, VERSION, EvidenceClass.NOMINAL_STATISTIC, fromSeq, at.sequence(), fromNano, at.nanoTime(),
                         String.format(Locale.ROOT,
-                                "Ping RTT dropped %.1f ms (from %.1f ms to %.1f ms, %dx) at attack while KeepAlive stayed %.1f ms",
-                                baselinePingMs - dropPingMs, baselinePingMs, dropPingMs, dropCount, kaMs),
+                                "Ping RTT dropped %.1f ms (from %.1f ms to %.1f ms, %dx) at attack while KeepAlive was %.1f ms (%s)",
+                                baselinePingMs - dropPingMs, baselinePingMs, dropPingMs, dropCount, kaMs, reason),
                         details, admissibility));
         state.lastReportNanos = at.nanoTime();
     }

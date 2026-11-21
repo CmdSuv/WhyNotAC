@@ -55,5 +55,17 @@ final class WhyNotAcVelocityPluginTest {
         assertFalse(WhyNotAcVelocityPlugin.shouldForwardTo("lobby", "lobby", 3));
         assertFalse(WhyNotAcVelocityPlugin.shouldForwardTo("lobby", "arena", 0));
         assertTrue(WhyNotAcVelocityPlugin.shouldForwardTo("lobby", "arena", 1));
+
+        // Offline target queueing: when target server has 0 players, verified relay frames queue until a carrier connects
+        assertTrue(WhyNotAcVelocityPlugin.shouldQueueForOfflineTarget("lobby", "arena", 0));
+        assertFalse(WhyNotAcVelocityPlugin.shouldQueueForOfflineTarget("lobby", "lobby", 0));
+        assertFalse(WhyNotAcVelocityPlugin.shouldQueueForOfflineTarget("lobby", "arena", 1));
+
+        // 4x4 CovarianceSummarySync frame round-trips and passes proxy relay validation
+        byte[] covFrame = NetworkEnvelope.encode(new NetworkEnvelope.CovarianceSummarySync(
+                now, id, Identity.AUTHENTICATED_BY_PROXY, 4, 25L,
+                new double[]{1.0, 2.0, 3.0, 4.0},
+                new double[16]), key1);
+        assertTrue(WhyNotAcVelocityPlugin.validateRelayFrame(covFrame, key1, now).isPresent());
     }
 }

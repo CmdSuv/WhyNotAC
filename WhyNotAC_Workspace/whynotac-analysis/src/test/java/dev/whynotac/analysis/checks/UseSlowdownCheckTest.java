@@ -188,4 +188,43 @@ final class UseSlowdownCheckTest {
 
         assertTrue(evidence.isEmpty(), () -> "Unexpected evidence: " + evidence);
     }
+
+    @Test
+    void detectsGoldenAppleNoSlowSprintDuringGuaranteedHoldWindowAndExpiresAfter24Ticks() {
+        List<Stack> items = new ArrayList<>();
+        Stack gapple = new Stack("minecraft:golden_apple", 4, List.of(), List.of(), null, false);
+        for (int i = 0; i < 46; i++) {
+            items.add(i == 36 ? gapple : Stack.EMPTY);
+        }
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(88)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.Pong(88)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 88, now, 0));
+
+        // Start eating golden_apple in main hand, then send START_SPRINTING on tick 2 -> caught!
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+
+        assertEquals(1, evidence.size());
+        assertEquals("sprint-while-using", evidence.get(0).details().get("reason"));
+        assertEquals("minecraft:golden_apple", evidence.get(0).details().get("item"));
+
+        // Start eating golden_apple again, wait 25 ticks (hold auto-expires before 32-tick finish), then sprint -> 0 FP!
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2,
+                new ServerboundPacket.UseItem(Hand.MAIN_HAND, 2, 0.0F, 0.0F)));
+        for (int t = 0; t < 25; t++) {
+            now += 50_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 3 + t, new ServerboundPacket.ClientTickEnd()));
+        }
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 30,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 30, new ServerboundPacket.ClientTickEnd()));
+        assertEquals(1, evidence.size(), "Sprint after 24-tick consumable window expiry must produce 0 false positives");
+    }
 }

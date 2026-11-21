@@ -1089,5 +1089,34 @@ class ClientWorldTest {
         sync();
         useOn(11, 10, 4, BlockFace.NORTH, 36);
         assertNull(world.placementForItem(36, "minecraft:end_rod"), "clicking an existing end_rod may flip facing");
+
+        // 4. Waterlogged slab, chain, and wooden trapdoor into settled water[level=0], plus dry trapdoor
+        int water = STATES.stateOf("minecraft:water", "level=0");
+        put(11, 11, 5, water);
+        out(new ClientboundPacket.BlockChangedAck(36));
+        sync();
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(11, 10, 5), BlockFace.UP,
+                new Vec3d(11.5, 11.0, 5.5), false, false, 37));
+        ClientWorld.Placement wlSlab = world.placementForItem(37, "minecraft:stone_slab");
+        assertNotNull(wlSlab);
+        assertEquals(STATES.stateOf("minecraft:stone_slab", "type=bottom,waterlogged=true"), wlSlab.state());
+        ClientWorld.Placement wlChain = world.placementForItem(37, "minecraft:iron_chain");
+        assertNotNull(wlChain);
+        assertEquals(STATES.stateOf("minecraft:iron_chain", "axis=y,waterlogged=true"), wlChain.state());
+        ClientWorld.Placement wlTrapdoor = world.placementForItem(37, "minecraft:oak_trapdoor", "north");
+        assertNotNull(wlTrapdoor);
+        assertEquals(STATES.stateOf("minecraft:oak_trapdoor", "facing=south,half=bottom,open=false,powered=false,waterlogged=true"),
+                wlTrapdoor.state());
+
+        // Dry trapdoor on horizontal EAST face upper half -> facing=east,half=top,waterlogged=false
+        out(new ClientboundPacket.BlockChangedAck(37));
+        sync();
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(11, 10, 5), BlockFace.EAST,
+                new Vec3d(12.0, 10.75, 5.5), false, false, 38));
+        ClientWorld.Placement dryTrapdoor = world.placementForItem(38, "minecraft:oak_trapdoor");
+        assertNotNull(dryTrapdoor);
+        assertEquals(STATES.stateOf("minecraft:oak_trapdoor", "facing=east,half=top,open=false,powered=false,waterlogged=false"),
+                dryTrapdoor.state());
+        assertNull(world.placementForItem(38, "minecraft:iron_trapdoor"));
     }
 }

@@ -188,4 +188,66 @@ class VerdictPolicyTest {
             assertEquals(0, punishes.get());
         }
     }
+
+    @Test
+    void persistsCorrelationAcrossAuthenticatedReconnectsUntilForgotten() {
+        VerdictConfig cfg = VerdictConfig.builder()
+                .armedChecks(Set.of("attack-reach", "movement"))
+                .mitigationsEnabled(true)
+                .autoBanEnabled(true)
+                .secondVerifierEnabled(false)
+                .requireCorroborationForTempBan(true)
+                .build();
+        try (VerdictEngine engine = new VerdictEngine(cfg, SecondVerifier.ReplaySource.none())) {
+            List<VerdictDecision> bans = new ArrayList<>();
+            engine.addEnforcementListener(new VerdictEngine.EnforcementListener() {
+                @Override public void tempBan(VerdictDecision decision) { bans.add(decision); }
+            });
+            SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, err) -> {});
+            java.util.UUID cheaterId = new java.util.UUID(99L, 99L);
+
+            // Connection 1: triggers attack-reach (1st P-A group), then disconnects immediately to evade corroboration
+            PlayerSession conn1 = registry.open("conn-1");
+            conn1.bind(cheaterId, "ReconnectCheater", 1, 1_000L);
+            engine.accept(conn1, ev("attack-reach", EvidenceClass.ADVANTAGE_PROOF, IdentityTier.AUTHENTICATED, 1_000L));
+            assertEquals(0, bans.size());
+
+            // Connection 2 (same authenticated UUID): triggers movement (2nd P-A group) -> cross-reconnect correlation corroborates TEMP_BAN!
+            PlayerSession conn2 = registry.open("conn-2");
+            conn2.bind(cheaterId, "ReconnectCheater", 2, 2_000L);
+            engine.accept(conn2, ev("movement", EvidenceClass.ADVANTAGE_PROOF, IdentityTier.AUTHENTICATED, 2_000L));
+            assertEquals(1, bans.size(), "Cross-reconnect correlation must prevent disconnect/reconnect score reset");
+
+            // GDPR forget clears persisted subject correlation
+            engine.forgetSubject(cheaterId, 3_000L);
+        }
+    }
+
+    @Test
+    void secondVerifierRingBufferFallbackAndBanWaveDurableJournal(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        // 1. Live PlayerSession ring buffer supplies SecondVerifier when disk recording is disabled (Optional.empty())
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, err) -> {});
+        PlayerSession live = registry.open("ring-fallback");
+        live.bind(new java.util.UUID(7L, 7L), "RingUser", 1, 1_000L);
+        SecondVerifier.ReplaySource source = SecondVerifier.ReplaySource.fromRecordingPaths(s -> java.util.Optional.empty());
+        assertTrue(source.prepare(live).open().isPresent());
+
+        // 2. BanWaveQueue durable JSONL journal persists enqueue and cancel events
+        java.nio.file.Path journal = dir.resolve("ban-wave-queue.jsonl");
+        VerdictConfig cfg = VerdictConfig.builder()
+                .armedChecks(Set.of("attack-reach", "movement"))
+                .autoBanEnabled(true)
+                .banWaveDelayMillis(5_000L)
+                .secondVerifierEnabled(false)
+                .requireCorroborationForTempBan(true)
+                .build();
+        try (VerdictEngine engine = new VerdictEngine(cfg, SecondVerifier.ReplaySource.none())) {
+            engine.banWaveQueue().attachJournal(journal);
+            engine.accept(live, ev("attack-reach", EvidenceClass.ADVANTAGE_PROOF, IdentityTier.AUTHENTICATED, 1_000L));
+            engine.accept(live, ev("movement", EvidenceClass.ADVANTAGE_PROOF, IdentityTier.AUTHENTICATED, 2_000L));
+            assertEquals(1, engine.banWaveQueue().pendingCount());
+            engine.banWaveQueue().cancelSubject(new java.util.UUID(7L, 7L), 3_000L);
+            assertTrue(java.nio.file.Files.isRegularFile(journal));
+        }
+    }
 }

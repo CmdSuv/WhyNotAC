@@ -49,6 +49,9 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
     private static final int SAFE_TRAIL_SIZE = 3;
     private static final long HIDE_INFORMATION_TTL_NANOS = TimeUnit.SECONDS.toNanos(15);
     private static final double HIDE_INFORMATION_DISTANCE_SQ = 16.0 * 16.0;
+    private static final double HIDE_INFORMATION_MAX_DISTANCE_SQ = 64.0 * 64.0;
+    static final int MAX_RAYTRACES_PER_TICK = 32;
+    private static final double MAX_SIMULATION_SETBACK_DISTANCE_SQ = 64.0 * 64.0;
 
     private final Plugin plugin;
     private final Logger logger;
@@ -176,6 +179,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
             return;
         }
         long now = System.nanoTime();
+        int remainingBudget = MAX_RAYTRACES_PER_TICK;
         for (Map.Entry<UUID, Long> entry : hideInfoUntilNanos.entrySet()) {
             UUID observerId = entry.getKey();
             Player observer = Bukkit.getPlayer(observerId);
@@ -187,17 +191,22 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
             if (now > entry.getValue()) {
                 hideInfoUntilNanos.remove(observerId);
                 restoreAllHidden(observer);
-            } else {
-                refreshOccludedVisibility(observer, entry.getValue());
+            } else if (remainingBudget > 0) {
+                remainingBudget = refreshOccludedVisibility(observer, entry.getValue(), remainingBudget);
             }
         }
     }
 
-    private void refreshOccludedVisibility(Player observer, long deadlineNanos) {
+    private int refreshOccludedVisibility(Player observer, long deadlineNanos) {
+        return refreshOccludedVisibility(observer, deadlineNanos, MAX_RAYTRACES_PER_TICK);
+    }
+
+    private int refreshOccludedVisibility(Player observer, long deadlineNanos, int raytraceBudget) {
         if (System.nanoTime() > deadlineNanos) {
             restoreAllHidden(observer);
-            return;
+            return raytraceBudget;
         }
+        int budget = raytraceBudget;
         Set<UUID> hidden = hiddenTargetsByObserver.computeIfAbsent(observer.getUniqueId(), k -> ConcurrentHashMap.newKeySet());
         Location eye = observer.getEyeLocation();
         for (Player target : Bukkit.getOnlinePlayers()) {
@@ -205,9 +214,24 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
                 continue;
             }
             boolean sameWorld = target.getWorld().equals(observer.getWorld());
-            boolean shouldHide = sameWorld
-                    && eye.distanceSquared(target.getLocation()) > HIDE_INFORMATION_DISTANCE_SQ
-                    && !observer.hasLineOfSight(target);
+            if (!sameWorld) {
+                if (hidden.remove(target.getUniqueId())) {
+                    observer.showPlayer(plugin, target);
+                }
+                continue;
+            }
+            double distSq = eye.distanceSquared(target.getLocation());
+            if (distSq <= HIDE_INFORMATION_DISTANCE_SQ || distSq > HIDE_INFORMATION_MAX_DISTANCE_SQ) {
+                if (hidden.remove(target.getUniqueId())) {
+                    observer.showPlayer(plugin, target);
+                }
+                continue;
+            }
+            if (budget <= 0) {
+                continue;
+            }
+            budget--;
+            boolean shouldHide = !observer.hasLineOfSight(target);
             if (shouldHide) {
                 if (hidden.add(target.getUniqueId())) {
                     observer.hidePlayer(plugin, target);
@@ -216,6 +240,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
                 observer.showPlayer(plugin, target);
             }
         }
+        return budget;
     }
 
     private void restoreAllHidden(Player observer) {
@@ -249,17 +274,61 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
                 if (!plugin.isEnabled()) {
                     return;
                 }
+                Map<String, String> details = decision.evidence() != null ? decision.evidence().details() : Map.of();
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     Player p = Bukkit.getPlayer(uuid);
+                    if (p == null || !p.isOnline()) {
+                        return;
+                    }
+                    Location current = p.getLocation();
+                    Location predicted = simulationPredictedLocation(current, details);
+                    if (predicted != null) {
+                        p.teleport(predicted);
+                        return;
+                    }
                     Deque<Location> trail = safeTrails.get(uuid);
                     Location safe = earliestSafeLocation(trail);
-                    if (p != null && p.isOnline() && safe != null && safe.getWorld() != null && safe.getWorld().equals(p.getWorld())) {
+                    if (safe != null && safe.getWorld() != null && safe.getWorld().equals(p.getWorld())) {
                         p.teleport(safe);
                     }
                 });
             }
             case NONE -> { }
         }
+    }
+
+    /**
+     * Extracts the bit-exact simulation-predicted coordinates from {@code MovementCheck} evidence details
+     * ({@code predicted="x,y,z ..."}) or {@code VelocityCheck} ({@code baseY} with current X/Z) when valid and
+     * within {@link #MAX_SIMULATION_SETBACK_DISTANCE_SQ} of {@code currentLocation}.
+     */
+    static Location simulationPredictedLocation(Location currentLocation, Map<String, String> details) {
+        if (currentLocation == null || details == null || details.isEmpty()) {
+            return null;
+        }
+        String predicted = details.get("predicted");
+        if (predicted != null && !predicted.isBlank()) {
+            int space = predicted.indexOf(' ');
+            String coords = space > 0 ? predicted.substring(0, space) : predicted.trim();
+            String[] parts = coords.split(",");
+            if (parts.length == 3) {
+                try {
+                    double x = Double.parseDouble(parts[0]);
+                    double y = Double.parseDouble(parts[1]);
+                    double z = Double.parseDouble(parts[2]);
+                    if (Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z)) {
+                        double dx = x - currentLocation.getX();
+                        double dy = y - currentLocation.getY();
+                        double dz = z - currentLocation.getZ();
+                        if (dx * dx + dy * dy + dz * dz <= MAX_SIMULATION_SETBACK_DISTANCE_SQ) {
+                            return new Location(currentLocation.getWorld(), x, y, z,
+                                    currentLocation.getYaw(), currentLocation.getPitch());
+                        }
+                    }
+                } catch (NumberFormatException ignored) { }
+            }
+        }
+        return null;
     }
 
     @Override
@@ -271,7 +340,8 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         if (uuid == null) {
             return;
         }
-        String certShort = decision.certificate().certificateId().substring(0, 8);
+        String certId = decision.certificate().certificateId();
+        String certShort = certId.substring(0, Math.min(8, certId.length()));
         String msg = "WhyNotAC: " + decision.evidence().check() + " (" + certShort + ")";
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player p = Bukkit.getPlayer(uuid);
@@ -291,11 +361,14 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
             return;
         }
         String name = decision.session().identity().name();
-        String certShort = decision.certificate().certificateId().substring(0, 8);
+        String certId = decision.certificate().certificateId();
+        String certShort = certId.substring(0, Math.min(8, certId.length()));
+        String digest = decision.certificate().sha256Digest();
+        String digestShort = digest.substring(0, Math.min(12, digest.length()));
         String reason = "WhyNotAC automated check (" + decision.evidence().check() + ", cert " + certShort + ")";
         Instant expires = Instant.now().plusMillis(decision.tempBanDurationMillis());
         logger.warning("WhyNotAC issuing temp-ban for " + name + " (" + uuid + "): " + reason
-                + " digest=" + decision.certificate().sha256Digest().substring(0, 12));
+                + " digest=" + digestShort);
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player online = Bukkit.getPlayer(uuid);
             var profile = online != null ? online.getPlayerProfile() : Bukkit.createProfile(uuid, name);

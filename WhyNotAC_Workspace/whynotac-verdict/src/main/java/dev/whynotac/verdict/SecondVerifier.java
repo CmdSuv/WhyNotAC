@@ -48,22 +48,27 @@ public final class SecondVerifier implements AutoCloseable {
 
         /**
          * Reads the finished {@code .wnrec} path returned by {@code pathLookup} on the analysis thread, falling back
-         * on the worker to the live {@code .wnrec.part} file when the session has not disconnected yet.
+         * on the worker to the live {@code .wnrec.part} file when the session has not disconnected yet, or to the
+         * session's bounded in-memory event ring buffer ({@link PlayerSession#recentEventsSnapshot()}) when disk
+         * recording is disabled or has not flushed yet.
          */
         static ReplaySource fromRecordingPaths(Function<PlayerSession, Optional<Path>> pathLookup) {
             return session -> {
-                Optional<Path> finished = session == null ? Optional.empty() : pathLookup.apply(session);
+                Optional<Path> finished = (session == null || pathLookup == null) ? Optional.empty() : pathLookup.apply(session);
+                List<TimelineEvent> memoryFallback = session == null ? List.of() : session.recentEventsSnapshot();
                 return () -> {
-                    if (finished.isEmpty()) {
-                        return Optional.empty();
+                    if (finished.isPresent()) {
+                        Path path = finished.get();
+                        if (Files.isRegularFile(path)) {
+                            return Optional.of(RecordingReader.open(path));
+                        }
+                        Path partial = path.resolveSibling(path.getFileName() + ".part");
+                        if (Files.isRegularFile(partial)) {
+                            return Optional.of(RecordingReader.open(partial));
+                        }
                     }
-                    Path path = finished.get();
-                    if (Files.isRegularFile(path)) {
-                        return Optional.of(RecordingReader.open(path));
-                    }
-                    Path partial = path.resolveSibling(path.getFileName() + ".part");
-                    if (Files.isRegularFile(partial)) {
-                        return Optional.of(RecordingReader.open(partial));
+                    if (!memoryFallback.isEmpty()) {
+                        return Optional.of(memoryFallback);
                     }
                     return Optional.empty();
                 };

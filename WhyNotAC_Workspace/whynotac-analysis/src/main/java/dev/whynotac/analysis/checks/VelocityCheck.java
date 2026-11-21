@@ -44,13 +44,15 @@ import java.util.TreeMap;
 public final class VelocityCheck implements TimelineListener {
 
     public static final String ID = "velocity-response";
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final double MIN_VERTICAL_KB = 0.12;
     static final double MIN_EXPECTED_RISE_FACTOR = 0.65;
     static final double MIN_HORIZONTAL_KB = 0.25;
     static final double MIN_HORIZONTAL_DISPLACEMENT = 0.08;
     static final double STATIONARY_HORIZ_FACTOR = 0.45;
+    static final double MIN_STRAFE_HORIZONTAL_KB = 0.28;
+    static final double MAX_VANILLA_GROUND_STRAFE_COUNTER = 0.16;
     static final double MIN_INPUT_HORIZONTAL_KB = 0.44;
     static final double MAX_VANILLA_JUMP_RESET_COUNTER = 0.36;
     static final double EXPLOSION_GRAVITY_SLACK = 0.08;
@@ -86,7 +88,8 @@ public final class VelocityCheck implements TimelineListener {
         boolean customSpeed;
         boolean hasSpeedEffect;
         boolean hasVerticalEffect;
-        boolean currentHorizOrJumpInput;
+        boolean currentHorizInput;
+        boolean currentJumpInput;
         int groundPosCount;
         double lastX = Double.NaN;
         double lastY = Double.NaN;
@@ -97,7 +100,8 @@ public final class VelocityCheck implements TimelineListener {
         boolean movedUpSinceKb;
         double maxVerticalRise;
         boolean horizCollisionSinceKb;
-        boolean hadHorizOrJumpInputSinceKb;
+        boolean hadHorizInputSinceKb;
+        boolean hadJumpInputSinceKb;
         double maxHorizProj;
 
         PendingKb pending;
@@ -123,7 +127,8 @@ public final class VelocityCheck implements TimelineListener {
             movedUpSinceKb = false;
             maxVerticalRise = 0.0;
             horizCollisionSinceKb = false;
-            hadHorizOrJumpInputSinceKb = false;
+            hadHorizInputSinceKb = false;
+            hadJumpInputSinceKb = false;
             maxHorizProj = 0.0;
             ticksSinceAck = 0;
         }
@@ -139,7 +144,8 @@ public final class VelocityCheck implements TimelineListener {
             customSpeed = false;
             hasSpeedEffect = false;
             hasVerticalEffect = false;
-            currentHorizOrJumpInput = false;
+            currentHorizInput = false;
+            currentJumpInput = false;
             reset();
         }
 
@@ -309,7 +315,8 @@ public final class VelocityCheck implements TimelineListener {
             state.movedUpSinceKb = false;
             state.maxVerticalRise = 0.0;
             state.horizCollisionSinceKb = false;
-            state.hadHorizOrJumpInputSinceKb = state.currentHorizOrJumpInput || state.lastHorizStep > 1.0e-3;
+            state.hadHorizInputSinceKb = state.currentHorizInput || state.lastHorizStep > 1.0e-3;
+            state.hadJumpInputSinceKb = state.currentJumpInput;
             state.maxHorizProj = 0.0;
             state.ticksSinceAck = 0;
         } else {
@@ -342,10 +349,17 @@ public final class VelocityCheck implements TimelineListener {
             case ServerboundPacket.PlayerCommand cmd
                     when cmd.action() == ServerboundPacket.PlayerCommand.Action.START_FALL_FLYING -> state.clearKb();
             case ServerboundPacket.PlayerInput input -> {
-                boolean activeInput = input.forward() || input.backward() || input.left() || input.right() || input.jump();
-                state.currentHorizOrJumpInput = activeInput;
-                if (activeInput && (state.pending != null || state.activeAcked != null)) {
-                    state.hadHorizOrJumpInputSinceKb = true;
+                boolean horizInput = input.forward() || input.backward() || input.left() || input.right();
+                boolean jumpInput = input.jump();
+                state.currentHorizInput = horizInput;
+                state.currentJumpInput = jumpInput;
+                if (state.pending != null || state.activeAcked != null) {
+                    if (horizInput) {
+                        state.hadHorizInputSinceKb = true;
+                    }
+                    if (jumpInput) {
+                        state.hadJumpInputSinceKb = true;
+                    }
                 }
             }
             case ServerboundPacket.MovePlayer move -> {
@@ -480,11 +494,20 @@ public final class VelocityCheck implements TimelineListener {
     }
 
     private static double expectedHorizontalMinimum(State state, PendingKb kb, ClientWorld world) {
-        if (!state.hadHorizOrJumpInputSinceKb) {
+        if (!state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb) {
             return Math.max(MIN_HORIZONTAL_DISPLACEMENT, kb.horizMag() * STATIONARY_HORIZ_FACTOR);
         }
-        if (state.customSpeed || state.hasSpeedEffect || kb.horizMag() < MIN_INPUT_HORIZONTAL_KB
+        if (state.customSpeed || state.hasSpeedEffect
                 || !hasStandardGroundFriction(world, kb.baseX(), kb.baseY(), kb.baseZ())) {
+            return Double.NaN;
+        }
+        if (!state.hadJumpInputSinceKb) {
+            if (kb.horizMag() < MIN_STRAFE_HORIZONTAL_KB) {
+                return Double.NaN;
+            }
+            return Math.max(MIN_HORIZONTAL_DISPLACEMENT, kb.horizMag() - MAX_VANILLA_GROUND_STRAFE_COUNTER);
+        }
+        if (kb.horizMag() < MIN_INPUT_HORIZONTAL_KB) {
             return Double.NaN;
         }
         return kb.horizMag() - MAX_VANILLA_JUMP_RESET_COUNTER;

@@ -310,6 +310,25 @@ final class VelocityCheckTest {
         assertTrue(new VelocityCheck((s, e) -> { }, Replicas.vanilla()).readsEntityMotion());
     }
 
+    @Test
+    void detectsGroundStrafeHorizontalAntiKbWithoutJumpBelow044WhilePermittingJumpReset() {
+        // Holding forward (W) WITHOUT jumping on standard ground friction: 0.38 horizontal KB requires >= 0.22 displacement
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(true, false, false, false, false, false, true)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.38, 0.36, 0.0))));
+        syncPing();
+        // Cheater takes vertical rise (+0.36) but suppresses horizontal KB to +0.08 (< 0.22) without jumping
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.58, 64.36, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.58, 64.60, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("partial-horizontal-knockback", evidence.get(0).details().get("reason"));
+    }
+
     private static byte[] flatChunk() {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         varInt(body, 0);

@@ -186,4 +186,59 @@ final class PingSpoofCheckTest {
         assertNotNull(Checks.create(PingSpoofCheck.ID, (s, e) -> {}));
         assertFalse(new PingSpoofCheck((s, e) -> {}).readsEntityMotion());
     }
+
+    @Test
+    void detectsSymmetricCombatRttDropWhenBothKeepAliveAndPingAreDelayedTogether() {
+        // Establish 6 clean low-RTT baseline samples (25 ms KA & 25 ms Ping)
+        for (int i = 0; i < 6; i++) {
+            long sent = now;
+            session.deliver(new TimelineEvent.Outbound(seq++, sent, new ClientboundPacket.KeepAlive(10L + i)));
+            session.deliver(new TimelineEvent.Outbound(seq++, sent, new ClientboundPacket.Ping(10 + i)));
+            now += 50_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+            long ackAt = sent + 25_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, ackAt, 0, new ServerboundPacket.KeepAlive(10L + i)));
+            session.deliver(new TimelineEvent.Inbound(seq++, ackAt, 0, new ServerboundPacket.Pong(10 + i)));
+            session.deliver(new TimelineEvent.Acknowledged(seq++, ackAt, 10 + i, sent, 0));
+        }
+        assertTrue(evidence.isEmpty());
+
+        // Delay both KA and Ping to 260 ms for 5 ticks then drop both to 30 ms upon ATTACK across 2 cycles
+        for (int cycle = 0; cycle < 2; cycle++) {
+            if (cycle == 1) {
+                for (int t = 0; t < 12; t++) {
+                    now += 50_000_000L;
+                    session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+                }
+            }
+            for (int i = 0; i < 5; i++) {
+                long sent = now;
+                long kaId = 100L + cycle * 20L + i;
+                int pid = 100 + cycle * 20 + i;
+                session.deliver(new TimelineEvent.Outbound(seq++, sent, new ClientboundPacket.KeepAlive(kaId)));
+                session.deliver(new TimelineEvent.Outbound(seq++, sent, new ClientboundPacket.Ping(pid)));
+                now += 50_000_000L;
+                session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+                long ackAt = sent + 260_000_000L;
+                session.deliver(new TimelineEvent.Inbound(seq++, ackAt, 0, new ServerboundPacket.KeepAlive(kaId)));
+                session.deliver(new TimelineEvent.Inbound(seq++, ackAt, 0, new ServerboundPacket.Pong(pid)));
+                session.deliver(new TimelineEvent.Acknowledged(seq++, ackAt, pid, sent, 0));
+            }
+            long dropSent = now;
+            long dropKa = 200L + cycle;
+            int dropPid = 200 + cycle;
+            session.deliver(new TimelineEvent.Outbound(seq++, dropSent, new ClientboundPacket.KeepAlive(dropKa)));
+            session.deliver(new TimelineEvent.Outbound(seq++, dropSent, new ClientboundPacket.Ping(dropPid)));
+            session.deliver(new TimelineEvent.Inbound(seq++, dropSent + 10_000_000L, 0,
+                    new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+            now += 50_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+            long dropAck = dropSent + 30_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, dropAck, 0, new ServerboundPacket.KeepAlive(dropKa)));
+            session.deliver(new TimelineEvent.Inbound(seq++, dropAck, 0, new ServerboundPacket.Pong(dropPid)));
+            session.deliver(new TimelineEvent.Acknowledged(seq++, dropAck, dropPid, dropSent, 0));
+        }
+        assertEquals(1, evidence.size());
+        assertEquals("symmetric-combat-rtt-drop", evidence.get(0).details().get("reason"));
+    }
 }

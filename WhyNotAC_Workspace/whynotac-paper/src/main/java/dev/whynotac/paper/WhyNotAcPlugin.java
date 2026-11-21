@@ -95,7 +95,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onEnable() {
-        int threads = Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
+        saveDefaultConfig();
+        int configuredThreads = getConfig().getInt("analysis.threads", 0);
+        int threads = configuredThreads > 0
+                ? configuredThreads
+                : Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
         analysisExecutor = Executors.newFixedThreadPool(threads, daemonThreads("WhyNotAC Analysis"));
         registry = new SessionRegistry(analysisExecutor, SessionRegistry.DEFAULT_MAILBOX_CAPACITY, (session, event, error) -> {
             long count = listenerErrors.incrementAndGet();
@@ -105,7 +109,6 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         });
         diagnostics = new Diagnostics();
         registry.addListener(diagnostics);
-        saveDefaultConfig();
         RecordingSetup.Recording recording = null;
         try {
             recording = RecordingSetup.install(getConfig().getConfigurationSection("recording"), getDataPath(), registry,
@@ -162,6 +165,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             String buildTag = getPluginMeta().getVersion() + "-p" + SharedConstants.getProtocolVersion();
             storage = new StorageManager(getDataPath().resolve("storage"), buildTag, getLogger());
             storage.restoreFalseBanBudget(verdict.falseBanBudget(), verdictConfig.falseBanBudgetWindowMillis(), System.currentTimeMillis());
+            verdict.banWaveQueue().attachJournal(getDataPath().resolve("storage").resolve("ban-wave-queue.jsonl"));
             verdict.addCaseListener(storage);
             verdict.addEnforcementListener(storage);
         } catch (IOException e) {
@@ -240,9 +244,10 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             }), 100L, 100L);
         }
         int metricsPort = getConfig().getInt("observability.metrics-http-port", 0);
+        String metricsAuthToken = getConfig().getString("observability.metrics-auth-token", "");
         if (metricsPort > 0) {
             try {
-                metricsExporter = MetricsExporter.startLocalHttp("127.0.0.1", metricsPort, this::metricsSnapshot);
+                metricsExporter = MetricsExporter.startLocalHttp("127.0.0.1", metricsPort, metricsAuthToken, this::metricsSnapshot);
                 getLogger().info("WhyNotAC OpenMetrics endpoint listening on http://127.0.0.1:" + metricsExporter.boundPort() + "/metrics");
             } catch (IOException e) {
                 getLogger().log(Level.WARNING, "WhyNotAC failed to bind metrics HTTP port " + metricsPort, e);
@@ -281,6 +286,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         System::currentTimeMillis, getLogger());
                 networkBridge.setRemoteErasureHandler(subject -> {
                     aiAdvisor.forget(subject);
+                    verdict.forgetSubject(subject, System.currentTimeMillis());
                     if (cases != null) {
                         cases.subject(subject, true, r -> { });
                     }
@@ -319,6 +325,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             if (networkBridge != null) {
                 sessionSnapshot.features().forEach((name, moments) ->
                         networkBridge.sendProfileSummary(playerId, identity, name, moments, 0));
+                if (sessionSnapshot.combatCovariance() != null && sessionSnapshot.combatCovariance().count() > 0) {
+                    networkBridge.sendCovarianceSummary(playerId, identity, sessionSnapshot.combatCovariance());
+                }
             }
         });
 
@@ -336,7 +345,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 new SubjectRequests(getDataPath().resolve("recordings"), getDataPath().resolve(RecordingSetup.SECRET_FILE), cases, storage,
                         subject -> {
                             aiAdvisor.forget(subject);
-                            verdict.banWaveQueue().cancelSubject(subject, System.currentTimeMillis());
+                            verdict.forgetSubject(subject, System.currentTimeMillis());
                             if (networkBridge != null) {
                                 networkBridge.sendEnforcementNotice(subject, "GDPR_FORGET", "", "", 0L, "gdpr erasure");
                             }

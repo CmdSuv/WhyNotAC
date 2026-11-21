@@ -3,6 +3,13 @@ package dev.whynotac.verdict;
 import dev.whynotac.analysis.policy.ActionPolicy;
 import dev.whynotac.analysis.policy.ActionPolicy.Action;
 import dev.whynotac.analysis.policy.ActionPolicy.Lifecycle;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
@@ -39,6 +46,8 @@ public final class BanWaveQueue implements AutoCloseable {
     private final Queue<UUID> cancelledOrder = new ConcurrentLinkedQueue<>();
     private final Set<ScheduledFuture<?>> pendingFutures = ConcurrentHashMap.newKeySet();
     private final AtomicInteger pendingCount = new AtomicInteger();
+    private final Object journalLock = new Object();
+    private volatile Path journalFile;
 
     public BanWaveQueue(VerdictConfig config, CircuitBreaker circuitBreaker, FalseBanBudget falseBanBudget) {
         this(config, circuitBreaker, falseBanBudget, 0xB417_4E12L);
@@ -67,6 +76,7 @@ public final class BanWaveQueue implements AutoCloseable {
         }
         long delayMillis = computeJitteredDelay(baseDelay);
         pendingCount.incrementAndGet();
+        appendJournalEntry("QUEUED", decision, delayMillis);
         ScheduledFuture<?>[] holder = new ScheduledFuture<?>[1];
         ScheduledFuture<?> future = scheduler.schedule(() -> {
             try {
@@ -85,6 +95,11 @@ public final class BanWaveQueue implements AutoCloseable {
     /** Atomically updates the active verdict config so hot-reloads immediately govern pending waves. */
     public void updateConfig(VerdictConfig newConfig) {
         this.config = Objects.requireNonNull(newConfig, "newConfig");
+    }
+
+    /** Attaches an optional append-only JSONL journal recording queued, cancelled, and executed ban wave events. */
+    public void attachJournal(Path journalPath) {
+        this.journalFile = journalPath;
     }
 
     /** Prevents any queued ban opened at or before {@code cancelledAtMillis} from firing (e.g. overturn/GDPR). */
@@ -142,7 +157,44 @@ public final class BanWaveQueue implements AutoCloseable {
             return;
         }
         falseBanBudget.recordAutoBanIssued();
+        appendJournalEntry("EXECUTED", decision, 0L);
         executor.accept(decision);
+    }
+
+    private void appendJournalEntry(String state, VerdictDecision decision, long delayMillis) {
+        Path file = this.journalFile;
+        if (file == null || decision == null) {
+            return;
+        }
+        UUID subjectId = decision.session() != null && decision.session().identity() != null
+                ? decision.session().identity().playerId()
+                : null;
+        String line = "{\"timestampMs\":" + System.currentTimeMillis()
+                + ",\"state\":\"" + state
+                + "\",\"caseId\":\"" + decision.verdictCase().id()
+                + "\",\"playerId\":\"" + (subjectId == null ? "" : subjectId)
+                + "\",\"check\":\"" + decision.evidence().check()
+                + "\",\"delayMs\":" + delayMillis
+                + ",\"certificateSha256\":\"" + decision.certificate().sha256Digest() + "\"}\n";
+        synchronized (journalLock) {
+            try {
+                Path parent = file.getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
+                try (FileChannel ch = FileChannel.open(file,
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+                    ByteBuffer buf = ByteBuffer.wrap(bytes);
+                    while (buf.hasRemaining()) {
+                        ch.write(buf);
+                    }
+                    ch.force(true);
+                }
+            } catch (IOException ignored) {
+                // Non-fatal: in-memory wave queue and AuditLedger continue operating
+            }
+        }
     }
 
     @Override

@@ -940,4 +940,23 @@ class ClientEntitiesTest {
         assertTrue(entities.mayHaveNear("minecraft:arrow", 4.5, 64.0, 0.5, 1.0, Long.MIN_VALUE));
         assertTrue(!entities.mayHaveNear("minecraft:firework_rocket", 4.5, 64.0, 0.5, 1.0, Long.MIN_VALUE), "an arrow is not a rocket");
     }
+
+    @Test
+    void coarseBoundingBoxMergePreventsCandidateOverflowAcrossFiveUnacknowledgedInterpolationSteps() {
+        out(add(15, "minecraft:zombie", 2.0, 64.0, 2.0));
+        sync();
+        // Send 5 relative MoveEntity packets across ticks without acknowledging: 2^5 = 32 interpolation branches
+        // coalesce via mergeableCoarse/absorbCoarse into <= MAX_CANDIDATES with 0 overflows!
+        for (int i = 0; i < 5; i++) {
+            out(move(15, 2.0 + i * 0.2, 2.0 + (i + 1) * 0.2));
+            tick();
+        }
+        assertEquals(0L, entities.stats().overflows(), "Coarse bounding-box merge must prevent candidate overflow");
+        assertEquals(ClientEntities.Existence.PRESENT, entities.existence(15));
+        sync();
+        List<ClientEntities.PossibleState> possible = states(15);
+        assertTrue(!possible.isEmpty() && possible.size() <= 4);
+        assertTrue(possible.stream().allMatch(ClientEntities.PossibleState::known));
+        assertTrue(possible.stream().anyMatch(s -> s.positionRadius() > 0.0));
+    }
 }

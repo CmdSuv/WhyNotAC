@@ -57,13 +57,18 @@ public final class PlayerSession {
     private volatile long clientTicksPublished;
 
     // analysis-thread confined
+    static final int RECENT_RING_CAPACITY = 4_096;
     private Object[] attachments = new Object[AttachmentKey.count()];
     private final PingLedger pingLedger = new PingLedger();
+    private final TimelineEvent[] recentRing;
+    private int recentHead;
+    private int recentSize;
 
     PlayerSession(long connectionId, String remoteAddress, SessionRegistry registry, int mailboxCapacity, boolean replay) {
         this.connectionId = connectionId;
         this.remoteAddress = remoteAddress;
         this.replay = replay;
+        this.recentRing = replay ? null : new TimelineEvent[RECENT_RING_CAPACITY];
         this.mailbox = new SerialMailbox(registry.executor(), mailboxCapacity, registry.globalQueued(),
                 replay ? Long.MAX_VALUE : registry.globalQueueCapacity(),
                 replay ? Long.MAX_VALUE : SerialMailbox.MAX_DRAIN_NANOS,
@@ -346,6 +351,42 @@ public final class PlayerSession {
     }
 
     // --- analysis side ---------------------------------------------------------------------------
+
+    /** Records an event into the live in-memory verification ring buffer (analysis thread only; no-op on replay). */
+    void recordRecentEvent(TimelineEvent event) {
+        if (recentRing == null || event == null) {
+            return;
+        }
+        synchronized (recentRing) {
+            if (recentSize < RECENT_RING_CAPACITY) {
+                recentRing[(recentHead + recentSize) % RECENT_RING_CAPACITY] = event;
+                recentSize++;
+            } else {
+                recentRing[recentHead] = event;
+                recentHead = (recentHead + 1) % RECENT_RING_CAPACITY;
+            }
+        }
+    }
+
+    /**
+     * Returns an ordered snapshot of the most recent timeline events delivered on this live session
+     * (up to {@link #RECENT_RING_CAPACITY}), or an empty list for replay sessions.
+     */
+    public java.util.List<TimelineEvent> recentEventsSnapshot() {
+        if (recentRing == null) {
+            return java.util.List.of();
+        }
+        synchronized (recentRing) {
+            if (recentSize == 0) {
+                return java.util.List.of();
+            }
+            TimelineEvent[] copy = new TimelineEvent[recentSize];
+            for (int i = 0; i < recentSize; i++) {
+                copy[i] = recentRing[(recentHead + i) % RECENT_RING_CAPACITY];
+            }
+            return java.util.List.of(copy);
+        }
+    }
 
     /** Shared per-session ping ledger, maintained on the analysis thread by {@link SessionRegistry}. */
     public PingLedger pingLedger() {

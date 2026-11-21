@@ -18,9 +18,13 @@ import dev.whynotac.protocol.network.NetworkSecret;
 import dev.whynotac.protocol.session.TimelineEvent.ClientFact.Identity;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -44,15 +48,19 @@ public final class WhyNotAcVelocityPlugin {
     public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("whynotac", "bridge");
     private static final long MAX_SKEW_MILLIS = 60_000L;
     private static final int SERVER_NATIVE_PROTOCOL = 774;
+    static final int MAX_QUEUED_FRAMES_PER_SERVER = 256;
 
     private final ProxyServer proxy;
     private final Logger logger;
     private final Path dataDirectory;
     private volatile byte[] secret;
 
+    private final Map<String, Deque<byte[]>> pendingFramesByServer = new ConcurrentHashMap<>();
     private final AtomicLong sentEdges = new AtomicLong();
     private final AtomicLong relayedProfiles = new AtomicLong();
     private final AtomicLong relayedEnforcements = new AtomicLong();
+    private final AtomicLong queuedOfflineFrames = new AtomicLong();
+    private final AtomicLong flushedOfflineFrames = new AtomicLong();
     private final AtomicLong rejectedFrames = new AtomicLong();
 
     @Inject
@@ -95,6 +103,11 @@ public final class WhyNotAcVelocityPlugin {
                     System.currentTimeMillis(), key);
             serverConn.sendPluginMessage(CHANNEL, frame);
             sentEdges.incrementAndGet();
+            String serverName = serverConn.getServerInfo().getName();
+            for (byte[] queued : drainOfflineQueue(pendingFramesByServer, serverName)) {
+                serverConn.sendPluginMessage(CHANNEL, queued);
+                flushedOfflineFrames.incrementAndGet();
+            }
         });
     }
 
@@ -122,7 +135,8 @@ public final class WhyNotAcVelocityPlugin {
         byte[] verifiedData = validated.get();
         try {
             NetworkEnvelope.Payload decoded = NetworkEnvelope.decodeAndVerify(verifiedData, key, System.currentTimeMillis(), MAX_SKEW_MILLIS);
-            if (decoded instanceof NetworkEnvelope.ProfileSummarySync) {
+            if (decoded instanceof NetworkEnvelope.ProfileSummarySync
+                    || decoded instanceof NetworkEnvelope.CovarianceSummarySync) {
                 relayedProfiles.incrementAndGet();
             } else if (decoded instanceof NetworkEnvelope.EnforcementNotice) {
                 relayedEnforcements.incrementAndGet();
@@ -137,22 +151,70 @@ public final class WhyNotAcVelocityPlugin {
                 ? sc.getServerInfo().getName()
                 : null;
         for (RegisteredServer server : proxy.getAllServers()) {
-            if (shouldForwardTo(originName, server.getServerInfo().getName(), server.getPlayersConnected().size())) {
+            String targetName = server.getServerInfo().getName();
+            int connected = server.getPlayersConnected().size();
+            if (shouldForwardTo(originName, targetName, connected)) {
                 server.sendPluginMessage(CHANNEL, verifiedData);
+            } else if (shouldQueueForOfflineTarget(originName, targetName, connected)) {
+                enqueueOfflineFrame(pendingFramesByServer, targetName, verifiedData);
+                queuedOfflineFrames.incrementAndGet();
             }
         }
     }
 
     /**
-     * Whether a validated backend relay frame originating from {@code originServerName} should be forwarded to
-     * {@code targetServerName}: skips the originating server to prevent double-counting profile merges or self-echoes,
-     * and skips servers with no connected carrier players.
+     * Whether a validated backend relay frame originating from {@code originServerName} should be forwarded immediately
+     * to {@code targetServerName}: skips the originating server and requires at least 1 connected carrier player.
      */
     public static boolean shouldForwardTo(String originServerName, String targetServerName, int targetPlayersConnected) {
         if (targetPlayersConnected <= 0 || targetServerName == null) {
             return false;
         }
         return originServerName == null || !originServerName.equals(targetServerName);
+    }
+
+    /**
+     * Whether a validated backend relay frame should be queued for an empty target backend server
+     * ({@code targetPlayersConnected == 0}) so it can be flushed as soon as a carrier player connects.
+     */
+    public static boolean shouldQueueForOfflineTarget(String originServerName, String targetServerName, int targetPlayersConnected) {
+        if (targetPlayersConnected > 0 || targetServerName == null) {
+            return false;
+        }
+        return originServerName == null || !originServerName.equals(targetServerName);
+    }
+
+    /** Enqueues a verified frame for an empty backend server, bounded to {@link #MAX_QUEUED_FRAMES_PER_SERVER}. */
+    public static void enqueueOfflineFrame(Map<String, Deque<byte[]>> queues, String serverName, byte[] frame) {
+        if (queues == null || serverName == null || frame == null) {
+            return;
+        }
+        Deque<byte[]> q = queues.computeIfAbsent(serverName, k -> new ArrayDeque<>());
+        synchronized (q) {
+            while (q.size() >= MAX_QUEUED_FRAMES_PER_SERVER) {
+                q.pollFirst();
+            }
+            q.addLast(frame.clone());
+        }
+    }
+
+    /** Drains all queued frames for {@code serverName} in FIFO order when a player connects. */
+    public static List<byte[]> drainOfflineQueue(Map<String, Deque<byte[]>> queues, String serverName) {
+        if (queues == null || serverName == null) {
+            return List.of();
+        }
+        Deque<byte[]> q = queues.get(serverName);
+        if (q == null) {
+            return List.of();
+        }
+        synchronized (q) {
+            if (q.isEmpty()) {
+                return List.of();
+            }
+            List<byte[]> drained = List.copyOf(q);
+            q.clear();
+            return drained;
+        }
     }
 
     /** Builds a signed {@link NetworkEnvelope.ProxyClientEdge} describing the upstream client connection. */
@@ -171,7 +233,9 @@ public final class WhyNotAcVelocityPlugin {
     public static Optional<byte[]> validateRelayFrame(byte[] frame, byte[] hmacKey, long nowMillis) {
         try {
             NetworkEnvelope.Payload payload = NetworkEnvelope.decodeAndVerify(frame, hmacKey, nowMillis, MAX_SKEW_MILLIS);
-            if (payload instanceof NetworkEnvelope.ProfileSummarySync || payload instanceof NetworkEnvelope.EnforcementNotice) {
+            if (payload instanceof NetworkEnvelope.ProfileSummarySync
+                    || payload instanceof NetworkEnvelope.CovarianceSummarySync
+                    || payload instanceof NetworkEnvelope.EnforcementNotice) {
                 return Optional.of(frame);
             }
             return Optional.empty();

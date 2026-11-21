@@ -9,7 +9,7 @@ import dev.whynotac.world.ClientEntities;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
@@ -29,22 +29,41 @@ import org.bukkit.plugin.Plugin;
  * Paper server driver for randomized, non-invasive behind-FOV decoy probes (AI-04 / AI-05).
  *
  * <p>Enabled only when {@code ai.active-probes.enabled: true} in {@code config.yml}. Spawns clientbound-only
- * invisible decoys using randomized {@link ProbeScheduler.ProbePlan} geometry within vanilla 3.0-block attack reach
- * behind combat players' camera yaw without touching server world chunks or polluting {@link ClientEntities}.
+ * polymorphic decoys with unpredictable virtual entity IDs in {@code [VIRTUAL_DECOY_MIN_ID, VIRTUAL_DECOY_MAX_ID)}
+ * within vanilla 3.0-block attack reach behind combat players' camera yaw without touching server world chunks
+ * or polluting {@link ClientEntities}.
  */
 public final class LiveProbeDriver implements Runnable {
+
+    private static final int VIRTUAL_DECOY_MAX_ID = 2_140_000_000;
+    private static final List<EntityType<?>> POLYMORPHIC_TYPES = List.of(
+            EntityType.HUSK,
+            EntityType.ZOMBIE,
+            EntityType.SKELETON,
+            EntityType.ARMOR_STAND);
 
     private final Plugin plugin;
     private final PacketInterceptor interceptor;
     private final AiAdvisor aiAdvisor;
     private final long ttlTicks;
-    private final AtomicInteger nextVirtualId = new AtomicInteger(ClientEntities.VIRTUAL_DECOY_MIN_ID);
 
     public LiveProbeDriver(Plugin plugin, PacketInterceptor interceptor, AiAdvisor aiAdvisor, long ttlTicks) {
         this.plugin = plugin;
         this.interceptor = interceptor;
         this.aiAdvisor = aiAdvisor;
         this.ttlTicks = Math.max(4L, ttlTicks);
+    }
+
+    static int nextRandomVirtualId() {
+        return ThreadLocalRandom.current().nextInt(ClientEntities.VIRTUAL_DECOY_MIN_ID, VIRTUAL_DECOY_MAX_ID);
+    }
+
+    static EntityType<?> selectPolymorphicType(ProbeScheduler.ProbePlan plan, int virtualId) {
+        if (plan.type() == ProbeScheduler.ProbeType.RANDOMIZED_HITBOX_OFFSET) {
+            return EntityType.ARMOR_STAND;
+        }
+        int idx = Math.floorMod(virtualId, POLYMORPHIC_TYPES.size() - 1);
+        return POLYMORPHIC_TYPES.get(idx);
     }
 
     @Override
@@ -79,7 +98,7 @@ public final class LiveProbeDriver implements Runnable {
         double z = base.getZ() + Math.cos(yawRad) * dist;
         long effectiveTtl = plan.effectiveTtlTicks(ttlTicks);
 
-        int virtualId = nextVirtualId.getAndIncrement();
+        int virtualId = nextRandomVirtualId();
         if (!engine.registerDecoy(session, virtualId, effectiveTtl, plan.expectedNullHitRate())) {
             return;
         }
@@ -88,13 +107,15 @@ public final class LiveProbeDriver implements Runnable {
         if (nmsPlayer.connection == null) {
             return;
         }
+        EntityType<?> chosenType = selectPolymorphicType(plan, virtualId);
+        float lookBackYaw = (base.getYaw() + 180.0f) % 360.0f;
         ArmorStand phantom = new ArmorStand(((CraftWorld) player.getWorld()).getHandle(), x, y, z);
         phantom.setInvisible(true);
         phantom.setSmall(plan.type() == ProbeScheduler.ProbeType.RANDOMIZED_HITBOX_OFFSET);
         phantom.setNoGravity(true);
 
         nmsPlayer.connection.send(new ClientboundAddEntityPacket(
-                virtualId, UUID.randomUUID(), x, y, z, 0.0f, 0.0f, EntityType.ARMOR_STAND, 0, Vec3.ZERO, 0.0));
+                virtualId, UUID.randomUUID(), x, y, z, 0.0f, lookBackYaw, chosenType, 0, Vec3.ZERO, lookBackYaw));
         List<SynchedEntityData.DataValue<?>> meta = phantom.getEntityData().getNonDefaultValues();
         if (meta != null && !meta.isEmpty()) {
             nmsPlayer.connection.send(new ClientboundSetEntityDataPacket(virtualId, meta));

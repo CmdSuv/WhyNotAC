@@ -1,11 +1,13 @@
 package dev.whynotac.paper.diagnostics;
 
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.whynotac.analysis.evidence.Margins;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -98,7 +100,13 @@ public final class MetricsExporter implements AutoCloseable {
     }
 
     public static MetricsExporter startLocalHttp(String host, int port, Supplier<Snapshot> snapshotSupplier) throws IOException {
+        return startLocalHttp(host, port, "", snapshotSupplier);
+    }
+
+    public static MetricsExporter startLocalHttp(String host, int port, String bearerToken, Supplier<Snapshot> snapshotSupplier)
+            throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
+        String expectedAuth = (bearerToken == null || bearerToken.isBlank()) ? null : "Bearer " + bearerToken.trim();
         ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "WhyNotAC MetricsHTTP");
             t.setDaemon(true);
@@ -106,6 +114,10 @@ public final class MetricsExporter implements AutoCloseable {
         });
         server.setExecutor(exec);
         server.createContext("/metrics", exchange -> {
+            if (!isAuthorized(exchange, expectedAuth)) {
+                rejectUnauthorized(exchange);
+                return;
+            }
             byte[] body = formatOpenMetrics(snapshotSupplier.get()).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
             exchange.sendResponseHeaders(200, body.length);
@@ -114,6 +126,10 @@ public final class MetricsExporter implements AutoCloseable {
             }
         });
         server.createContext("/health", exchange -> {
+            if (!isAuthorized(exchange, expectedAuth)) {
+                rejectUnauthorized(exchange);
+                return;
+            }
             HealthModel.Evaluation eval = snapshotSupplier.get().health();
             int code = eval.status() == HealthModel.Status.CRITICAL ? 503 : 200;
             byte[] body = (eval.toJson() + "\n").getBytes(StandardCharsets.UTF_8);
@@ -125,6 +141,29 @@ public final class MetricsExporter implements AutoCloseable {
         });
         server.start();
         return new MetricsExporter(server, exec);
+    }
+
+    private static boolean isAuthorized(HttpExchange exchange, String expectedAuthHeader) {
+        if (expectedAuthHeader == null) {
+            return true;
+        }
+        String provided = exchange.getRequestHeaders().getFirst("Authorization");
+        if (provided == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                expectedAuthHeader.getBytes(StandardCharsets.UTF_8),
+                provided.trim().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void rejectUnauthorized(HttpExchange exchange) throws IOException {
+        byte[] body = "{\"error\":\"unauthorized\"}\n".getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer realm=\"WhyNotAC\"");
+        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        exchange.sendResponseHeaders(401, body.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+        }
     }
 
     public int boundPort() {

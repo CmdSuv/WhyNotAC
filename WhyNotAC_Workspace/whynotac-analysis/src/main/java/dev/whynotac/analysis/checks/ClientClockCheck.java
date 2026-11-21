@@ -40,8 +40,9 @@ import java.util.Map;
  * {@code i} no earlier than the server sent it ({@code s_i}) and answered {@code j} no later than the
  * server received the answer ({@code r_j}). So the ClientTickEnd between the two answers are at most
  * {@code (r_j - s_i) * (1 + drift) / 50 ms + 22}, with {@code drift} = 1% (the client's clock rate may
- * differ from the server's by that much: 100 times a normal quartz error). It holds whoever answers the
- * transactions, so it also holds through a translator.
+ * differ from the server's by that much: 100 times a normal quartz error). Evaluated strictly on native
+ * protocol 774 sessions ({@link AdmissibilityTracker#evaluate(long)}) where {@code ClientTickEnd} is sent
+ * natively by the client rather than synthesized by an older protocol translator.
  * The best pair is found in O(1) per answer: a violation exists iff
  * {@code K_j - f r_j - 22 > min_i (K_i - f s_i)}, {@code K} counting ClientTickEnd before an answer.
  *

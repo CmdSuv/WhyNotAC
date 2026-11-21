@@ -54,10 +54,19 @@ import java.util.TreeMap;
 public final class UseSlowdownCheck implements TimelineListener {
 
     public static final String ID = "use-item-state";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
+    static final int MAX_CONSUMABLE_HOLD_TICKS = 24;
     private static final Set<String> CONTINUOUS_HOLD_ITEMS = Set.of("minecraft:shield", "minecraft:spyglass");
+    private static final Set<String> ALWAYS_CONSUMABLE_HOLD_ITEMS = Set.of(
+            "minecraft:golden_apple",
+            "minecraft:enchanted_golden_apple",
+            "minecraft:potion",
+            "minecraft:milk_bucket",
+            "minecraft:honey_bottle",
+            "minecraft:ominous_bottle");
     private static final String CONSUMABLE = "minecraft:consumable";
+    private static final String FOOD = "minecraft:food";
     private static final String USE_COOLDOWN = "minecraft:use_cooldown";
 
     private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
@@ -91,8 +100,10 @@ public final class UseSlowdownCheck implements TimelineListener {
         String holdItem;
         long holdStartSeq = -1L;
         long holdStartNano;
+        int holdTicksRemaining;
         int shieldCooldownTicks;
         int spyglassCooldownTicks;
+        int anyCooldownTicks;
 
         void resetTick() {
             releasedInCurrentTick = false;
@@ -108,6 +119,7 @@ public final class UseSlowdownCheck implements TimelineListener {
             activeHoldUse = false;
             holdItem = null;
             holdStartSeq = -1L;
+            holdTicksRemaining = 0;
         }
     }
 
@@ -126,6 +138,7 @@ public final class UseSlowdownCheck implements TimelineListener {
                 state.clearHold();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
+                state.anyCooldownTicks = 0;
             }
             case TimelineEvent.Bound bound -> state.selfId = bound.entityId();
             case TimelineEvent.Outbound out -> onOutbound(state, out.packet());
@@ -142,16 +155,19 @@ public final class UseSlowdownCheck implements TimelineListener {
                 state.clearHold();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
+                state.anyCooldownTicks = 0;
             }
             case ClientboundPacket.Respawn ignored -> {
                 state.resetTick();
                 state.clearHold();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
+                state.anyCooldownTicks = 0;
             }
             case ClientboundPacket.Cooldown cd -> {
                 state.clearHold();
                 if (cd.duration() > 0) {
+                    state.anyCooldownTicks = Math.max(state.anyCooldownTicks, cd.duration());
                     if (cd.group().endsWith(":shield") || cd.group().equals("shield")) {
                         state.shieldCooldownTicks = Math.max(state.shieldCooldownTicks, cd.duration());
                     } else if (cd.group().endsWith(":spyglass") || cd.group().equals("spyglass")) {
@@ -192,6 +208,15 @@ public final class UseSlowdownCheck implements TimelineListener {
                 }
                 if (state.spyglassCooldownTicks > 0) {
                     state.spyglassCooldownTicks--;
+                }
+                if (state.anyCooldownTicks > 0) {
+                    state.anyCooldownTicks--;
+                }
+                if (state.activeHoldUse && state.holdTicksRemaining < Integer.MAX_VALUE) {
+                    state.holdTicksRemaining--;
+                    if (state.holdTicksRemaining <= 0) {
+                        state.clearHold();
+                    }
                 }
             }
             case ServerboundPacket.SetCarriedItem ignored -> state.clearHold();
@@ -347,12 +372,22 @@ public final class UseSlowdownCheck implements TimelineListener {
         String agreed = null;
         for (ClientInventory.View v : views) {
             int slot = hand == Hand.MAIN_HAND ? v.selected() : ClientInventory.HOTBAR;
-            if (slot < 0 || v.mayBeNone()[slot]) {
+            if (slot < 0) {
                 return;
             }
             Stack stack = hand == Hand.MAIN_HAND ? v.hotbar().get(slot) : v.offhand();
-            if (stack == null || stack.isEmpty() || !CONTINUOUS_HOLD_ITEMS.contains(stack.item())
-                    || stack.added().contains(CONSUMABLE) || stack.added().contains(USE_COOLDOWN)) {
+            if (stack == null || stack.isEmpty()) {
+                return;
+            }
+            if (v.mayBeNone()[slot] && (v.itemUses(slot) < 1 || v.itemUses(slot) > stack.count())) {
+                return;
+            }
+            boolean isContinuous = CONTINUOUS_HOLD_ITEMS.contains(stack.item());
+            boolean isAlwaysConsumable = ALWAYS_CONSUMABLE_HOLD_ITEMS.contains(stack.item());
+            if ((!isContinuous && !isAlwaysConsumable)
+                    || stack.added().contains(CONSUMABLE) || stack.removed().contains(CONSUMABLE)
+                    || stack.added().contains(FOOD) || stack.removed().contains(FOOD)
+                    || stack.added().contains(USE_COOLDOWN)) {
                 return;
             }
             if (agreed == null) {
@@ -362,13 +397,17 @@ public final class UseSlowdownCheck implements TimelineListener {
             }
         }
         if ("minecraft:shield".equals(agreed) && state.shieldCooldownTicks > 0
-                || "minecraft:spyglass".equals(agreed) && state.spyglassCooldownTicks > 0) {
+                || "minecraft:spyglass".equals(agreed) && state.spyglassCooldownTicks > 0
+                || ALWAYS_CONSUMABLE_HOLD_ITEMS.contains(agreed) && state.anyCooldownTicks > 0) {
             return;
         }
         state.activeHoldUse = true;
         state.holdItem = agreed;
         state.holdStartSeq = in.sequence();
         state.holdStartNano = in.nanoTime();
+        state.holdTicksRemaining = CONTINUOUS_HOLD_ITEMS.contains(agreed)
+                ? Integer.MAX_VALUE
+                : MAX_CONSUMABLE_HOLD_TICKS;
     }
 
     private boolean onUsePacket(PlayerSession session, State state, TimelineEvent.Inbound in, String packetName) {
