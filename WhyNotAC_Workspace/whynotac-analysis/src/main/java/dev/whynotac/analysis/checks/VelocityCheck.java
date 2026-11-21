@@ -22,25 +22,37 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Velocity response ({@code velocity-response}, P-A, SHADOW, v2): verifies that when the server sends a
+ * Velocity response ({@code velocity-response}, P-A, SHADOW, v3): verifies that when the server sends a
  * vertical or horizontal knockback ({@code ClientboundSetEntityMotionPacket} or {@code ClientboundExplodePacket}
  * with {@code playerKnockback}) to an on-ground survival player with open air across their full hitbox footprint,
- * the client does not ignore or partially suppress the impulse ({@code 0%..60%} vertical Anti-KB, {@code 0%}
- * horizontal Anti-KB) after transaction acknowledgement.
+ * the client does not ignore or partially suppress the impulse ({@code 0%..60%} vertical Anti-KB, {@code 0%..44%}
+ * stationary horizontal Anti-KB, and vanilla Jump-Reset-safe heavy horizontal Anti-KB) after transaction
+ * acknowledgement.
  *
  * <p>Even when nearby entities cause {@link MovementCheck} to withdraw its bit-exact horizontal step claim,
  * {@code Entity.push} is strictly horizontal ({@code dy = 0}) and cannot cancel a vertical knockback impulse
  * when no ceiling, fluid, or climbable block intersects the player's {@code 0.6x0.6} footprint.
+ *
+ * <p>For horizontal knockback, a legitimate vanilla 1.21.11 PvP "Jump Reset" (holding movement + sprint + jump
+ * on the knockback tick) can oppose up to {@code 0.20 (sprint-jump) + 0.13 (sprint ground input) = 0.33} blocks
+ * on standard ground friction ({@code 0.6F}, speed factor {@code 1.0F}, default movement speed). When movement or
+ * jump input is present, horizontal suppression is only claimed when {@code horizMag >= 0.45} against standard
+ * friction and default speed with a strict {@code horizMag - 0.36} floor; when the player is stationary with no
+ * movement/jump input, zero counter-impulse is possible so both {@code 0%} and partial ({@code < 45%})
+ * horizontal suppression are proven.
  */
 public final class VelocityCheck implements TimelineListener {
 
     public static final String ID = "velocity-response";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final double MIN_VERTICAL_KB = 0.12;
     static final double MIN_EXPECTED_RISE_FACTOR = 0.65;
     static final double MIN_HORIZONTAL_KB = 0.25;
     static final double MIN_HORIZONTAL_DISPLACEMENT = 0.08;
+    static final double STATIONARY_HORIZ_FACTOR = 0.45;
+    static final double MIN_INPUT_HORIZONTAL_KB = 0.44;
+    static final double MAX_VANILLA_JUMP_RESET_COUNTER = 0.36;
     static final double EXPLOSION_GRAVITY_SLACK = 0.08;
     static final double FOOTPRINT_HALF_WIDTH = 0.3001;
 
@@ -71,16 +83,21 @@ public final class VelocityCheck implements TimelineListener {
         boolean noGravity;
         boolean customGravity;
         boolean customScale;
+        boolean customSpeed;
+        boolean hasSpeedEffect;
         boolean hasVerticalEffect;
+        boolean currentHorizOrJumpInput;
         int groundPosCount;
         double lastX = Double.NaN;
         double lastY = Double.NaN;
         double lastZ = Double.NaN;
         double lastHorizStep = Double.POSITIVE_INFINITY;
+        boolean sawPosMoveThisTick;
         boolean lastOnGround;
         boolean movedUpSinceKb;
         double maxVerticalRise;
-        boolean movedHorizSinceKb;
+        boolean horizCollisionSinceKb;
+        boolean hadHorizOrJumpInputSinceKb;
         double maxHorizProj;
 
         PendingKb pending;
@@ -105,7 +122,8 @@ public final class VelocityCheck implements TimelineListener {
             activeAcked = null;
             movedUpSinceKb = false;
             maxVerticalRise = 0.0;
-            movedHorizSinceKb = false;
+            horizCollisionSinceKb = false;
+            hadHorizOrJumpInputSinceKb = false;
             maxHorizProj = 0.0;
             ticksSinceAck = 0;
         }
@@ -118,7 +136,10 @@ public final class VelocityCheck implements TimelineListener {
             noGravity = false;
             customGravity = false;
             customScale = false;
+            customSpeed = false;
+            hasSpeedEffect = false;
             hasVerticalEffect = false;
+            currentHorizOrJumpInput = false;
             reset();
         }
 
@@ -126,6 +147,7 @@ public final class VelocityCheck implements TimelineListener {
             groundPosCount = 0;
             lastOnGround = false;
             lastHorizStep = Double.POSITIVE_INFINITY;
+            sawPosMoveThisTick = false;
             clearKb();
         }
     }
@@ -204,23 +226,33 @@ public final class VelocityCheck implements TimelineListener {
                             if (state.customScale) {
                                 state.clearKb();
                             }
+                        } else if ("minecraft:movement_speed".equals(a.key())) {
+                            double[] range = AttributeValues.range(a, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+                            // Default player base speed is 0.10 (0.13 while sprinting); anything above indicates speed buffs
+                            state.customSpeed = range[1] > 0.1301;
                         }
                     }
                 }
             }
             case ClientboundPacket.MobEffect effect -> {
                 ClientSelf self = replicas.self().self(session);
-                if (self.selfId() >= 0 && effect.entityId() == self.selfId()
-                        && ("minecraft:levitation".equals(effect.effectKey()) || "minecraft:slow_falling".equals(effect.effectKey()))) {
-                    state.hasVerticalEffect = true;
-                    state.clearKb();
+                if (self.selfId() >= 0 && effect.entityId() == self.selfId()) {
+                    if ("minecraft:levitation".equals(effect.effectKey()) || "minecraft:slow_falling".equals(effect.effectKey())) {
+                        state.hasVerticalEffect = true;
+                        state.clearKb();
+                    } else if ("minecraft:speed".equals(effect.effectKey())) {
+                        state.hasSpeedEffect = true;
+                    }
                 }
             }
             case ClientboundPacket.RemoveMobEffect effect -> {
                 ClientSelf self = replicas.self().self(session);
-                if (self.selfId() >= 0 && effect.entityId() == self.selfId()
-                        && ("minecraft:levitation".equals(effect.effectKey()) || "minecraft:slow_falling".equals(effect.effectKey()))) {
-                    state.hasVerticalEffect = false;
+                if (self.selfId() >= 0 && effect.entityId() == self.selfId()) {
+                    if ("minecraft:levitation".equals(effect.effectKey()) || "minecraft:slow_falling".equals(effect.effectKey())) {
+                        state.hasVerticalEffect = false;
+                    } else if ("minecraft:speed".equals(effect.effectKey())) {
+                        state.hasSpeedEffect = false;
+                    }
                 }
             }
             case ClientboundPacket.Ping ping -> {
@@ -276,7 +308,8 @@ public final class VelocityCheck implements TimelineListener {
             state.activeAcked = null;
             state.movedUpSinceKb = false;
             state.maxVerticalRise = 0.0;
-            state.movedHorizSinceKb = false;
+            state.horizCollisionSinceKb = false;
+            state.hadHorizOrJumpInputSinceKb = state.currentHorizOrJumpInput || state.lastHorizStep > 1.0e-3;
             state.maxHorizProj = 0.0;
             state.ticksSinceAck = 0;
         } else {
@@ -308,8 +341,16 @@ public final class VelocityCheck implements TimelineListener {
             }
             case ServerboundPacket.PlayerCommand cmd
                     when cmd.action() == ServerboundPacket.PlayerCommand.Action.START_FALL_FLYING -> state.clearKb();
+            case ServerboundPacket.PlayerInput input -> {
+                boolean activeInput = input.forward() || input.backward() || input.left() || input.right() || input.jump();
+                state.currentHorizOrJumpInput = activeInput;
+                if (activeInput && (state.pending != null || state.activeAcked != null)) {
+                    state.hadHorizOrJumpInputSinceKb = true;
+                }
+            }
             case ServerboundPacket.MovePlayer move -> {
                 if (move.hasPosition() && !move.hasNonFiniteValue()) {
+                    state.sawPosMoveThisTick = true;
                     if (Double.isFinite(state.lastX) && Double.isFinite(state.lastZ)) {
                         state.lastHorizStep = Math.hypot(move.x() - state.lastX, move.z() - state.lastZ);
                     }
@@ -329,8 +370,8 @@ public final class VelocityCheck implements TimelineListener {
                         if (kb.horizontalCandidate() && kb.horizMag() > 0.0) {
                             double proj = ((move.x() - kb.baseX()) * kb.vx() + (move.z() - kb.baseZ()) * kb.vz()) / kb.horizMag();
                             state.maxHorizProj = Math.max(state.maxHorizProj, proj);
-                            if (proj >= MIN_HORIZONTAL_DISPLACEMENT - 1.0e-4 || move.horizontalCollision()) {
-                                state.movedHorizSinceKb = true;
+                            if (move.horizontalCollision()) {
+                                state.horizCollisionSinceKb = true;
                             }
                         }
                     }
@@ -343,7 +384,7 @@ public final class VelocityCheck implements TimelineListener {
                 } else {
                     state.lastHorizStep = 0.0;
                     if (move.horizontalCollision() && (state.pending != null || state.activeAcked != null)) {
-                        state.movedHorizSinceKb = true;
+                        state.horizCollisionSinceKb = true;
                     }
                 }
                 state.lastOnGround = move.onGround();
@@ -354,6 +395,11 @@ public final class VelocityCheck implements TimelineListener {
     }
 
     private void onTickEnd(PlayerSession session, State state, TimelineEvent.Inbound tickEnd) {
+        if (!state.sawPosMoveThisTick && state.loaded && state.groundPosCount >= 1) {
+            // Vanilla sendPosition omits MovePlayer when horizontal/vertical displacement <= 2e-4
+            state.lastHorizStep = 0.0;
+        }
+        state.sawPosMoveThisTick = false;
         if (state.activeAcked == null) {
             return;
         }
@@ -371,7 +417,10 @@ public final class VelocityCheck implements TimelineListener {
         boolean vertReady = active.verticalCandidate() && !state.movedUpSinceKb
                 && hasOpenAirAbove(world, active.baseX(), active.baseY(), active.baseZ())
                 && hasOpenAirAbove(world, state.lastX, state.lastY, state.lastZ);
-        boolean horizReady = active.horizontalCandidate() && !state.movedHorizSinceKb
+        double expectedHorizMin = expectedHorizontalMinimum(state, active, world);
+        boolean horizReady = active.horizontalCandidate() && !state.horizCollisionSinceKb
+                && Double.isFinite(expectedHorizMin)
+                && state.maxHorizProj < expectedHorizMin - 1.0e-4
                 && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
         if (!vertReady && !horizReady) {
@@ -409,21 +458,61 @@ public final class VelocityCheck implements TimelineListener {
                         String.format(Locale.ROOT, "%s vy=%.4f (maxRise=%.4f at y=%.2f)", reason, kb.vy(), maxRise, state.lastY),
                         details, admissibility));
             } else {
-                details.put("reason", "ignored-horizontal-knockback");
+                boolean partial = maxProj > 1.0e-3;
+                String reason = partial ? "partial-horizontal-knockback" : "ignored-horizontal-knockback";
+                details.put("reason", reason);
                 details.put("expectedVx", String.format(Locale.ROOT, "%.4f", kb.vx()));
                 details.put("expectedVz", String.format(Locale.ROOT, "%.4f", kb.vz()));
                 details.put("expectedHorizontal", String.format(Locale.ROOT, "%.4f", kb.horizMag()));
+                details.put("minExpectedProjection", String.format(Locale.ROOT, "%.4f", expectedHorizMin));
                 details.put("projectedDisplacement", String.format(Locale.ROOT, "%.4f", maxProj));
                 details.put("currentX", String.format(Locale.ROOT, "%.4f", state.lastX));
                 details.put("currentZ", String.format(Locale.ROOT, "%.4f", state.lastZ));
                 sink.accept(session, new Evidence(
                         ID, VERSION, EvidenceClass.ADVANTAGE_PROOF,
                         kb.sentSeq(), tickEnd.sequence(), kb.sentNano(), tickEnd.nanoTime(),
-                        String.format(Locale.ROOT, "ignored horizontal knockback %.4f (projected %.4f)", kb.horizMag(), maxProj),
+                        String.format(Locale.ROOT, "%s %.4f (projected %.4f, min %.4f)",
+                                reason, kb.horizMag(), maxProj, expectedHorizMin),
                         details, admissibility));
             }
             state.lastReportNanos = tickEnd.nanoTime();
         }
+    }
+
+    private static double expectedHorizontalMinimum(State state, PendingKb kb, ClientWorld world) {
+        if (!state.hadHorizOrJumpInputSinceKb) {
+            return Math.max(MIN_HORIZONTAL_DISPLACEMENT, kb.horizMag() * STATIONARY_HORIZ_FACTOR);
+        }
+        if (state.customSpeed || state.hasSpeedEffect || kb.horizMag() < MIN_INPUT_HORIZONTAL_KB
+                || !hasStandardGroundFriction(world, kb.baseX(), kb.baseY(), kb.baseZ())) {
+            return Double.NaN;
+        }
+        return kb.horizMag() - MAX_VANILLA_JUMP_RESET_COUNTER;
+    }
+
+    private static boolean hasStandardGroundFriction(ClientWorld world, double x, double y, double z) {
+        if (world == null || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+            return false;
+        }
+        BlockStates states = world.states();
+        int minBx = (int) Math.floor(x - FOOTPRINT_HALF_WIDTH);
+        int maxBx = (int) Math.floor(x + FOOTPRINT_HALF_WIDTH);
+        int by = (int) Math.floor(y) - 1;
+        int minBz = (int) Math.floor(z - FOOTPRINT_HALF_WIDTH);
+        int maxBz = (int) Math.floor(z + FOOTPRINT_HALF_WIDTH);
+        for (int bx = minBx; bx <= maxBx; bx++) {
+            for (int bz = minBz; bz <= maxBz; bz++) {
+                if (!world.isLoaded(bx >> 4, bz >> 4)) {
+                    return false;
+                }
+                int s = world.settledBlockState(bx, by, bz);
+                if (!states.isValid(s) || states.friction(s) != 0.6F || states.speedFactor(s) != 1.0F
+                        || "minecraft:soul_soil".equals(states.block(s))) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static boolean hasOpenAirAbove(ClientWorld world, double x, double y, double z) {

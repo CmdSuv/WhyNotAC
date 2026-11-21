@@ -248,6 +248,62 @@ final class VelocityCheckTest {
     }
 
     @Test
+    void detectsPartialHorizontalAntiKbWhenStationaryAndPermitsVanillaJumpResetAndSpeed() {
+        // 1. Stationary player with no input takes only 30% of 0.50 horizontal KB (+0.15 < 0.225) -> partial-horizontal-knockback
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.50, 0.36, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.65, 64.36, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.65, 64.60, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("partial-horizontal-knockback", evidence.get(0).details().get("reason"));
+
+        // 2. Vanilla PvP Jump-Reset (forward + jump + sprint opposing 0.36 horizontal KB -> net +0.03) yields 0 FP
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 90.0F, 0.0F, true, true, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(true, false, false, false, true, false, true)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.36, 0.40, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.53, 64.42, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.51, 64.75, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(1, evidence.size(), "Legitimate vanilla PvP Jump-Reset must never false-flag");
+
+        // 3. Speed II effect exempts input-active horizontal KB even above 0.45
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.MobEffect(SELF, "minecraft:speed", 1, 600, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.46, 0.40, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.52, 64.42, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        tick();
+        assertEquals(1, evidence.size(), "Speed effect with active input must exempt horizontal velocity check");
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(VelocityCheck.VERSION, Checks.version(VelocityCheck.ID));
         assertNotNull(Checks.create(VelocityCheck.ID, (s, e) -> { }));

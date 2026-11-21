@@ -42,9 +42,9 @@ final class AlertStreamExporterTest {
         session.bind(playerId, "Cheater\"One", 1, 100L);
 
         Evidence ev = new Evidence(
-                "velocity-response", 1, EvidenceClass.ADVANTAGE_PROOF,
+                "velocity-response", 3, EvidenceClass.ADVANTAGE_PROOF,
                 10L, 12L, 1_000_000L, 2_000_000L,
-                "ignored vertical kb\nline2", Map.of(),
+                "ignored vertical kb\nline2\tcol\u0007bell", Map.of(),
                 new Admissibility(true, List.of(), Admissibility.IdentityTier.AUTHENTICATED));
         EvidenceCertificate cert = EvidenceCertificate.issue(
                 "cert-1", 1000L, session.connectionId(),
@@ -74,6 +74,7 @@ final class AlertStreamExporterTest {
         assertTrue(line.contains("\"check\":\"velocity-response\""));
         assertTrue(line.contains("\"playerName\":\"Cheater\\\"One\""));
         assertTrue(line.contains("\"mitigation\":\"SETBACK_POSITION\""));
+        assertTrue(line.contains("\\tcol\\u0007bell"), "Control characters must be RFC 8259 JSON-escaped: " + line);
     }
 
     @Test

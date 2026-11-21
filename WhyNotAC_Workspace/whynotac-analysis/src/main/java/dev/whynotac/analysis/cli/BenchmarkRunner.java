@@ -253,6 +253,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("honest-water-bucket-place", null, false, h -> scenarioHonestWaterBucket(h)));
         scenarioResults.add(measure("honest-double-slab-merge", null, false, h -> scenarioHonestDoubleSlabMerge(h)));
         scenarioResults.add(measure("honest-instant-break-slime", null, false, h -> scenarioHonestInstantBreakSlime(h)));
+        scenarioResults.add(measure("honest-pvp-jump-reset", null, false, h -> scenarioHonestPvpJumpReset(h)));
         // Deterministic P-A physics/combat checks
         scenarioResults.add(measure("reach-4.2b-violation", "attack-reach", true, h -> scenarioReach(h)));
         scenarioResults.add(measure("aim-off-target-violation", "attack-aim", true, h -> scenarioAimOffTarget(h)));
@@ -263,6 +264,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("partial-vertical-anti-kb-30pct", "velocity-response", true, h -> scenarioPartialVerticalAntiKb(h)));
         scenarioResults.add(measure("explosion-anti-kb", "velocity-response", true, h -> scenarioExplosionAntiKb(h)));
         scenarioResults.add(measure("horizontal-anti-kb-0pct", "velocity-response", true, h -> scenarioHorizontalAntiKb(h)));
+        scenarioResults.add(measure("partial-horizontal-anti-kb-30pct", "velocity-response", true, h -> scenarioPartialHorizontalAntiKb(h)));
         // Deterministic P-M grammar/protocol checks
         scenarioResults.add(measure("packet-bounds-hotbar-cursor", "packet-bounds", true, h -> scenarioPacketBounds(h)));
         scenarioResults.add(measure("packet-bounds-pitch-flip", "packet-bounds", true, h -> scenarioPacketBoundsPitchFlip(h)));
@@ -338,7 +340,10 @@ public final class BenchmarkRunner {
                 new CorpusEntry("cheat-shield-autoblock.wnrec", BenchmarkRunner::scenarioCrossTickShieldAutoBlock),
                 new CorpusEntry("cheat-partial-velocity-explosion.wnrec", h -> {
                     scenarioPartialVerticalAntiKb(h);
+                    h.now += 2_000_000_000L;
                     scenarioExplosionAntiKb(h);
+                    h.now += 2_000_000_000L;
+                    scenarioPartialHorizontalAntiKb(h);
                 }),
                 new CorpusEntry("cheat-pitch-hotbar-spam.wnrec", h -> {
                     scenarioPacketBoundsPitchFlip(h);
@@ -564,6 +569,29 @@ public final class BenchmarkRunner {
         }
     }
 
+    private static void scenarioHonestPvpJumpReset(Harness h) {
+        // Settle facing west (-X, yaw=90), then receive +0.36 X / +0.40 Y knockback and execute a vanilla PvP Jump-Reset
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 90.0f, 0.0f);
+        }
+        ClientboundPacket.SetEntityMotion kb = ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.36, 0.40, 0.0));
+        h.out(kb);
+        h.syncPing();
+        PlayerState p = h.player;
+        h.player = new PlayerState(p.x(), p.y(), p.z(), kb.clientMotion(), p.yRot(), p.xRot(),
+                p.onGround(), p.horizontalCollision(), p.minorHorizontalCollision(), p.verticalCollision(),
+                p.verticalCollisionBelow(), p.fallDistance(), p.sprinting(), p.sprintModifier(), p.crouching(),
+                p.pose(), p.keys(), p.noJumpDelay(), p.sprintTriggerTime(), p.autoJumpTime(), p.support(),
+                p.onGroundNoBlocks(), p.stuckSpeedMultiplier(), p.swimming(), p.eyeInWater(),
+                p.fallFlying(), p.inPowderSnow(), p.inWater(), p.spinAttackTicks());
+        PlayerState.Keys jumpSprint = new PlayerState.Keys(true, false, false, false, true, false, true);
+        PlayerState.Keys forwardSprint = new PlayerState.Keys(true, false, false, false, false, false, true);
+        h.stepVanilla(jumpSprint, 90.0f, 0.0f);
+        for (int t = 0; t < 4; t++) {
+            h.stepVanilla(forwardSprint, 90.0f, 0.0f);
+        }
+    }
+
     private static void scenarioReach(Harness h) {
         h.markCheatStart();
         h.spawnZombie(2, 2.5, 64.0, 7.2); // 4.7 blocks away (> 3.0 survival reach)
@@ -645,6 +673,21 @@ public final class BenchmarkRunner {
         // Cheater accepts upward jump but suppresses all horizontal displacement
         h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y() + 0.36, h.player.z(), 0.0f, 0.0f, true, false, false, false));
         h.tick();
+        h.tick();
+    }
+
+    private static void scenarioPartialHorizontalAntiKb(Harness h) {
+        // Settle stationary with no input so zero counter-impulse is possible
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        h.markCheatStart();
+        h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.50, 0.36, 0.0)));
+        h.syncPing();
+        // Cheater accepts vertical rise (+0.36) but reduces horizontal knockback to 30% (+0.15 < 0.225)
+        h.in(new ServerboundPacket.MovePlayer(h.player.x() + 0.15, h.player.y() + 0.36, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+        h.in(new ServerboundPacket.MovePlayer(h.player.x() + 0.15, h.player.y() + 0.60, h.player.z(), 0.0f, 0.0f, true, false, false, false));
         h.tick();
     }
 

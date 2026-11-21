@@ -49,8 +49,8 @@ Offline-mode sunucularda [`identity.trust-auth-plugins: true`](../deploy/configs
      java -jar WhyNotAC.jar explain plugins/WhyNotAC/cases/<case-id>.json
      ```
 2. **Yumuşak Etkisizleştirme Pilotu (`mitigate-pilot`):**
-   - [`deploy/configs/paper-mitigate-pilot/config.yml`](../deploy/configs/paper-mitigate-pilot/config.yml) şablonu `attack-reach`, `attack-aim`, `break-time`, `use-aim`, `movement` ve `design-probe` kontrollerini `ARMED` + `mitigations: true` + `hide-information: true` ile açar; **`auto-kick: false` ve `auto-ban: false`** korur.
-   - `ClickPatternCheck`, `AimPatternCheck`, `ContainerTimingCheck` (`S`) ve `DesignProbeEngine` (`D`) sınıfsal olarak asla ban, kick veya etkisizleştirme tetiklemez (`ActionPolicy`).
+   - [`deploy/configs/paper-mitigate-pilot/config.yml`](../deploy/configs/paper-mitigate-pilot/config.yml) şablonu 11 deterministik/sonda kontrolünü (`attack-reach`, `attack-aim`, `break-time`, `use-aim`, `movement`, `velocity-response`, `packet-bounds`, `inventory-protocol`, `interact-at-box`, `use-item-state`, `design-probe`) `ARMED` + `mitigations: true` + `hide-information: true` ile açar; **`auto-kick: false` ve `auto-ban: false`** korur.
+   - `click-pattern`, `aim-pattern`, `container-timing`, `scaffold-pattern`, `timer-balance`, `ping-spoof` (`S`) ve `design-probe` (`D`) sınıfsal olarak asla ban, kick veya etkisizleştirme tetiklemez (`ActionPolicy`).
 3. **İki-Gözlü İnceleme & Acil Durdurma:**
    - İnceleme iş akışı: `/whynotac review <case-prefix> pass1|confirm|appeal|uphold|overturn [not]` (`overturn` yanlış ban bütçesini kaydeder, bekleyen ban dalgasını iptal eder ve proxy üzerinden diğer sunuculara duyurur).
    - Acil kapatma: `/whynotac killswitch on` (tüm yaptırımı anında `SHADOW`'a çeker).
@@ -76,7 +76,7 @@ Offline-mode sunucularda [`identity.trust-auth-plugins: true`](../deploy/configs
 ### Çevrimdışı JAR CLI (`java -jar WhyNotAC.jar ...`)
 - `verify <dossier.json>` — Kayıtlı `.wnrec` üzerinden bağımsız replikada bulguyu tekrar üretir ve parmak izini doğrular.
 - `explain <dossier.json>` — İnsan tarafından okunabilir inceleme, karar ve AI triage (`aiPriorityScore`, `aiDominantSignal`, `aiProbeWealth`) özetini basar.
-- `benchmark [regression-dir]` — Tüm dürüst `.wnrec` kayıtlarını (`0` yanlış pozitif) ve 12 senaryolu hile kıyaslama matrisini çalıştırıp `BENCHMARK_JSON` üretir.
+- `benchmark [regression-dir] [cheat-corpus-dir]` (`--write-corpus <dir>`) — Tüm dürüst `.wnrec` kayıtlarını (`0` yanlış pozitif), **9** kalıcı `.wnrec` hile korpusunu (`0` FN) ve **30** senaryolu kıyaslama matrisini çalıştırıp `BENCHMARK_JSON` üretir.
 - `audit <storage-dir>` — `plugins/WhyNotAC/storage` dizinindeki HMAC/hash zincirli denetim defterinin bütünlüğünü doğrular.
 - `inspect <file.wnrec>` / `dump <file.wnrec>` / `find ...` / `forget ...` — Ham kayıt ve mahremiyet araçları ([`docs/privacy`](privacy/README.md)).
 

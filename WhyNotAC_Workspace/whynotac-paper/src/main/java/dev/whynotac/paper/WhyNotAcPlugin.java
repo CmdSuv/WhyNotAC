@@ -329,6 +329,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (verdictBridge != null) {
+            verdictBridge.restoreAllOccluded();
+        }
         if (interceptor != null) {
             interceptor.uninstall();
             // Detaching closes every session on its network thread; wait (bounded) until each one's

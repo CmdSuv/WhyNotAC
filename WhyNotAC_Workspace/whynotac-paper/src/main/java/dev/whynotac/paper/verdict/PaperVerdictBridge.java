@@ -74,6 +74,35 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         if (config != null) {
             this.mitigationsEnabled = config.mitigationsEnabled();
             this.hidesInformationEnabled = config.hidesInformationEnabled();
+            if (!this.mitigationsEnabled) {
+                cancelAttackUntilNanos.clear();
+                cancelBlockUntilNanos.clear();
+                setbackCooldownUntilNanos.clear();
+            }
+            if (!this.hidesInformationEnabled && plugin.isEnabled()) {
+                Bukkit.getScheduler().runTask(plugin, this::restoreAllOccluded);
+            }
+        }
+    }
+
+    /** Restores visibility for all observers with occluded players (primary thread; reload / plugin disable). */
+    public void restoreAllOccluded() {
+        for (UUID observerId : java.util.List.copyOf(hideInfoUntilNanos.keySet())) {
+            hideInfoUntilNanos.remove(observerId);
+            Player observer = Bukkit.getPlayer(observerId);
+            if (observer != null && observer.isOnline()) {
+                restoreAllHidden(observer);
+            } else {
+                hiddenTargetsByObserver.remove(observerId);
+            }
+        }
+        for (UUID observerId : java.util.List.copyOf(hiddenTargetsByObserver.keySet())) {
+            Player observer = Bukkit.getPlayer(observerId);
+            if (observer != null && observer.isOnline()) {
+                restoreAllHidden(observer);
+            } else {
+                hiddenTargetsByObserver.remove(observerId);
+            }
         }
     }
 
@@ -118,7 +147,7 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
 
     @Override
     public void hideInformation(VerdictDecision decision) {
-        if (!hidesInformationEnabled) {
+        if (!hidesInformationEnabled || !plugin.isEnabled()) {
             return;
         }
         UUID uuid = decision.session().identity() != null ? decision.session().identity().playerId() : null;
@@ -137,7 +166,13 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
 
     /** Called periodically (e.g. every 10 ticks) to update or restore occluded ESP visibility safely on main thread. */
     public void tickOcclusionVisibility() {
-        if (!hidesInformationEnabled || hideInfoUntilNanos.isEmpty()) {
+        if (!hidesInformationEnabled) {
+            if (!hideInfoUntilNanos.isEmpty() || !hiddenTargetsByObserver.isEmpty()) {
+                restoreAllOccluded();
+            }
+            return;
+        }
+        if (hideInfoUntilNanos.isEmpty()) {
             return;
         }
         long now = System.nanoTime();
@@ -211,6 +246,9 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
             case CANCEL_IMPOSSIBLE_BLOCK_ACTION -> cancelBlockUntilNanos.put(uuid, deadline);
             case SETBACK_POSITION -> {
                 setbackCooldownUntilNanos.put(uuid, deadline);
+                if (!plugin.isEnabled()) {
+                    return;
+                }
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     Player p = Bukkit.getPlayer(uuid);
                     Deque<Location> trail = safeTrails.get(uuid);
@@ -226,6 +264,9 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
 
     @Override
     public void kick(VerdictDecision decision) {
+        if (!plugin.isEnabled()) {
+            return;
+        }
         UUID uuid = decision.session().identity() != null ? decision.session().identity().playerId() : null;
         if (uuid == null) {
             return;
@@ -242,6 +283,9 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
 
     @Override
     public void tempBan(VerdictDecision decision) {
+        if (!plugin.isEnabled()) {
+            return;
+        }
         UUID uuid = decision.session().identity() != null ? decision.session().identity().playerId() : null;
         if (uuid == null) {
             return;
@@ -274,6 +318,9 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
     public void circuitBreakerTripped(CircuitBreaker.Status status) {
         String alert = "[WhyNotAC] CIRCUIT BREAKER TRIPPED (" + status.reason() + ") — degraded all enforcement to SHADOW!";
         logger.severe(alert);
+        if (!plugin.isEnabled()) {
+            return;
+        }
         Bukkit.getScheduler().runTask(plugin, () -> {
             Component text = Component.text(alert, NamedTextColor.RED);
             for (Player player : Bukkit.getOnlinePlayers()) {
