@@ -26,7 +26,7 @@ bilgi sınırı** ile birlikte `Evidence` üreten dedektörler. Cezalandırmaz.
 | `interact-at-box` | P-M | `InteractEntity(INTERACT_AT)` yerel hedef ofsetinin hedef varlığın olası hitbox zarfının dışına taşması |
 | `use-item-state` | P-M | Aynı client tick içinde `RELEASE_USE_ITEM` sonrası saldırı/kullanım veya `START_SPRINTING` sonrası eşya kullanma/bırakma (v1) ve tikler arası (`shield`/`spyglass`) bırakma/değişim olmadan kesintisiz kullanım altında saldırı, etkileşim, kullanım veya koşma başlatma (v2, AutoBlock/NoSlow) |
 | `timer-balance` | S | Yavaşlatıp ardından hızlı boşaltan osilasyonlu bakiye zamanlayıcı (`>= 4` döngü, çeviri güvenli); ceza vermez |
-| `ping-spoof` | S | `KeepAlive` ağ RTT'sine göre `>= 10` aktif transaction boyunca `>= 180 ms` şişirilmiş `Ping` RTT sapması (`sustained-ping-rtt-inflation`) ve saldırı anında `>= 120 ms` ani düşüş (`combat-rtt-drop`, çeviri güvenli); ceza vermez |
+| `ping-spoof` | S | `KeepAlive` ağ RTT'sine göre duraksamasız `>= 15` aktif transaction boyunca `>= 200 ms` şişirilmiş `Ping` RTT sapması (`sustained-ping-rtt-inflation`) ve 60 sn içinde `>= 2` döngüde saldırı anında `KeepAlive + 60 ms` altına `>= 120 ms` ani düşüş (`combat-rtt-drop`, v2, çeviri güvenli); ceza vermez |
 | `transaction-order` | P-M | Seçici transaction tutma/geciktirme (`ping-after-later-teleport-accept`: kendisinden sonra gönderilen bir teleport onaylandıktan sonra yanıtlanan transaction; `ping-delayed-past-keepalive`: kendisinden sonraki bir `KeepAlive` yanıtı döndükten sonra 12 tik geçmesine rağmen yanıtlanmayan transaction) |
 
 ### Paylar (`VAL-4`)

@@ -100,38 +100,84 @@ final class PingSpoofCheckTest {
     }
 
     @Test
-    void detectsCombatRttDropAfterBacktrackHoldOnAttack() {
+    void detectsCombatRttDropAfterRepeatedBacktrackHoldOnAttackAndIgnoresSingleStallRecovery() {
         long kaSent = now;
         session.deliver(new TimelineEvent.Outbound(seq++, kaSent, new ClientboundPacket.KeepAlive(1L)));
         now += 25_000_000L; // Real network RTT = 25 ms
         session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.KeepAlive(1L)));
 
-        // Hold 5 Ping samples inflated at 260 ms (below REQUIRED_INFLATED_SAMPLES=10 so Rule 1 hasn't fired yet)
-        for (int i = 0; i < 5; i++) {
-            long pingSent = now;
-            session.deliver(new TimelineEvent.Outbound(seq++, pingSent, new ClientboundPacket.Ping(200 + i)));
+        // Cycle 1: Hold 5 Ping samples inflated at 260 ms then flush to 30 ms on attack (single event must not fire!)
+        for (int cycle = 0; cycle < 2; cycle++) {
+            if (cycle == 1) {
+                // Separate cycles by > 500 ms with smooth 50 ms ticks
+                for (int t = 0; t < 12; t++) {
+                    now += 50_000_000L;
+                    session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+                }
+            }
+            for (int i = 0; i < 5; i++) {
+                long pingSent = now;
+                int pid = 200 + cycle * 20 + i;
+                session.deliver(new TimelineEvent.Outbound(seq++, pingSent, new ClientboundPacket.Ping(pid)));
+                now += 50_000_000L;
+                session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+                long ackTime = pingSent + 260_000_000L;
+                session.deliver(new TimelineEvent.Inbound(seq++, ackTime, 0, new ServerboundPacket.Pong(pid)));
+                session.deliver(new TimelineEvent.Acknowledged(seq++, ackTime, pid, pingSent, 0));
+            }
+            long dropPingSent = now;
+            int dropPid = 250 + cycle;
+            session.deliver(new TimelineEvent.Outbound(seq++, dropPingSent, new ClientboundPacket.Ping(dropPid)));
+            session.deliver(new TimelineEvent.Inbound(seq++, dropPingSent + 10_000_000L, 0,
+                    new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
             now += 50_000_000L;
             session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
-            long ackTime = pingSent + 260_000_000L;
-            session.deliver(new TimelineEvent.Inbound(seq++, ackTime, 0, new ServerboundPacket.Pong(200 + i)));
-            session.deliver(new TimelineEvent.Acknowledged(seq++, ackTime, 200 + i, pingSent, 0));
+            long dropAckTime = dropPingSent + 30_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropPid)));
+            session.deliver(new TimelineEvent.Acknowledged(seq++, dropAckTime, dropPid, dropPingSent, 0));
+            if (cycle == 0) {
+                assertTrue(evidence.isEmpty(), "Single combat RTT recovery must not trigger false positive");
+            }
         }
-        assertTrue(evidence.isEmpty());
-
-        // Player attacks and immediately drops Ping RTT back down to 30 ms (delta = 230 ms >= 120 ms)
-        long dropPingSent = now;
-        session.deliver(new TimelineEvent.Outbound(seq++, dropPingSent, new ClientboundPacket.Ping(250)));
-        session.deliver(new TimelineEvent.Inbound(seq++, dropPingSent + 10_000_000L, 0,
-                new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
-        now += 50_000_000L;
-        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
-        long dropAckTime = dropPingSent + 30_000_000L;
-        session.deliver(new TimelineEvent.Inbound(seq++, dropAckTime, 0, new ServerboundPacket.Pong(250)));
-        session.deliver(new TimelineEvent.Acknowledged(seq++, dropAckTime, 250, dropPingSent, 0));
 
         assertEquals(1, evidence.size());
         assertEquals(EvidenceClass.NOMINAL_STATISTIC, evidence.get(0).evidenceClass());
         assertEquals("combat-rtt-drop", evidence.get(0).details().get("reason"));
+    }
+
+    @Test
+    void ignoresClientFreezeStallAndStaircaseDrainWithoutFullFlush() {
+        long kaSent = now;
+        session.deliver(new TimelineEvent.Outbound(seq++, kaSent, new ClientboundPacket.KeepAlive(1L)));
+        now += 5_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.KeepAlive(1L)));
+
+        // Staircase drain (290 ms -> 150 ms) never flushes near KeepAlive (5 + 60 ms) -> 0 evidence
+        for (int cycle = 0; cycle < 3; cycle++) {
+            for (int t = 0; t < 12; t++) {
+                now += 50_000_000L;
+                session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+            }
+            for (int i = 0; i < 5; i++) {
+                long pingSent = now;
+                int pid = 400 + cycle * 20 + i;
+                session.deliver(new TimelineEvent.Outbound(seq++, pingSent, new ClientboundPacket.Ping(pid)));
+                now += 50_000_000L;
+                session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+                session.deliver(new TimelineEvent.Inbound(seq++, pingSent + 290_000_000L, 0, new ServerboundPacket.Pong(pid)));
+                session.deliver(new TimelineEvent.Acknowledged(seq++, pingSent + 290_000_000L, pid, pingSent, 0));
+            }
+            long dropSent = now;
+            int dropId = 500 + cycle;
+            session.deliver(new TimelineEvent.Outbound(seq++, dropSent, new ClientboundPacket.Ping(dropId)));
+            session.deliver(new TimelineEvent.Inbound(seq++, dropSent + 10_000_000L, 0,
+                    new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+            now += 50_000_000L;
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+            session.deliver(new TimelineEvent.Inbound(seq++, dropSent + 150_000_000L, 0, new ServerboundPacket.Pong(dropId)));
+            session.deliver(new TimelineEvent.Acknowledged(seq++, dropSent + 150_000_000L, dropId, dropSent, 0));
+        }
+        assertTrue(evidence.isEmpty(), "Partial queue staircase drain must not false-flag");
     }
 
     @Test

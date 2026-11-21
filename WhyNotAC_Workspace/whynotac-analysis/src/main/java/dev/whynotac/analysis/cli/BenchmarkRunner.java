@@ -804,7 +804,7 @@ public final class BenchmarkRunner {
         h.now += 25_000_000L;
         h.in(new ServerboundPacket.KeepAlive(55L));
         h.markCheatStart();
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < 16; i++) {
             long pingSent = h.now;
             int id = ++h.pingId;
             h.out(new ClientboundPacket.Ping(id));
@@ -821,24 +821,31 @@ public final class BenchmarkRunner {
         h.now += 25_000_000L;
         h.in(new ServerboundPacket.KeepAlive(77L));
         h.markCheatStart();
-        for (int i = 0; i < 5; i++) {
-            long pingSent = h.now;
-            int id = ++h.pingId;
-            h.out(new ClientboundPacket.Ping(id));
+        for (int cycle = 0; cycle < 2; cycle++) {
+            if (cycle == 1) {
+                for (int t = 0; t < 12; t++) {
+                    h.tick();
+                }
+            }
+            for (int i = 0; i < 5; i++) {
+                long pingSent = h.now;
+                int id = ++h.pingId;
+                h.out(new ClientboundPacket.Ping(id));
+                h.tick();
+                long ackTime = pingSent + 260_000_000L;
+                h.deliver(new TimelineEvent.Inbound(h.seq++, ackTime, 0, new ServerboundPacket.Pong(id)));
+                h.deliver(new TimelineEvent.Acknowledged(h.seq++, ackTime, id, pingSent, 0));
+            }
+            long dropPingSent = h.now;
+            int dropId = ++h.pingId;
+            h.out(new ClientboundPacket.Ping(dropId));
+            h.deliver(new TimelineEvent.Inbound(h.seq++, dropPingSent + 10_000_000L, 0,
+                    new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
             h.tick();
-            long ackTime = pingSent + 260_000_000L;
-            h.deliver(new TimelineEvent.Inbound(h.seq++, ackTime, 0, new ServerboundPacket.Pong(id)));
-            h.deliver(new TimelineEvent.Acknowledged(h.seq++, ackTime, id, pingSent, 0));
+            long dropAckTime = dropPingSent + 30_000_000L;
+            h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropId)));
+            h.deliver(new TimelineEvent.Acknowledged(h.seq++, dropAckTime, dropId, dropPingSent, 0));
         }
-        long dropPingSent = h.now;
-        int dropId = ++h.pingId;
-        h.out(new ClientboundPacket.Ping(dropId));
-        h.deliver(new TimelineEvent.Inbound(h.seq++, dropPingSent + 10_000_000L, 0,
-                new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
-        h.tick();
-        long dropAckTime = dropPingSent + 30_000_000L;
-        h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropId)));
-        h.deliver(new TimelineEvent.Acknowledged(h.seq++, dropAckTime, dropId, dropPingSent, 0));
     }
 
     private static int countCheck(List<Evidence> findings, String checkId) {
