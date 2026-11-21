@@ -1,0 +1,104 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "title": "WhyNotAC — Real-Time Physics, Verdict & Performance Overview",
+  "uid": "whynotac-ops-v1",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "tags": ["whynotac", "anticheat", "paper", "observability"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "System Health (2=GREEN, 1=DEGRADED, 0=CRITICAL)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "whynotac_health_status", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Live Sessions / Queued Events",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_sessions_live", "legendFormat": "live", "refId": "A" },
+        { "expr": "whynotac_events_queued", "legendFormat": "queued", "refId": "B" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Lost Events & Listener Errors",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_events_lost_total", "legendFormat": "lost", "refId": "A" },
+        { "expr": "whynotac_listener_errors_total", "legendFormat": "errors", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Transaction Loop Overhead (us)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_transaction_loop_mean_micros", "legendFormat": "mean_us", "refId": "A" },
+        { "expr": "whynotac_transaction_loop_max_micros", "legendFormat": "max_us", "refId": "B" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Packet Throughput (Inbound / Outbound per sec)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(whynotac_packets_inbound_total[1m])", "legendFormat": "inbound/s", "refId": "A" },
+        { "expr": "rate(whynotac_packets_outbound_total[1m])", "legendFormat": "outbound/s", "refId": "B" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Cases Opened / Stored / Dropped & Pending Ban Waves",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(whynotac_cases_opened_total[5m])", "legendFormat": "opened/s", "refId": "A" },
+        { "expr": "rate(whynotac_cases_stored_total[5m])", "legendFormat": "stored/s", "refId": "B" },
+        { "expr": "whynotac_ban_wave_pending", "legendFormat": "pending_bans", "refId": "C" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Minimum Clean Margins by Check (Near-Zero Indicator)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_check_min_margin", "legendFormat": "{{check}}", "refId": "A" }
+      ]
+    }
+  ]
+}

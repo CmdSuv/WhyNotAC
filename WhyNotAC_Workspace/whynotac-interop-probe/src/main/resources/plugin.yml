@@ -1,0 +1,13 @@
+name: WhyNotACInteropProbe
+version: '${version}'
+main: dev.whynotac.interop.InteropProbePlugin
+api-version: '1.21'
+description: Test-only. Sends and cancels knockback below WhyNotAC for the live E2E. Never install on a real server.
+softdepend: [packetevents]
+commands:
+  wnprobe:
+    description: wnprobe game|inject|cancel <player> <vx> <vy> <vz>
+    permission: whynotac.interop.probe
+permissions:
+  whynotac.interop.probe:
+    default: op

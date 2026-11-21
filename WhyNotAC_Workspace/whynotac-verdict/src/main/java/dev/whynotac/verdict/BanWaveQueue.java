@@ -1,0 +1,207 @@
+package dev.whynotac.verdict;
+
+import dev.whynotac.analysis.policy.ActionPolicy;
+import dev.whynotac.analysis.policy.ActionPolicy.Action;
+import dev.whynotac.analysis.policy.ActionPolicy.Lifecycle;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
+import java.util.SplittableRandom;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+
+/**
+ * Delayed/jittered temporary-ban wave queue (VER-12).
+ *
+ * <p>When configured with {@code banWaveDelayMillis > 0}, holds automatic temporary bans until a jittered
+ * wave delay elapses, then re-verifies every safety invariant at execution time ({@link EvidenceCertificate}
+ * integrity, {@link CircuitBreaker}, {@link FalseBanBudget}, {@link ActionPolicy}, and cancellation state)
+ * before issuing the ban.
+ */
+public final class BanWaveQueue implements AutoCloseable {
+
+    private static final int MAX_CANCELLED_SUBJECTS = 10_000;
+
+    private volatile VerdictConfig config;
+    private final CircuitBreaker circuitBreaker;
+    private final FalseBanBudget falseBanBudget;
+    private final ScheduledExecutorService scheduler;
+    private final SplittableRandom rng;
+    private final Map<UUID, Long> cancelledBeforeMillis = new ConcurrentHashMap<>();
+    private final Queue<UUID> cancelledOrder = new ConcurrentLinkedQueue<>();
+    private final Set<ScheduledFuture<?>> pendingFutures = ConcurrentHashMap.newKeySet();
+    private final AtomicInteger pendingCount = new AtomicInteger();
+    private final Object journalLock = new Object();
+    private volatile Path journalFile;
+
+    public BanWaveQueue(VerdictConfig config, CircuitBreaker circuitBreaker, FalseBanBudget falseBanBudget) {
+        this(config, circuitBreaker, falseBanBudget, 0xB417_4E12L);
+    }
+
+    BanWaveQueue(VerdictConfig config, CircuitBreaker circuitBreaker, FalseBanBudget falseBanBudget, long seed) {
+        this.config = Objects.requireNonNull(config, "config");
+        this.circuitBreaker = Objects.requireNonNull(circuitBreaker, "circuitBreaker");
+        this.falseBanBudget = Objects.requireNonNull(falseBanBudget, "falseBanBudget");
+        this.rng = new SplittableRandom(seed);
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "WhyNotAC BanWaveQueue");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /** Enqueues a verified temporary ban (executes immediately when {@code banWaveDelayMillis == 0}). */
+    public void enqueue(VerdictDecision decision, Consumer<VerdictDecision> executor) {
+        Objects.requireNonNull(decision, "decision");
+        Objects.requireNonNull(executor, "executor");
+        long baseDelay = config.banWaveDelayMillis();
+        if (baseDelay <= 0L) {
+            executeIfSafe(decision, executor);
+            return;
+        }
+        long delayMillis = computeJitteredDelay(baseDelay);
+        pendingCount.incrementAndGet();
+        appendJournalEntry("QUEUED", decision, delayMillis);
+        ScheduledFuture<?>[] holder = new ScheduledFuture<?>[1];
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            try {
+                executeIfSafe(decision, executor);
+            } finally {
+                pendingCount.decrementAndGet();
+                if (holder[0] != null) {
+                    pendingFutures.remove(holder[0]);
+                }
+            }
+        }, delayMillis, TimeUnit.MILLISECONDS);
+        holder[0] = future;
+        pendingFutures.add(future);
+    }
+
+    /** Atomically updates the active verdict config so hot-reloads immediately govern pending waves. */
+    public void updateConfig(VerdictConfig newConfig) {
+        this.config = Objects.requireNonNull(newConfig, "newConfig");
+    }
+
+    /** Attaches an optional append-only JSONL journal recording queued, cancelled, and executed ban wave events. */
+    public void attachJournal(Path journalPath) {
+        this.journalFile = journalPath;
+    }
+
+    /** Prevents any queued ban opened at or before {@code cancelledAtMillis} from firing (e.g. overturn/GDPR). */
+    public void cancelSubject(UUID playerId, long cancelledAtMillis) {
+        if (playerId != null) {
+            boolean isNew = cancelledBeforeMillis.putIfAbsent(playerId, cancelledAtMillis) == null;
+            if (isNew) {
+                cancelledOrder.add(playerId);
+                while (cancelledBeforeMillis.size() > MAX_CANCELLED_SUBJECTS) {
+                    UUID evicted = cancelledOrder.poll();
+                    if (evicted == null) {
+                        break;
+                    }
+                    cancelledBeforeMillis.remove(evicted);
+                }
+            } else {
+                cancelledBeforeMillis.merge(playerId, cancelledAtMillis, Math::max);
+            }
+        }
+    }
+
+    public int pendingCount() {
+        return Math.max(0, pendingCount.get());
+    }
+
+    private long computeJitteredDelay(long baseDelay) {
+        long min = Math.max(1L, baseDelay / 2L);
+        long max = Math.max(min + 1L, baseDelay + baseDelay / 4L);
+        synchronized (rng) {
+            return min + rng.nextLong(max - min + 1L);
+        }
+    }
+
+    private void executeIfSafe(VerdictDecision decision, Consumer<VerdictDecision> executor) {
+        VerdictConfig active = this.config;
+        if (!active.autoBanEnabled() || !decision.certificate().verifyIntegrity()) {
+            return;
+        }
+        if (circuitBreaker.isSuppressed() || falseBanBudget.isLocked()) {
+            return;
+        }
+        UUID subjectId = decision.session() != null && decision.session().identity() != null
+                ? decision.session().identity().playerId()
+                : null;
+        if (subjectId != null) {
+            Long cutoff = cancelledBeforeMillis.get(subjectId);
+            if (cutoff != null && decision.verdictCase().openedEpochMillis() <= cutoff) {
+                return;
+            }
+        }
+        boolean allowed = active.armedChecks().contains(decision.evidence().check())
+                && ActionPolicy.enabled(decision.evidence().evidenceClass(), Action.TEMP_BAN,
+                        decision.evidence().admissibility().identity(), Lifecycle.ARMED, true);
+        if (!allowed) {
+            return;
+        }
+        falseBanBudget.recordAutoBanIssued();
+        appendJournalEntry("EXECUTED", decision, 0L);
+        executor.accept(decision);
+    }
+
+    private void appendJournalEntry(String state, VerdictDecision decision, long delayMillis) {
+        Path file = this.journalFile;
+        if (file == null || decision == null) {
+            return;
+        }
+        UUID subjectId = decision.session() != null && decision.session().identity() != null
+                ? decision.session().identity().playerId()
+                : null;
+        String line = "{\"timestampMs\":" + System.currentTimeMillis()
+                + ",\"state\":\"" + state
+                + "\",\"caseId\":\"" + decision.verdictCase().id()
+                + "\",\"playerId\":\"" + (subjectId == null ? "" : subjectId)
+                + "\",\"check\":\"" + decision.evidence().check()
+                + "\",\"delayMs\":" + delayMillis
+                + ",\"certificateSha256\":\"" + decision.certificate().sha256Digest() + "\"}\n";
+        synchronized (journalLock) {
+            try {
+                Path parent = file.getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
+                try (FileChannel ch = FileChannel.open(file,
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+                    ByteBuffer buf = ByteBuffer.wrap(bytes);
+                    while (buf.hasRemaining()) {
+                        ch.write(buf);
+                    }
+                    ch.force(true);
+                }
+            } catch (IOException ignored) {
+                // Non-fatal: in-memory wave queue and AuditLedger continue operating
+            }
+        }
+    }
+
+    @Override
+    public void close() {
+        for (ScheduledFuture<?> future : pendingFutures) {
+            future.cancel(false);
+        }
+        scheduler.shutdownNow();
+    }
+}

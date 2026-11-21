@@ -1,0 +1,65 @@
+# WhyNotAC Server-Type Preset — Survival Multiplayer / SMP (1.21.11)
+# Per docs/DECISIONS.md: tailored for large survival worlds with gentle deterministic soft mitigation on
+# reach/movement/break/inventory violations, low main-thread overhead (occlusion & active probes OFF by default),
+# and 180s correlation half-life — auto-kick & auto-ban OFF.
+
+recording:
+  enabled: true
+  max-age-days: 14
+  max-total-megabytes: 4096
+  max-queued-megabytes: 64
+
+observation:
+  edge: true
+  per-tick-transactions: true
+  flush-transactions: true
+
+cases:
+  retention-days: 90
+
+verdict:
+  armed-checks:
+    - "attack-reach"
+    - "attack-aim"
+    - "break-time"
+    - "use-aim"
+    - "movement"
+    - "velocity-response"
+    - "packet-bounds"
+    - "inventory-protocol"
+    - "interact-at-box"
+  mitigations: true
+  hide-information: false
+  auto-kick: false
+  auto-ban: false
+  second-verifier: true
+  require-corroboration-for-ban: true
+  temp-ban-hours: 24
+  max-enforced-players-per-minute: 3
+  max-false-ban-budget: 1
+  false-ban-window-days: 7
+  correlation-half-life-seconds: 180
+  min-score-for-mitigation: 1.0
+  min-score-for-kick: 4.0
+  ban-wave-delay-seconds: 300
+
+identity:
+  trust-auth-plugins: true
+
+observability:
+  health-watchdog: true
+  metrics-http-port: 9108
+  alert-stream-file: "alerts-stream.jsonl"
+  webhook-url: ""
+
+network-bridge:
+  enabled: false
+  secret-file: "network-secret.key"
+  max-clock-skew-seconds: 60
+
+ai:
+  active-probes:
+    enabled: false
+    ttl-ticks: 10
+    min-cooldown-ticks: 300
+    max-jitter-ticks: 600

@@ -1,0 +1,61 @@
+{
+ "variant": "baseline",
+ "layout": "cluster",
+ "bots": 100,
+ "measureSeconds": 61.73,
+ "warmup": {
+  "seconds": 140,
+  "settled": true
+ },
+ "mspt": {
+  "avg": 27.9,
+  "min": 14.0,
+  "max": 2482.1,
+  "window": "1m"
+ },
+ "tps": 18.8,
+ "serverCpuCores": 0.9961,
+ "heapAfterFullGcBytes": 425911040,
+ "whynotacHeapBytes": 0,
+ "whynotacStatsAfterAllLeft": null,
+ "botSide": {
+  "processes": 4,
+  "joined": 100,
+  "still_connected": 100,
+  "pings_seen": 0,
+  "pings_answered": 0,
+  "errors": [],
+  "disconnects": []
+ },
+ "serverMovementCorrections": 0,
+ "threadCpuCores": {
+  "Async-profiler Timer": 0.0006,
+  "Attach Listener": 0.045,
+  "C# CompilerThread#": 0.4231,
+  "Common-Cleaner": 0.0,
+  "Craft Async Scheduler Management Thread": 0.004,
+  "DestroyJavaVM": 0.0428,
+  "JFR Periodic Tasks": 0.007,
+  "JFR Recorder Thread": 0.0012,
+  "JNA Cleaner": 0.0,
+  "Log#j#-AsyncAppenderEventDispatcher-#-Async": 0.001,
+  "Monitor Deflation Thread": 0.0003,
+  "Netty Epoll IO ##": 0.4059,
+  "Paper Async Command Builder Thread Pool - #": 0.001,
+  "Paper Async Task Handler Thread - #": 0.0016,
+  "Paper Common Worker ##": 0.074,
+  "Paper I/O Worker ##": 0.0043,
+  "Paper Watchdog Thread": 0.0002,
+  "PaperFilledProfileCache-cleanup-#": 0.0001,
+  "Reference Handler": 0.0,
+  "Server console handler": 0.0001,
+  "Server thread": 0.7703,
+  "Service Thread": 0.0014,
+  "Worker-Main-#": 0.0294,
+  "Yggdrasil Key Fetcher": 0.005,
+  "pool-#-thread-#": 0.0049,
+  "spark-async-sampler-worker-thread": 0.0119,
+  "spark-monitoring-thread": 0.003
+ },
+ "jfrWhynotacShare": 0.0
+}

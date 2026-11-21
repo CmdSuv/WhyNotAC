@@ -1,0 +1,16 @@
+name: WhyNotAC
+version: '${version}'
+main: dev.whynotac.paper.WhyNotAcPlugin
+api-version: '${minecraft}'
+description: Server-side anomaly detection for Minecraft ${minecraft}
+load: STARTUP
+permissions:
+  whynotac.inspect:
+    description: Use /whynotac inspect, sessions, stats, cases and case
+    default: op
+  whynotac.alerts:
+    description: Receive alerts of armed checks
+    default: op
+  whynotac.alerts.shadow:
+    description: Receive alerts of checks still in SHADOW (developers and testers)
+    default: false
