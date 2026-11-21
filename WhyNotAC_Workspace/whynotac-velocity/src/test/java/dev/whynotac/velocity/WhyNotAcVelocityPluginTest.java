@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,5 +50,10 @@ final class WhyNotAcVelocityPluginTest {
                 now, id, Identity.AUTHENTICATED_BY_PROXY, "click_interval_ticks", 50, 5.2, 0.3, 0), key1);
         Optional<byte[]> validRelay = WhyNotAcVelocityPlugin.validateRelayFrame(syncFrame, key1, now);
         assertTrue(validRelay.isPresent());
+
+        // Origin-server exclusion prevents self-echo double merges while forwarding to populated peer backends
+        assertFalse(WhyNotAcVelocityPlugin.shouldForwardTo("lobby", "lobby", 3));
+        assertFalse(WhyNotAcVelocityPlugin.shouldForwardTo("lobby", "arena", 0));
+        assertTrue(WhyNotAcVelocityPlugin.shouldForwardTo("lobby", "arena", 1));
     }
 }

@@ -10,6 +10,7 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import com.velocitypowered.api.proxy.ServerConnection;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import dev.whynotac.protocol.network.NetworkEnvelope;
@@ -132,11 +133,26 @@ public final class WhyNotAcVelocityPlugin {
             rejectedFrames.incrementAndGet();
             return;
         }
+        String originName = event.getSource() instanceof ServerConnection sc
+                ? sc.getServerInfo().getName()
+                : null;
         for (RegisteredServer server : proxy.getAllServers()) {
-            if (!server.getPlayersConnected().isEmpty()) {
+            if (shouldForwardTo(originName, server.getServerInfo().getName(), server.getPlayersConnected().size())) {
                 server.sendPluginMessage(CHANNEL, verifiedData);
             }
         }
+    }
+
+    /**
+     * Whether a validated backend relay frame originating from {@code originServerName} should be forwarded to
+     * {@code targetServerName}: skips the originating server to prevent double-counting profile merges or self-echoes,
+     * and skips servers with no connected carrier players.
+     */
+    public static boolean shouldForwardTo(String originServerName, String targetServerName, int targetPlayersConnected) {
+        if (targetPlayersConnected <= 0 || targetServerName == null) {
+            return false;
+        }
+        return originServerName == null || !originServerName.equals(targetServerName);
     }
 
     /** Builds a signed {@link NetworkEnvelope.ProxyClientEdge} describing the upstream client connection. */

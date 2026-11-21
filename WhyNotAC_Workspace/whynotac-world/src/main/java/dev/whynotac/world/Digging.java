@@ -211,6 +211,80 @@ public final class Digging {
         return out;
     }
 
+    /**
+     * The state a survival client's {@code START_DESTROY_BLOCK} certainly set at the dug position when every possible
+     * non-air state there has zero hardness ({@code destroySpeed == 0.0F}), or -1 where instant breaking is not
+     * guaranteed. In decompiled 1.21.11 {@code MultiPlayerGameMode.startDestroyBlock}, any non-air block with
+     * {@code getDestroyProgress >= 1.0F} calls {@code destroyBlock(pos)} immediately without sending
+     * {@code STOP_DESTROY_BLOCK}. When {@link ClientSelf#canInstantBreakZeroHardness()} holds and every possible held
+     * stack has strictly positive vanilla tool speed and is not in {@link #REFUSING_ITEMS}, every non-air zero-hardness
+     * block without {@link BlockStates#DIG_HOOKED} breaks to {@code air} (or {@code water[level=0]} if waterlogged).
+     * If all candidate states are air, {@link #certainlyStartsOnly} already handles it and this returns -1.
+     */
+    public static int instantBrokenTo(BlockStates table, int[] states, Set<Stack> stacks, ItemPrototypes prototypes) {
+        if (states == null || stacks == null || stacks.isEmpty()) {
+            return -1;
+        }
+        for (Stack stack : stacks) {
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (REFUSING_ITEMS.contains(stack.item()) || stack.added().contains(TOOL)) {
+                return -1;
+            }
+            if (!stack.removed().contains(TOOL)) {
+                ItemPrototypes.Prototype prototype = prototypes.get(stack.item());
+                if (prototype == null) {
+                    return -1;
+                }
+                ItemPrototypes.Tool tool = prototype.tool();
+                if (tool != null) {
+                    if (!(tool.defaultMiningSpeed() > 0.0F)) {
+                        return -1;
+                    }
+                    for (ItemPrototypes.Rule rule : tool.rules()) {
+                        if (rule.speed() != null && !(rule.speed() > 0.0F)) {
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
+        int air = table.firstStateOf("minecraft:air");
+        int out = -1;
+        boolean sawNonAir = false;
+        for (int state : states) {
+            if (!table.isValid(state)) {
+                return -1;
+            }
+            int left;
+            if (table.isAir(state)) {
+                left = air;
+            } else {
+                if (table.has(state, BlockStates.DIG_HOOKED) || table.destroySpeed(state) != 0.0F) {
+                    return -1;
+                }
+                sawNonAir = true;
+                String fluid = table.fluid(state);
+                if (fluid == null || fluid.isEmpty()) {
+                    left = air;
+                } else if (fluid.startsWith("minecraft:water/")) {
+                    left = table.firstStateOf("minecraft:water");
+                    if (!table.properties(left).equals("level=0")) {
+                        return -1;
+                    }
+                } else {
+                    return -1;
+                }
+            }
+            if (out != -1 && out != left) {
+                return -1;
+            }
+            out = left;
+        }
+        return sawNonAir ? out : -1;
+    }
+
     /** The client's block tags for one block ({@link ClientTags#holds}). */
     public interface TagLookupByBlock {
         TagLookup forBlock(int blockId);

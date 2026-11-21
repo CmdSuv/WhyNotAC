@@ -779,6 +779,18 @@ public final class ClientSelf {
                 submergedMiningSpeed.hull(certain, end)[1]);
     }
 
+    /**
+     * Whether {@code Player.getDestroySpeed} is strictly positive across every attribute prefix the client may hold now,
+     * guaranteeing that a zero-hardness ({@code destroySpeed == 0.0F}) block breaks immediately on
+     * {@code START_DESTROY_BLOCK} ({@code positive / 0.0F == +Infinity >= 1.0F}) even off-ground, underwater, and under
+     * Mining Fatigue.
+     */
+    public boolean canInstantBreakZeroHardness() {
+        long certain = certain();
+        long end = windowEnd();
+        return blockBreakSpeed.hull(certain, end)[0] >= 1.0E-6 && submergedMiningSpeed.hull(certain, end)[0] >= 1.0E-6;
+    }
+
     /** {@code [low, high]} of the scales the player's cached dimensions may have now. */
     public double[] scaleBounds() {
         return scale.hull(certain(), windowEnd());

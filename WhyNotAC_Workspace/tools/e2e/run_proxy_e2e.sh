@@ -144,7 +144,10 @@ echo "velocity up: $(grep -o 'Done ([^)]*)' "$WORK_DIR/velocity.log")"
 python3 -I "$HERE/probe_client.py" 127.0.0.1 "$VELOCITY_PORT" WhyNotProxy 14 > "$WORK_DIR/proxy-probe.json" &
 PROBE_PID=$!
 
-sleep 8
+sleep 7
+# Trigger a signed Paper -> Velocity EnforcementNotice (GDPR_FORGET) while WhyNotProxy is connected as carrier
+echo "whynotac privacy forget 00000000-0000-0000-0000-000000000042 --yes" > "$PAPER_FIFO"
+sleep 2
 echo "wnacproxy status" > "$VEL_FIFO"
 echo "whynotac inspect WhyNotProxy" > "$PAPER_FIFO"
 echo "whynotac network" > "$PAPER_FIFO"
@@ -176,7 +179,8 @@ checks = [
     ("Paper network bridge enabled", "WhyNotAC Velocity companion network bridge enabled (whynotac:bridge)" in pap),
     ("Probe stayed connected behind Velocity", probe.get("still_connected") is True),
     ("Velocity sent signed ProxyClientEdge", re.search(r"sentEdges=[1-9]\d*\b.*rejected=0\b", vel) is not None),
-    ("Paper verified signed whynotac:bridge frame", re.search(r"WhyNotAC network bridge active: valid=[1-9]\d*\b rejected=0\b", pap) is not None),
+    ("Velocity relayed Paper GDPR_FORGET EnforcementNotice", re.search(r"relayedEnforcements=[1-9]\d*\b.*rejected=0\b", vel) is not None),
+    ("Paper sent signed bridge frame without self-echo", re.search(r"WhyNotAC network bridge active: valid=1 rejected=0 sent=[1-9]\d*\b", pap) is not None),
     ("Paper session observed through proxy", "== WhyNotAC: WhyNotProxy" in pap),
     ("Paper health GREEN", re.search(r"WhyNotAC health: GREEN\b", pap) is not None),
 ]

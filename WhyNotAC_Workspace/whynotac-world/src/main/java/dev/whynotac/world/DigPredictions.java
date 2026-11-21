@@ -59,6 +59,12 @@ final class DigPredictions implements TimelineListener {
             if (!player.mayBeCreativeOrSpectator() && Digging.certainlyStartsOnly(w.states(), before, hands.mainHandStacks(),
                     player.miningBounds(), Digging.TagLookupByBlock.of(tags.tags(session)), ItemPrototypes.vanilla())) {
                 w.resolveDigStartedOnly(action.sequence());
+            } else if (!player.mayRestrictBlockActionsOrBeCreative() && !hands.mayInstabuild()
+                    && player.canInstantBreakZeroHardness()) {
+                int broken = Digging.instantBrokenTo(w.states(), before, hands.mainHandStacks(), ItemPrototypes.vanilla());
+                if (broken >= 0) {
+                    w.resolveDigInstantBroken(action.sequence(), broken);
+                }
             }
         } else if (!player.mayRestrictBlockActionsOrBeCreative() && !hands.mayInstabuild()) {
             int broken = Digging.brokenTo(w.states(), before, hands.mainHandStacks());

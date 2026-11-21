@@ -263,7 +263,20 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 byte[] secret = NetworkSecret.loadOrCreate(getDataPath().resolve(secretName));
                 networkBridge = new PaperNetworkBridge(
                         secret, maxSkewMs, registry::byPlayer, aiAdvisor.baselineModel(), verdict.banWaveQueue(),
-                        frame -> getServer().sendPluginMessage(this, NetworkEnvelope.CHANNEL, frame),
+                        frame -> {
+                            if (!isEnabled()) {
+                                return;
+                            }
+                            if (Bukkit.isPrimaryThread()) {
+                                getServer().sendPluginMessage(this, NetworkEnvelope.CHANNEL, frame);
+                            } else {
+                                Bukkit.getScheduler().runTask(this, () -> {
+                                    if (isEnabled()) {
+                                        getServer().sendPluginMessage(this, NetworkEnvelope.CHANNEL, frame);
+                                    }
+                                });
+                            }
+                        },
                         System::currentTimeMillis, getLogger());
                 PaperNetworkBridge.registerBukkitChannels(this, networkBridge);
                 getLogger().info("WhyNotAC Velocity companion network bridge enabled (" + NetworkEnvelope.CHANNEL + ")");

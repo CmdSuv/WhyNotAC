@@ -12,6 +12,7 @@ Deterministic `.wnrec` recordings exercising WhyNotAC's core deterministic (`P-A
 - `cheat-ping-spoof.wnrec` — Sustained `Ping` vs `KeepAlive` RTT divergence (`ping-spoof`)
 - `cheat-shield-autoblock.wnrec` — Cross-tick offhand `minecraft:shield` keep-using `AutoBlock` attack (`use-item-state` v2)
 - `cheat-partial-velocity-explosion.wnrec` — 30% partial vertical Velocity spoofing `onGround=false` and suppressed `Explosion` knockback (`velocity-response` v2)
+- `cheat-pitch-hotbar-spam.wnrec` — Out-of-bounds `pitch = 105°` Derp/Pitch-Flip and duplicate consecutive `SetCarriedItem` NoSlow slot-spam (`packet-bounds` v4)
 
 Regenerate cleanly anytime from `WhyNotAC_Workspace/`:
 

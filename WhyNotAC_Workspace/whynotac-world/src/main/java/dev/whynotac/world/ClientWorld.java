@@ -693,6 +693,21 @@ public final class ClientWorld {
         cells.put(blockKey(p.x(), p.y(), p.z()), state);
     }
 
+    /**
+     * Resolves the dug position of a survival {@code START_DESTROY_BLOCK} {@code sequence} whose zero-hardness block
+     * broke immediately on start ({@link Digging#instantBrokenTo}): its {@code destroyBlock} set {@code state} there,
+     * while {@link #digNeighbours} already bounded the six neighbours.
+     */
+    public void resolveDigInstantBroken(int sequence, int state) {
+        Dig dig = digs.get(sequence);
+        Map<Long, Integer> cells = resolvedUses.get(sequence);
+        if (dig == null || !dig.start || dig.before == null || cells == null || !states.isValid(state)) {
+            return;
+        }
+        BlockPosition p = dig.position;
+        cells.put(blockKey(p.x(), p.y(), p.z()), state);
+    }
+
     /** The sequences above {@code acked}, in their order (some are: the position still has a prediction). */
     private static int[] after(int[] sequences, int acked) {
         return Arrays.stream(sequences).filter(q -> q > acked).toArray();
@@ -1157,8 +1172,11 @@ public final class ClientWorld {
                     return new Placement(new BlockPosition(tx, ty, tz), chosen);
                 }
             }
-            // Variant E: Dry isolated FenceBlock (_fence) or WallBlock (_wall) in pure AIR with pure AIR horizontal surroundings
-            if ((placedBlockKey.endsWith("_fence") || placedBlockKey.endsWith("_wall")) && pureAir(target)) {
+            // Variant E: Dry isolated FenceBlock (_fence), WallBlock (_wall), IronBarsBlock / StainedGlassPaneBlock in pure AIR
+            if ((placedBlockKey.endsWith("_fence") || placedBlockKey.endsWith("_wall")
+                    || "minecraft:iron_bars".equals(placedBlockKey)
+                    || "minecraft:glass_pane".equals(placedBlockKey)
+                    || placedBlockKey.endsWith("_stained_glass_pane")) && pureAir(target)) {
                 boolean isWall = placedBlockKey.endsWith("_wall");
                 boolean ok = true;
                 for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
@@ -1190,6 +1208,43 @@ public final class ClientWorld {
                             ? "east=none,north=none,south=none,up=true,waterlogged=false,west=none"
                             : "east=false,north=false,south=false,waterlogged=false,west=false";
                     int chosen = states.stateOf(placedBlockKey, props);
+                    if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                        return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                    }
+                }
+            }
+            // Variant F: Dry ChainBlock (*_chain: axis=x|y|z,waterlogged=false) into pure AIR with non-reactive neighbours
+            if (placedBlockKey.endsWith("_chain") && pureAir(target) && neighboursNonReactive(before)) {
+                String axisProp = switch (face) {
+                    case UP, DOWN -> "axis=y,waterlogged=false";
+                    case NORTH, SOUTH -> "axis=z,waterlogged=false";
+                    case EAST, WEST -> "axis=x,waterlogged=false";
+                    default -> null;
+                };
+                int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
+                if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                }
+            }
+            // Variant G: EndRodBlock (minecraft:end_rod) into pure AIR against a non-end_rod clicked block
+            if ("minecraft:end_rod".equals(placedBlockKey) && pureAir(target) && neighboursNonReactive(before)) {
+                boolean clickedIsEndRod = false;
+                for (int s : clicked) {
+                    if ("minecraft:end_rod".equals(states.block(s))) {
+                        clickedIsEndRod = true;
+                        break;
+                    }
+                }
+                if (!clickedIsEndRod) {
+                    String dirProp = switch (face) {
+                        case DOWN -> "facing=down";
+                        case UP -> "facing=up";
+                        case NORTH -> "facing=north";
+                        case SOUTH -> "facing=south";
+                        case WEST -> "facing=west";
+                        case EAST -> "facing=east";
+                    };
+                    int chosen = states.stateOf(placedBlockKey, dirProp);
                     if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
                         return new Placement(new BlockPosition(tx, ty, tz), chosen);
                     }

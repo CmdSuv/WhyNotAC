@@ -1030,4 +1030,64 @@ class ClientWorldTest {
         useOn(13, 10, 10, BlockFace.UP, 25);
         assertNull(world.placementForItem(25, "minecraft:cobblestone_wall"));
     }
+
+    @Test
+    void resolvesIsolatedPanesBarsDryChainsAndEndRod() {
+        stoneInTheAir();
+        // 1. Isolated iron_bars and white_stained_glass_pane in open air
+        useOn(5, 10, 5, BlockFace.UP, 30);
+        ClientWorld.Placement bars = world.placementForItem(30, "minecraft:iron_bars");
+        assertNotNull(bars);
+        assertEquals(new BlockPosition(5, 11, 5), bars.position());
+        assertEquals(STATES.stateOf("minecraft:iron_bars", "east=false,north=false,south=false,waterlogged=false,west=false"), bars.state());
+        out(new ClientboundPacket.BlockChangedAck(30));
+
+        put(8, 10, 5, STONE);
+        sync();
+        useOn(8, 10, 5, BlockFace.UP, 31);
+        ClientWorld.Placement pane = world.placementForItem(31, "minecraft:white_stained_glass_pane");
+        assertNotNull(pane);
+        assertEquals(STATES.stateOf("minecraft:white_stained_glass_pane", "east=false,north=false,south=false,waterlogged=false,west=false"),
+                pane.state());
+        // Adjacent block disqualifies isolated pane
+        put(7, 11, 5, STONE);
+        out(new ClientboundPacket.BlockChangedAck(31));
+        sync();
+        useOn(8, 10, 5, BlockFace.UP, 32);
+        assertNull(world.placementForItem(32, "minecraft:white_stained_glass_pane"));
+
+        // 2. Dry iron_chain and copper_chain resolve axis from clicked face
+        put(11, 10, 5, STONE);
+        out(new ClientboundPacket.BlockChangedAck(32));
+        sync();
+        useOn(11, 10, 5, BlockFace.EAST, 33);
+        ClientWorld.Placement chainX = world.placementForItem(33, "minecraft:iron_chain");
+        assertNotNull(chainX);
+        assertEquals(new BlockPosition(12, 10, 5), chainX.position());
+        assertEquals(STATES.stateOf("minecraft:iron_chain", "axis=x,waterlogged=false"), chainX.state());
+
+        out(new ClientboundPacket.BlockChangedAck(33));
+        sync();
+        useOn(11, 10, 5, BlockFace.UP, 34);
+        ClientWorld.Placement copperChainY = world.placementForItem(34, "minecraft:copper_chain");
+        assertNotNull(copperChainY);
+        assertEquals(STATES.stateOf("minecraft:copper_chain", "axis=y,waterlogged=false"), copperChainY.state());
+
+        // 3. end_rod against non-end_rod clicked block resolves facing=clickedFace; against end_rod returns null
+        out(new ClientboundPacket.BlockChangedAck(34));
+        sync();
+        useOn(11, 10, 5, BlockFace.NORTH, 35);
+        ClientWorld.Placement rod = world.placementForItem(35, "minecraft:end_rod");
+        assertNotNull(rod);
+        assertEquals(new BlockPosition(11, 10, 4), rod.position());
+        assertEquals(STATES.stateOf("minecraft:end_rod", "facing=north"), rod.state());
+        world.resolveUse(35, rod.position(), rod.state());
+        assertArrayEquals(new int[] {rod.state()}, world.possibleStates(11, 10, 4));
+
+        put(11, 10, 4, rod.state());
+        out(new ClientboundPacket.BlockChangedAck(35));
+        sync();
+        useOn(11, 10, 4, BlockFace.NORTH, 36);
+        assertNull(world.placementForItem(36, "minecraft:end_rod"), "clicking an existing end_rod may flip facing");
+    }
 }

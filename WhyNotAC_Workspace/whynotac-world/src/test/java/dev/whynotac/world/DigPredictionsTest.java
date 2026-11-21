@@ -127,9 +127,28 @@ class DigPredictionsTest {
     }
 
     @Test
-    void aStartOfABlockThatBreaksAtOnceIsTheClientsPrediction() {
+    void aStartOfZeroHardnessBlockInSurvivalResolvesToAirAndGuardsHooksAndZeroBreakSpeed() {
         open(0);
-        put("minecraft:short_grass"); // hardness 0
+        put("minecraft:short_grass"); // hardness 0, non-hooked
+        start();
+        assertArrayEquals(new int[] {AIR}, world().possibleStates(2, 65, 0));
+        out(new ClientboundPacket.BlockChangedAck(actionSequence));
+
+        put("minecraft:slime_block"); // hardness 0, solid non-hooked
+        start();
+        assertArrayEquals(new int[] {AIR}, world().possibleStates(2, 65, 0));
+        assertArrayEquals(new int[] {STATES.firstStateOf("minecraft:stone")}, world().possibleStates(2, 65, 1));
+        out(new ClientboundPacket.BlockChangedAck(actionSequence));
+
+        put("minecraft:tnt"); // hardness 0, but DIG_HOOKED -> stays unresolved
+        start();
+        assertNull(world().possibleStates(2, 65, 0));
+        out(new ClientboundPacket.BlockChangedAck(actionSequence));
+
+        // Zero block_break_speed attribute makes 0/0 = NaN -> stays unresolved
+        out(new ClientboundPacket.UpdateAttributes(SELF, List.of(
+                new ClientboundPacket.UpdateAttributes.Attribute(ClientSelf.BLOCK_BREAK_SPEED, 0.0, List.of()))));
+        put("minecraft:slime_block");
         start();
         assertNull(world().possibleStates(2, 65, 0));
     }

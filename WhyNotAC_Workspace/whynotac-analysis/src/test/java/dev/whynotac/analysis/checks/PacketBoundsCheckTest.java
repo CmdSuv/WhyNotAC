@@ -150,6 +150,56 @@ final class PacketBoundsCheckTest {
     }
 
     @Test
+    void detectsInvalidPitchDuplicateHotbarSlotAndInvalidContainerButtonsWithServerPitchExemption() {
+        // 1. Pitch flip > 90 deg -> invalid-pitch
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(0.5, 64.0, 0.5, 0.0F, 95.5F, true, true, true, false)));
+        assertEquals(1, evidence.size());
+        assertEquals("invalid-pitch", evidence.get(0).details().get("reason"));
+
+        // 2. Duplicate consecutive SetCarriedItem -> duplicate-hotbar-slot
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.SetCarriedItem(3)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.SetCarriedItem(3)));
+        assertEquals(2, evidence.size());
+        assertEquals("duplicate-hotbar-slot", evidence.get(1).details().get("reason"));
+
+        // Respawn resets hotbar history so selecting slot 3 again once is permitted
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Respawn(new ClientboundPacket.Dimension("minecraft:overworld", -64, 384), 0, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.SetCarriedItem(3)));
+        assertEquals(2, evidence.size());
+
+        // 3. Invalid THROW / PICKUP_ALL / QUICK_CRAFT buttons
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, 10, 5, "THROW", List.of(), Stack.EMPTY)));
+        assertEquals(3, evidence.size());
+        assertEquals("invalid-container-button", evidence.get(2).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, 10, 1, "PICKUP_ALL", List.of(), Stack.EMPTY)));
+        assertEquals(4, evidence.size());
+        assertEquals("invalid-container-button", evidence.get(3).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(0, 1, 10, 3, "QUICK_CRAFT", List.of(), Stack.EMPTY)));
+        assertEquals(5, evidence.size());
+        assertEquals("invalid-container-button", evidence.get(4).details().get("reason"));
+
+        // 4. Server sending out-of-range pitch exempts subsequent client pitch echo
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.PlayerRotation(0.0F, false, 120.0F, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 0.0F, 120.0F, false, true, true, false)));
+        assertEquals(5, evidence.size());
+    }
+
+    @Test
     void translatorSafeRulesAcceptViaVersionWhileStrictRulesReject() {
         List<Evidence> tvEvidence = new ArrayList<>();
         List<Admissibility> tvRejected = new ArrayList<>();

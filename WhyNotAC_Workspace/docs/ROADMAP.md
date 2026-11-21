@@ -204,11 +204,11 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
   kimliklerle sunucular arası profil/karar eşitlemesi) çalışır; gerçek çok-süreçli Velocity 3.4.0 + Paper 1.21.11 E2E testleri
   `tools/e2e/run_proxy_e2e.sh` ve CI `e2e-proxy` işiyle doğrulanır.
 
-## Faz 7 – Faz 14 — İleri Mühendislik ve Tam Kapsam Yol Haritası (Güncel)
+## Faz 7 – Faz 15 — İleri Mühendislik ve Tam Kapsam Yol Haritası (Güncel)
 
-Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) daraltılması (tek-durumlu bloklar, sütun/kütük, yarım blok `_slab` ve `type=double` birleştirme, düz merdiven `_stairs`, 4-yönlü tam küpler, izole kuru `_fence`/`_wall`, kalkan/dürbün `UseItem` temizlemesi ve deterministik `water_bucket`/`lava_bucket`/`bucket` ışın çözümü dâhil), yeni nesil deterministik kontroller (`VelocityCheck` v2 kısmi dikey + `Explosion` + tam ayak-izi, `InventoryActionCheck`, `UseSlowdownCheck` v2, `TimerBalanceCheck`, `PingSpoofCheck`, `InteractAtBoxCheck`), 2. nesil çok-değişkenli `whynotac-ai`, `WhyNotAC.jar benchmark` CLI + **25** senaryo + **8** kalıcı `.wnrec` hile korpusu (`DATA-02`), 12-kontrol canlı `ARMED` hile E2E (`tools/e2e/run_cheat_e2e.sh`), canlı `alerts-stream.jsonl` / `/whynotac reload` ve çoklu-sürüm (`PROD-14`) mimarisini kapsayan ayrıntılı master plan için bkz.:
+Faz 1 – Faz 6 çekirdeğinin üzerine inşa edilen; `MovementTracker` kapsam çekilmelerinin (`NO_CLAIM` / `Lose`) daraltılması (tek-durumlu bloklar, sütun/kütük, yarım blok `_slab` ve `type=double` birleştirme, düz merdiven `_stairs`, 4-yönlü tam küpler, izole kuru `_fence`/`_wall`/`iron_bars`/`*_glass_pane`, kuru `*_chain`, `end_rod`, hayatta kalma sıfır-sertlikli `START_DESTROY_BLOCK` anında-kırma, kalkan/dürbün `UseItem` temizlemesi ve deterministik `water_bucket`/`lava_bucket`/`bucket` ışın çözümü dâhil), yeni nesil deterministik kontroller (`VelocityCheck` v2 kısmi dikey + `Explosion`, `PacketBoundsCheck` v4 `invalid-pitch` + `duplicate-hotbar-slot` + konteyner tuşları, `InventoryActionCheck`, `UseSlowdownCheck` v2, `TimerBalanceCheck`, `PingSpoofCheck`, `InteractAtBoxCheck`), 2. nesil çok-değişkenli `whynotac-ai`, `WhyNotAC.jar benchmark` CLI + **28** senaryo + **9** kalıcı `.wnrec` hile korpusu (`DATA-02`), 12-kontrol canlı `ARMED` hile E2E (`tools/e2e/run_cheat_e2e.sh`), çift-yönlü yankısız Velocity proxy köprüsü (`tools/e2e/run_proxy_e2e.sh`), canlı `alerts-stream.jsonl` / `/whynotac reload` ve çoklu-sürüm (`PROD-14`) mimarisini kapsayan ayrıntılı master plan için bkz.:
 
-- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 14 Ayrıntılı Teknik Yol Haritası**
+- **[ROADMAP-PHASE-7-12.md](ROADMAP-PHASE-7-12.md) — Faz 7 – Faz 15 Ayrıntılı Teknik Yol Haritası**
 
 ## Sahibin kararını bekleyenler
 

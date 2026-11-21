@@ -252,6 +252,7 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("honest-sprint-jump-motion", null, false, h -> scenarioHonestSprint(h)));
         scenarioResults.add(measure("honest-water-bucket-place", null, false, h -> scenarioHonestWaterBucket(h)));
         scenarioResults.add(measure("honest-double-slab-merge", null, false, h -> scenarioHonestDoubleSlabMerge(h)));
+        scenarioResults.add(measure("honest-instant-break-slime", null, false, h -> scenarioHonestInstantBreakSlime(h)));
         // Deterministic P-A physics/combat checks
         scenarioResults.add(measure("reach-4.2b-violation", "attack-reach", true, h -> scenarioReach(h)));
         scenarioResults.add(measure("aim-off-target-violation", "attack-aim", true, h -> scenarioAimOffTarget(h)));
@@ -264,6 +265,8 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("horizontal-anti-kb-0pct", "velocity-response", true, h -> scenarioHorizontalAntiKb(h)));
         // Deterministic P-M grammar/protocol checks
         scenarioResults.add(measure("packet-bounds-hotbar-cursor", "packet-bounds", true, h -> scenarioPacketBounds(h)));
+        scenarioResults.add(measure("packet-bounds-pitch-flip", "packet-bounds", true, h -> scenarioPacketBoundsPitchFlip(h)));
+        scenarioResults.add(measure("packet-bounds-duplicate-hotbar", "packet-bounds", true, h -> scenarioPacketBoundsDuplicateHotbar(h)));
         scenarioResults.add(measure("inventory-walk-autototem", "inventory-protocol", true, h -> scenarioInventoryProtocol(h)));
         scenarioResults.add(measure("unopened-container-click", "inventory-protocol", true, h -> scenarioUnopenedContainerClick(h)));
         scenarioResults.add(measure("interact-at-box-spoof", "interact-at-box", true, h -> scenarioInteractAtBox(h)));
@@ -336,6 +339,11 @@ public final class BenchmarkRunner {
                 new CorpusEntry("cheat-partial-velocity-explosion.wnrec", h -> {
                     scenarioPartialVerticalAntiKb(h);
                     scenarioExplosionAntiKb(h);
+                }),
+                new CorpusEntry("cheat-pitch-hotbar-spam.wnrec", h -> {
+                    scenarioPacketBoundsPitchFlip(h);
+                    h.now += 2_000_000_000L;
+                    scenarioPacketBoundsDuplicateHotbar(h);
                 }));
         for (CorpusEntry entry : entries) {
             Path file = outputDir.resolve(entry.fileName());
@@ -520,6 +528,42 @@ public final class BenchmarkRunner {
         }
     }
 
+    private static void scenarioHonestInstantBreakSlime(Harness h) {
+        BlockStates states = BlockStates.vanilla();
+        int slime = states.onlyStateOf("minecraft:slime_block");
+        int air = states.onlyStateOf("minecraft:air");
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        int tx = (int) Math.floor(h.player.x());
+        int tz = (int) Math.floor(h.player.z() + 0.4) + 1;
+        h.out(new ClientboundPacket.BlockUpdate(new BlockPosition(tx, 64, tz), slime));
+        h.syncPing();
+        double eyeX = h.player.x();
+        double eyeY = h.player.y() + 1.62;
+        double eyeZ = h.player.z();
+        double dx = (tx + 0.5) - eyeX;
+        double dy = 64.5 - eyeY;
+        double dz = tz - eyeZ;
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(Math.atan2(-dy, Math.hypot(dx, dz)));
+        h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        // Instant-break slime_block with START_DESTROY_BLOCK and walk straight into (tx, 64, tz) before BlockChangedAck
+        h.in(new ServerboundPacket.PlayerAction(
+                ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK, new BlockPosition(tx, 64, tz), BlockFace.NORTH, 1));
+        h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        PlayerState.Keys forward = new PlayerState.Keys(true, false, false, false, false, false, false);
+        for (int t = 0; t < 8; t++) {
+            h.stepVanilla(forward, yaw, pitch);
+        }
+        h.out(new ClientboundPacket.BlockUpdate(new BlockPosition(tx, 64, tz), air));
+        h.out(new ClientboundPacket.BlockChangedAck(1));
+        h.syncPing();
+        for (int t = 0; t < 3; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        }
+    }
+
     private static void scenarioReach(Harness h) {
         h.markCheatStart();
         h.spawnZombie(2, 2.5, 64.0, 7.2); // 4.7 blocks away (> 3.0 survival reach)
@@ -607,6 +651,20 @@ public final class BenchmarkRunner {
     private static void scenarioPacketBounds(Harness h) {
         h.markCheatStart();
         h.in(new ServerboundPacket.SetCarriedItem(9));
+        h.tick();
+    }
+
+    private static void scenarioPacketBoundsPitchFlip(Harness h) {
+        h.markCheatStart();
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y(), h.player.z(), 0.0f, 105.0f, true, true, true, false));
+        h.tick();
+    }
+
+    private static void scenarioPacketBoundsDuplicateHotbar(Harness h) {
+        h.in(new ServerboundPacket.SetCarriedItem(2));
+        h.tick();
+        h.markCheatStart();
+        h.in(new ServerboundPacket.SetCarriedItem(2));
         h.tick();
     }
 

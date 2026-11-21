@@ -1414,6 +1414,53 @@ class MovementCheckTest {
     }
 
     @Test
+    void instantBreakingSlimeAndPlacingChainAndEndRodRemainExplained() throws Exception {
+        int slime = STATES.onlyStateOf("minecraft:slime_block");
+        int air = STATES.onlyStateOf("minecraft:air");
+        int chainY = STATES.stateOf("minecraft:iron_chain", "axis=y,waterlogged=false");
+        int endRodUp = STATES.stateOf("minecraft:end_rod", "facing=up");
+        // Place slime_block directly ahead at (0, 64, 1); player starts at (0.5, 64, 0.5) facing +Z (yaw 0)
+        place(0, 64, 1, slime);
+        ticks(3, NONE, 0.0F, 0.0F);
+        int before = ticks.size();
+        // Instant-break slime_block with START_DESTROY_BLOCK and walk straight into (0, 64, 1) BEFORE BlockChangedAck
+        keybinds.add(new ServerboundPacket.PlayerAction(ServerboundPacket.PlayerAction.Action.START_DESTROY_BLOCK,
+                new BlockPosition(0, 64, 1), BlockFace.NORTH, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(0, 64, 1), air);
+        int breakSeq = blockSequence;
+        ticks(4, FORWARD, 0.0F, 0.0F);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(0, 64, 1), air));
+        out(new ClientboundPacket.BlockChangedAck(breakSeq));
+        sync();
+        // Place dry iron_chain and end_rod nearby and stay EXPLAINED
+        holdItem("minecraft:iron_chain", 64);
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(3, 63, 1),
+                BlockFace.UP, new Vec3d(3.5, 64.0, 1.5), false, false, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(3, 64, 1), chainY);
+        int chainSeq = blockSequence;
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(3, 64, 1), chainY));
+        out(new ClientboundPacket.BlockChangedAck(chainSeq));
+        sync();
+        holdItem("minecraft:end_rod", 64);
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(3, 63, 3),
+                BlockFace.UP, new Vec3d(3.5, 64.0, 3.5), false, false, ++blockSequence));
+        keybinds.add(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        placed.put(List.of(3, 64, 3), endRodUp);
+        int rodSeq = blockSequence;
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(3, 64, 3), endRodUp));
+        out(new ClientboundPacket.BlockChangedAck(rodSeq));
+        sync();
+        ticks(3, NONE, 0.0F, 0.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(before, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
     void waterBucketPlacementAndPickupRemainExplained() throws Exception {
         int water = STATES.stateOf("minecraft:water", "level=0");
         // Player stands at (0.5, 64.0, 0.5) on stone below y=64; hold water_bucket in main hand and place at (0, 64, 0)
