@@ -8,4 +8,7 @@ description = "Differential test suite: WhyNotAC numerics vs. the real Minecraft
 dependencies {
     paperweight.paperDevBundle(libs.versions.paper.dev.bundle.get())
     testImplementation(project(":whynotac-math"))
+    testImplementation(project(":whynotac-protocol"))
+    testImplementation(project(":whynotac-world"))
+    testImplementation(project(":whynotac-physics"))
 }

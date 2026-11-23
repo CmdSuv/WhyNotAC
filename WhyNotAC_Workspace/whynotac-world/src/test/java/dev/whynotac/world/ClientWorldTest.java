@@ -907,11 +907,14 @@ class ClientWorldTest {
         assertEquals(STATES.stateOf("minecraft:oak_stairs", "facing=north,half=bottom,shape=straight,waterlogged=false"), stair.state());
         world.resolveUse(10, stair.position(), stair.state());
 
-        // Clicking UP on (6, 10, 5) places horizontally adjacent to the existing oak_stairs at (5, 11, 5): shape=straight is no longer guaranteed
+        // Clicking UP on (6, 10, 5) places horizontally adjacent to the existing oak_stairs at (5, 11, 5): resolves exact inner_left corner!
         put(6, 10, 5, STONE);
         sync();
         useOn(6, 10, 5, BlockFace.UP, 11);
-        assertNull(world.placementForItem(11, "minecraft:oak_stairs", "east"));
+        ClientWorld.PlacementPlan corner = world.placementPlanForItem(11, "minecraft:oak_stairs", "east");
+        assertNotNull(corner);
+        assertEquals(STATES.stateOf("minecraft:oak_stairs", "facing=east,half=bottom,shape=inner_left,waterlogged=false"),
+                corner.primary().state());
     }
 
     @Test
@@ -1023,12 +1026,15 @@ class ClientWorldTest {
         assertNotNull(wall);
         assertEquals(STATES.stateOf("minecraft:cobblestone_wall", "east=none,north=none,south=none,up=true,waterlogged=false,west=none"), wall.state());
 
-        // Adjacent solid block at (12, 11, 10) disqualifies isolated wall
+        // Adjacent solid block at (12, 11, 10) connects wall on the west side (west=low, up=true)
         put(12, 11, 10, STONE);
         out(new ClientboundPacket.BlockChangedAck(24));
         sync();
         useOn(13, 10, 10, BlockFace.UP, 25);
-        assertNull(world.placementForItem(25, "minecraft:cobblestone_wall"));
+        ClientWorld.Placement connectedWall = world.placementForItem(25, "minecraft:cobblestone_wall");
+        assertNotNull(connectedWall);
+        assertEquals(STATES.stateOf("minecraft:cobblestone_wall", "east=none,north=none,south=none,up=true,waterlogged=false,west=low"),
+                connectedWall.state());
     }
 
     @Test
@@ -1049,12 +1055,15 @@ class ClientWorldTest {
         assertNotNull(pane);
         assertEquals(STATES.stateOf("minecraft:white_stained_glass_pane", "east=false,north=false,south=false,waterlogged=false,west=false"),
                 pane.state());
-        // Adjacent block disqualifies isolated pane
+        // Adjacent solid block at (7, 11, 5) connects pane on the west side (west=true)
         put(7, 11, 5, STONE);
         out(new ClientboundPacket.BlockChangedAck(31));
         sync();
         useOn(8, 10, 5, BlockFace.UP, 32);
-        assertNull(world.placementForItem(32, "minecraft:white_stained_glass_pane"));
+        ClientWorld.Placement connectedPane = world.placementForItem(32, "minecraft:white_stained_glass_pane");
+        assertNotNull(connectedPane);
+        assertEquals(STATES.stateOf("minecraft:white_stained_glass_pane", "east=false,north=false,south=false,waterlogged=false,west=true"),
+                connectedPane.state());
 
         // 2. Dry iron_chain and copper_chain resolve axis from clicked face
         put(11, 10, 5, STONE);
@@ -1118,5 +1127,113 @@ class ClientWorldTest {
         assertEquals(STATES.stateOf("minecraft:oak_trapdoor", "facing=east,half=top,open=false,powered=false,waterlogged=false"),
                 dryTrapdoor.state());
         assertNull(world.placementForItem(38, "minecraft:iron_trapdoor"));
+    }
+
+    @Test
+    void resolvesMultiCellConnectedPlacementsTwoBlockDoorsAndInteractiveToggles() {
+        stoneInTheAir();
+        // 1. Connected oak_fence next to existing oak_fence updates both cells atomically via resolveUseMulti
+        int isolatedFence = STATES.stateOf("minecraft:oak_fence", "east=false,north=false,south=false,waterlogged=false,west=false");
+        put(5, 11, 5, isolatedFence);
+        put(6, 10, 5, STONE);
+        sync();
+        useOn(6, 10, 5, BlockFace.UP, 40);
+        ClientWorld.PlacementPlan fencePlan = world.placementPlanForItem(40, "minecraft:oak_fence", "north");
+        assertNotNull(fencePlan);
+        assertEquals(STATES.stateOf("minecraft:oak_fence", "east=false,north=false,south=false,waterlogged=false,west=true"),
+                fencePlan.primary().state());
+        assertEquals(1, fencePlan.extras().size());
+        assertEquals(new BlockPosition(5, 11, 5), fencePlan.extras().get(0).position());
+        assertEquals(STATES.stateOf("minecraft:oak_fence", "east=true,north=false,south=false,waterlogged=false,west=false"),
+                fencePlan.extras().get(0).state());
+        world.resolveUseMulti(40, fencePlan);
+        assertArrayEquals(new int[] {fencePlan.primary().state()}, world.possibleStates(6, 11, 5));
+        assertArrayEquals(new int[] {fencePlan.extras().get(0).state()}, world.possibleStates(5, 11, 5));
+
+        // 2. Two-block oak_door places both lower and upper halves, then toggles both halves on non-sneaking click
+        put(10, 10, 5, STONE);
+        out(new ClientboundPacket.BlockChangedAck(40));
+        sync();
+        in(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(10, 10, 5), BlockFace.UP,
+                new Vec3d(10.2, 11.0, 5.5), false, false, 41));
+        ClientWorld.PlacementPlan doorPlan = world.placementPlanForItem(41, "minecraft:oak_door", "north");
+        assertNotNull(doorPlan);
+        assertEquals(new BlockPosition(10, 11, 5), doorPlan.primary().position());
+        assertEquals(STATES.stateOf("minecraft:oak_door", "facing=north,half=lower,hinge=left,open=false,powered=false"),
+                doorPlan.primary().state());
+        assertEquals(1, doorPlan.extras().size());
+        assertEquals(new BlockPosition(10, 12, 5), doorPlan.extras().get(0).position());
+        assertEquals(STATES.stateOf("minecraft:oak_door", "facing=north,half=upper,hinge=left,open=false,powered=false"),
+                doorPlan.extras().get(0).state());
+        world.resolveUseMulti(41, doorPlan);
+        assertArrayEquals(new int[] {doorPlan.primary().state()}, world.possibleStates(10, 11, 5));
+        assertArrayEquals(new int[] {doorPlan.extras().get(0).state()}, world.possibleStates(10, 12, 5));
+
+        // Sync door into world and toggle it from the EAST face (where upper half is outside target's immediate neighbours!)
+        put(10, 11, 5, doorPlan.primary().state());
+        put(10, 12, 5, doorPlan.extras().get(0).state());
+        out(new ClientboundPacket.BlockChangedAck(41));
+        sync();
+        useOn(10, 11, 5, BlockFace.EAST, 42);
+        ClientWorld.PlacementPlan doorToggle = world.blockToggleForUse(42, "west", "");
+        assertNotNull(doorToggle);
+        assertEquals(STATES.stateOf("minecraft:oak_door", "facing=north,half=lower,hinge=left,open=true,powered=false"),
+                doorToggle.primary().state());
+        assertEquals(1, doorToggle.extras().size());
+        assertEquals(STATES.stateOf("minecraft:oak_door", "facing=north,half=upper,hinge=left,open=true,powered=false"),
+                doorToggle.extras().get(0).state());
+        world.resolveUseMulti(42, doorToggle);
+        assertArrayEquals(new int[] {doorToggle.primary().state()}, world.possibleStates(10, 11, 5));
+        assertArrayEquals(new int[] {doorToggle.extras().get(0).state()}, world.possibleStates(10, 12, 5));
+
+        // 3. Trapdoor and fence_gate toggles (including fence_gate facing flip when opening from opposite side)
+        int closedTrap = STATES.stateOf("minecraft:oak_trapdoor", "facing=north,half=bottom,open=false,powered=false,waterlogged=false");
+        int openTrap = STATES.stateOf("minecraft:oak_trapdoor", "facing=north,half=bottom,open=true,powered=false,waterlogged=false");
+        put(13, 11, 5, closedTrap);
+        out(new ClientboundPacket.BlockChangedAck(42));
+        sync();
+        useOn(13, 11, 5, BlockFace.UP, 43);
+        ClientWorld.PlacementPlan trapToggle = world.blockToggleForUse(43, "north", "");
+        assertNotNull(trapToggle);
+        assertEquals(openTrap, trapToggle.primary().state());
+
+        int closedGate = STATES.stateOf("minecraft:oak_fence_gate", "facing=north,in_wall=false,open=false,powered=false");
+        int flippedOpenGate = STATES.stateOf("minecraft:oak_fence_gate", "facing=south,in_wall=false,open=true,powered=false");
+        put(13, 11, 8, closedGate);
+        out(new ClientboundPacket.BlockChangedAck(43));
+        sync();
+        useOn(13, 11, 8, BlockFace.NORTH, 44);
+        ClientWorld.PlacementPlan gateToggle = world.blockToggleForUse(44, "south", "");
+        assertNotNull(gateToggle);
+        assertEquals(flippedOpenGate, gateToggle.primary().state());
+
+        // Iron door/trapdoor and copper trapdoor with axe must NOT toggle
+        put(13, 11, 11, STATES.stateOf("minecraft:iron_trapdoor", "facing=north,half=bottom,open=false,powered=false,waterlogged=false"));
+        put(13, 11, 13, STATES.stateOf("minecraft:copper_trapdoor", "facing=north,half=bottom,open=false,powered=false,waterlogged=false"));
+        out(new ClientboundPacket.BlockChangedAck(44));
+        sync();
+        useOn(13, 11, 11, BlockFace.UP, 45);
+        assertNull(world.blockToggleForUse(45, "north", ""));
+        useOn(13, 11, 13, BlockFace.UP, 46);
+        assertNull(world.blockToggleForUse(46, "north", "minecraft:diamond_axe"));
+        assertNotNull(world.blockToggleForUse(46, "north", ""));
+
+        // 4. Snow stacking, carpet, and lantern
+        put(2, 10, 2, STONE);
+        out(new ClientboundPacket.BlockChangedAck(46));
+        sync();
+        useOn(2, 10, 2, BlockFace.UP, 47);
+        assertEquals(STATES.stateOf("minecraft:snow", "layers=1"), world.placementForItem(47, "minecraft:snow").state());
+        assertEquals(STATES.onlyStateOf("minecraft:white_carpet"), world.placementForItem(47, "minecraft:white_carpet").state());
+        assertEquals(STATES.stateOf("minecraft:lantern", "hanging=false,waterlogged=false"),
+                world.placementForItem(47, "minecraft:lantern").state());
+        put(2, 11, 2, STATES.stateOf("minecraft:snow", "layers=3"));
+        out(new ClientboundPacket.BlockChangedAck(47));
+        sync();
+        useOn(2, 11, 2, BlockFace.UP, 48);
+        ClientWorld.Placement stackedSnow = world.placementForItem(48, "minecraft:snow");
+        assertNotNull(stackedSnow);
+        assertEquals(new BlockPosition(2, 11, 2), stackedSnow.position());
+        assertEquals(STATES.stateOf("minecraft:snow", "layers=4"), stackedSnow.state());
     }
 }

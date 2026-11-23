@@ -141,6 +141,7 @@ public final class ClientWorld {
     private long chunksUnreadable;
     private long blockUpdates;
     private long staleEvents;
+    private long lastEventSequence = Long.MIN_VALUE;
 
     public ClientWorld(BlockStates states) {
         this(states, new SectionPool());
@@ -223,6 +224,9 @@ public final class ClientWorld {
 
     /** Applies one timeline event, in sequence order. */
     public void onEvent(TimelineEvent event) {
+        if (event.sequence() > lastEventSequence) {
+            lastEventSequence = event.sequence();
+        }
         switch (event) {
             case TimelineEvent.Outbound out -> onOutbound(out.sequence(), out.packet());
             case TimelineEvent.Inbound in -> onInbound(in.sequence(), in.packet());
@@ -1016,26 +1020,57 @@ public final class ClientWorld {
     public record Placement(BlockPosition position, int state) {}
 
     /**
+     * Exact multi-cell outcome of a resolved block use: the primary placed/toggled cell plus any secondary cells
+     * atomically updated by the same client prediction (connected fence/wall/pane/stair neighbours, door upper half,
+     * or toggled door partner half).
+     */
+    public record PlacementPlan(Placement primary, List<Placement> extras) {
+        public PlacementPlan {
+            if (primary == null) {
+                throw new IllegalArgumentException("primary placement must not be null");
+            }
+            extras = extras == null || extras.isEmpty() ? List.of() : List.copyOf(extras);
+        }
+
+        public static PlacementPlan single(BlockPosition position, int state) {
+            return new PlacementPlan(new Placement(position, state), List.of());
+        }
+    }
+
+    /**
      * Resolves exact placement position and block state for single-state full cubes, directional
-     * pillars ({@code axis=x|y|z}), non-waterlogged slabs, and straight non-waterlogged stairs placed into pure air.
+     * pillars ({@code axis=x|y|z}), slabs, stairs, connected fences/walls/panes, doors, fence gates, snow layers,
+     * carpets, lanterns, and trapdoors.
      */
     public Placement placementForItem(int sequence, String placedBlockKey) {
         return placementForItem(sequence, placedBlockKey, null);
     }
 
     /**
-     * Resolves exact placement position and block state including {@code StairBlock} ({@code _stairs}) when the
+     * Resolves exact primary placement position and block state including directional blocks when the
      * caller supplies the client's unanimous horizontal facing ({@code "north"}, {@code "south"}, {@code "east"},
      * {@code "west"}) strictly clear of 45-degree diagonal corners.
      */
     public Placement placementForItem(int sequence, String placedBlockKey, String horizontalFacing) {
+        PlacementPlan plan = placementPlanForItem(sequence, placedBlockKey, horizontalFacing);
+        return plan == null ? null : plan.primary();
+    }
+
+    /**
+     * Resolves exact multi-cell placement plan (primary cell + exact secondary neighbour / upper-half updates)
+     * for {@link ServerboundPacket.UseItemOn} {@code sequence}, returning {@code null} whenever any neighbour,
+     * fluid, redstone source, or placement rule leaves ambiguity.
+     */
+    public PlacementPlan placementPlanForItem(int sequence, String placedBlockKey, String horizontalFacing) {
         if (placedBlockKey == null || storage == null || hasUnlocatedPredictionBefore(sequence)) {
             return null;
         }
         int single = states.onlyStateOf(placedBlockKey);
         if (single >= 0) {
             BlockPosition pos = placement(sequence, single);
-            return pos == null ? null : new Placement(pos, single);
+            if (pos != null) {
+                return PlacementPlan.single(pos, single);
+            }
         }
         ServerboundPacket.UseItemOn use = uses.get(sequence);
         if (use == null) {
@@ -1068,7 +1103,20 @@ public final class ClientWorld {
                 int doubleState = states.stateOf(placedBlockKey, "type=double,waterlogged=false");
                 if (doubleState >= 0 && !states.has(doubleState, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)
                         && clickedNeighboursNonReactive(c, sequence)) {
-                    return new Placement(c, doubleState);
+                    return PlacementPlan.single(c, doubleState);
+                }
+                return null;
+            }
+        }
+        // Variant K1: Stacking minecraft:snow[layers=1..7] onto an existing snow layer block at clicked
+        if ("minecraft:snow".equals(placedBlockKey) && clicked.length == 1
+                && "minecraft:snow".equals(states.block(clicked[0]))
+                && c.y() >= minY() && c.y() < minY() + height()) {
+            int layers = parsePositiveIntProp(states.properties(clicked[0]), "layers");
+            if (layers >= 1 && layers < 8 && (layers == 1 || face == BlockFace.UP)) {
+                int nextState = states.stateOf("minecraft:snow", "layers=" + (layers + 1));
+                if (nextState >= 0 && clickedNeighboursNonReactive(c, sequence)) {
+                    return PlacementPlan.single(c, nextState);
                 }
                 return null;
             }
@@ -1079,208 +1127,1173 @@ public final class ClientWorld {
         if (!clickedAllowsPlacement(clicked, placedBlockKey)) {
             return null;
         }
-        // Variant A: RotatedPillarBlock (exact 3 states axis=x/y/z, all FULL_BLOCK, non-reactive)
+        // Variant L1: Single-state CarpetBlock (*_carpet except pale_moss_carpet) into pure AIR over any non-air block
+        if (single >= 0 && placedBlockKey.endsWith("_carpet") && !"minecraft:pale_moss_carpet".equals(placedBlockKey)) {
+            int[] below = before[5];
+            if (pureAir(target) && below != null && allNonAir(below) && neighboursNonReactive(before)) {
+                return PlacementPlan.single(new BlockPosition(tx, ty, tz), single);
+            }
+            return null;
+        }
+        if (single >= 0) {
+            return null;
+        }
         int first = states.firstStateOf(placedBlockKey);
-        if (first >= 0) {
-            int[] all = states.statesOfBlock(first);
-            if (all.length == 3 && isPurePillarStates(all)) {
-                String axisProp = switch (face) {
-                    case UP, DOWN -> "axis=y";
-                    case NORTH, SOUTH -> "axis=z";
-                    case EAST, WEST -> "axis=x";
-                    default -> null;
+        if (first < 0) {
+            return null;
+        }
+        int[] all = states.statesOfBlock(first);
+        // Variant A: RotatedPillarBlock (exact 3 states axis=x/y/z, all FULL_BLOCK, non-reactive)
+        if (all.length == 3 && isPurePillarStates(all)) {
+            String axisProp = switch (face) {
+                case UP, DOWN -> "axis=y";
+                case NORTH, SOUTH -> "axis=z";
+                case EAST, WEST -> "axis=x";
+                default -> null;
+            };
+            int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
+            if (chosen < 0 || !targetReplaceableNonReactive(target, placedBlockKey) || !neighboursNonReactive(before)) {
+                return null;
+            }
+            return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+        }
+        boolean inAir = pureAir(target);
+        boolean inWater = !inAir && pureWaterSource(target);
+        // Variant B: SlabBlock into pure AIR or settled water source
+        if (placedBlockKey.endsWith("_slab") && use.location() != null) {
+            if (!inAir && !inWater) {
+                return null;
+            }
+            for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+                int[] beside = before[i + 1];
+                if (beside == null) {
+                    return null;
+                }
+                for (int s : beside) {
+                    if (reacts(s) && !states.block(s).endsWith("_slab")) {
+                        return null;
+                    }
+                }
+            }
+            boolean bottom = face == BlockFace.UP
+                    || (face != BlockFace.DOWN && (use.location().y() - ty) <= 0.5);
+            String wl = inWater ? "true" : "false";
+            String props = (bottom ? "type=bottom,waterlogged=" : "type=top,waterlogged=") + wl;
+            int chosen = states.stateOf(placedBlockKey, props);
+            if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+            }
+            return null;
+        }
+        // Variant C: Straight + Corner (inner/outer) + Waterlogged StairBlock with exact neighbour stair updates
+        if (placedBlockKey.endsWith("_stairs") && horizontalFacing != null && use.location() != null) {
+            return resolveStairPlacement(sequence, use, placedBlockKey, horizontalFacing, tx, ty, tz, before, inAir, inWater);
+        }
+        // Variant D: 4-way HorizontalDirectionalBlock full cubes (glazed terracotta, carved_pumpkin, jack_o_lantern)
+        if (all.length == 4 && horizontalFacing != null && isPureHorizontalFacingFullBlock(all)) {
+            if (!targetReplaceableNonReactive(target, placedBlockKey) || !neighboursNonReactive(before)) {
+                return null;
+            }
+            if ("minecraft:carved_pumpkin".equals(placedBlockKey) || "minecraft:jack_o_lantern".equals(placedBlockKey)) {
+                int[] below = before[5];
+                if (below == null) {
+                    return null;
+                }
+                for (int s : below) {
+                    String b = states.block(s);
+                    if ("minecraft:snow_block".equals(b) || "minecraft:iron_block".equals(b)) {
+                        return null; // avoid golem spawn side effects
+                    }
+                }
+            }
+            String opposite = oppositeHorizontalFacing(horizontalFacing);
+            int chosen = opposite == null ? -1 : states.stateOf(placedBlockKey, "facing=" + opposite);
+            if (chosen >= 0) {
+                return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+            }
+            return null;
+        }
+        // Variant E: Connected FenceBlock (_fence), WallBlock (_wall), IronBarsBlock / GlassPaneBlock in AIR or water source
+        if ((placedBlockKey.endsWith("_fence") || isWall(placedBlockKey) || isPaneOrBars(placedBlockKey))
+                && (inAir || inWater)) {
+            return resolveConnectedPlacement(sequence, placedBlockKey, tx, ty, tz, before, inWater);
+        }
+        // Variant F: ChainBlock (*_chain: axis=x|y|z,waterlogged=true|false) into pure AIR or settled water source
+        if (placedBlockKey.endsWith("_chain") && (inAir || inWater) && neighboursNonReactive(before)) {
+            String wl = inWater ? "true" : "false";
+            String axisProp = switch (face) {
+                case UP, DOWN -> "axis=y,waterlogged=" + wl;
+                case NORTH, SOUTH -> "axis=z,waterlogged=" + wl;
+                case EAST, WEST -> "axis=x,waterlogged=" + wl;
+                default -> null;
+            };
+            int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
+            if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+            }
+            return null;
+        }
+        // Variant G: EndRodBlock (minecraft:end_rod) into pure AIR against a non-end_rod clicked block
+        if ("minecraft:end_rod".equals(placedBlockKey) && inAir && neighboursNonReactive(before)) {
+            boolean clickedIsEndRod = false;
+            for (int s : clicked) {
+                if ("minecraft:end_rod".equals(states.block(s))) {
+                    clickedIsEndRod = true;
+                    break;
+                }
+            }
+            if (!clickedIsEndRod) {
+                String dirProp = switch (face) {
+                    case DOWN -> "facing=down";
+                    case UP -> "facing=up";
+                    case NORTH -> "facing=north";
+                    case SOUTH -> "facing=south";
+                    case WEST -> "facing=west";
+                    case EAST -> "facing=east";
                 };
-                int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
-                if (chosen < 0 || !targetReplaceableNonReactive(target, placedBlockKey) || !neighboursNonReactive(before)) {
-                    return null;
-                }
-                return new Placement(new BlockPosition(tx, ty, tz), chosen);
-            }
-            boolean inAir = pureAir(target);
-            boolean inWater = !inAir && pureWaterSource(target);
-            // Variant B: SlabBlock into pure AIR or settled water source
-            if (placedBlockKey.endsWith("_slab") && use.location() != null) {
-                if (!inAir && !inWater) {
-                    return null;
-                }
-                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
-                    int[] beside = before[i + 1];
-                    if (beside == null) {
-                        return null;
-                    }
-                    for (int s : beside) {
-                        if (reacts(s) && !states.block(s).endsWith("_slab")) {
-                            return null;
-                        }
-                    }
-                }
-                boolean bottom = face == BlockFace.UP
-                        || (face != BlockFace.DOWN && (use.location().y() - ty) <= 0.5);
-                String wl = inWater ? "true" : "false";
-                String props = (bottom ? "type=bottom,waterlogged=" : "type=top,waterlogged=") + wl;
-                int chosen = states.stateOf(placedBlockKey, props);
+                int chosen = states.stateOf(placedBlockKey, dirProp);
                 if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                    return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
                 }
             }
-            // Variant C: Straight non-waterlogged StairBlock into pure AIR with no orthogonal stair or reactive neighbour
-            if (placedBlockKey.endsWith("_stairs") && horizontalFacing != null && use.location() != null) {
-                if (!inAir) {
-                    return null;
-                }
-                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
-                    int[] beside = before[i + 1];
-                    if (beside == null) {
-                        return null;
-                    }
-                    boolean horizontal = PREDICTION_NEIGHBOURS[i][1] == 0;
-                    for (int s : beside) {
-                        if (reacts(s) || (horizontal && states.block(s).endsWith("_stairs"))) {
-                            return null;
-                        }
-                    }
-                }
+            return null;
+        }
+        // Variant H: Non-iron TrapDoorBlock (*_trapdoor) into pure AIR or settled water source with non-reactive neighbours
+        if (placedBlockKey.endsWith("_trapdoor") && !"minecraft:iron_trapdoor".equals(placedBlockKey)
+                && (inAir || inWater) && neighboursNonReactive(before)) {
+            if (hasNearbyRedstoneSource(tx, ty, tz, sequence)) {
+                return null;
+            }
+            String trapFacing = null;
+            String trapHalf = null;
+            if (face == BlockFace.UP || face == BlockFace.DOWN) {
+                trapFacing = horizontalFacing == null ? null : oppositeHorizontalFacing(horizontalFacing);
+                trapHalf = face == BlockFace.UP ? "bottom" : "top";
+            } else if (use.location() != null) {
                 double localY = use.location().y() - ty;
-                if (face != BlockFace.UP && face != BlockFace.DOWN && Math.abs(localY - 0.5) <= 1.0E-5) {
-                    return null;
+                if (Math.abs(localY - 0.5) > 1.0E-5) {
+                    trapFacing = face.name().toLowerCase(java.util.Locale.ROOT);
+                    trapHalf = localY > 0.5 ? "top" : "bottom";
                 }
-                boolean bottom = face == BlockFace.UP || (face != BlockFace.DOWN && localY <= 0.5);
-                String props = "facing=" + horizontalFacing + ",half=" + (bottom ? "bottom" : "top")
-                        + ",shape=straight,waterlogged=false";
+            }
+            if (trapFacing != null && trapHalf != null) {
+                String props = "facing=" + trapFacing + ",half=" + trapHalf
+                        + ",open=false,powered=false,waterlogged=" + (inWater ? "true" : "false");
                 int chosen = states.stateOf(placedBlockKey, props);
                 if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
+                    return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
                 }
             }
-            // Variant D: 4-way HorizontalDirectionalBlock full cubes (glazed terracotta, carved_pumpkin, jack_o_lantern)
-            if (all.length == 4 && horizontalFacing != null && isPureHorizontalFacingFullBlock(all)) {
-                if (!targetReplaceableNonReactive(target, placedBlockKey) || !neighboursNonReactive(before)) {
+            return null;
+        }
+        // Variant I: Two-block DoorBlock (*_door) into pure AIR at (tx,ty,tz) and (tx,ty+1,tz)
+        if (placedBlockKey.endsWith("_door") && horizontalFacing != null && inAir) {
+            return resolveDoorPlacement(sequence, use, placedBlockKey, horizontalFacing, tx, ty, tz, before);
+        }
+        // Variant J: FenceGateBlock (*_fence_gate) into pure AIR with in_wall + adjacent fence/wall updates
+        if (isFenceGate(placedBlockKey) && horizontalFacing != null && inAir) {
+            return resolveFenceGatePlacement(sequence, placedBlockKey, horizontalFacing, tx, ty, tz, before);
+        }
+        // Variant K2: Fresh minecraft:snow[layers=1] into pure AIR on a snow-supporting block
+        if ("minecraft:snow".equals(placedBlockKey) && inAir && neighboursNonReactive(before)) {
+            int[] below = before[5];
+            if (below != null && canSupportSnow(below)) {
+                int chosen = states.stateOf("minecraft:snow", "layers=1");
+                if (chosen >= 0) {
+                    return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+                }
+            }
+            return null;
+        }
+        // Variant L2: LanternBlock (lantern, soul_lantern, copper lanterns) when exactly one vertical support holds
+        if (all.length == 4 && (inAir || inWater) && placedBlockKey.endsWith("lantern")
+                && states.stateOf(placedBlockKey, "hanging=false,waterlogged=false") >= 0
+                && neighboursNonReactive(before)) {
+            int[] above = before[4];
+            int[] below = before[5];
+            if (above == null || below == null) {
+                return null;
+            }
+            boolean belowFull = allFullSturdyBlock(below);
+            boolean aboveFull = allFullSturdyBlock(above);
+            boolean aboveAir = pureAir(above);
+            boolean belowAir = pureAir(below);
+            String wl = inWater ? "true" : "false";
+            if (belowFull && aboveAir) {
+                int chosen = states.stateOf(placedBlockKey, "hanging=false,waterlogged=" + wl);
+                if (chosen >= 0) {
+                    return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+                }
+            } else if (aboveFull && belowAir) {
+                int chosen = states.stateOf(placedBlockKey, "hanging=true,waterlogged=" + wl);
+                if (chosen >= 0) {
+                    return PlacementPlan.single(new BlockPosition(tx, ty, tz), chosen);
+                }
+            }
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Resolves an interactive non-sneaking right-click open/close toggle ({@code useWithoutItem}) on a wooden or
+     * copper {@code _trapdoor}, {@code _fence_gate}, or two-block {@code _door}. Returns {@code null} for iron
+     * doors/trapdoors, copper doors/trapdoors when holding an axe or honeycomb, unknown neighbours, or any ambiguity.
+     */
+    public PlacementPlan blockToggleForUse(int sequence, String horizontalFacing, String heldItemKey) {
+        if (storage == null || hasUnlocatedPredictionBefore(sequence)) {
+            return null;
+        }
+        ServerboundPacket.UseItemOn use = uses.get(sequence);
+        int[][] before = useBefore.get(sequence);
+        if (use == null || before == null || before[0] == null || before[0].length != 1) {
+            return null;
+        }
+        BlockPosition c = use.position();
+        int clickedState = before[0][0];
+        String block = states.block(clickedState);
+        if ("minecraft:iron_door".equals(block) || "minecraft:iron_trapdoor".equals(block)) {
+            return null;
+        }
+        boolean isCopper = block.contains("copper_");
+        if (isCopper && (heldItemKey == null || heldItemKey.endsWith("_axe") || "minecraft:honeycomb".equals(heldItemKey))) {
+            return null;
+        }
+        String props = states.properties(clickedState);
+        if (block.endsWith("_trapdoor")) {
+            if (!clickedNeighboursNonReactive(c, sequence)) {
+                return null;
+            }
+            String toggledProps = toggleOpenProperty(props);
+            int toggled = toggledProps == null ? -1 : states.stateOf(block, toggledProps);
+            return toggled >= 0 ? PlacementPlan.single(c, toggled) : null;
+        }
+        if (isFenceGate(block)) {
+            if (!clickedNeighboursNonReactive(c, sequence)) {
+                return null;
+            }
+            String openVal = propValue(props, "open");
+            String curFacing = propValue(props, "facing");
+            String inWall = propValue(props, "in_wall");
+            String powered = propValue(props, "powered");
+            if (openVal == null || curFacing == null || inWall == null || powered == null) {
+                return null;
+            }
+            String newOpen;
+            String newFacing = curFacing;
+            if ("true".equals(openVal)) {
+                newOpen = "false";
+            } else {
+                if (horizontalFacing == null) {
                     return null;
                 }
-                if ("minecraft:carved_pumpkin".equals(placedBlockKey) || "minecraft:jack_o_lantern".equals(placedBlockKey)) {
-                    int[] below = before[5]; // PREDICTION_NEIGHBOURS[4] = {0, -1, 0}
-                    if (below == null) {
+                newOpen = "true";
+                if (curFacing.equals(oppositeHorizontalFacing(horizontalFacing))) {
+                    newFacing = horizontalFacing;
+                }
+            }
+            String newProps = "facing=" + newFacing + ",in_wall=" + inWall + ",open=" + newOpen + ",powered=" + powered;
+            int toggled = states.stateOf(block, newProps);
+            return toggled >= 0 ? PlacementPlan.single(c, toggled) : null;
+        }
+        if (block.endsWith("_door")) {
+            String half = propValue(props, "half");
+            if (!"lower".equals(half) && !"upper".equals(half)) {
+                return null;
+            }
+            int dy = "lower".equals(half) ? 1 : -1;
+            BlockPosition otherPos = new BlockPosition(c.x(), c.y() + dy, c.z());
+            if (otherPos.y() < minY() || otherPos.y() >= minY() + height()) {
+                return null;
+            }
+            int[] otherStates = possibleStatesBefore(otherPos.x(), otherPos.y(), otherPos.z(), sequence);
+            if (otherStates == null || otherStates.length != 1 || !block.equals(states.block(otherStates[0]))) {
+                return null;
+            }
+            String otherProps = states.properties(otherStates[0]);
+            String expectedOtherHalf = "lower".equals(half) ? "upper" : "lower";
+            if (!expectedOtherHalf.equals(propValue(otherProps, "half"))
+                    || !java.util.Objects.equals(propValue(props, "facing"), propValue(otherProps, "facing"))
+                    || !java.util.Objects.equals(propValue(props, "hinge"), propValue(otherProps, "hinge"))
+                    || !java.util.Objects.equals(propValue(props, "open"), propValue(otherProps, "open"))) {
+                return null;
+            }
+            if (!doorNeighboursNonReactive(c, otherPos, sequence)) {
+                return null;
+            }
+            String toggledClickedProps = toggleOpenProperty(props);
+            String toggledOtherProps = toggleOpenProperty(otherProps);
+            int toggledClicked = toggledClickedProps == null ? -1 : states.stateOf(block, toggledClickedProps);
+            int toggledOther = toggledOtherProps == null ? -1 : states.stateOf(block, toggledOtherProps);
+            if (toggledClicked < 0 || toggledOther < 0) {
+                return null;
+            }
+            return new PlacementPlan(new Placement(c, toggledClicked), List.of(new Placement(otherPos, toggledOther)));
+        }
+        return null;
+    }
+
+    private PlacementPlan resolveStairPlacement(int sequence, ServerboundPacket.UseItemOn use, String placedBlockKey,
+            String horizontalFacing, int tx, int ty, int tz, int[][] before, boolean inAir, boolean inWater) {
+        if (!inAir && !inWater) {
+            return null;
+        }
+        double localY = use.location().y() - ty;
+        BlockFace face = use.face();
+        if (face != BlockFace.UP && face != BlockFace.DOWN && Math.abs(localY - 0.5) <= 1.0E-5) {
+            return null;
+        }
+        // Vertical neighbours must not react; horizontal neighbours must be settled and either non-reactive or stairs.
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int[] beside = before[i + 1];
+            if (beside == null) {
+                return null;
+            }
+            boolean horizontal = PREDICTION_NEIGHBOURS[i][1] == 0;
+            if (horizontal) {
+                if (beside.length != 1) {
+                    return null;
+                }
+                int ns = beside[0];
+                if (reacts(ns) && !states.block(ns).endsWith("_stairs")) {
+                    return null;
+                }
+            } else {
+                for (int s : beside) {
+                    if (reacts(s)) {
                         return null;
-                    }
-                    for (int s : below) {
-                        String b = states.block(s);
-                        if ("minecraft:snow_block".equals(b) || "minecraft:iron_block".equals(b)) {
-                            return null; // avoid golem spawn side effects
-                        }
-                    }
-                }
-                String opposite = oppositeHorizontalFacing(horizontalFacing);
-                int chosen = opposite == null ? -1 : states.stateOf(placedBlockKey, "facing=" + opposite);
-                if (chosen >= 0) {
-                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
-                }
-            }
-            // Variant E: Isolated FenceBlock (_fence), WallBlock (_wall), IronBarsBlock / StainedGlassPaneBlock in pure AIR or settled water source
-            if ((placedBlockKey.endsWith("_fence") || placedBlockKey.endsWith("_wall")
-                    || "minecraft:iron_bars".equals(placedBlockKey)
-                    || "minecraft:glass_pane".equals(placedBlockKey)
-                    || placedBlockKey.endsWith("_stained_glass_pane")) && (inAir || inWater)) {
-                boolean isWall = placedBlockKey.endsWith("_wall");
-                boolean ok = true;
-                for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
-                    int[] beside = before[i + 1];
-                    if (beside == null) {
-                        ok = false;
-                        break;
-                    }
-                    int dy = PREDICTION_NEIGHBOURS[i][1];
-                    if (dy == 0 || (isWall && dy > 0)) {
-                        if (!pureAir(beside)) {
-                            ok = false;
-                            break;
-                        }
-                    } else {
-                        for (int s : beside) {
-                            if (reacts(s)) {
-                                ok = false;
-                                break;
-                            }
-                        }
-                        if (!ok) {
-                            break;
-                        }
-                    }
-                }
-                if (ok) {
-                    String wl = inWater ? "true" : "false";
-                    String props = isWall
-                            ? "east=none,north=none,south=none,up=true,waterlogged=" + wl + ",west=none"
-                            : "east=false,north=false,south=false,waterlogged=" + wl + ",west=false";
-                    int chosen = states.stateOf(placedBlockKey, props);
-                    if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                        return new Placement(new BlockPosition(tx, ty, tz), chosen);
-                    }
-                }
-            }
-            // Variant F: ChainBlock (*_chain: axis=x|y|z,waterlogged=true|false) into pure AIR or settled water source with non-reactive neighbours
-            if (placedBlockKey.endsWith("_chain") && (inAir || inWater) && neighboursNonReactive(before)) {
-                String wl = inWater ? "true" : "false";
-                String axisProp = switch (face) {
-                    case UP, DOWN -> "axis=y,waterlogged=" + wl;
-                    case NORTH, SOUTH -> "axis=z,waterlogged=" + wl;
-                    case EAST, WEST -> "axis=x,waterlogged=" + wl;
-                    default -> null;
-                };
-                int chosen = axisProp == null ? -1 : states.stateOf(placedBlockKey, axisProp);
-                if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                    return new Placement(new BlockPosition(tx, ty, tz), chosen);
-                }
-            }
-            // Variant G: EndRodBlock (minecraft:end_rod) into pure AIR against a non-end_rod clicked block
-            if ("minecraft:end_rod".equals(placedBlockKey) && inAir && neighboursNonReactive(before)) {
-                boolean clickedIsEndRod = false;
-                for (int s : clicked) {
-                    if ("minecraft:end_rod".equals(states.block(s))) {
-                        clickedIsEndRod = true;
-                        break;
-                    }
-                }
-                if (!clickedIsEndRod) {
-                    String dirProp = switch (face) {
-                        case DOWN -> "facing=down";
-                        case UP -> "facing=up";
-                        case NORTH -> "facing=north";
-                        case SOUTH -> "facing=south";
-                        case WEST -> "facing=west";
-                        case EAST -> "facing=east";
-                    };
-                    int chosen = states.stateOf(placedBlockKey, dirProp);
-                    if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                        return new Placement(new BlockPosition(tx, ty, tz), chosen);
-                    }
-                }
-            }
-            // Variant H: Non-iron TrapDoorBlock (*_trapdoor) into pure AIR or settled water source with non-reactive neighbours
-            if (placedBlockKey.endsWith("_trapdoor") && !"minecraft:iron_trapdoor".equals(placedBlockKey)
-                    && (inAir || inWater) && neighboursNonReactive(before)) {
-                String trapFacing = null;
-                String trapHalf = null;
-                if (face == BlockFace.UP || face == BlockFace.DOWN) {
-                    trapFacing = horizontalFacing == null ? null : oppositeHorizontalFacing(horizontalFacing);
-                    trapHalf = face == BlockFace.UP ? "bottom" : "top";
-                } else if (use.location() != null) {
-                    double localY = use.location().y() - ty;
-                    if (Math.abs(localY - 0.5) > 1.0E-5) {
-                        trapFacing = face.name().toLowerCase(java.util.Locale.ROOT);
-                        trapHalf = localY > 0.5 ? "top" : "bottom";
-                    }
-                }
-                if (trapFacing != null && trapHalf != null) {
-                    String props = "facing=" + trapFacing + ",half=" + trapHalf
-                            + ",open=false,powered=false,waterlogged=" + (inWater ? "true" : "false");
-                    int chosen = states.stateOf(placedBlockKey, props);
-                    if (chosen >= 0 && !states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
-                        return new Placement(new BlockPosition(tx, ty, tz), chosen);
                     }
                 }
             }
         }
+        String half = (face == BlockFace.UP || (face != BlockFace.DOWN && localY <= 0.5)) ? "bottom" : "top";
+        int eastState = before[2][0];
+        int westState = before[3][0];
+        int southState = before[6][0];
+        int northState = before[7][0];
+        String shape = computeStairsShape(horizontalFacing, half, eastState, westState, southState, northState);
+        String props = "facing=" + horizontalFacing + ",half=" + half + ",shape=" + shape
+                + ",waterlogged=" + (inWater ? "true" : "false");
+        int chosen = states.stateOf(placedBlockKey, props);
+        if (chosen < 0 || states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+            return null;
+        }
+        // Recompute any adjacent horizontal stair whose shape updates in response to our newly placed stair.
+        List<Placement> extras = new ArrayList<>();
+        int[] horizIdx = {1, 2, 5, 6}; // EAST, WEST, SOUTH, NORTH in PREDICTION_NEIGHBOURS
+        for (int idx : horizIdx) {
+            int ns = before[idx + 1][0];
+            String nb = states.block(ns);
+            if (!nb.endsWith("_stairs")) {
+                continue;
+            }
+            int nx = tx + PREDICTION_NEIGHBOURS[idx][0];
+            int ny = ty;
+            int nz = tz + PREDICTION_NEIGHBOURS[idx][2];
+            int updated = recomputeNeighborStair(nx, ny, nz, ns, tx, ty, tz, chosen, sequence);
+            if (updated < 0) {
+                return null;
+            }
+            if (updated != ns) {
+                extras.add(new Placement(new BlockPosition(nx, ny, nz), updated));
+            }
+        }
+        return new PlacementPlan(new Placement(new BlockPosition(tx, ty, tz), chosen), extras);
+    }
+
+    private int recomputeNeighborStair(int nx, int ny, int nz, int currentState,
+            int placedX, int placedY, int placedZ, int placedState, int sequence) {
+        int e = settledStateWithOverride(nx + 1, ny, nz, placedX, placedY, placedZ, placedState, sequence);
+        int w = settledStateWithOverride(nx - 1, ny, nz, placedX, placedY, placedZ, placedState, sequence);
+        int s = settledStateWithOverride(nx, ny, nz + 1, placedX, placedY, placedZ, placedState, sequence);
+        int n = settledStateWithOverride(nx, ny, nz - 1, placedX, placedY, placedZ, placedState, sequence);
+        if (e < 0 || w < 0 || s < 0 || n < 0) {
+            return -1;
+        }
+        String props = states.properties(currentState);
+        String facing = propValue(props, "facing");
+        String half = propValue(props, "half");
+        String wl = propValue(props, "waterlogged");
+        if (facing == null || half == null || wl == null) {
+            return -1;
+        }
+        String newShape = computeStairsShape(facing, half, e, w, s, n);
+        String newProps = "facing=" + facing + ",half=" + half + ",shape=" + newShape + ",waterlogged=" + wl;
+        return states.stateOf(states.block(currentState), newProps);
+    }
+
+    private String computeStairsShape(String facing, String half, int eastState, int westState, int southState, int northState) {
+        int frontState = neighborByFacing(facing, eastState, westState, southState, northState);
+        if (states.block(frontState).endsWith("_stairs")) {
+            String fProps = states.properties(frontState);
+            if (half.equals(propValue(fProps, "half"))) {
+                String fFacing = propValue(fProps, "facing");
+                if (fFacing != null && isPerpendicularFacing(facing, fFacing)) {
+                    int checkState = neighborByFacing(oppositeHorizontalFacing(fFacing), eastState, westState, southState, northState);
+                    if (canTakeStairShape(facing, half, checkState)) {
+                        return fFacing.equals(counterClockWise(facing)) ? "outer_left" : "outer_right";
+                    }
+                }
+            }
+        }
+        int backState = neighborByFacing(oppositeHorizontalFacing(facing), eastState, westState, southState, northState);
+        if (states.block(backState).endsWith("_stairs")) {
+            String bProps = states.properties(backState);
+            if (half.equals(propValue(bProps, "half"))) {
+                String bFacing = propValue(bProps, "facing");
+                if (bFacing != null && isPerpendicularFacing(facing, bFacing)) {
+                    int checkState = neighborByFacing(bFacing, eastState, westState, southState, northState);
+                    if (canTakeStairShape(facing, half, checkState)) {
+                        return bFacing.equals(counterClockWise(facing)) ? "inner_left" : "inner_right";
+                    }
+                }
+            }
+        }
+        return "straight";
+    }
+
+    private boolean canTakeStairShape(String facing, String half, int otherState) {
+        if (!states.block(otherState).endsWith("_stairs")) {
+            return true;
+        }
+        String props = states.properties(otherState);
+        return !(facing.equals(propValue(props, "facing")) && half.equals(propValue(props, "half")));
+    }
+
+    private PlacementPlan resolveConnectedPlacement(int sequence, String placedBlockKey,
+            int tx, int ty, int tz, int[][] before, boolean inWater) {
+        boolean placedWall = isWall(placedBlockKey);
+        boolean placedPane = isPaneOrBars(placedBlockKey);
+        boolean placedFence = placedBlockKey.endsWith("_fence");
+        int[] up = before[4];
+        int[] down = before[5];
+        if (up == null || down == null || before[2] == null || before[3] == null || before[6] == null || before[7] == null) {
+            return null;
+        }
+        if (before[2].length != 1 || before[3].length != 1 || before[6].length != 1 || before[7].length != 1) {
+            return null;
+        }
+        int eastState = before[2][0];
+        int westState = before[3][0];
+        int southState = before[6][0];
+        int northState = before[7][0];
+        // Vertical neighbour checks
+        if (placedWall) {
+            if (up.length != 1) {
+                return null;
+            }
+            int upState = up[0];
+            if (reacts(upState) && !isWall(states.block(upState))) {
+                return null;
+            }
+            if (down.length == 1 && isWall(states.block(down[0]))) {
+                // Wall stacked on wall: lower wall updates below!
+            } else {
+                for (int s : down) {
+                    if (reacts(s)) {
+                        return null;
+                    }
+                }
+            }
+        } else {
+            for (int s : up) {
+                if (reacts(s)) {
+                    return null;
+                }
+            }
+            for (int s : down) {
+                if (reacts(s)) {
+                    return null;
+                }
+            }
+        }
+        // Horizontal neighbour safety check: reject unknown reactive blocks
+        int[] horizStates = {eastState, westState, southState, northState};
+        BlockFace[] horizDirs = {BlockFace.EAST, BlockFace.WEST, BlockFace.SOUTH, BlockFace.NORTH};
+        for (int ns : horizStates) {
+            if (states.has(ns, BlockStates.DYNAMIC_SHAPE)) {
+                return null;
+            }
+            String nb = states.block(ns);
+            boolean supportedReactive = nb.endsWith("_fence") || isWall(nb) || isPaneOrBars(nb) || isFenceGate(nb);
+            if (reacts(ns) && !supportedReactive) {
+                return null;
+            }
+        }
+        boolean connE = connectedTo(placedBlockKey, eastState, BlockFace.EAST);
+        boolean connW = connectedTo(placedBlockKey, westState, BlockFace.WEST);
+        boolean connS = connectedTo(placedBlockKey, southState, BlockFace.SOUTH);
+        boolean connN = connectedTo(placedBlockKey, northState, BlockFace.NORTH);
+        int chosen;
+        if (placedWall) {
+            chosen = computeWallState(placedBlockKey, connE, connW, connS, connN, up[0], inWater);
+        } else {
+            String props = "east=" + connE + ",north=" + connN + ",south=" + connS
+                    + ",waterlogged=" + inWater + ",west=" + connW;
+            chosen = states.stateOf(placedBlockKey, props);
+        }
+        if (chosen < 0 || states.has(chosen, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+            return null;
+        }
+        // Compute exact secondary updates on affected horizontal neighbours (and lower wall if wall-on-wall)
+        List<Placement> extras = new ArrayList<>();
+        int[][] horizOffsets = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int i = 0; i < 4; i++) {
+            int ns = horizStates[i];
+            String nb = states.block(ns);
+            int nx = tx + horizOffsets[i][0];
+            int nz = tz + horizOffsets[i][2];
+            BlockFace dirFromNeighborToUs = oppositeFace(horizDirs[i]);
+            if (placedFence && sameFenceFamily(placedBlockKey, nb)) {
+                int updated = setHorizontalConnProp(ns, dirFromNeighborToUs, true);
+                if (updated < 0) {
+                    return null;
+                }
+                if (updated != ns) {
+                    extras.add(new Placement(new BlockPosition(nx, ty, nz), updated));
+                }
+            } else if ((placedPane || placedWall) && isPaneOrBars(nb)) {
+                int updated = setHorizontalConnProp(ns, dirFromNeighborToUs, true);
+                if (updated < 0) {
+                    return null;
+                }
+                if (updated != ns) {
+                    extras.add(new Placement(new BlockPosition(nx, ty, nz), updated));
+                }
+            } else if ((placedPane || placedWall) && isWall(nb)) {
+                int updated = recomputeNeighborWall(nx, ty, nz, ns, tx, ty, tz, chosen, sequence);
+                if (updated < 0) {
+                    return null;
+                }
+                if (updated != ns) {
+                    extras.add(new Placement(new BlockPosition(nx, ty, nz), updated));
+                }
+            } else if (placedWall && isFenceGate(nb)) {
+                if (fenceGateConnectsTo(states.properties(ns), horizDirs[i])) {
+                    int updated = setFenceGateInWall(ns, true);
+                    if (updated < 0) {
+                        return null;
+                    }
+                    if (updated != ns) {
+                        extras.add(new Placement(new BlockPosition(nx, ty, nz), updated));
+                    }
+                }
+            }
+        }
+        if (placedWall && down.length == 1 && isWall(states.block(down[0]))) {
+            int updatedDown = recomputeNeighborWall(tx, ty - 1, tz, down[0], tx, ty, tz, chosen, sequence);
+            if (updatedDown < 0) {
+                return null;
+            }
+            if (updatedDown != down[0]) {
+                extras.add(new Placement(new BlockPosition(tx, ty - 1, tz), updatedDown));
+            }
+        }
+        return new PlacementPlan(new Placement(new BlockPosition(tx, ty, tz), chosen), extras);
+    }
+
+    private boolean connectedTo(String placedBlock, int neighborState, BlockFace dirToNeighbor) {
+        String nb = states.block(neighborState);
+        boolean sturdyNotException = !isExceptionForConnection(nb) && isSideSturdyToward(neighborState, dirToNeighbor);
+        if (placedBlock.endsWith("_fence")) {
+            return sturdyNotException
+                    || sameFenceFamily(placedBlock, nb)
+                    || (isFenceGate(nb) && fenceGateConnectsTo(states.properties(neighborState), dirToNeighbor));
+        }
+        if (isPaneOrBars(placedBlock)) {
+            return sturdyNotException || isPaneOrBars(nb) || isWall(nb);
+        }
+        if (isWall(placedBlock)) {
+            return sturdyNotException
+                    || isWall(nb)
+                    || isPaneOrBars(nb)
+                    || (isFenceGate(nb) && fenceGateConnectsTo(states.properties(neighborState), dirToNeighbor));
+        }
+        return false;
+    }
+
+    private int computeWallState(String wallBlock, boolean connE, boolean connW, boolean connS, boolean connN,
+            int aboveState, boolean waterlogged) {
+        String aboveBlock = states.block(aboveState);
+        String eVal, wVal, sVal, nVal;
+        boolean aboveWallUp = false;
+        boolean aboveCoversPost;
+        if (states.isAir(aboveState)
+                || (!states.has(aboveState, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)
+                        && states.collisionShape(aboveState).isEmpty())) {
+            eVal = connE ? "low" : "none";
+            wVal = connW ? "low" : "none";
+            sVal = connS ? "low" : "none";
+            nVal = connN ? "low" : "none";
+            aboveCoversPost = false;
+        } else if (states.has(aboveState, BlockStates.FULL_BLOCK)
+                && !states.has(aboveState, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+            eVal = connE ? "tall" : "none";
+            wVal = connW ? "tall" : "none";
+            sVal = connS ? "tall" : "none";
+            nVal = connN ? "tall" : "none";
+            aboveCoversPost = true;
+        } else if (isWall(aboveBlock)) {
+            String ap = states.properties(aboveState);
+            boolean aE = !"none".equals(propValue(ap, "east"));
+            boolean aW = !"none".equals(propValue(ap, "west"));
+            boolean aS = !"none".equals(propValue(ap, "south"));
+            boolean aN = !"none".equals(propValue(ap, "north"));
+            aboveWallUp = "true".equals(propValue(ap, "up"));
+            eVal = connE ? (aE ? "tall" : "low") : "none";
+            wVal = connW ? (aW ? "tall" : "low") : "none";
+            sVal = connS ? (aS ? "tall" : "low") : "none";
+            nVal = connN ? (aN ? "tall" : "low") : "none";
+            aboveCoversPost = aboveWallUp || aE || aW || aS || aN;
+        } else {
+            return -1;
+        }
+        boolean flag5 = (!connN && !connS && !connE && !connW) || (connN != connS) || (connE != connW);
+        boolean flag6 = ("tall".equals(nVal) && "tall".equals(sVal)) || ("tall".equals(eVal) && "tall".equals(wVal));
+        boolean up = aboveWallUp || flag5 || (!flag6 && aboveCoversPost);
+        String props = "east=" + eVal + ",north=" + nVal + ",south=" + sVal
+                + ",up=" + up + ",waterlogged=" + waterlogged + ",west=" + wVal;
+        return states.stateOf(wallBlock, props);
+    }
+
+    private int recomputeNeighborWall(int wx, int wy, int wz, int currentWallState,
+            int placedX, int placedY, int placedZ, int placedState, int sequence) {
+        int e = settledStateWithOverride(wx + 1, wy, wz, placedX, placedY, placedZ, placedState, sequence);
+        int w = settledStateWithOverride(wx - 1, wy, wz, placedX, placedY, placedZ, placedState, sequence);
+        int s = settledStateWithOverride(wx, wy, wz + 1, placedX, placedY, placedZ, placedState, sequence);
+        int n = settledStateWithOverride(wx, wy, wz - 1, placedX, placedY, placedZ, placedState, sequence);
+        int up = settledStateWithOverride(wx, wy + 1, wz, placedX, placedY, placedZ, placedState, sequence);
+        if (e < 0 || w < 0 || s < 0 || n < 0 || up < 0) {
+            return -1;
+        }
+        if (states.has(e, BlockStates.DYNAMIC_SHAPE) || states.has(w, BlockStates.DYNAMIC_SHAPE)
+                || states.has(s, BlockStates.DYNAMIC_SHAPE) || states.has(n, BlockStates.DYNAMIC_SHAPE)) {
+            return -1;
+        }
+        String wallBlock = states.block(currentWallState);
+        boolean wl = "true".equals(propValue(states.properties(currentWallState), "waterlogged"));
+        boolean connE = connectedTo(wallBlock, e, BlockFace.EAST);
+        boolean connW = connectedTo(wallBlock, w, BlockFace.WEST);
+        boolean connS = connectedTo(wallBlock, s, BlockFace.SOUTH);
+        boolean connN = connectedTo(wallBlock, n, BlockFace.NORTH);
+        return computeWallState(wallBlock, connE, connW, connS, connN, up, wl);
+    }
+
+    private PlacementPlan resolveDoorPlacement(int sequence, ServerboundPacket.UseItemOn use, String placedBlockKey,
+            String horizontalFacing, int tx, int ty, int tz, int[][] before) {
+        if (ty + 1 >= minY() + height()) {
+            return null;
+        }
+        int[] above = before[4];
+        int[] below = before[5];
+        if (above == null || below == null || !pureAir(above) || !allFullSturdyBlock(below)) {
+            return null;
+        }
+        // Check all 6 neighbours of lower (except above) and upper (except below) are settled & non-reactive.
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            if (i == 3) { // UP is our upper door half
+                continue;
+            }
+            int[] beside = before[i + 1];
+            if (beside == null) {
+                return null;
+            }
+            for (int s : beside) {
+                if (reacts(s)) {
+                    return null;
+                }
+            }
+        }
+        int[][] aroundUpper = around(tx, ty + 1, tz, sequence);
+        if (aroundUpper == null) {
+            return null;
+        }
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            if (i == 4) { // DOWN is our lower door half
+                continue;
+            }
+            int[] beside = aroundUpper[i];
+            if (beside == null) {
+                return null;
+            }
+            for (int s : beside) {
+                if (reacts(s)) {
+                    return null;
+                }
+            }
+        }
+        if (hasNearbyRedstoneSource(tx, ty, tz, sequence) || hasNearbyRedstoneSource(tx, ty + 1, tz, sequence)) {
+            return null;
+        }
+        // Compute vanilla DoorBlock.getHinge
+        String leftDir = counterClockWise(horizontalFacing);
+        String rightDir = clockWise(horizontalFacing);
+        int[] leftLow = neighborArrayByFacing(leftDir, before[2], before[3], before[6], before[7]);
+        int[] rightLow = neighborArrayByFacing(rightDir, before[2], before[3], before[6], before[7]);
+        int[] leftHigh = neighborArrayByFacing(leftDir, aroundUpper[1], aroundUpper[2], aroundUpper[5], aroundUpper[6]);
+        int[] rightHigh = neighborArrayByFacing(rightDir, aroundUpper[1], aroundUpper[2], aroundUpper[5], aroundUpper[6]);
+        if (leftLow == null || rightLow == null || leftHigh == null || rightHigh == null
+                || leftLow.length != 1 || rightLow.length != 1 || leftHigh.length != 1 || rightHigh.length != 1) {
+            return null;
+        }
+        int leftL = leftLow[0], rightL = rightLow[0], leftH = leftHigh[0], rightH = rightHigh[0];
+        if (states.has(leftL, BlockStates.DYNAMIC_SHAPE) || states.has(rightL, BlockStates.DYNAMIC_SHAPE)
+                || states.has(leftH, BlockStates.DYNAMIC_SHAPE) || states.has(rightH, BlockStates.DYNAMIC_SHAPE)) {
+            return null;
+        }
+        int score = (states.has(leftL, BlockStates.FULL_BLOCK) ? -1 : 0)
+                + (states.has(leftH, BlockStates.FULL_BLOCK) ? -1 : 0)
+                + (states.has(rightL, BlockStates.FULL_BLOCK) ? 1 : 0)
+                + (states.has(rightH, BlockStates.FULL_BLOCK) ? 1 : 0);
+        boolean leftDoor = states.block(leftL).endsWith("_door") && "lower".equals(propValue(states.properties(leftL), "half"));
+        boolean rightDoor = states.block(rightL).endsWith("_door") && "lower".equals(propValue(states.properties(rightL), "half"));
+        String hinge;
+        if ((!leftDoor || rightDoor) && score <= 0) {
+            if ((!rightDoor || leftDoor) && score >= 0) {
+                if (use.location() == null) {
+                    return null;
+                }
+                double fracX = use.location().x() - tx;
+                double fracZ = use.location().z() - tz;
+                int stepX = facingStepX(horizontalFacing);
+                int stepZ = facingStepZ(horizontalFacing);
+                // Vanilla DoorBlock.getHinge: (stepX < 0 && fracZ < 0.5) || (stepX > 0 && fracZ > 0.5)
+                // || (stepZ < 0 && fracX > 0.5) || (stepZ > 0 && fracX < 0.5) -> RIGHT else LEFT
+                double coord = stepX != 0 ? fracZ : fracX;
+                if (Math.abs(coord - 0.5) <= 1.0E-5) {
+                    return null;
+                }
+                boolean isRight = (stepX < 0 && fracZ < 0.5) || (stepX > 0 && fracZ > 0.5)
+                        || (stepZ < 0 && fracX > 0.5) || (stepZ > 0 && fracX < 0.5);
+                hinge = isRight ? "right" : "left";
+            } else {
+                hinge = "left";
+            }
+        } else {
+            hinge = "right";
+        }
+        int lower = states.stateOf(placedBlockKey, "facing=" + horizontalFacing + ",half=lower,hinge=" + hinge + ",open=false,powered=false");
+        int upper = states.stateOf(placedBlockKey, "facing=" + horizontalFacing + ",half=upper,hinge=" + hinge + ",open=false,powered=false");
+        if (lower < 0 || upper < 0) {
+            return null;
+        }
+        return new PlacementPlan(
+                new Placement(new BlockPosition(tx, ty, tz), lower),
+                List.of(new Placement(new BlockPosition(tx, ty + 1, tz), upper)));
+    }
+
+    private PlacementPlan resolveFenceGatePlacement(int sequence, String placedBlockKey, String horizontalFacing,
+            int tx, int ty, int tz, int[][] before) {
+        if (before[2] == null || before[3] == null || before[4] == null || before[5] == null || before[6] == null || before[7] == null) {
+            return null;
+        }
+        if (before[2].length != 1 || before[3].length != 1 || before[6].length != 1 || before[7].length != 1) {
+            return null;
+        }
+        for (int s : before[4]) {
+            if (reacts(s)) {
+                return null;
+            }
+        }
+        for (int s : before[5]) {
+            if (reacts(s)) {
+                return null;
+            }
+        }
+        if (hasNearbyRedstoneSource(tx, ty, tz, sequence)) {
+            return null;
+        }
+        int eastState = before[2][0];
+        int westState = before[3][0];
+        int southState = before[6][0];
+        int northState = before[7][0];
+        int[] horizStates = {eastState, westState, southState, northState};
+        BlockFace[] horizDirs = {BlockFace.EAST, BlockFace.WEST, BlockFace.SOUTH, BlockFace.NORTH};
+        for (int ns : horizStates) {
+            String nb = states.block(ns);
+            boolean allowed = nb.endsWith("_fence") || isWall(nb) || isPaneOrBars(nb) || isFenceGate(nb);
+            if (reacts(ns) && !allowed) {
+                return null;
+            }
+        }
+        String cw = clockWise(horizontalFacing);
+        String ccw = counterClockWise(horizontalFacing);
+        int cwState = neighborByFacing(cw, eastState, westState, southState, northState);
+        int ccwState = neighborByFacing(ccw, eastState, westState, southState, northState);
+        boolean inWall = isWall(states.block(cwState)) || isWall(states.block(ccwState));
+        String props = "facing=" + horizontalFacing + ",in_wall=" + inWall + ",open=false,powered=false";
+        int chosen = states.stateOf(placedBlockKey, props);
+        if (chosen < 0) {
+            return null;
+        }
+        List<Placement> extras = new ArrayList<>();
+        int[][] horizOffsets = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int i = 0; i < 4; i++) {
+            int ns = horizStates[i];
+            String nb = states.block(ns);
+            if (!fenceGateConnectsTo(props, horizDirs[i])) {
+                continue;
+            }
+            int nx = tx + horizOffsets[i][0];
+            int nz = tz + horizOffsets[i][2];
+            if (nb.endsWith("_fence")) {
+                int updated = setHorizontalConnProp(ns, oppositeFace(horizDirs[i]), true);
+                if (updated < 0) {
+                    return null;
+                }
+                if (updated != ns) {
+                    extras.add(new Placement(new BlockPosition(nx, ty, nz), updated));
+                }
+            } else if (isWall(nb)) {
+                int updated = recomputeNeighborWall(nx, ty, nz, ns, tx, ty, tz, chosen, sequence);
+                if (updated < 0) {
+                    return null;
+                }
+                if (updated != ns) {
+                    extras.add(new Placement(new BlockPosition(nx, ty, nz), updated));
+                }
+            }
+        }
+        return new PlacementPlan(new Placement(new BlockPosition(tx, ty, tz), chosen), extras);
+    }
+
+    private int settledStateWithOverride(int x, int y, int z, int ox, int oy, int oz, int oState, int sequence) {
+        if (x == ox && y == oy && z == oz) {
+            return oState;
+        }
+        int[] possible = possibleStatesBefore(x, y, z, sequence);
+        return possible != null && possible.length == 1 ? possible[0] : -1;
+    }
+
+    private int setHorizontalConnProp(int state, BlockFace side, boolean value) {
+        String props = states.properties(state);
+        String key = switch (side) {
+            case EAST -> "east";
+            case WEST -> "west";
+            case SOUTH -> "south";
+            case NORTH -> "north";
+            default -> null;
+        };
+        if (key == null) {
+            return -1;
+        }
+        String e = "east".equals(key) ? Boolean.toString(value) : propValue(props, "east");
+        String n = "north".equals(key) ? Boolean.toString(value) : propValue(props, "north");
+        String s = "south".equals(key) ? Boolean.toString(value) : propValue(props, "south");
+        String wl = propValue(props, "waterlogged");
+        String w = "west".equals(key) ? Boolean.toString(value) : propValue(props, "west");
+        if (e == null || n == null || s == null || wl == null || w == null) {
+            return -1;
+        }
+        return states.stateOf(states.block(state), "east=" + e + ",north=" + n + ",south=" + s + ",waterlogged=" + wl + ",west=" + w);
+    }
+
+    private int setFenceGateInWall(int state, boolean inWall) {
+        String props = states.properties(state);
+        String facing = propValue(props, "facing");
+        String open = propValue(props, "open");
+        String powered = propValue(props, "powered");
+        if (facing == null || open == null || powered == null) {
+            return -1;
+        }
+        return states.stateOf(states.block(state), "facing=" + facing + ",in_wall=" + inWall + ",open=" + open + ",powered=" + powered);
+    }
+
+    private static String toggleOpenProperty(String props) {
+        if (props.contains("open=false")) {
+            return props.replace("open=false", "open=true");
+        }
+        if (props.contains("open=true")) {
+            return props.replace("open=true", "open=false");
+        }
         return null;
+    }
+
+    private boolean doorNeighboursNonReactive(BlockPosition a, BlockPosition b, int sequence) {
+        return nonReactiveAroundExcluding(a, b, sequence) && nonReactiveAroundExcluding(b, a, sequence);
+    }
+
+    private boolean nonReactiveAroundExcluding(BlockPosition center, BlockPosition excluded, int sequence) {
+        int[][] aroundPos = around(center.x(), center.y(), center.z(), sequence);
+        if (aroundPos == null) {
+            return false;
+        }
+        for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+            int nx = center.x() + PREDICTION_NEIGHBOURS[i][0];
+            int ny = center.y() + PREDICTION_NEIGHBOURS[i][1];
+            int nz = center.z() + PREDICTION_NEIGHBOURS[i][2];
+            if (nx == excluded.x() && ny == excluded.y() && nz == excluded.z()) {
+                continue;
+            }
+            int[] beside = aroundPos[i];
+            if (beside == null) {
+                return false;
+            }
+            for (int s : beside) {
+                if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE) && !isDrySlab(s)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean hasNearbyRedstoneSource(int x, int y, int z, int sequence) {
+        for (int[] o : PREDICTION_NEIGHBOURS) {
+            if (o[0] == 0 && o[1] == 0 && o[2] == 0) {
+                continue;
+            }
+            int nx = x + o[0], ny = y + o[1], nz = z + o[2];
+            int[] beside = possibleStatesBefore(nx, ny, nz, sequence);
+            if (beside == null) {
+                return true;
+            }
+            for (int s : beside) {
+                if (couldEmitRedstone(s)) {
+                    return true;
+                }
+                if (states.has(s, BlockStates.FULL_BLOCK)) {
+                    // Check direct neighbours of this full block for indirect strong redstone power
+                    for (int[] o2 : PREDICTION_NEIGHBOURS) {
+                        if (o2[0] == 0 && o2[1] == 0 && o2[2] == 0) {
+                            continue;
+                        }
+                        int bx = nx + o2[0], by = ny + o2[1], bz = nz + o2[2];
+                        if (bx == x && by == y && bz == z) {
+                            continue;
+                        }
+                        int[] indirect = possibleStatesBefore(bx, by, bz, sequence);
+                        if (indirect == null) {
+                            return true;
+                        }
+                        for (int is : indirect) {
+                            if (couldEmitRedstone(is)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean couldEmitRedstone(int state) {
+        String b = states.block(state);
+        if (b.contains("redstone") || b.contains("lever") || b.contains("button")
+                || b.contains("pressure_plate") || b.contains("observer")
+                || b.contains("repeater") || b.contains("comparator")
+                || b.contains("daylight") || b.contains("tripwire")
+                || b.contains("detector_rail") || b.contains("sculk_sensor")
+                || b.contains("trapped_chest") || b.contains("lectern")
+                || b.contains("lightning_rod") || "minecraft:target".equals(b)
+                || "minecraft:jukebox".equals(b)) {
+            return true;
+        }
+        String p = states.properties(state);
+        return p.contains("powered=true") || p.contains("power=");
+    }
+
+    private boolean allNonAir(int[] possible) {
+        if (possible.length == 0) {
+            return false;
+        }
+        for (int s : possible) {
+            if (states.isAir(s)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean allFullSturdyBlock(int[] possible) {
+        if (possible.length == 0) {
+            return false;
+        }
+        for (int s : possible) {
+            if (!states.has(s, BlockStates.FULL_BLOCK)
+                    || states.has(s, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean canSupportSnow(int[] below) {
+        if (below.length == 0) {
+            return false;
+        }
+        for (int s : below) {
+            String b = states.block(s);
+            if ("minecraft:ice".equals(b) || "minecraft:packed_ice".equals(b) || "minecraft:barrier".equals(b)) {
+                return false;
+            }
+            if ("minecraft:honey_block".equals(b) || "minecraft:soul_sand".equals(b) || "minecraft:mud".equals(b)) {
+                continue;
+            }
+            if ("minecraft:snow".equals(b) && "layers=8".equals(states.properties(s))) {
+                continue;
+            }
+            if (!states.has(s, BlockStates.FULL_BLOCK)
+                    || states.has(s, BlockStates.DYNAMIC_SHAPE | BlockStates.CONTEXTUAL_COLLISION)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isSideSturdyToward(int neighborState, BlockFace dirToNeighbor) {
+        if (states.has(neighborState, BlockStates.DYNAMIC_SHAPE)) {
+            return false;
+        }
+        return switch (dirToNeighbor) {
+            case EAST -> states.has(neighborState, BlockStates.STURDY_WEST);
+            case WEST -> states.has(neighborState, BlockStates.STURDY_EAST);
+            case SOUTH -> states.has(neighborState, BlockStates.STURDY_NORTH);
+            case NORTH -> states.has(neighborState, BlockStates.STURDY_SOUTH);
+            default -> false;
+        };
+    }
+
+    private static boolean isExceptionForConnection(String block) {
+        return block.endsWith("_leaves")
+                || block.endsWith("shulker_box")
+                || "minecraft:barrier".equals(block)
+                || "minecraft:carved_pumpkin".equals(block)
+                || "minecraft:jack_o_lantern".equals(block)
+                || "minecraft:melon".equals(block)
+                || "minecraft:pumpkin".equals(block);
+    }
+
+    private static boolean sameFenceFamily(String a, String b) {
+        if (!a.endsWith("_fence") || !b.endsWith("_fence")) {
+            return false;
+        }
+        boolean aNether = "minecraft:nether_brick_fence".equals(a);
+        boolean bNether = "minecraft:nether_brick_fence".equals(b);
+        return aNether == bNether;
+    }
+
+    private static boolean isPaneOrBars(String block) {
+        return "minecraft:iron_bars".equals(block)
+                || "minecraft:glass_pane".equals(block)
+                || block.endsWith("_stained_glass_pane");
+    }
+
+    private static boolean isWall(String block) {
+        return block.endsWith("_wall");
+    }
+
+    private static boolean isFenceGate(String block) {
+        return block.endsWith("_fence_gate");
+    }
+
+    private static boolean fenceGateConnectsTo(String gateProps, BlockFace dirToGate) {
+        String f = propValue(gateProps, "facing");
+        if (f == null) {
+            return false;
+        }
+        boolean gateNS = "north".equals(f) || "south".equals(f);
+        return gateNS ? (dirToGate == BlockFace.EAST || dirToGate == BlockFace.WEST)
+                : (dirToGate == BlockFace.NORTH || dirToGate == BlockFace.SOUTH);
+    }
+
+    private static String propValue(String props, String key) {
+        if (props == null || props.isEmpty()) {
+            return null;
+        }
+        int len = props.length();
+        int klen = key.length();
+        int start = 0;
+        while (start < len) {
+            int comma = props.indexOf(',', start);
+            int end = comma < 0 ? len : comma;
+            if (end - start > klen + 1 && props.regionMatches(start, key, 0, klen) && props.charAt(start + klen) == '=') {
+                return props.substring(start + klen + 1, end);
+            }
+            if (comma < 0) {
+                break;
+            }
+            start = comma + 1;
+        }
+        return null;
+    }
+
+    private static int parsePositiveIntProp(String props, String key) {
+        String v = propValue(props, key);
+        if (v == null || v.isEmpty()) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(v);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static int neighborByFacing(String facing, int east, int west, int south, int north) {
+        return switch (facing) {
+            case "east" -> east;
+            case "west" -> west;
+            case "south" -> south;
+            case "north" -> north;
+            default -> -1;
+        };
+    }
+
+    private static int[] neighborArrayByFacing(String facing, int[] east, int[] west, int[] south, int[] north) {
+        return switch (facing) {
+            case "east" -> east;
+            case "west" -> west;
+            case "south" -> south;
+            case "north" -> north;
+            default -> null;
+        };
+    }
+
+    private static boolean isPerpendicularFacing(String a, String b) {
+        boolean aNS = "north".equals(a) || "south".equals(a);
+        boolean bNS = "north".equals(b) || "south".equals(b);
+        return aNS != bNS;
+    }
+
+    private static String clockWise(String facing) {
+        return switch (facing) {
+            case "north" -> "east";
+            case "east" -> "south";
+            case "south" -> "west";
+            case "west" -> "north";
+            default -> null;
+        };
+    }
+
+    private static String counterClockWise(String facing) {
+        return switch (facing) {
+            case "north" -> "west";
+            case "west" -> "south";
+            case "south" -> "east";
+            case "east" -> "north";
+            default -> null;
+        };
+    }
+
+    private static int facingStepX(String facing) {
+        return "east".equals(facing) ? 1 : ("west".equals(facing) ? -1 : 0);
+    }
+
+    private static int facingStepZ(String facing) {
+        return "south".equals(facing) ? 1 : ("north".equals(facing) ? -1 : 0);
+    }
+
+    private static BlockFace oppositeFace(BlockFace face) {
+        return switch (face) {
+            case DOWN -> BlockFace.UP;
+            case UP -> BlockFace.DOWN;
+            case NORTH -> BlockFace.SOUTH;
+            case SOUTH -> BlockFace.NORTH;
+            case WEST -> BlockFace.EAST;
+            case EAST -> BlockFace.WEST;
+        };
     }
 
     private boolean clickedNeighboursNonReactive(BlockPosition c, int sequence) {
@@ -1496,6 +2509,77 @@ public final class ClientWorld {
                         if (states.has(s, BlockStates.NEIGHBOUR_REACTIVE) && !isDrySlab(s)) {
                             cells.put(key, SAME_BLOCK);
                         }
+                    }
+                }
+            }
+        }
+        resolvedUses.put(sequence, cells);
+    }
+
+    /**
+     * Atomically resolves a multi-cell block use ({@link #placementPlanForItem} or {@link #blockToggleForUse}):
+     * sets {@code plan.primary()} and every cell in {@code plan.extras()} to its exact predicted state, registers
+     * prediction tracking for any extra cell outside the default target neighbourhood (such as a toggled door's
+     * partner half), keeps untouched neighbours as {@link #KEPT}, and marks {@link BlockStates#UPDATE_KEEPS_BLOCK}
+     * neighbours as {@link #SAME_BLOCK}. Passing {@code plan == null} marks every predicted cell as {@link #KEPT}.
+     */
+    public void resolveUseMulti(int sequence, PlacementPlan plan) {
+        if (plan == null) {
+            resolveUse(sequence, null, 0);
+            return;
+        }
+        ServerboundPacket.UseItemOn use = uses.get(sequence);
+        if (use == null) {
+            return;
+        }
+        BlockPosition c = use.position();
+        BlockFace face = use.face();
+        int tx = c.x() + face.stepX();
+        int ty = c.y() + face.stepY();
+        int tz = c.z() + face.stepZ();
+        BlockPosition primaryPos = plan.primary().position();
+        boolean atClicked = primaryPos.x() == c.x() && primaryPos.y() == c.y() && primaryPos.z() == c.z();
+        boolean atTarget = primaryPos.x() == tx && primaryPos.y() == ty && primaryPos.z() == tz;
+        if (!atClicked && !atTarget) {
+            throw new IllegalArgumentException(primaryPos + " is not where use " + sequence + " places");
+        }
+        Map<Long, Integer> cells = new HashMap<>();
+        cells.put(blockKey(c.x(), c.y(), c.z()), KEPT);
+        for (int[] o : PREDICTION_NEIGHBOURS) {
+            cells.put(blockKey(tx + o[0], ty + o[1], tz + o[2]), KEPT);
+        }
+        java.util.Set<Long> explicit = new java.util.HashSet<>();
+        long primaryKey = blockKey(primaryPos.x(), primaryPos.y(), primaryPos.z());
+        cells.put(primaryKey, plan.primary().state());
+        explicit.add(primaryKey);
+        for (Placement extra : plan.extras()) {
+            BlockPosition ep = extra.position();
+            long key = blockKey(ep.x(), ep.y(), ep.z());
+            if (!cells.containsKey(key)) {
+                addPredictionCell(ep.x(), ep.y(), ep.z(), sequence);
+                if (lastEventSequence != Long.MIN_VALUE) {
+                    change(lastEventSequence, ep.x(), ep.y(), ep.z(), ep.x(), ep.y(), ep.z());
+                }
+            }
+            cells.put(key, extra.state());
+            explicit.add(key);
+        }
+        if (atTarget) {
+            int[][] before = useBefore.get(sequence);
+            for (int i = 1; i < PREDICTION_NEIGHBOURS.length; i++) {
+                int[] o = PREDICTION_NEIGHBOURS[i];
+                long key = blockKey(tx + o[0], ty + o[1], tz + o[2]);
+                if (explicit.contains(key)) {
+                    continue;
+                }
+                int[] beside = before == null ? null : before[i + 1];
+                if (beside == null) {
+                    cells.remove(key);
+                    continue;
+                }
+                for (int s : beside) {
+                    if (states.has(s, BlockStates.UPDATE_KEEPS_BLOCK)) {
+                        cells.put(key, SAME_BLOCK);
                     }
                 }
             }

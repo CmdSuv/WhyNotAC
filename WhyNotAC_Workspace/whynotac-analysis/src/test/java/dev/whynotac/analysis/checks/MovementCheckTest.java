@@ -3929,4 +3929,45 @@ class MovementCheckTest {
         assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
         assertEquals(List.of(), evidence);
     }
+
+    @Test
+    void interactiveTrapdoorToggleAndConnectedFencePlacementStayExplained() throws Exception {
+        int closedTrap = STATES.stateOf("minecraft:oak_trapdoor", "facing=north,half=bottom,open=false,powered=false,waterlogged=false");
+        int openTrap = STATES.stateOf("minecraft:oak_trapdoor", "facing=north,half=bottom,open=true,powered=false,waterlogged=false");
+        int isolatedFence = STATES.stateOf("minecraft:oak_fence", "east=false,north=false,south=false,waterlogged=false,west=false");
+        int eastFence = STATES.stateOf("minecraft:oak_fence", "east=true,north=false,south=false,waterlogged=false,west=false");
+        int westFence = STATES.stateOf("minecraft:oak_fence", "east=false,north=false,south=false,waterlogged=false,west=true");
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 64, 0), closedTrap));
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(4, 64, 0), isolatedFence));
+        placed.put(List.of(2, 64, 0), closedTrap);
+        placed.put(List.of(4, 64, 0), isolatedFence);
+        holdItem("minecraft:oak_fence", 16);
+        sync();
+        ticks(3, NONE, 0.0F, 0.0F);
+        int start = ticks.size();
+        // 1. Non-sneaking right-click toggles the wooden trapdoor open without losing tracking
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(2, 64, 0), BlockFace.UP,
+                new Vec3d(2.5, 64.1875, 0.5), false, false, ++blockSequence));
+        int toggleSeq = blockSequence;
+        placed.put(List.of(2, 64, 0), openTrap);
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(2, 64, 0), openTrap));
+        out(new ClientboundPacket.BlockChangedAck(toggleSeq));
+        sync();
+        // 2. Place a connected oak_fence at (5, 64, 0) beside (4, 64, 0) -> updates both fences atomically
+        keybinds.add(new ServerboundPacket.UseItemOn(Hand.MAIN_HAND, new BlockPosition(5, 63, 0), BlockFace.UP,
+                new Vec3d(5.5, 64.0, 0.5), false, false, ++blockSequence));
+        int fenceSeq = blockSequence;
+        placed.put(List.of(5, 64, 0), westFence);
+        placed.put(List.of(4, 64, 0), eastFence);
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(5, 64, 0), westFence));
+        out(new ClientboundPacket.BlockUpdate(new BlockPosition(4, 64, 0), eastFence));
+        out(new ClientboundPacket.BlockChangedAck(fenceSeq));
+        sync();
+        ticks(3, NONE, 0.0F, 0.0F);
+        List<MovementTracker.Tick> segment = ticks.subList(start, ticks.size());
+        assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
+    }
 }

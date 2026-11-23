@@ -2308,10 +2308,47 @@ public final class MovementTracker {
         for (int i = 0; i < slots.length; i++) {
             slots[i] = in.blockUses.get(i).hand() == Hand.MAIN_HAND ? selected : ClientInventory.HOTBAR;
         }
+        boolean allNotSneaking = true;
+        for (Hypothesis h : starts) {
+            if (h.player().keys().shift()) {
+                allNotSneaking = false;
+                break;
+            }
+        }
         BlockStates states = world.states();
         for (int i = 0; i < slots.length; i++) {
             ServerboundPacket.UseItemOn use = in.blockUses.get(i);
             int slot = slots[i];
+            if (allNotSneaking) {
+                String heldForToggle = null;
+                if (slot >= 0 && (unresolvedUseSlots & 1 << slot) == 0 && !views.isEmpty()) {
+                    boolean consistent = true;
+                    String common = null;
+                    for (ClientInventory.View v : views) {
+                        Stack s = slot == ClientInventory.HOTBAR ? v.offhand() : v.hotbar().get(slot);
+                        if (s == null) {
+                            consistent = false;
+                            break;
+                        }
+                        String name = s.isEmpty() ? "" : s.item();
+                        if (common == null) {
+                            common = name;
+                        } else if (!common.equals(name)) {
+                            consistent = false;
+                            break;
+                        }
+                    }
+                    if (consistent) {
+                        heldForToggle = common;
+                    }
+                }
+                ClientWorld.PlacementPlan toggle = world.blockToggleForUse(use.sequence(), unanimousHorizontalFacing(in, starts), heldForToggle);
+                if (toggle != null) {
+                    world.resolveUseMulti(use.sequence(), toggle);
+                    in.resolvedBlockUses = i + 1;
+                    continue;
+                }
+            }
             if (slot < 0) {
                 return "the selected hotbar slot is not known";
             }
@@ -2343,12 +2380,12 @@ public final class MovementTracker {
                 return "not a resolved block item";
             }
             String facing = states.onlyStateOf(prototype.places()) < 0 ? unanimousHorizontalFacing(in, starts) : null;
-            ClientWorld.Placement placed = world.placementForItem(use.sequence(), prototype.places(), facing);
-            if (placed == null) {
+            ClientWorld.PlacementPlan plan = world.placementPlanForItem(use.sequence(), prototype.places(), facing);
+            if (plan == null) {
                 return "the blocks or item state do not decide placement";
             }
-            dev.whynotac.protocol.packet.BlockPosition at = placed.position();
-            int state = placed.state();
+            dev.whynotac.protocol.packet.BlockPosition at = plan.primary().position();
+            int state = plan.primary().state();
             if (entities.mayHaveBuildingBlockerNear(selfId, at.x() - ENTITY_MARGIN, at.y() - ENTITY_MARGIN, at.z() - ENTITY_MARGIN, at.x() + 1 + ENTITY_MARGIN,
                     at.y() + 1 + ENTITY_MARGIN, at.z() + 1 + ENTITY_MARGIN, UNKNOWN_ENTITY_RADIUS)) {
                 return "an entity may be in the way";
@@ -2362,7 +2399,11 @@ public final class MovementTracker {
                 }
                 way = here;
             }
-            world.resolveUse(use.sequence(), way == 1 ? null : at, state);
+            if (way == 1) {
+                world.resolveUse(use.sequence(), null, state);
+            } else {
+                world.resolveUseMulti(use.sequence(), plan);
+            }
             in.resolvedBlockUses = i + 1;
         }
         return null;
