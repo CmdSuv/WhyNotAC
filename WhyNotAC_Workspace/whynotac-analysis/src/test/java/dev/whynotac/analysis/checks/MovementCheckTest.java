@@ -103,6 +103,7 @@ class MovementCheckTest {
     private final List<Admissibility> rejected = new ArrayList<>();
     private final Map<MovementTracker.Outcome, Integer> outcomes = new EnumMap<>(MovementTracker.Outcome.class);
     private final List<MovementTracker.Tick> ticks = new ArrayList<>();
+    private MovementTracker tracker;
     private PlayerSession session;
     private long seq;
     private long now;
@@ -240,7 +241,7 @@ class MovementCheckTest {
                 rejected.add(a);
             }
         }, replicas));
-        MovementTracker tracker = new MovementTracker();
+        tracker = new MovementTracker();
         registry.addListener((s, event) -> {
             MovementTracker.Tick tick = tracker.onEvent(event, replicas.world().world(s), replicas.entities().entities(s), replicas.inventory().inventory(s));
             if (tick != null) {
@@ -3968,6 +3969,77 @@ class MovementCheckTest {
         ticks(3, NONE, 0.0F, 0.0F);
         List<MovementTracker.Tick> segment = ticks.subList(start, ticks.size());
         assertTrue(segment.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(segment));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void chainedWindChargeExplosionsAndMaceBounceStayExplainedWhileAntiKbIsCaught() throws Exception {
+        ticks(3, NONE, 0.0F, 0.0F);
+        int start = ticks.size();
+        // Chained additive WindCharge explosions in a single burst
+        Vec3d kb1 = new Vec3d(0.25, 0.55, 0.0);
+        Vec3d kb2 = new Vec3d(0.15, 0.45, 0.10);
+        out(new ClientboundPacket.Explosion(new Vec3d(0.5, 64.0, 0.5), 1.2F, kb1));
+        out(new ClientboundPacket.Explosion(new Vec3d(0.5, 64.0, 0.5), 1.2F, kb2));
+        sync();
+        player = new PlayerState(player.x(), player.y(), player.z(),
+                player.deltaMovement().add(kb1).add(kb2),
+                player.yRot(), player.xRot(), player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
+                player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(),
+                player.sprintModifier(), player.crouching(), player.pose(), player.keys(), player.noJumpDelay(),
+                player.sprintTriggerTime(), player.autoJumpTime(), player.support(), player.onGroundNoBlocks(),
+                player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(), player.fallFlying(),
+                player.inPowderSnow(), player.inWater(), player.spinAttackTicks());
+        ticks(6, NONE, 0.0F, 0.0F);
+        // Followed by a Mace smash SetEntityMotion upward bounce
+        Vec3d bounce = new Vec3d(0.0, 0.70, 0.0);
+        out(new ClientboundPacket.SetEntityMotion(SELF, bounce, bounce));
+        sync();
+        player = new PlayerState(player.x(), player.y(), player.z(), bounce,
+                player.yRot(), player.xRot(), player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(),
+                player.verticalCollision(), player.verticalCollisionBelow(), player.fallDistance(), player.sprinting(),
+                player.sprintModifier(), player.crouching(), player.pose(), player.keys(), player.noJumpDelay(),
+                player.sprintTriggerTime(), player.autoJumpTime(), player.support(), player.onGroundNoBlocks(),
+                player.stuckSpeedMultiplier(), player.swimming(), player.eyeInWater(), player.fallFlying(),
+                player.inPowderSnow(), player.inWater(), player.spinAttackTicks());
+        ticks(5, NONE, 0.0F, 0.0F);
+        List<MovementTracker.Tick> legit = ticks.subList(start, ticks.size());
+        assertTrue(legit.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(legit));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void platformCosLocksToClientCpuAndFastPostActionAnchorRecoversWithinTwoTicks() throws Exception {
+        // 1. Glide on X86_64 at distinguishing pitch 34.2F locks the session's PlatformCos mask to X86_64
+        platform = PlatformCos.X86_64;
+        glide(4.0F, i -> 34.2F);
+        assertEquals(List.of(), evidence);
+        assertEquals(1 << PlatformCos.X86_64.ordinal(), tracker.lockedCosineMask());
+        assertEquals(0L, tracker.hypothesisOverflows());
+
+        // 2. Lose tracking via an unresolved item-use (holding brush -> self-ending) then send 2 stationary ticks -> fastPostActionAnchor!
+        holdItem("minecraft:brush", 1);
+        sync();
+        // Reset cleanly onto flat ground first
+        player = new PlayerState(4.5, 64.0, 4.5, Vec3d.ZERO, 0.0F, 0.0F, true, false, false, true, true, 0.0,
+                false, false, false, PlayerState.Pose.STANDING, NONE, 0, 0, 0, null, false, Vec3d.ZERO,
+                false, false, false, false, null, 0);
+        teleport(4.5, 64.0, 4.5, 0.0F, 0.0F);
+        ticks(2, NONE, 0.0F, 0.0F);
+        // Trigger unresolved item-use loss (UseItem on self-ending brush)
+        keybinds.add(new ServerboundPacket.UseItem(Hand.MAIN_HAND, ++blockSequence, 0.0F, 0.0F));
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        // Now switch to empty hand so usesAtAnchor succeeds and send 2 exact stationary POS ticks (instead of waiting 12 ticks!)
+        holdItem("minecraft:stone", 1);
+        sync();
+        int recoverStart = ticks.size();
+        in(new ServerboundPacket.MovePlayer(4.5, 64.0, 4.5, 0.0F, 0.0F, true, false, true, false));
+        in(new ServerboundPacket.ClientTickEnd());
+        in(new ServerboundPacket.MovePlayer(4.5, 64.0, 4.5, 0.0F, 0.0F, true, false, true, false));
+        in(new ServerboundPacket.ClientTickEnd());
+        List<MovementTracker.Tick> recovery = ticks.subList(recoverStart, ticks.size());
+        assertTrue(recovery.stream().anyMatch(t -> "anchored: post-action recovery".equals(t.reason())),
+                "Expected fast post-action anchor within 2 stationary ticks: " + recovery);
         assertEquals(List.of(), evidence);
     }
 }

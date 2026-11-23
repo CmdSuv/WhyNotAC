@@ -69,7 +69,7 @@ public final class VelocityCheck implements TimelineListener {
         this.replicas = replicas;
     }
 
-    private record PendingKb(long sentSeq, long sentNano, String source, double vx, double vy, double vz, double horizMag,
+    private record PendingKb(long sentSeq, long sentNano, String source, double vx, double vy, double rawVy, double vz, double horizMag,
             double baseX, double baseY, double baseZ, boolean verticalCandidate, boolean horizontalCandidate) {}
 
     private static final class State {
@@ -275,8 +275,46 @@ public final class VelocityCheck implements TimelineListener {
             case ClientboundPacket.Explosion explosion -> {
                 Vec3d pk = explosion.playerKnockback();
                 if (pk != null && !pk.equals(Vec3d.ZERO)) {
-                    // Overlapping explosions or downward knockback clear prior pending/active checks conservatively
-                    if (state.pending != null || state.activeAcked != null || !pk.isFinite() || pk.y() < 0.0) {
+                    if (!pk.isFinite() || pk.y() < 0.0) {
+                        state.clearKb();
+                    } else if (state.pending != null && "explosion".equals(state.pending.source()) && state.activeAcked == null) {
+                        // Chained WindCharge / explosion knockback before ack: vanilla accumulates deltaMovement.add(pk)
+                        PendingKb prev = state.pending;
+                        Vec3d combined = new Vec3d(prev.vx() + pk.x(), prev.rawVy() + pk.y(), prev.vz() + pk.z());
+                        double effVy = combined.y() - EXPLOSION_GRAVITY_SLACK;
+                        double horizMag = Math.hypot(combined.x(), combined.z());
+                        ClientSelf self = replicas.self().self(session);
+                        ClientWorld world = replicas.world().world(session);
+                        if (world == null || world.hasUnlocatedPrediction() || state.exempt() || self.mayBeCreativeOrSpectator() || self.mayRide()) {
+                            state.clearKb();
+                        } else {
+                            boolean vert = effVy >= MIN_VERTICAL_KB && hasOpenAirAbove(world, prev.baseX(), prev.baseY(), prev.baseZ());
+                            boolean sameDirHoriz = (prev.vx() * pk.x() + prev.vz() * pk.z()) >= -1.0e-6;
+                            boolean horiz = prev.horizontalCandidate() && sameDirHoriz && horizMag >= MIN_HORIZONTAL_KB && effVy >= 0.0
+                                    && hasOpenAirBox(world, prev.baseX(), prev.baseY(), prev.baseZ())
+                                    && noPusherNear(replicas.entities().entities(session), self.selfId(), prev.baseX(), prev.baseY(), prev.baseZ());
+                            if (vert || horiz) {
+                                state.pending = new PendingKb(out.sequence(), out.nanoTime(), "explosion",
+                                        combined.x(), effVy, combined.y(), combined.z(), horizMag,
+                                        prev.baseX(), prev.baseY(), prev.baseZ(), vert, horiz);
+                            } else {
+                                state.clearKb();
+                            }
+                        }
+                    } else if (state.activeAcked != null && "explosion".equals(state.activeAcked.source())) {
+                        // Mid-air follow-up WindCharge explosion (pk.y >= 0): upward rise only increases; guard opposing horizontal vectors
+                        PendingKb active = state.activeAcked;
+                        boolean opposingHoriz = active.horizontalCandidate() && (active.vx() * pk.x() + active.vz() * pk.z()) < 0.0;
+                        if (opposingHoriz) {
+                            if (active.verticalCandidate()) {
+                                state.activeAcked = new PendingKb(active.sentSeq(), active.sentNano(), active.source(),
+                                        active.vx(), active.vy(), active.rawVy(), active.vz(), active.horizMag(),
+                                        active.baseX(), active.baseY(), active.baseZ(), true, false);
+                            } else {
+                                state.clearKb();
+                            }
+                        }
+                    } else if (state.pending != null || state.activeAcked != null) {
                         state.clearKb();
                     } else {
                         armKnockback(session, state, out, "explosion", pk, true);
@@ -309,7 +347,7 @@ public final class VelocityCheck implements TimelineListener {
                 && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
         if (vert || horiz) {
-            state.pending = new PendingKb(out.sequence(), out.nanoTime(), source, v.x(), effVy, v.z(), horizMag,
+            state.pending = new PendingKb(out.sequence(), out.nanoTime(), source, v.x(), effVy, v.y(), v.z(), horizMag,
                     state.lastX, state.lastY, state.lastZ, vert, horiz);
             state.activeAcked = null;
             state.movedUpSinceKb = false;

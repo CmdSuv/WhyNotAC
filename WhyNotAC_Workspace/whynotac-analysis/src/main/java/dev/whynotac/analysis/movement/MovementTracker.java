@@ -224,6 +224,11 @@ public final class MovementTracker {
     private List<Hypothesis> sent = List.of();
     private long pushesFollowed;
     private long rocketBoosts;
+    private long hypothesisOverflows;
+    /** Session-wide narrowed PlatformCos bitmask (reset on Login; pruned once glide cosine distinguishes CPU intrinsic). */
+    private int lockedCosineMask = Hypothesis.ALL_COSINES;
+    /** True when the most recent tracking loss came from a short bounded action (riptide/trident/item-use) eligible for fastPostActionAnchor. */
+    private boolean lostFromShortAction;
     private long since = Long.MIN_VALUE;
     /** While untracked: the player's state as far as the server knows it for certain, and what it last sent. */
     private SelfState base = SelfState.INITIAL;
@@ -1365,7 +1370,13 @@ public final class MovementTracker {
             for (Hypothesis a : starts) {
                 simulate(a, in, view, next, steps, predictions);
                 if (next.size() > MAX_HYPOTHESES) {
-                    throw new Lose("more than " + MAX_HYPOTHESES + " hypotheses");
+                    List<Hypothesis> deduped = merged(next);
+                    next.clear();
+                    next.addAll(deduped);
+                    if (next.size() > MAX_HYPOTHESES) {
+                        hypothesisOverflows++;
+                        throw new Lose("more than " + MAX_HYPOTHESES + " hypotheses");
+                    }
                 }
             }
         } catch (Lose e) {
@@ -1384,11 +1395,19 @@ public final class MovementTracker {
             // the entities that tick after the player, in this same client tick
             hypotheses = merged(new LinkedHashSet<>(borderTicked(pushed(sent, false, view), entities.lastTickRanNormally())));
             if (hypotheses.size() > MAX_HYPOTHESES) {
+                hypothesisOverflows++;
                 throw new Lose("more than " + MAX_HYPOTHESES + " hypotheses");
             }
         } catch (Lose e) {
             lose(e.getMessage()); // this tick is explained; the next one starts untracked
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, 0, since, null, null);
+        }
+        int unionCos = 0;
+        for (Hypothesis h : hypotheses) {
+            unionCos |= h.cosineMask();
+        }
+        if (unionCos != 0 && (lockedCosineMask & unionCos) != 0) {
+            lockedCosineMask &= unionCos;
         }
         return new Tick(number, end.sequence(), end.nanoTime(), Outcome.EXPLAINED, null, hypotheses.size(), since, null, null);
     }
@@ -1616,6 +1635,25 @@ public final class MovementTracker {
         hypotheses = null; // the base goes on from what the server knows for certain
         lostReason = reason;
         quietSincePosition = false;
+        lostFromShortAction = isShortActionLoss(reason);
+    }
+
+    private static boolean isShortActionLoss(String reason) {
+        if (reason == null) {
+            return false;
+        }
+        return reason.contains("riptide") || reason.contains("trident") || reason.contains("self-ending")
+                || reason.contains("item use") || reason.contains("brush") || reason.contains("bundle");
+    }
+
+    /** Number of ticks where tracking was dropped because deduplicated hypotheses still exceeded {@link #MAX_HYPOTHESES}. */
+    public long hypothesisOverflows() {
+        return hypothesisOverflows;
+    }
+
+    /** Session-wide narrowed {@link PlatformCos} bitmask ({@link Hypothesis#ALL_COSINES} until a glide distinguishes CPU cosine). */
+    public int lockedCosineMask() {
+        return lockedCosineMask;
     }
 
     // --- applying what the client was sent -------------------------------------------------------------------------
@@ -1948,15 +1986,16 @@ public final class MovementTracker {
         boolean autoJump = self.firstTick() || (h.autoJumpMask() & Hypothesis.AUTO_JUMP_ON) != 0;
         int window = Integer.numberOfTrailingZeros(h.windowMask());
         PlatformCos[] platforms = PlatformCos.values();
+        int effectiveCosMask = (h.cosineMask() & lockedCosineMask) != 0 ? (h.cosineMask() & lockedCosineMask) : h.cosineMask();
         for (Start begin : starts) {
-            PlatformCos any = platforms[Integer.numberOfTrailingZeros(h.cosineMask())];
+            PlatformCos any = platforms[Integer.numberOfTrailingZeros(effectiveCosMask)];
             OnFoot.Step first = step(begin, keys, view, self, autoJump, window, glider, any, steps);
             if (!first.readCosine()) {
-                successors(h, self, in, begin, first, glider, keys, h.cosineMask(), out, predictions);
+                successors(h, self, in, begin, first, glider, keys, effectiveCosMask, out, predictions);
                 continue;
             }
             // a glide: Math.cos is the client's CPU's; each cosine the platforms still possible give at this pitch is a step
-            for (int left = h.cosineMask(); left != 0; ) {
+            for (int left = effectiveCosMask; left != 0; ) {
                 PlatformCos p = platforms[Integer.numberOfTrailingZeros(left)];
                 long cosine = Double.doubleToRawLongBits(OnFoot.glideCosine(p, begin.player().xRot()));
                 int same = 0;
@@ -2748,6 +2787,11 @@ public final class MovementTracker {
             }
         }
         Hypothesis settled = baseReliable ? settleAnchor(number, in, w, world, entities) : null;
+        boolean fastPostAction = false;
+        if (settled == null && baseReliable && lostFromShortAction) {
+            settled = fastPostActionAnchor(number, in, w, world, entities);
+            fastPostAction = settled != null;
+        }
         List<Hypothesis> uses = settled == null ? null : usesAtAnchor(settled);
         if (uses != null) {
             boolean present = settled.self().speed().holdsSprinting();
@@ -2758,13 +2802,16 @@ public final class MovementTracker {
                 anchored.add(u.withPlayer(withSprintModifier(u.player(), !present)).withSelf(u.self().withSpeed(other)));
             }
             hypotheses = List.copyOf(borderTicked(anchored, entities.lastTickRanNormally())); // the anchor is the state after this tick
+            lostFromShortAction = false;
             lastHands = hands();
             since = end.sequence();
-            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: standing still", hypotheses.size(), since, null, null);
+            String reason = fastPostAction ? "anchored: post-action recovery" : "anchored: standing still";
+            return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, reason, hypotheses.size(), since, null, null);
         }
         List<Hypothesis> running = baseReliable ? runAnchor(number, in, w, world, entities) : null;
         if (running != null) {
             hypotheses = List.copyOf(borderTicked(running, entities.lastTickRanNormally())); // the state after this tick
+            lostFromShortAction = false;
             lastHands = hands();
             since = end.sequence();
             return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: running steadily", hypotheses.size(), since, null,
@@ -2830,7 +2877,11 @@ public final class MovementTracker {
                 baseGameTime = 0L; // a new ClientLevel's game time is 0 until the server's
             }
             switch (packet) {
-                case ClientboundPacket.Login ignored -> baseMayGlide = false;
+                case ClientboundPacket.Login ignored -> {
+                    baseMayGlide = false;
+                    lockedCosineMask = Hypothesis.ALL_COSINES;
+                    lostFromShortAction = false;
+                }
                 case ClientboundPacket.Respawn r when r.dataToKeep() < 0 -> baseMayGlide = true; // what it keeps is not known
                 case ClientboundPacket.Respawn r when (r.dataToKeep() & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) == 0 -> baseMayGlide = false;
                 case ClientboundPacket.SetEntityData data -> {
@@ -2951,7 +3002,7 @@ public final class MovementTracker {
                         SelfState self = mod == present ? baseBefore : baseBefore.withSpeed(baseBefore.speed().setSprinting(mod));
                         PlayerState p = mod == present ? cand : withSprintModifier(cand, mod);
                         Hypothesis baseHyp = new Hypothesis(p, self, startSent, Hypothesis.ALL_WINDOWS,
-                                baseBefore.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY, Hypothesis.ALL_COSINES, baseApplied);
+                                baseBefore.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY, lockedCosineMask, baseApplied);
                         List<Hypothesis> withUses = usesAtAnchor(baseHyp);
                         if (withUses == null) {
                             continue;
@@ -3113,7 +3164,69 @@ public final class MovementTracker {
                 return null;
             }
             return new Hypothesis(first, base, baseSent, Hypothesis.ALL_WINDOWS, base.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY,
-                    Hypothesis.ALL_COSINES, baseApplied);
+                    lockedCosineMask, baseApplied);
+        } catch (Colliders.Unknown | Lose e) {
+            return null;
+        }
+    }
+
+    /**
+     * Fast post-action anchor recovery ({@code PH21-04}): after a short bounded loss (Riptide trident, self-ending
+     * brush/bundle, or unresolved item use), re-anchors in 1-2 stationary on-ground ticks once the client sends an
+     * exact repeated position packet ({@code move.x == lastX && move.y == lastY && move.z == lastZ}) with no keys
+     * held. Because vanilla {@code LivingEntity.aiStep} zeroes any horizontal velocity below {@code 0.003} and any
+     * velocity {@code >= 0.003} strictly moves the position away from {@code lastX/lastZ}, an exact repeated ground
+     * position proves {@code deltaMovement == (0.0, settledY, 0.0)} bit-for-bit without waiting 12 keyless ticks.
+     */
+    private Hypothesis fastPostActionAnchor(long number, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+        ServerboundPacket.MovePlayer move = in.move;
+        if (move == null || !move.hasPosition() || !base.ticking() || w[0] != w[1] || in.unmodelled != null || !in.blockUses.isEmpty()
+                || in.abilities > 0 || in.attacks > 0 || in.moves > 1) {
+            return null;
+        }
+        PlayerState.Keys now = in.input != null ? keys(in.input) : currentKeys;
+        if (lastPositionTick == Long.MIN_VALUE || number - lastPositionTick < 1 || !quietSincePosition
+                || !now.equals(PlayerState.Keys.NONE) || keylessTicks < 1
+                || move.x() != lastX || move.y() != lastY || move.z() != lastZ || !move.onGround()
+                || move.horizontalCollision() || base.outOfScope() != null) {
+            return null;
+        }
+        if (baseMayGlide || lastGlideStart != Long.MIN_VALUE && lastBaseFlags < lastGlideStart
+                || spinMayRun > 0 || sentUnsure || !base.speed().sprintLayoutCanonical()) {
+            return null;
+        }
+        double x = move.x();
+        double y = move.y();
+        double z = move.z();
+        if (world.mayMoveEntitiesIn((int) Math.floor(x) - MOVER_MARGIN, (int) Math.floor(y) - MOVER_MARGIN, (int) Math.floor(z) - MOVER_MARGIN,
+                (int) Math.floor(x) + MOVER_MARGIN, (int) Math.floor(y + 1.8) + MOVER_MARGIN, (int) Math.floor(z) + MOVER_MARGIN, lastPositionSequence)) {
+            return null;
+        }
+        double settled = settledYMotion(base.effects());
+        if (Double.isNaN(settled)) {
+            return null;
+        }
+        View view = new View(world, entities, selfId);
+        PlayerState guess = new PlayerState(x, y, z, new Vec3d(0.0, settled, 0.0), baseSent.yRot(), baseSent.xRot(), true, false, false, true,
+                true, 0.0, baseSent.sprinting(), base.speed().holdsSprinting(), false, PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null,
+                false, Vec3d.ZERO, false, false, false, false, null, 0);
+        try {
+            Box box = guess.box();
+            if (!base.border().known() && !base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
+                return null;
+            }
+            view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
+            OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(), base.effects(),
+                    null, false, PlatformCos.X86_64, base.border().collision(), leatherBoots).withSpinAttack(base.spinAttack());
+            PlayerState first = OnFoot.tick(guess, PlayerState.Keys.NONE, view, conditions);
+            PlayerState again = OnFoot.tick(first, PlayerState.Keys.NONE, view, conditions);
+            if (!first.equals(again) || first.x() != x || first.y() != y || first.z() != z || !first.onGround() || first.horizontalCollision()
+                    || first.deltaMovement().x() != 0.0 || first.deltaMovement().z() != 0.0 || first.deltaMovement().y() != settled
+                    || first.sprinting() != baseSent.sprinting()) {
+                return null;
+            }
+            return new Hypothesis(first, base, baseSent, Hypothesis.ALL_WINDOWS, base.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY,
+                    lockedCosineMask, baseApplied);
         } catch (Colliders.Unknown | Lose e) {
             return null;
         }
@@ -3206,7 +3319,7 @@ public final class MovementTracker {
             PlayerState anchor = runFrom(path, settled, modifier, conditions, view);
             if (anchor != null) {
                 out.add(new Hypothesis(anchor, self, baseSent, Hypothesis.ALL_WINDOWS, self.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY,
-                        Hypothesis.ALL_COSINES, baseApplied));
+                        lockedCosineMask, baseApplied));
             }
         }
         return out.isEmpty() ? null : out;

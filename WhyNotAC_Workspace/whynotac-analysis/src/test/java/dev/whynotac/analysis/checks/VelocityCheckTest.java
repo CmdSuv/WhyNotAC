@@ -329,6 +329,63 @@ final class VelocityCheckTest {
         assertEquals("partial-horizontal-knockback", evidence.get(0).details().get("reason"));
     }
 
+    @Test
+    void chainedWindChargeExplosionsAccumulateAndCatchAntiKbWithoutFalsePositivesOnLegit() {
+        // Legit chained WindCharge explosions: 2 back-to-back additive explosions before ack, player rises cleanly -> 0 FP
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Explosion(new Vec3d(2.5, 64.0, 2.5), 1.2F, new Vec3d(0.25, 0.35, 0.0))));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Explosion(new Vec3d(2.5, 64.0, 2.5), 1.2F, new Vec3d(0.25, 0.35, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(3.0, 64.62, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(3.4, 65.10, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(0, evidence.size(), "Honest chained WindCharge burst must produce 0 FP");
+
+        // Now reset back onto ground and ignore a chained WindCharge explosion pair -> caught as ADVANTAGE_PROOF!
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Explosion(new Vec3d(2.5, 64.0, 2.5), 1.2F, new Vec3d(0.20, 0.25, 0.0))));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Explosion(new Vec3d(2.5, 64.0, 2.5), 1.2F, new Vec3d(0.20, 0.25, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        assertEquals(1, evidence.size(), "Anti-KB ignoring chained WindCharge explosions must be caught");
+        assertEquals("explosion", evidence.get(0).details().get("source"));
+        assertEquals("ignored-vertical-knockback", evidence.get(0).details().get("reason"));
+    }
+
+    @Test
+    void maceSmashMidAirBounceProducesZeroFalsePositives() {
+        // Player falls airborne, lands a Mace smash, server sends upward SetEntityMotion -> must stay 0 FP
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 68.0, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.SetEntityMotion(SELF, new Vec3d(0.0, 0.75, 0.0), new Vec3d(0.0, 0.75, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 68.75, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 69.40, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(0, evidence.size());
+    }
+
     private static byte[] flatChunk() {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         varInt(body, 0);
