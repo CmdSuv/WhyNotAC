@@ -352,6 +352,34 @@ class AimPatternCheckTest {
     }
 
     @Test
+    void linearInterpolationGhostAimbotIsCaughtWhileHumanSinusoidalAimProducesZeroFp() {
+        // 1. Human sinusoidal acceleration/deceleration across 35 combat ticks -> 0 FP
+        float yaw = 0.0F;
+        for (int t = 0; t < 35; t++) {
+            float step = (float) (0.8 + 1.8 * Math.sin(t * 0.45));
+            yaw += Math.max(0.2F, step);
+            if (t % 5 == 0) {
+                attack();
+            }
+            look(yaw, (float) (2.0 * Math.cos(t * 0.3)));
+            tick();
+        }
+        assertTrue(evidence.isEmpty(), "Human sinusoidal combat aim must produce 0 FP: " + evidence);
+
+        // 2. Ghost linear-interpolation aimbot at 0.85 deg/tick (below robotic 1.5 deg threshold) with |ddYaw| <= 0.005
+        for (int t = 0; t < 27; t++) {
+            yaw += 0.85F + (t * 0.005F);
+            if (t % 5 == 0) {
+                attack();
+            }
+            look(yaw, 0.0F);
+            tick();
+        }
+        assertTrue(evidence.stream().anyMatch(e -> "linear-combat-tracking".equals(e.details().get("reason"))),
+                "Expected linear-combat-tracking, got: " + evidence);
+    }
+
+    @Test
     void registeredInChecks() {
         assertEquals(AimPatternCheck.VERSION, Checks.version(AimPatternCheck.ID));
         assertTrue(Checks.all((s, e) -> { }, Replicas.vanilla()).stream().anyMatch(AimPatternCheck.class::isInstance));

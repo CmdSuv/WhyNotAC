@@ -44,7 +44,7 @@ import java.util.TreeMap;
 public final class VelocityCheck implements TimelineListener {
 
     public static final String ID = "velocity-response";
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final double MIN_VERTICAL_KB = 0.12;
     static final double MIN_EXPECTED_RISE_FACTOR = 0.65;
@@ -55,6 +55,8 @@ public final class VelocityCheck implements TimelineListener {
     static final double MAX_VANILLA_GROUND_STRAFE_COUNTER = 0.16;
     static final double MIN_INPUT_HORIZONTAL_KB = 0.44;
     static final double MAX_VANILLA_JUMP_RESET_COUNTER = 0.36;
+    static final double MIN_DELAYED_TICK1_PROJ = 0.25;
+    static final double MAX_DELAYED_TICK2_RETENTION = 0.15;
     static final double EXPLOSION_GRAVITY_SLACK = 0.08;
     static final double FOOTPRINT_HALF_WIDTH = 0.3001;
 
@@ -103,6 +105,11 @@ public final class VelocityCheck implements TimelineListener {
         boolean hadHorizInputSinceKb;
         boolean hadJumpInputSinceKb;
         double maxHorizProj;
+        double prevTickHorizProj;
+        double tick1HorizStepProj;
+        double tick2HorizStepProj;
+        boolean sawTick1Step;
+        boolean sawTick2Step;
 
         PendingKb pending;
         PendingKb activeAcked;
@@ -130,6 +137,11 @@ public final class VelocityCheck implements TimelineListener {
             hadHorizInputSinceKb = false;
             hadJumpInputSinceKb = false;
             maxHorizProj = 0.0;
+            prevTickHorizProj = 0.0;
+            tick1HorizStepProj = 0.0;
+            tick2HorizStepProj = 0.0;
+            sawTick1Step = false;
+            sawTick2Step = false;
             ticksSinceAck = 0;
         }
 
@@ -356,6 +368,11 @@ public final class VelocityCheck implements TimelineListener {
             state.hadHorizInputSinceKb = state.currentHorizInput || state.lastHorizStep > 1.0e-3;
             state.hadJumpInputSinceKb = state.currentJumpInput;
             state.maxHorizProj = 0.0;
+            state.prevTickHorizProj = 0.0;
+            state.tick1HorizStepProj = 0.0;
+            state.tick2HorizStepProj = 0.0;
+            state.sawTick1Step = false;
+            state.sawTick2Step = false;
             state.ticksSinceAck = 0;
         } else {
             state.clearKb();
@@ -422,6 +439,17 @@ public final class VelocityCheck implements TimelineListener {
                         if (kb.horizontalCandidate() && kb.horizMag() > 0.0) {
                             double proj = ((move.x() - kb.baseX()) * kb.vx() + (move.z() - kb.baseZ()) * kb.vz()) / kb.horizMag();
                             state.maxHorizProj = Math.max(state.maxHorizProj, proj);
+                            if (state.activeAcked != null) {
+                                double stepProj = proj - state.prevTickHorizProj;
+                                if (!state.sawTick1Step) {
+                                    state.tick1HorizStepProj = stepProj;
+                                    state.sawTick1Step = true;
+                                } else if (!state.sawTick2Step) {
+                                    state.tick2HorizStepProj = stepProj;
+                                    state.sawTick2Step = true;
+                                }
+                            }
+                            state.prevTickHorizProj = proj;
                             if (move.horizontalCollision()) {
                                 state.horizCollisionSinceKb = true;
                             }
@@ -475,7 +503,15 @@ public final class VelocityCheck implements TimelineListener {
                 && state.maxHorizProj < expectedHorizMin - 1.0e-4
                 && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
-        if (!vertReady && !horizReady) {
+        boolean delayedBrakeEligible = active.horizontalCandidate()
+                && !state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb
+                && !state.horizCollisionSinceKb
+                && state.sawTick1Step && state.tick1HorizStepProj >= MIN_DELAYED_TICK1_PROJ
+                && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
+                && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
+        boolean delayedHorizBrake = delayedBrakeEligible && state.ticksSinceAck >= 1 && state.sawTick2Step
+                && state.tick2HorizStepProj < Math.min(0.05, state.tick1HorizStepProj * MAX_DELAYED_TICK2_RETENTION);
+        if (!vertReady && !horizReady && !delayedBrakeEligible) {
             state.clearKb();
             return;
         }
@@ -484,8 +520,16 @@ public final class VelocityCheck implements TimelineListener {
             PendingKb kb = state.activeAcked;
             double maxRise = state.maxVerticalRise;
             double maxProj = state.maxHorizProj;
+            double step1Proj = state.tick1HorizStepProj;
+            double step2Proj = state.sawTick2Step ? state.tick2HorizStepProj : 0.0;
             boolean stayedOnGround = state.lastOnGround;
+            boolean reportVert = vertReady;
+            boolean reportHoriz = horizReady;
+            boolean reportDelayed = !vertReady && !horizReady && delayedHorizBrake;
             state.clearKb();
+            if (!reportVert && !reportHoriz && !reportDelayed) {
+                return;
+            }
             if (state.lastReportNanos != Long.MIN_VALUE && tickEnd.nanoTime() - state.lastReportNanos < REPORT_INTERVAL_NANOS) {
                 return;
             }
@@ -496,7 +540,7 @@ public final class VelocityCheck implements TimelineListener {
             }
             Map<String, String> details = new TreeMap<>();
             details.put("source", kb.source());
-            if (vertReady) {
+            if (reportVert) {
                 boolean partial = !stayedOnGround || maxRise > 1.0e-3;
                 String reason = partial ? "partial-vertical-knockback" : "ignored-vertical-knockback";
                 details.put("reason", reason);
@@ -509,7 +553,7 @@ public final class VelocityCheck implements TimelineListener {
                         kb.sentSeq(), tickEnd.sequence(), kb.sentNano(), tickEnd.nanoTime(),
                         String.format(Locale.ROOT, "%s vy=%.4f (maxRise=%.4f at y=%.2f)", reason, kb.vy(), maxRise, state.lastY),
                         details, admissibility));
-            } else {
+            } else if (reportHoriz) {
                 boolean partial = maxProj > 1.0e-3;
                 String reason = partial ? "partial-horizontal-knockback" : "ignored-horizontal-knockback";
                 details.put("reason", reason);
@@ -525,6 +569,18 @@ public final class VelocityCheck implements TimelineListener {
                         kb.sentSeq(), tickEnd.sequence(), kb.sentNano(), tickEnd.nanoTime(),
                         String.format(Locale.ROOT, "%s %.4f (projected %.4f, min %.4f)",
                                 reason, kb.horizMag(), maxProj, expectedHorizMin),
+                        details, admissibility));
+            } else {
+                String reason = "delayed-horizontal-knockback";
+                details.put("reason", reason);
+                details.put("expectedHorizontal", String.format(Locale.ROOT, "%.4f", kb.horizMag()));
+                details.put("tick1Projection", String.format(Locale.ROOT, "%.4f", step1Proj));
+                details.put("tick2Projection", String.format(Locale.ROOT, "%.4f", step2Proj));
+                sink.accept(session, new Evidence(
+                        ID, VERSION, EvidenceClass.ADVANTAGE_PROOF,
+                        kb.sentSeq(), tickEnd.sequence(), kb.sentNano(), tickEnd.nanoTime(),
+                        String.format(Locale.ROOT, "%s tick1=%.4f -> tick2=%.4f (abrupt 2nd-tick momentum zeroing)",
+                                reason, step1Proj, step2Proj),
                         details, admissibility));
             }
             state.lastReportNanos = tickEnd.nanoTime();

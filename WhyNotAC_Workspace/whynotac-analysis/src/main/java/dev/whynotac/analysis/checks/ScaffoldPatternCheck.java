@@ -43,7 +43,7 @@ import java.util.TreeMap;
 public final class ScaffoldPatternCheck implements TimelineListener {
 
     public static final String ID = "scaffold-pattern";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     static final double MIN_SNAP_DEGREES = 22.0;
@@ -57,6 +57,17 @@ public final class ScaffoldPatternCheck implements TimelineListener {
     static final double MAX_MEAN_CADENCE_TICKS = 4.5;
     static final double MAX_CADENCE_STD_DEV = 0.10;
 
+    static final int EAGLE_WINDOW = 14;
+    static final double MAX_EAGLE_LEAD_SD = 0.08;
+    static final double MAX_EAGLE_DURATION_SD = 0.08;
+    static final double MAX_EAGLE_MEAN_LEAD = 2.5;
+    static final double MAX_EAGLE_MEAN_DURATION = 4.0;
+
+    static final int PITCH_LOCK_WINDOW = 15;
+    static final int PITCH_LOCK_MAX_GAP_TICKS = 12;
+    static final int PITCH_LOCK_MIN_YAW_MOVES = 10;
+    static final double PITCH_LOCK_MIN_TOTAL_YAW = 15.0;
+
     private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
     private final EvidenceSink sink;
@@ -69,6 +80,8 @@ public final class ScaffoldPatternCheck implements TimelineListener {
 
     private record SnapCandidate(long tick, float preYaw, float prePitch, long seq, long nano) {}
     private record PlaceSample(long tick, long seq, long nano) {}
+    private record EagleCandidate(long placeTick, long sneakStartTick, int leadTicks, long seq, long nano) {}
+    private record EagleSample(int leadTicks, int durationTicks, long seq, long nano) {}
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
@@ -83,6 +96,9 @@ public final class ScaffoldPatternCheck implements TimelineListener {
         long prevNano;
 
         boolean placedBridgeThisTick;
+        boolean distinctBridgePlacedThisTick;
+        long lastBridgeSeq;
+        long lastBridgeNano;
         SnapCandidate pendingSnap;
         final ArrayDeque<long[]> snapbacks = new ArrayDeque<>();
 
@@ -90,6 +106,23 @@ public final class ScaffoldPatternCheck implements TimelineListener {
         long lastBridgeTick = -1L;
         final ArrayDeque<Integer> intervals = new ArrayDeque<>();
         final ArrayDeque<PlaceSample> intervalSamples = new ArrayDeque<>();
+
+        // v2: Eagle / SafeWalk sneak-lead & sneak-duration timing
+        boolean currentShift;
+        long lastSneakStartTick = -1L;
+        EagleCandidate pendingEagle;
+        final ArrayDeque<EagleSample> eagleSamples = new ArrayDeque<>();
+
+        // v2: Zero-dPitch bridge pitch-lock across active yaw turns
+        boolean hasPitchLockRef;
+        float pitchLockRefPitch;
+        float pitchLockLastYaw;
+        long pitchLockLastTick = -1L;
+        long pitchLockStartSeq;
+        long pitchLockStartNano;
+        int pitchLockCount;
+        int pitchLockYawMoves;
+        double pitchLockTotalYaw;
 
         State(PingLedger ledger) {
             this.look = new TickLook(ledger);
@@ -99,15 +132,29 @@ public final class ScaffoldPatternCheck implements TimelineListener {
             return new State(session.pingLedger());
         }
 
+        void resetPitchLock() {
+            hasPitchLockRef = false;
+            pitchLockLastTick = -1L;
+            pitchLockCount = 0;
+            pitchLockYawMoves = 0;
+            pitchLockTotalYaw = 0.0;
+        }
+
         void reset() {
             hasPrevRot = false;
             placedBridgeThisTick = false;
+            distinctBridgePlacedThisTick = false;
             pendingSnap = null;
             snapbacks.clear();
             lastBridgePos = null;
             lastBridgeTick = -1L;
             intervals.clear();
             intervalSamples.clear();
+            currentShift = false;
+            lastSneakStartTick = -1L;
+            pendingEagle = null;
+            eagleSamples.clear();
+            resetPitchLock();
         }
     }
 
@@ -147,6 +194,52 @@ public final class ScaffoldPatternCheck implements TimelineListener {
                 state.look.onAccept(accept);
                 state.reset();
             }
+            case ServerboundPacket.PlayerInput input -> {
+                boolean wasShift = state.currentShift;
+                state.currentShift = input.shift();
+                if (!wasShift && state.currentShift) {
+                    state.lastSneakStartTick = state.tickNumber;
+                } else if (wasShift && !state.currentShift && state.pendingEagle != null) {
+                    EagleCandidate cand = state.pendingEagle;
+                    state.pendingEagle = null;
+                    long releaseAfterPlace = state.tickNumber - cand.placeTick();
+                    long dur = state.tickNumber - cand.sneakStartTick();
+                    if (releaseAfterPlace >= 0 && releaseAfterPlace <= 6 && dur >= 1 && dur <= 8) {
+                        state.eagleSamples.addLast(new EagleSample(cand.leadTicks(), (int) dur, cand.seq(), cand.nano()));
+                        while (state.eagleSamples.size() > EAGLE_WINDOW) {
+                            state.eagleSamples.pollFirst();
+                        }
+                        if (state.eagleSamples.size() == EAGLE_WINDOW) {
+                            RunningMoments leadM = new RunningMoments();
+                            RunningMoments durM = new RunningMoments();
+                            for (EagleSample es : state.eagleSamples) {
+                                leadM.add(es.leadTicks());
+                                durM.add(es.durationTicks());
+                            }
+                            if (leadM.mean() <= MAX_EAGLE_MEAN_LEAD && durM.mean() <= MAX_EAGLE_MEAN_DURATION
+                                    && leadM.sampleStdDev() <= MAX_EAGLE_LEAD_SD
+                                    && durM.sampleStdDev() <= MAX_EAGLE_DURATION_SD) {
+                                EagleSample oldest = state.eagleSamples.peekFirst();
+                                Map<String, String> details = new TreeMap<>();
+                                details.put("reason", "eagle-sneak-macro");
+                                details.put("samples", Integer.toString(EAGLE_WINDOW));
+                                details.put("meanLeadTicks", String.format(Locale.ROOT, "%.3f", leadM.mean()));
+                                details.put("stdDevLeadTicks", String.format(Locale.ROOT, "%.4f", leadM.sampleStdDev()));
+                                details.put("meanDurationTicks", String.format(Locale.ROOT, "%.3f", durM.mean()));
+                                details.put("stdDevDurationTicks", String.format(Locale.ROOT, "%.4f", durM.sampleStdDev()));
+                                if (report(session, state, oldest.seq(), oldest.nano(), in,
+                                        String.format(Locale.ROOT, "robotic Eagle/SafeWalk sneak macro (lead %.2f±%.3f, dur %.2f±%.3f over %d blocks)",
+                                                leadM.mean(), leadM.sampleStdDev(), durM.mean(), durM.sampleStdDev(), EAGLE_WINDOW),
+                                        details)) {
+                                    state.eagleSamples.clear();
+                                }
+                            }
+                        }
+                    } else {
+                        state.eagleSamples.clear();
+                    }
+                }
+            }
             case ServerboundPacket.UseItemOn useOn -> {
                 state.look.onAction();
                 if (useOn.face() != BlockFace.UP) {
@@ -175,6 +268,21 @@ public final class ScaffoldPatternCheck implements TimelineListener {
             return;
         }
         state.lastBridgePos = pos;
+        state.distinctBridgePlacedThisTick = true;
+        state.lastBridgeSeq = in.sequence();
+        state.lastBridgeNano = in.nanoTime();
+        if (state.currentShift && state.lastSneakStartTick >= 0) {
+            long lead = state.tickNumber - state.lastSneakStartTick;
+            if (lead >= 1 && lead <= 4) {
+                state.pendingEagle = new EagleCandidate(state.tickNumber, state.lastSneakStartTick, (int) lead, in.sequence(), in.nanoTime());
+            } else {
+                state.pendingEagle = null;
+                state.eagleSamples.clear();
+            }
+        } else {
+            state.pendingEagle = null;
+            state.eagleSamples.clear();
+        }
 
         if (state.lastBridgeTick >= 0) {
             long gap = state.tickNumber - state.lastBridgeTick;
@@ -223,7 +331,9 @@ public final class ScaffoldPatternCheck implements TimelineListener {
         state.look.onTickEnd(mayRide);
 
         boolean placedThisTick = state.placedBridgeThisTick;
+        boolean distinctPlacedThisTick = state.distinctBridgePlacedThisTick;
         state.placedBridgeThisTick = false;
+        state.distinctBridgePlacedThisTick = false;
 
         List<TickLook.Rotation> candidates = state.look.candidates();
         if (!state.look.loaded() || mayRide || self.mayBeCreativeOrSpectator() || candidates == null || candidates.size() != 1) {
@@ -295,6 +405,46 @@ public final class ScaffoldPatternCheck implements TimelineListener {
         }
         if (placedThisTick && stepDeg >= MIN_SNAP_DEGREES) {
             state.pendingSnap = new SnapCandidate(tick, prevYaw, prevPitch, prevSeq, prevNano);
+        }
+        if (distinctPlacedThisTick) {
+            if (!state.hasPitchLockRef
+                    || tick - state.pitchLockLastTick > PITCH_LOCK_MAX_GAP_TICKS
+                    || Float.compare(currPitch, state.pitchLockRefPitch) != 0) {
+                state.hasPitchLockRef = true;
+                state.pitchLockRefPitch = currPitch;
+                state.pitchLockLastYaw = currYaw;
+                state.pitchLockLastTick = tick;
+                state.pitchLockStartSeq = state.lastBridgeSeq;
+                state.pitchLockStartNano = state.lastBridgeNano;
+                state.pitchLockCount = 1;
+                state.pitchLockYawMoves = 0;
+                state.pitchLockTotalYaw = 0.0;
+            } else {
+                double bridgeYawDelta = Math.abs(VanillaMath.wrapDegrees((double) currYaw - state.pitchLockLastYaw));
+                state.pitchLockLastYaw = currYaw;
+                state.pitchLockLastTick = tick;
+                state.pitchLockCount++;
+                if (bridgeYawDelta >= 1.0) {
+                    state.pitchLockYawMoves++;
+                    state.pitchLockTotalYaw += bridgeYawDelta;
+                }
+                if (state.pitchLockCount >= PITCH_LOCK_WINDOW
+                        && state.pitchLockYawMoves >= PITCH_LOCK_MIN_YAW_MOVES
+                        && state.pitchLockTotalYaw >= PITCH_LOCK_MIN_TOTAL_YAW) {
+                    Map<String, String> details = new TreeMap<>();
+                    details.put("reason", "bridge-pitch-lock");
+                    details.put("placements", Integer.toString(state.pitchLockCount));
+                    details.put("lockedPitch", String.format(Locale.ROOT, "%.4f", state.pitchLockRefPitch));
+                    details.put("yawMoves", Integer.toString(state.pitchLockYawMoves));
+                    details.put("totalYawDegrees", String.format(Locale.ROOT, "%.2f", state.pitchLockTotalYaw));
+                    if (report(session, state, state.pitchLockStartSeq, state.pitchLockStartNano, tickEnd,
+                            String.format(Locale.ROOT, "zero-dPitch bridge lock at %.2f deg across %d placements (%.1f deg yaw turns)",
+                                    state.pitchLockRefPitch, state.pitchLockCount, state.pitchLockTotalYaw),
+                            details)) {
+                        state.resetPitchLock();
+                    }
+                }
+            }
         }
     }
 

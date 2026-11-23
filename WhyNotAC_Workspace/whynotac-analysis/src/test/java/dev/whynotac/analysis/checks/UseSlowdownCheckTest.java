@@ -227,4 +227,43 @@ final class UseSlowdownCheckTest {
         session.deliver(new TimelineEvent.Inbound(seq++, now, 30, new ServerboundPacket.ClientTickEnd()));
         assertEquals(1, evidence.size(), "Sprint after 24-tick consumable window expiry must produce 0 false positives");
     }
+
+    @Test
+    void hungerVerifiedPvpFoodDetectsNoSlowWhenHungryAndProducesZeroFpWhenFull() {
+        List<Stack> slots = new ArrayList<>();
+        for (int i = 0; i < 46; i++) slots.add(Stack.EMPTY);
+        slots.set(36, new Stack("minecraft:cooked_beef", 16, List.of(), List.of(), null, false));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetHeldSlot(0)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerSetContent(0, 1, slots, Stack.EMPTY)));
+        // 1. Full hunger (food == 20): client cannot eat cooked_beef -> UseItem + START_SPRINTING must produce 0 FP!
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetHealth(20.0F, 20, 5.0F)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(101)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.Pong(101)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 101, now, 0));
+
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.UseItem(Hand.MAIN_HAND, 10, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), "Full-hunger UseItem(cooked_beef) + sprint must produce 0 FP");
+
+        // 2. Confirmed hungry (food == 14, acked): eating cooked_beef + START_SPRINTING -> caught!
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetHealth(20.0F, 14, 2.0F)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(102)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.Pong(102)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 102, now, 0));
+
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.UseItem(Hand.MAIN_HAND, 11, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.ClientTickEnd()));
+        assertEquals(1, evidence.size());
+        assertEquals("sprint-while-using", evidence.get(0).details().get("reason"));
+        assertEquals("minecraft:cooked_beef", evidence.get(0).details().get("item"));
+    }
 }

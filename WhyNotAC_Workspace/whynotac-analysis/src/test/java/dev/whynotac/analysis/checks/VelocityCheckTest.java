@@ -386,6 +386,23 @@ final class VelocityCheckTest {
         assertEquals(0, evidence.size());
     }
 
+    @Test
+    void delayedSecondTickHorizontalBrakeIsCaught() {
+        // Stationary player with no input receives horizontal+vertical knockback: takes full tick 1 (+0.40) then brakes to 0 on tick 2!
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.SetEntityMotion(SELF, new Vec3d(0.40, 0.40, 0.0), new Vec3d(0.40, 0.40, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.40, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        // Tick 2: cheater zeros horizontal motion completely (stays at x=2.90 instead of ~3.26)
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.90, 64.71, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertEquals(1, evidence.size());
+        assertEquals("delayed-horizontal-knockback", evidence.get(0).details().get("reason"));
+    }
+
     private static byte[] flatChunk() {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         varInt(body, 0);

@@ -9,6 +9,7 @@ import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.Hand;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.packet.Stack;
+import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
@@ -54,7 +55,7 @@ import java.util.TreeMap;
 public final class UseSlowdownCheck implements TimelineListener {
 
     public static final String ID = "use-item-state";
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
     static final int MAX_CONSUMABLE_HOLD_TICKS = 24;
     private static final Set<String> CONTINUOUS_HOLD_ITEMS = Set.of("minecraft:shield", "minecraft:spyglass");
@@ -65,6 +66,13 @@ public final class UseSlowdownCheck implements TimelineListener {
             "minecraft:milk_bucket",
             "minecraft:honey_bottle",
             "minecraft:ominous_bottle");
+    private static final Set<String> HUNGER_CONSUMABLE_HOLD_ITEMS = Set.of(
+            "minecraft:cooked_beef",
+            "minecraft:golden_carrot",
+            "minecraft:cooked_porkchop",
+            "minecraft:bread",
+            "minecraft:cooked_mutton",
+            "minecraft:cooked_chicken");
     private static final String CONSUMABLE = "minecraft:consumable";
     private static final String FOOD = "minecraft:food";
     private static final String USE_COOLDOWN = "minecraft:use_cooldown";
@@ -81,8 +89,13 @@ public final class UseSlowdownCheck implements TimelineListener {
 
     private static final class State {
         final AdmissibilityTracker admissibility = new AdmissibilityTracker();
+        final PingLedger ledger;
+        final boolean sharedLedger;
         long lastReportNanos = Long.MIN_VALUE;
         int selfId = -1;
+
+        boolean confirmedHungry;
+        long pendingHungrySeq = Long.MIN_VALUE;
 
         boolean releasedInCurrentTick;
         long releaseSeq = -1L;
@@ -104,6 +117,20 @@ public final class UseSlowdownCheck implements TimelineListener {
         int shieldCooldownTicks;
         int spyglassCooldownTicks;
         int anyCooldownTicks;
+
+        State(PingLedger shared) {
+            this.sharedLedger = shared != null;
+            this.ledger = shared != null ? shared : new PingLedger();
+        }
+
+        static State fromSession(PlayerSession session) {
+            return new State(session.pingLedger());
+        }
+
+        void resetHunger() {
+            confirmedHungry = false;
+            pendingHungrySeq = Long.MIN_VALUE;
+        }
 
         void resetTick() {
             releasedInCurrentTick = false;
@@ -130,29 +157,39 @@ public final class UseSlowdownCheck implements TimelineListener {
 
     @Override
     public void onEvent(PlayerSession session, TimelineEvent event) {
-        State state = session.attachment(STATE, State::new);
+        State state = session.attachment(STATE, State::fromSession);
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Gap ignored -> {
                 state.resetTick();
                 state.clearHold();
+                state.resetHunger();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
             }
             case TimelineEvent.Bound bound -> state.selfId = bound.entityId();
-            case TimelineEvent.Outbound out -> onOutbound(state, out.packet());
+            case TimelineEvent.Outbound out -> onOutbound(state, out);
+            case TimelineEvent.Acknowledged ack -> {
+                long pingSeq = state.sharedLedger ? state.ledger.lastMatched() : state.ledger.onAcknowledged(ack.transactionId());
+                if (pingSeq != Long.MIN_VALUE && state.pendingHungrySeq != Long.MIN_VALUE && pingSeq > state.pendingHungrySeq) {
+                    state.confirmedHungry = true;
+                    state.pendingHungrySeq = Long.MIN_VALUE;
+                }
+            }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             default -> { }
         }
     }
 
-    private void onOutbound(State state, ClientboundPacket packet) {
+    private void onOutbound(State state, TimelineEvent.Outbound out) {
+        ClientboundPacket packet = out.packet();
         switch (packet) {
             case ClientboundPacket.Login login -> {
                 state.selfId = login.entityId();
                 state.resetTick();
                 state.clearHold();
+                state.resetHunger();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
@@ -160,9 +197,15 @@ public final class UseSlowdownCheck implements TimelineListener {
             case ClientboundPacket.Respawn ignored -> {
                 state.resetTick();
                 state.clearHold();
+                state.resetHunger();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
+            }
+            case ClientboundPacket.Ping ping -> {
+                if (!state.sharedLedger) {
+                    state.ledger.onPing(ping.id(), out.sequence());
+                }
             }
             case ClientboundPacket.Cooldown cd -> {
                 state.clearHold();
@@ -183,7 +226,14 @@ public final class UseSlowdownCheck implements TimelineListener {
             case ClientboundPacket.ContainerSetSlot ignored -> state.clearHold();
             case ClientboundPacket.SetPlayerInventory ignored -> state.clearHold();
             case ClientboundPacket.SetCursorItem ignored -> state.clearHold();
-            case ClientboundPacket.SetHealth ignored -> state.clearHold();
+            case ClientboundPacket.SetHealth h -> {
+                state.clearHold();
+                if (h.food() >= 20 || !(h.health() > 0.0F)) {
+                    state.resetHunger();
+                } else if (h.food() >= 0 && !state.confirmedHungry) {
+                    state.pendingHungrySeq = out.sequence();
+                }
+            }
             case ClientboundPacket.GameEvent ignored -> state.clearHold();
             case ClientboundPacket.EntityEvent ev when state.selfId >= 0 && ev.entityId() == state.selfId -> state.clearHold();
             case ClientboundPacket.SetEntityData data when state.selfId >= 0 && data.entityId() == state.selfId -> {
@@ -384,7 +434,9 @@ public final class UseSlowdownCheck implements TimelineListener {
             }
             boolean isContinuous = CONTINUOUS_HOLD_ITEMS.contains(stack.item());
             boolean isAlwaysConsumable = ALWAYS_CONSUMABLE_HOLD_ITEMS.contains(stack.item());
-            if ((!isContinuous && !isAlwaysConsumable)
+            boolean isHungryFood = state.confirmedHungry && !self.mayBeCreativeOrSpectator()
+                    && HUNGER_CONSUMABLE_HOLD_ITEMS.contains(stack.item());
+            if ((!isContinuous && !isAlwaysConsumable && !isHungryFood)
                     || stack.added().contains(CONSUMABLE) || stack.removed().contains(CONSUMABLE)
                     || stack.added().contains(FOOD) || stack.removed().contains(FOOD)
                     || stack.added().contains(USE_COOLDOWN)) {
@@ -398,7 +450,8 @@ public final class UseSlowdownCheck implements TimelineListener {
         }
         if ("minecraft:shield".equals(agreed) && state.shieldCooldownTicks > 0
                 || "minecraft:spyglass".equals(agreed) && state.spyglassCooldownTicks > 0
-                || ALWAYS_CONSUMABLE_HOLD_ITEMS.contains(agreed) && state.anyCooldownTicks > 0) {
+                || (ALWAYS_CONSUMABLE_HOLD_ITEMS.contains(agreed) || HUNGER_CONSUMABLE_HOLD_ITEMS.contains(agreed))
+                        && state.anyCooldownTicks > 0) {
             return;
         }
         state.activeHoldUse = true;

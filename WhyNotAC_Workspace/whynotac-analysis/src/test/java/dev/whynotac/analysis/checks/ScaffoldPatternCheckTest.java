@@ -142,6 +142,54 @@ final class ScaffoldPatternCheckTest {
     }
 
     @Test
+    void detectsRoboticEagleSneakMacroAndBridgePitchLockWithZeroFpOnHandsOffGodBridge() {
+        // 1. Legit hands-off straight GodBridge (16 placements at constant pitch 76.5, ZERO yaw movement, varied gaps) -> 0 FP!
+        rotateAndTick(180.0F, 76.5F);
+        int[] legitGaps = {4, 6, 5, 7, 4, 5, 6, 5, 7, 4, 5, 6, 5, 4, 6, 5};
+        for (int i = 0; i < legitGaps.length; i++) {
+            placeBlock(0, 63, 40 + i, BlockFace.NORTH);
+            for (int t = 0; t < legitGaps[i]; t++) {
+                rotateAndTick(180.0F, 76.5F);
+            }
+        }
+        assertTrue(evidence.isEmpty(), "Hands-off straight GodBridge must produce 0 FP: " + evidence);
+
+        // 2. Pitch-locked Scaffold rotating yaw while holding exact dPitch == 0 across 15 placements -> caught!
+        float yaw = 120.0F;
+        for (int i = 0; i < 16; i++) {
+            yaw += (i % 2 == 0) ? 3.2F : -2.1F;
+            placeBlock(10 + i, 63, 10, BlockFace.EAST);
+            rotateAndTick(yaw, 77.25F);
+            for (int t = 0; t < (i % 3) + 3; t++) {
+                rotateAndTick(yaw, 77.25F);
+            }
+        }
+        assertTrue(evidence.stream().anyMatch(e -> "bridge-pitch-lock".equals(e.details().get("reason"))),
+                "Expected bridge-pitch-lock, got: " + evidence);
+
+        // 3. Robotic Eagle / SafeWalk sneak macro: exact 1-tick sneak lead & 2-tick sneak duration across 14 blocks
+        evidence.clear();
+        now += 2_000_000_000L;
+        for (int i = 0; i < 15; i++) {
+            // Press shift on tick 0
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                    new ServerboundPacket.PlayerInput(false, true, false, false, false, true, false)));
+            rotateAndTick(180.0F, 78.0F + (i % 3) * 0.2F);
+            // Place on tick 1 (lead = 1 tick)
+            placeBlock(30 + i, 63, 30, BlockFace.EAST);
+            rotateAndTick(180.0F, 78.0F + (i % 3) * 0.2F);
+            // Release shift on tick 2 (duration = 2 ticks)
+            session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                    new ServerboundPacket.PlayerInput(false, true, false, false, false, false, false)));
+            for (int t = 0; t < (i % 3) + 4; t++) {
+                rotateAndTick(180.0F, 78.0F + (i % 3) * 0.2F);
+            }
+        }
+        assertTrue(evidence.stream().anyMatch(e -> "eagle-sneak-macro".equals(e.details().get("reason"))),
+                "Expected eagle-sneak-macro, got: " + evidence);
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(ScaffoldPatternCheck.VERSION, Checks.version(ScaffoldPatternCheck.ID));
         assertNotNull(Checks.create(ScaffoldPatternCheck.ID, (s, e) -> { }));

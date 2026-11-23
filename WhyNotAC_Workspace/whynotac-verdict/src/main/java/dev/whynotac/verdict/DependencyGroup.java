@@ -30,6 +30,7 @@ public enum DependencyGroup {
             Map.entry("transaction-order", CLOCK_AND_FRAMING),
             Map.entry("timer-balance", CLOCK_AND_FRAMING),
             Map.entry("ping-spoof", CLOCK_AND_FRAMING),
+            Map.entry("blink-burst", CLOCK_AND_FRAMING),
             Map.entry("break-time", BLOCK_TIMING),
             Map.entry("action-grammar", PACKET_GRAMMAR),
             Map.entry("prediction-sequence", PACKET_GRAMMAR),
@@ -40,6 +41,7 @@ public enum DependencyGroup {
             Map.entry("aim-pattern", STATISTICAL_SIGNALS),
             Map.entry("container-timing", STATISTICAL_SIGNALS),
             Map.entry("scaffold-pattern", STATISTICAL_SIGNALS),
+            Map.entry("reach-distribution", STATISTICAL_SIGNALS),
             Map.entry("design-probe", STATISTICAL_SIGNALS));
 
     private final String id;

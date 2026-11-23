@@ -53,7 +53,7 @@ import java.util.TreeMap;
 public final class AimPatternCheck implements TimelineListener {
 
     public static final String ID = "aim-pattern";
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     static final long REPORT_INTERVAL_NANOS = 1_000_000_000L;
 
     // Signal 1: hit-and-snapback
@@ -66,7 +66,13 @@ public final class AimPatternCheck implements TimelineListener {
     static final int ROBOTIC_WINDOW = 25;
     static final double MIN_ROBOTIC_MEAN_DYAW = 1.5;
     static final double MAX_ROBOTIC_STD_DEV = 0.015;
-    static final int COMBAT_ACTIVE_TICKS = 4;
+    static final int COMBAT_ACTIVE_TICKS = 5;
+
+    // Signal 2c: linear-combat-tracking (v3: 2nd-order angular acceleration |ddYaw| <= 0.02 deg over >= 25 steps)
+    static final int LINEAR_WINDOW = 25;
+    static final double MIN_LINEAR_STEP_DYAW = 0.4;
+    static final double MAX_LINEAR_ACCEL_DDYAW = 0.02;
+    static final int MIN_LINEAR_ATTACKS = 3;
 
     // Signal 2b: low-entropy-aim (multi-tick discrete speed locking, e.g. alternating aimbot steps)
     static final int ENTROPY_WINDOW = 32;
@@ -130,6 +136,15 @@ public final class AimPatternCheck implements TimelineListener {
         // Robotic constant-speed & low-entropy combat tracking
         final ArrayDeque<double[]> roboticSamples = new ArrayDeque<>(); // [absDYaw, seq, nano]
         final ArrayDeque<double[]> entropySamples = new ArrayDeque<>(); // [absDYaw, attacked(0/1), seq, nano]
+        // Linear 2nd-order angular acceleration (|ddYaw| <= 0.02) tracking
+        boolean hasPrevCombatDYaw;
+        double prevCombatDYaw;
+        int linearTarget = Integer.MIN_VALUE;
+        int linearStreak;
+        int linearAttacks;
+        long linearStartSeq;
+        long linearStartNano;
+        double linearMaxAbsDdYaw;
 
         // Lattice baseline + combat break
         double prevCleanPitchDelta = Double.NaN;
@@ -253,10 +268,12 @@ public final class AimPatternCheck implements TimelineListener {
         if (inCombat) {
             checkRoboticTracking(session, state, tickEnd, Math.abs(dYaw));
             checkLowEntropyTracking(session, state, tickEnd, Math.abs(dYaw), attackedThisTick);
+            checkLinearCombatTracking(session, state, tickEnd, dYaw, attackedThisTick);
         } else {
             state.roboticSamples.clear();
             state.entropySamples.clear();
             state.currentTarget = Integer.MIN_VALUE;
+            resetLinearTracking(state);
         }
 
         if (!mayHoldSpyglass(replicas.inventory().inventory(session)) && Math.ulp(Math.abs(prevYaw)) <= MAX_LATTICE_ULP) {
@@ -382,6 +399,70 @@ public final class AimPatternCheck implements TimelineListener {
                     String.format(Locale.ROOT, "low-entropy combat aiming (H=%.2f bits, %d bins over %d ticks)",
                             entropy, bins.size(), ENTROPY_WINDOW), details)) {
                 state.entropySamples.clear();
+            }
+        }
+    }
+
+    private static void resetLinearTracking(State state) {
+        state.hasPrevCombatDYaw = false;
+        state.prevCombatDYaw = 0.0;
+        state.linearTarget = Integer.MIN_VALUE;
+        state.linearStreak = 0;
+        state.linearAttacks = 0;
+        state.linearMaxAbsDdYaw = 0.0;
+    }
+
+    private void checkLinearCombatTracking(PlayerSession session, State state, TimelineEvent.Inbound tickEnd,
+                                           double dYaw, boolean attackedThisTick) {
+        if (state.lastAttackTarget != state.linearTarget) {
+            resetLinearTracking(state);
+            state.linearTarget = state.lastAttackTarget;
+        }
+        double absDYaw = Math.abs(dYaw);
+        if (absDYaw < MIN_LINEAR_STEP_DYAW) {
+            resetLinearTracking(state);
+            state.linearTarget = state.lastAttackTarget;
+            return;
+        }
+        if (!state.hasPrevCombatDYaw) {
+            state.hasPrevCombatDYaw = true;
+            state.prevCombatDYaw = dYaw;
+            state.linearStreak = 1;
+            state.linearAttacks = attackedThisTick ? 1 : 0;
+            state.linearStartSeq = tickEnd.sequence();
+            state.linearStartNano = tickEnd.nanoTime();
+            state.linearMaxAbsDdYaw = 0.0;
+            return;
+        }
+        double ddYaw = Math.abs(dYaw - state.prevCombatDYaw);
+        boolean sameDirection = (dYaw * state.prevCombatDYaw) > 0.0;
+        state.prevCombatDYaw = dYaw;
+        if (!sameDirection || ddYaw > MAX_LINEAR_ACCEL_DDYAW) {
+            state.linearStreak = 1;
+            state.linearAttacks = attackedThisTick ? 1 : 0;
+            state.linearStartSeq = tickEnd.sequence();
+            state.linearStartNano = tickEnd.nanoTime();
+            state.linearMaxAbsDdYaw = 0.0;
+            return;
+        }
+        state.linearStreak++;
+        if (attackedThisTick) {
+            state.linearAttacks++;
+        }
+        if (ddYaw > state.linearMaxAbsDdYaw) {
+            state.linearMaxAbsDdYaw = ddYaw;
+        }
+        if (state.linearStreak >= LINEAR_WINDOW && state.linearAttacks >= MIN_LINEAR_ATTACKS) {
+            Map<String, String> details = new TreeMap<>();
+            details.put("reason", "linear-combat-tracking");
+            details.put("steps", Integer.toString(state.linearStreak));
+            details.put("attacks", Integer.toString(state.linearAttacks));
+            details.put("maxAbsDdYaw", format(state.linearMaxAbsDdYaw));
+            details.put("lastAbsDYaw", format(absDYaw));
+            if (report(session, state, state.linearStartSeq, state.linearStartNano, tickEnd,
+                    String.format(Locale.ROOT, "linear-interpolation combat tracking (|ddYaw| <= %.4f deg over %d steps)",
+                            state.linearMaxAbsDdYaw, state.linearStreak), details)) {
+                resetLinearTracking(state);
             }
         }
     }
@@ -559,6 +640,7 @@ public final class AimPatternCheck implements TimelineListener {
         state.roboticSamples.clear();
         state.entropySamples.clear();
         state.currentTarget = Integer.MIN_VALUE;
+        resetLinearTracking(state);
         state.prevCleanPitchDelta = Double.NaN;
         state.combatLatticeSamples.clear();
         state.combatBreakCount = 0;

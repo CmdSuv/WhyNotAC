@@ -38,7 +38,9 @@ public final class Checks {
             Map.entry(VelocityCheck.ID, VelocityCheck::new),
             Map.entry(TimerBalanceCheck.ID, (sink, replicas) -> new TimerBalanceCheck(sink)),
             Map.entry(PingSpoofCheck.ID, (sink, replicas) -> new PingSpoofCheck(sink)),
-            Map.entry(TransactionOrderCheck.ID, (sink, replicas) -> new TransactionOrderCheck(sink)));
+            Map.entry(TransactionOrderCheck.ID, (sink, replicas) -> new TransactionOrderCheck(sink)),
+            Map.entry(BlinkBurstCheck.ID, (sink, replicas) -> new BlinkBurstCheck(sink)),
+            Map.entry(ReachDistributionCheck.ID, ReachDistributionCheck::new));
     private static final Map<String, Integer> VERSIONS = Map.ofEntries(
             Map.entry(TickFramingCheck.ID, TickFramingCheck.VERSION),
             Map.entry(ClientClockCheck.ID, ClientClockCheck.VERSION),
@@ -60,7 +62,9 @@ public final class Checks {
             Map.entry(VelocityCheck.ID, VelocityCheck.VERSION),
             Map.entry(TimerBalanceCheck.ID, TimerBalanceCheck.VERSION),
             Map.entry(PingSpoofCheck.ID, PingSpoofCheck.VERSION),
-            Map.entry(TransactionOrderCheck.ID, TransactionOrderCheck.VERSION));
+            Map.entry(TransactionOrderCheck.ID, TransactionOrderCheck.VERSION),
+            Map.entry(BlinkBurstCheck.ID, BlinkBurstCheck.VERSION),
+            Map.entry(ReachDistributionCheck.ID, ReachDistributionCheck.VERSION));
 
     private Checks() {}
 
@@ -75,7 +79,8 @@ public final class Checks {
                 new InteractAtBoxCheck(sink, replicas),
                 new UseSlowdownCheck(sink, replicas), new VelocityCheck(sink, replicas),
                 new TimerBalanceCheck(sink), new PingSpoofCheck(sink),
-                new TransactionOrderCheck(sink));
+                new TransactionOrderCheck(sink), new BlinkBurstCheck(sink),
+                new ReachDistributionCheck(sink, replicas));
     }
 
     /** The check with this id, behind a fresh set of the replicas it may read, or null. */
