@@ -815,7 +815,7 @@ public class MovementTruth {
             // LocalPlayer.autoJumpEnabled: true until a new player's first sendPosition, then the option (older truth files: off)
             boolean autoJump = firstLoaded || Boolean.TRUE.equals(pre.get("autoJumpEnabled"));
             firstLoaded = false;
-            RecordedSpeed speedBefore = RecordedSpeed.of(f32(pre.get("speed")), (Boolean) pre.get("sprinting"));
+            RecordedSpeed speedBefore = speedAtStart(pre);
             RecordedSpeed speedAfter = RecordedSpeed.of(f32(post.get("speed")), (Boolean) post.get("sprinting"));
             if (speedBefore == null || speedAfter == null) {
                 unknown.merge("a speed attribute other than the base's, frost's and sprinting's", 1L, Long::sum);
@@ -868,7 +868,7 @@ public class MovementTruth {
                     // TridentItem.releaseUsing in this tick's keybinds (the record before the tick holds its push and lift): the
                     // whole tick from the one before, the release the engine's own (the course's trident: riptide III)
                     riptides++;
-                    RecordedSpeed speedPrevious = RecordedSpeed.of(f32(previous.get("speed")), (Boolean) previous.get("sprinting"));
+                    RecordedSpeed speedPrevious = speedAtStart(previous);
                     PlayerState from = state(previous, speedPrevious != null && speedPrevious.sprintModifier());
                     from = new PlayerState(from.x(), from.y(), from.z(), from.deltaMovement(), before.yRot(), before.xRot(), from.onGround(),
                             from.horizontalCollision(), from.minorHorizontalCollision(), from.verticalCollision(), from.verticalCollisionBelow(),
@@ -1492,6 +1492,17 @@ public class MovementTruth {
      * server's {@code tryAddFrost}: {@code -0.05F} times the part frozen, {@code ticksFrozen / 140}), and the sprinting
      * modifier or not. {@link #of} is null where none gives the float, or two that move the player differently do.
      */
+    /**
+     * The speed attribute as the tick starts. {@code LivingEntity.speed} takes the attribute in {@code aiStep}: an
+     * {@code UpdateAttributes} the client processed between ticks is in the attribute before the tick and in the field only
+     * after it (at 640 ms round trip the echo of an earlier sprint stop removed the sprinting modifier of a new sprint). The
+     * record's {@code movementSpeed} is the attribute; older truth files have the field only.
+     */
+    private static RecordedSpeed speedAtStart(Map<String, Object> r) {
+        float recorded = r.containsKey("movementSpeed") ? (float) f64(r.get("movementSpeed")) : f32(r.get("speed"));
+        return RecordedSpeed.of(recorded, (Boolean) r.get("sprinting"));
+    }
+
     record RecordedSpeed(double frost, boolean sprintModifier) implements OnFoot.Speed {
         @Override
         public double value(boolean sprint) {

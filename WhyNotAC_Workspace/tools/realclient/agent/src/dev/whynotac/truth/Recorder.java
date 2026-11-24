@@ -487,6 +487,9 @@ public final class Recorder {
             bool(line, "onGroundNoBlocks", onGroundNoBlocks.getBoolean(player));
             line.append(",\"noJumpDelay\":").append(noJumpDelay.getInt(player));
             f32(line, "speed", speed.getFloat(player));
+            // the attribute itself: the field above takes it in aiStep, so a server's UpdateAttributes processed between ticks
+            // shows here before the tick and in the field only after it
+            f64(line, "movementSpeed", (Double) getAttributeValue.invoke(player, movementSpeed));
             bool(line, "crouching", crouching.getBoolean(player));
             line.append(",\"sprintTriggerTime\":").append(sprintTriggerTime.getInt(player));
             line.append(",\"autoJumpTime\":").append(autoJumpTime.getInt(player));
