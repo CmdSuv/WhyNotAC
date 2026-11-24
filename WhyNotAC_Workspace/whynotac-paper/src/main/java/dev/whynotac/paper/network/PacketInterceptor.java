@@ -46,6 +46,7 @@ public final class PacketInterceptor {
     /** Off after uninstall: the registered listener then does nothing (it is never removed, see install). */
     private volatile boolean enabled;
     private volatile ClientFacts.Policy identityPolicy;
+    private volatile java.util.Set<String> ignoredReconcilePackets = WireObserver.DEFAULT_NOT_RECONCILED_INBOUND;
     private final boolean edgeEnabled;
     private final boolean flushTransactions;
 
@@ -141,6 +142,7 @@ public final class PacketInterceptor {
             WireObserver observer = new WireObserver(session, translator, protocols, logger, upstreamTranslation(channel));
             observer.activeWhile(() -> enabled);
             observer.bracketFlushes(flushTransactions);
+            observer.setIgnoredReconcilePackets(ignoredReconcilePackets);
             pipeline.addBefore(ANCHOR, HANDLER_NAME, new WhyNotChannelHandler(session, translator, observer, logger));
             boolean edge = false;
             if (edgeEnabled && fresh && pipeline.get("splitter") != null && pipeline.get("prepender") != null) {
@@ -227,6 +229,30 @@ public final class PacketInterceptor {
                 logger.log(Level.WARNING, "WhyNotAC could not audit the pipeline of " + player.getName(), e);
             }
         });
+    }
+
+    /** Updates inbound packet type names excluded from wire/game reconciliation for new and live sessions. */
+    public void setIgnoredReconcilePackets(java.util.Collection<String> configured) {
+        java.util.Set<String> merged = new java.util.HashSet<>(WireObserver.DEFAULT_NOT_RECONCILED_INBOUND);
+        if (configured != null) {
+            for (String name : configured) {
+                if (name != null && !name.isBlank()) {
+                    merged.add(name.trim());
+                }
+            }
+        }
+        java.util.Set<String> immutable = java.util.Set.copyOf(merged);
+        this.ignoredReconcilePackets = immutable;
+        for (Connection connection : existingConnections()) {
+            Channel channel = connection.channel;
+            if (channel != null && channel.isOpen()) {
+                channel.eventLoop().execute(() -> {
+                    if (channel.pipeline().get(HANDLER_NAME) instanceof WhyNotChannelHandler handler) {
+                        handler.observer().setIgnoredReconcilePackets(immutable);
+                    }
+                });
+            }
+        }
     }
 
     /** Sends one stand-alone transaction (used every server tick for continuous latency tracking). */

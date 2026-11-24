@@ -1,9 +1,10 @@
 package dev.whynotac.protocol.version;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry of verified Minecraft protocol versions, table bindings, and soundness gates
@@ -62,23 +63,44 @@ public final class SupportedProtocols {
     public static final ProtocolSpec V1_21_11 =
             new ProtocolSpec(774, "1.21.11", true, true, true, VersionedTables.MC_1_21_11);
 
-    private static final Map<Integer, ProtocolSpec> BY_PROTOCOL;
-    private static final Map<String, ProtocolSpec> BY_PROTOCOL_STRING;
+    private static final ConcurrentHashMap<Integer, ProtocolSpec> BY_PROTOCOL = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, ProtocolSpec> BY_PROTOCOL_STRING = new ConcurrentHashMap<>();
 
     static {
-        Map<Integer, ProtocolSpec> byInt = new LinkedHashMap<>();
-        Map<String, ProtocolSpec> byStr = new LinkedHashMap<>();
-        register(byInt, byStr, V1_21_11);
-        BY_PROTOCOL = Collections.unmodifiableMap(byInt);
-        BY_PROTOCOL_STRING = Collections.unmodifiableMap(byStr);
+        registerInternal(V1_21_11);
     }
 
-    private static void register(
-            Map<Integer, ProtocolSpec> byInt,
-            Map<String, ProtocolSpec> byStr,
-            ProtocolSpec spec) {
-        byInt.put(spec.protocolVersion(), spec);
-        byStr.put(Integer.toString(spec.protocolVersion()), spec);
+    private static void registerInternal(ProtocolSpec spec) {
+        BY_PROTOCOL.put(spec.protocolVersion(), spec);
+        BY_PROTOCOL_STRING.put(Integer.toString(spec.protocolVersion()), spec);
+    }
+
+    /**
+     * Registers an additional verified or staged Minecraft protocol specification at runtime
+     * ({@code PROD-14} multi-version extensibility). Built-in {@link #V1_21_11} (774) cannot be overwritten.
+     */
+    public static void registerAdditional(ProtocolSpec spec) {
+        Objects.requireNonNull(spec, "spec");
+        if (spec.protocolVersion() <= 0) {
+            throw new IllegalArgumentException("protocolVersion must be positive: " + spec.protocolVersion());
+        }
+        if (spec.minecraftVersion() == null || spec.minecraftVersion().isBlank()) {
+            throw new IllegalArgumentException("minecraftVersion must not be blank");
+        }
+        Objects.requireNonNull(spec.tables(), "tables");
+        if (spec.protocolVersion() == V1_21_11.protocolVersion()) {
+            throw new IllegalArgumentException("Built-in baseline protocol " + V1_21_11.protocolVersion() + " cannot be overwritten");
+        }
+        registerInternal(spec);
+    }
+
+    /** Package-private test cleanup helper. */
+    static boolean unregisterForTest(int protocolVersion) {
+        if (protocolVersion == V1_21_11.protocolVersion()) {
+            return false;
+        }
+        BY_PROTOCOL_STRING.remove(Integer.toString(protocolVersion));
+        return BY_PROTOCOL.remove(protocolVersion) != null;
     }
 
     private SupportedProtocols() {}
@@ -114,6 +136,6 @@ public final class SupportedProtocols {
     }
 
     public static Map<Integer, ProtocolSpec> all() {
-        return BY_PROTOCOL;
+        return Collections.unmodifiableMap(BY_PROTOCOL);
     }
 }

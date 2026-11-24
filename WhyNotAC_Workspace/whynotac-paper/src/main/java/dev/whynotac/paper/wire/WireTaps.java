@@ -60,18 +60,69 @@ public final class WireTaps {
      * true if something was repaired. Must run on the connection's event loop.
      */
     public static boolean ensurePlacement(ChannelPipeline pipeline) {
+        return ensurePlacement(pipeline, System.nanoTime(), false);
+    }
+
+    /**
+     * Event-driven rate-limited placement repair ({@code <= 4/s} per session, PH25-01). Returns true
+     * if a tap was actually moved (or edge lost), false if already placed or rate-limited.
+     */
+    public static boolean ensurePlacementRateLimited(ChannelPipeline pipeline, long nanoTime) {
+        return ensurePlacement(pipeline, nanoTime, true);
+    }
+
+    /** True when either edge tap is present but no longer directly adjacent to its framing anchor. */
+    static boolean isMisplaced(ChannelPipeline pipeline) {
+        String inAnchor = inboundAnchor(pipeline);
+        String outAnchor = outboundAnchor(pipeline);
+        if (inAnchor == null || outAnchor == null) {
+            return pipeline.get(INBOUND) != null || pipeline.get(OUTBOUND) != null;
+        }
+        List<String> names = pipeline.names();
+        int inIdx = names.indexOf(INBOUND);
+        int outIdx = names.indexOf(OUTBOUND);
+        if (inIdx < 0 || outIdx < 0) {
+            return false;
+        }
+        return inIdx != names.indexOf(inAnchor) + 1 || outIdx != names.indexOf(outAnchor) + 1;
+    }
+
+    private static boolean ensurePlacement(ChannelPipeline pipeline, long nanoTime, boolean enforceRateLimit) {
         ChannelHandler inbound = pipeline.get(INBOUND);
         ChannelHandler outbound = pipeline.get(OUTBOUND);
         if (!(inbound instanceof Inbound tap) || outbound == null) {
             return false; // absent, or left over from another plugin instance (it removes itself)
         }
         WireObserver observer = tap.observer;
+        if (!isMisplaced(pipeline)) {
+            return false;
+        }
+        if (enforceRateLimit && !observer.tryConsumeRepairPermit(nanoTime)) {
+            return false;
+        }
         observer.moving(true);
         try {
             return repair(pipeline, observer);
         } finally {
             observer.moving(false);
         }
+    }
+
+    static void scheduleEventRepairIfMisplaced(ChannelHandlerContext ctx, WireObserver observer, Logger logger) {
+        ChannelPipeline pipeline = ctx.pipeline();
+        if (!isMisplaced(pipeline) || !observer.markRepairScheduled()) {
+            return;
+        }
+        ctx.channel().eventLoop().execute(() -> {
+            observer.clearRepairScheduled();
+            try {
+                ensurePlacementRateLimited(pipeline, System.nanoTime());
+            } catch (RuntimeException e) {
+                if (logger != null) {
+                    logger.log(Level.WARNING, "WhyNotAC event-driven tap placement repair failed", e);
+                }
+            }
+        });
     }
 
     private static boolean repair(ChannelPipeline pipeline, WireObserver observer) {
@@ -136,10 +187,14 @@ public final class WireTaps {
                 remove(ctx.pipeline());
                 return;
             }
+            long now = System.nanoTime();
+            if (observer.shouldProbePlacement(now)) {
+                scheduleEventRepairIfMisplaced(ctx, observer, logger);
+            }
             WireObserver.InboundAction action = WireObserver.InboundAction.CONTINUE;
             if (msg instanceof ByteBuf frame) {
                 try {
-                    action = observer.onWireInbound(frame, System.nanoTime());
+                    action = observer.onWireInbound(frame, now);
                 } catch (RuntimeException | LinkageError e) {
                     failures = report(logger, failures, "inbound frame", e);
                     try {
@@ -153,6 +208,12 @@ public final class WireTaps {
             if (action == WireObserver.InboundAction.DETACH) {
                 remove(ctx.pipeline());
             }
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            scheduleEventRepairIfMisplaced(ctx, observer, logger);
+            ctx.fireChannelActive();
         }
 
         @Override
@@ -177,7 +238,7 @@ public final class WireTaps {
                 ChannelPipeline pipeline = ctx.pipeline();
                 ctx.channel().eventLoop().execute(() -> {
                     try {
-                        ensurePlacement(pipeline);
+                        ensurePlacementRateLimited(pipeline, System.nanoTime());
                     } catch (RuntimeException e) {
                         failures = report(logger, failures, "tap placement", e);
                     }

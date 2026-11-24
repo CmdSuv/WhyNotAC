@@ -227,6 +227,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                     + " (detection quality is lower; meant for measurements and troubleshooting)");
         }
         interceptor = new PacketInterceptor(registry, getLogger(), edge, flushTransactions);
+        interceptor.setIgnoredReconcilePackets(getConfig().getStringList("wire.ignored-reconcile-packets"));
         interceptor.install();
         Bukkit.getScheduler().runTask(this, interceptor::injectExisting); // connections still pending at install time
         Bukkit.getScheduler().runTask(this, () -> Bukkit.getOnlinePlayers().forEach(interceptor::bind));
@@ -498,6 +499,9 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (metricsExporter != null) {
             metricsExporter.updateBearerToken(newBearerToken);
             metricsExporter.setDashboardEnabled(newDashboardEnabled);
+        }
+        if (interceptor != null) {
+            interceptor.setIgnoredReconcilePackets(getConfig().getStringList("wire.ignored-reconcile-packets"));
         }
         boolean probesEnabled = getConfig().getBoolean("ai.active-probes.enabled", false);
         long probeTtl = Math.max(4L, getConfig().getLong("ai.active-probes.ttl-ticks", 10L));

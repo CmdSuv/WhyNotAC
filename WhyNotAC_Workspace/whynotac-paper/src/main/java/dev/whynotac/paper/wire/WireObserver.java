@@ -54,11 +54,15 @@ public final class WireObserver {
     /** Type of the marker recorded when the edge itself failed on a frame whose type it cannot even read. */
     static final String EDGE_FAILURE = "whynotac:edge-failure";
     /**
-     * Inbound types recorded but never reconciled: the game itself may drop them (vanilla skips
+     * Default inbound types recorded but never reconciled: the game itself may drop them (vanilla skips
      * {@code set_creative_mode_slot} with {@code SkipPacketDecoderException} for players without infinite
      * materials), so a missing game-side packet would wrongly be blamed on a plugin.
      */
-    static final java.util.Set<String> NOT_RECONCILED_INBOUND = java.util.Set.of("minecraft:set_creative_mode_slot");
+    public static final java.util.Set<String> DEFAULT_NOT_RECONCILED_INBOUND = java.util.Set.of("minecraft:set_creative_mode_slot");
+    static final java.util.Set<String> NOT_RECONCILED_INBOUND = DEFAULT_NOT_RECONCILED_INBOUND;
+    /** Maximum event-driven pipeline placement self-repairs permitted per session per 1-second window (PH25-01). */
+    public static final int MAX_REPAIRS_PER_SECOND = 4;
+    static final long REPAIR_WINDOW_NANOS = 1_000_000_000L;
     /**
      * How long a packet may be held back by another plugin before it counts as cancelled, once later
      * packets have passed it (see {@link Reconciler}).
@@ -113,6 +117,14 @@ public final class WireObserver {
     private volatile long edgeTransactions;
     private volatile long flushTransactions;
     private volatile long placementRepairs;
+    private volatile long placementRepairRateLimited;
+    private volatile java.util.Set<String> notReconciledInbound = DEFAULT_NOT_RECONCILED_INBOUND;
+    /** Event-loop confined sliding-window timestamps for rate-limiting event-driven placement repairs (<= 4/s). */
+    private final long[] repairTimestamps = new long[MAX_REPAIRS_PER_SECOND];
+    private int repairTimestampCount;
+    private int repairTimestampCursor;
+    private boolean repairScheduled;
+    private long lastPlacementProbeNanos;
 
     public WireObserver(PlayerSession session, PacketTranslator translator, WireProtocols protocols, Logger logger) {
         this(session, translator, protocols, logger, null);
@@ -211,7 +223,7 @@ public final class WireObserver {
             inboundTable = protocols.playServerbound();
         }
         session.onInbound(translated, nanoTime);
-        if (!gameViewLost && !NOT_RECONCILED_INBOUND.contains(typeName)) {
+        if (!gameViewLost && !notReconciledInbound.contains(typeName)) {
             inbound.expect(typeName, translated, nanoTime);
         }
         return InboundAction.CONTINUE;
@@ -514,13 +526,77 @@ public final class WireObserver {
 
     /** A packet the game decoded and is about to process. */
     public void onGameInbound(String type, ServerboundPacket packet, long nanoTime) {
-        if (NOT_RECONCILED_INBOUND.contains(type)) {
+        if (notReconciledInbound.contains(type)) {
             return;
         }
         if (!inbound.match(type, packet, nanoTime)) {
             inboundGameOnly++;
             session.onInboundDivergence(DivergenceKind.GAME_ONLY, packet, nanoTime);
         }
+    }
+
+    /** Updates inbound packet type names excluded from wire/game reconciliation (always retaining vanilla defaults). */
+    public void setIgnoredReconcilePackets(java.util.Collection<String> configured) {
+        java.util.Set<String> merged = new java.util.HashSet<>(DEFAULT_NOT_RECONCILED_INBOUND);
+        if (configured != null) {
+            for (String name : configured) {
+                if (name != null && !name.isBlank()) {
+                    merged.add(name.trim());
+                }
+            }
+        }
+        this.notReconciledInbound = java.util.Set.copyOf(merged);
+    }
+
+    public java.util.Set<String> ignoredReconcilePackets() {
+        return notReconciledInbound;
+    }
+
+    /** Event-loop helper: true if enough time (250 ms) elapsed since the last lightweight placement check. */
+    boolean shouldProbePlacement(long nanoTime) {
+        if (moving || repairScheduled || source != Source.WIRE) {
+            return false;
+        }
+        if (lastPlacementProbeNanos != 0L && (nanoTime - lastPlacementProbeNanos) < 250_000_000L) {
+            return false;
+        }
+        lastPlacementProbeNanos = nanoTime;
+        return true;
+    }
+
+    boolean markRepairScheduled() {
+        if (repairScheduled) {
+            return false;
+        }
+        repairScheduled = true;
+        return true;
+    }
+
+    void clearRepairScheduled() {
+        repairScheduled = false;
+    }
+
+    /**
+     * Sliding-window rate limiter ({@value #MAX_REPAIRS_PER_SECOND} repairs / second per session) so an
+     * adversarial or misbehaving third-party Netty handler cannot cause an infinite pipeline ping-pong spin.
+     */
+    boolean tryConsumeRepairPermit(long nanoTime) {
+        if (repairTimestampCount < MAX_REPAIRS_PER_SECOND) {
+            repairTimestamps[repairTimestampCount++] = nanoTime;
+            return true;
+        }
+        long oldest = repairTimestamps[repairTimestampCursor];
+        if (nanoTime - oldest < REPAIR_WINDOW_NANOS) {
+            placementRepairRateLimited++;
+            return false;
+        }
+        repairTimestamps[repairTimestampCursor] = nanoTime;
+        repairTimestampCursor = (repairTimestampCursor + 1) % MAX_REPAIRS_PER_SECOND;
+        return true;
+    }
+
+    public long placementRepairRateLimited() {
+        return placementRepairRateLimited;
     }
 
     /** The game is about to write these packets (a bundle is several); the edge will match them as they pass. */

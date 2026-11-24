@@ -28,6 +28,12 @@ observation:
   # entity replica is exact with them; without, it keeps every possible order. Leave it on.
   flush-transactions: true
 
+wire:
+  # Inbound packet types recorded by the edge tap but excluded from wire-vs-game reconciliation
+  # (in addition to vanilla minecraft:set_creative_mode_slot) for third-party plugins that rewrite custom packets.
+  ignored-reconcile-packets:
+    - "minecraft:set_creative_mode_slot"
+
 cases:
   # Every finding opens a case: a row in plugins/WhyNotAC/cases.db and a dossier in plugins/WhyNotAC/cases/
   # (re-verifiable offline: java -jar WhyNotAC.jar verify <dossier>). Cases name the player: they are
