@@ -113,6 +113,103 @@ final class AnalysisMutationResilienceTest {
         assertEquals("sustained-ping-rtt-inflation", at15.getFirst().details().get("reason"));
     }
 
+    @Test
+    void blinkBurstThresholdRequiresMinimumRepeatedBurstsAndIgnoresSingleFreeze() {
+        List<Evidence> twoBursts = runBlinkBursts(2);
+        assertTrue(twoBursts.isEmpty(), "2 bursts (< REQUIRED_BURSTS=3) must stay clean");
+        List<Evidence> threeBursts = runBlinkBursts(3);
+        assertEquals(1, threeBursts.size(), "3 bursts must trigger blink-burst");
+        assertEquals("blink-burst", threeBursts.getFirst().check());
+    }
+
+    private static List<Evidence> runBlinkBursts(int bursts) {
+        List<Evidence> found = new ArrayList<>();
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (s, e, t) -> { throw new AssertionError(t); });
+        registry.addListener(new BlinkBurstCheck(capturing(found)));
+        PlayerSession s = openAdmissibleSession(registry);
+        long seq = 20;
+        long now = 2 * SECOND;
+        double x = 2.5;
+        // Normal baseline ticks first
+        for (int i = 0; i < 6; i++) {
+            now += 50_000_000L;
+            x += 0.1;
+            s.deliver(new TimelineEvent.Inbound(seq++, now, i,
+                    new ServerboundPacket.MovePlayer(x, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false)));
+            s.deliver(new TimelineEvent.Inbound(seq++, now, i, new ServerboundPacket.ClientTickEnd()));
+        }
+        for (int b = 0; b < bursts; b++) {
+            now += 450_000_000L; // 450 ms held silence
+            for (int k = 0; k < 10; k++) {
+                now += 1_000_000L; // 1 ms burst flush
+                x += 0.15;
+                s.deliver(new TimelineEvent.Inbound(seq++, now, 10 + b * 20 + k,
+                        new ServerboundPacket.MovePlayer(x, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false)));
+                if (k == 9) {
+                    s.deliver(new TimelineEvent.Inbound(seq++, now, 10 + b * 20 + k,
+                            new ServerboundPacket.InteractEntity(2, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+                }
+                s.deliver(new TimelineEvent.Inbound(seq++, now, 10 + b * 20 + k, new ServerboundPacket.ClientTickEnd()));
+            }
+            for (int r = 0; r < 6; r++) {
+                now += 50_000_000L;
+                x += 0.1;
+                s.deliver(new TimelineEvent.Inbound(seq++, now, 10 + b * 20 + 10 + r,
+                        new ServerboundPacket.MovePlayer(x, 64.0, 2.5, 0.0f, 0.0f, true, false, true, false)));
+                s.deliver(new TimelineEvent.Inbound(seq++, now, 10 + b * 20 + 10 + r, new ServerboundPacket.ClientTickEnd()));
+            }
+        }
+        return found;
+    }
+
+    @Test
+    void useSlowdownV4GatesHungerVerifiedPvpFoodsStrictlyOnAcknowledgedLowFood() {
+        // Full food (food == 20): steak UseItem MUST NOT trigger NoSlow!
+        List<Evidence> fullFood = runSteakSprint(20);
+        assertTrue(fullFood.isEmpty(), "Steak with food==20 must produce 0 findings (client cannot eat)");
+        // Hungry (food == 14): steak UseItem + START_SPRINTING MUST trigger use-item-state!
+        List<Evidence> hungry = runSteakSprint(14);
+        assertEquals(1, hungry.size(), "Steak with acknowledged food<20 + sprint must trigger use-item-state");
+    }
+
+    private static List<Evidence> runSteakSprint(int foodLevel) {
+        List<Evidence> found = new ArrayList<>();
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (s, e, t) -> { throw new AssertionError(t); });
+        Replicas replicas = Replicas.vanilla();
+        replicas.listeners().forEach(registry::addListener);
+        registry.addListener(new UseSlowdownCheck(capturing(found), replicas));
+        PlayerSession s = openAdmissibleSession(registry);
+        long seq = 20;
+        long now = 2 * SECOND;
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:cooked_beef", 16, List.of(), List.of(), null, false));
+        s.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetHeldSlot(0)));
+        s.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerSetContent(0, 1, inv, Stack.EMPTY)));
+        s.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetHealth(20.0f, foodLevel, 2.0f)));
+        s.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(77)));
+        s.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.Pong(77)));
+        s.deliver(new TimelineEvent.Acknowledged(seq++, now, 77, now, 0));
+        s.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.UseItem(dev.whynotac.protocol.packet.Hand.MAIN_HAND, 1, 0.0f, 0.0f)));
+        s.deliver(new TimelineEvent.Inbound(seq++, now + 50_000_000L, 2, new ServerboundPacket.ClientTickEnd()));
+        s.deliver(new TimelineEvent.Inbound(seq++, now + 100_000_000L, 3, new ServerboundPacket.ClientTickEnd()));
+        s.deliver(new TimelineEvent.Inbound(seq++, now + 150_000_000L, 4,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        s.deliver(new TimelineEvent.Inbound(seq++, now + 150_000_000L, 4, new ServerboundPacket.ClientTickEnd()));
+        return found;
+    }
+
+    @Test
+    void reachDistributionAndVelocityV5ThresholdsPreserveSafetyMargins() {
+        assertEquals(40, ReachDistributionCheck.MIN_SAMPLES);
+        assertTrue(ReachDistributionCheck.MIN_MEDIAN >= 2.94);
+        assertTrue(ReachDistributionCheck.MAX_STD_DEV <= 0.03);
+        assertTrue(VelocityCheck.MAX_DELAYED_TICK2_RETENTION <= 0.20,
+                "Delayed tick-2 horizontal halt threshold must remain well below vanilla air drag (~0.91)");
+    }
+
     private static List<Evidence> runSustainedInflation(int samples) {
         List<Evidence> found = new ArrayList<>();
         SessionRegistry registry = new SessionRegistry(Runnable::run, 1, (s, e, t) -> { throw new AssertionError(t); });

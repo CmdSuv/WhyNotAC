@@ -33,24 +33,22 @@ import org.junit.jupiter.api.io.TempDir;
 final class BenchmarkRunnerTest {
 
     @Test
-    void benchmarkSuitePassesAll32ScenariosWithZeroHonestFpAndZeroCheatFn(@TempDir Path tempCorpus) throws Exception {
-        Path corpusDir = Path.of("../cheat-corpus");
-        if (!java.nio.file.Files.isDirectory(corpusDir)) {
-            corpusDir = tempCorpus;
-            BenchmarkRunner.generateCheatCorpus(corpusDir);
-        }
+    void benchmarkSuitePassesAll52ScenariosWithZeroHonestFpAndZeroCheatFn(@TempDir Path tempCorpus) throws Exception {
+        Path corpusDir = tempCorpus;
+        int generated = BenchmarkRunner.generateCheatCorpus(corpusDir);
+        assertTrue(generated >= 16, "Must generate at least 16 adversarial .wnrec corpus files");
         BenchmarkRunner.BenchmarkReport report = BenchmarkRunner.run(Path.of("../regression"), corpusDir);
         assertEquals(0, report.honestFalsePositives(), "Honest recordings must produce 0 false positives");
-        assertTrue(report.cheatRecordings() >= 10, "Must replay at least 10 cheat corpus recordings");
+        assertTrue(report.cheatRecordings() >= 16, "Must replay at least 16 cheat corpus recordings");
         assertEquals(0, report.cheatFalseNegatives(), "Cheat corpus must produce 0 false negatives: " + report.scenarioFindings());
-        assertTrue(report.scenariosTotal() >= 32, "Must run at least 32 scenarios");
+        assertTrue(report.scenariosTotal() >= 50, "Must run at least 50 scenarios (actual=" + report.scenariosTotal() + ")");
         assertEquals(report.scenariosTotal(), report.scenariosPassed(),
                 "All synthetic benchmark scenarios must pass: " + report.scenarioFindings());
         assertTrue(report.allPassed());
     }
 
     @Test
-    void stress500ConcurrentSessionsAcrossAll21ChecksDropsZeroEventsAndZeroFalsePositives() throws Exception {
+    void stress500ConcurrentSessionsAcrossAll23ChecksDropsZeroEventsAndZeroFalsePositives() throws Exception {
         final int sessionsCount = 500;
         AtomicInteger findings = new AtomicInteger();
         AtomicInteger errors = new AtomicInteger();
@@ -67,7 +65,9 @@ final class BenchmarkRunnerTest {
             @Override
             public void rejected(PlayerSession s, String check, Admissibility a) {}
         };
-        Checks.all(sink, replicas).forEach(registry::addListener);
+        var allChecks = Checks.all(sink, replicas);
+        assertEquals(23, allChecks.size(), "All 23 built-in checks must be wired in stress benchmark");
+        allChecks.forEach(registry::addListener);
 
         List<PlayerSession> sessions = new java.util.ArrayList<>(sessionsCount);
         ClientboundPacket.Dimension overworld = new ClientboundPacket.Dimension("minecraft:overworld", -64, 384, false);

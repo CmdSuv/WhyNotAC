@@ -10,6 +10,7 @@
  */
 plugins {
     `java-library`
+    jacoco
 }
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
@@ -65,5 +66,13 @@ tasks.withType<Test>().configureEach {
         events("failed", "skipped")
         showStandardStreams = false
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+tasks.withType<JacocoReport>().configureEach {
+    dependsOn(tasks.withType<Test>())
+    reports {
+        xml.required = true
+        html.required = true
     }
 }

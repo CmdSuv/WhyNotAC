@@ -254,6 +254,12 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("honest-double-slab-merge", null, false, h -> scenarioHonestDoubleSlabMerge(h)));
         scenarioResults.add(measure("honest-instant-break-slime", null, false, h -> scenarioHonestInstantBreakSlime(h)));
         scenarioResults.add(measure("honest-pvp-jump-reset", null, false, h -> scenarioHonestPvpJumpReset(h)));
+        scenarioResults.add(measure("honest-connected-fence-stair-place", null, false, h -> scenarioHonestConnectedFenceStairPlace(h)));
+        scenarioResults.add(measure("honest-windcharge-chained-bounce", null, false, h -> scenarioHonestWindChargeChainedBounce(h)));
+        scenarioResults.add(measure("honest-godbridge-constant-pitch", null, false, h -> scenarioHonestGodBridgeConstantPitch(h)));
+        scenarioResults.add(measure("honest-steak-eating-slowdown", null, false, h -> scenarioHonestSteakEatingSlowdown(h)));
+        scenarioResults.add(measure("honest-pvp-variable-reach-hits", null, false, h -> scenarioHonestPvpVariableReachHits(h)));
+        scenarioResults.add(measure("honest-smooth-manual-aim", null, false, h -> scenarioHonestSmoothManualAim(h)));
         // Deterministic P-A physics/combat checks
         scenarioResults.add(measure("reach-4.2b-violation", "attack-reach", true, h -> scenarioReach(h)));
         scenarioResults.add(measure("aim-off-target-violation", "attack-aim", true, h -> scenarioAimOffTarget(h)));
@@ -263,8 +269,10 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("vertical-anti-kb-0pct", "velocity-response", true, h -> scenarioZeroAntiKb(h)));
         scenarioResults.add(measure("partial-vertical-anti-kb-30pct", "velocity-response", true, h -> scenarioPartialVerticalAntiKb(h)));
         scenarioResults.add(measure("explosion-anti-kb", "velocity-response", true, h -> scenarioExplosionAntiKb(h)));
+        scenarioResults.add(measure("chained-windcharge-antikb", "velocity-response", true, h -> scenarioChainedWindChargeAntiKb(h)));
         scenarioResults.add(measure("horizontal-anti-kb-0pct", "velocity-response", true, h -> scenarioHorizontalAntiKb(h)));
         scenarioResults.add(measure("partial-horizontal-anti-kb-30pct", "velocity-response", true, h -> scenarioPartialHorizontalAntiKb(h)));
+        scenarioResults.add(measure("delayed-horizontal-antikb-tick2", "velocity-response", true, h -> scenarioDelayedHorizontalAntiKb(h)));
         scenarioResults.add(measure("ground-strafe-anti-kb", "velocity-response", true, h -> scenarioGroundStrafeAntiKb(h)));
         // Deterministic P-M grammar/protocol checks
         scenarioResults.add(measure("packet-bounds-hotbar-cursor", "packet-bounds", true, h -> scenarioPacketBounds(h)));
@@ -276,15 +284,24 @@ public final class BenchmarkRunner {
         scenarioResults.add(measure("autoblock-noslow-same-tick", "use-item-state", true, h -> scenarioUseSlowdown(h)));
         scenarioResults.add(measure("shield-autoblock-cross-tick", "use-item-state", true, h -> scenarioCrossTickShieldAutoBlock(h)));
         scenarioResults.add(measure("golden-apple-noslow-sprint", "use-item-state", true, h -> scenarioGoldenAppleNoSlowSprint(h)));
+        scenarioResults.add(measure("pvp-steak-noslow-sprint", "use-item-state", true, h -> scenarioSteakNoSlowSprint(h)));
+        scenarioResults.add(measure("pvp-golden-carrot-noslow-sprint", "use-item-state", true, h -> scenarioGoldenCarrotNoSlowSprint(h)));
         scenarioResults.add(measure("tick-framing-multi-move", "tick-framing", true, h -> scenarioTickFraming(h)));
         scenarioResults.add(measure("transaction-skipped-ping", "transaction-order", true, h -> scenarioTransactionSkippedPing(h)));
         scenarioResults.add(measure("transaction-duplicate-pong", "transaction-order", true, h -> scenarioTransactionDuplicatePong(h)));
+        scenarioResults.add(measure("action-grammar-attack-no-swing", "action-grammar", true, h -> scenarioActionGrammarNoSwing(h)));
+        scenarioResults.add(measure("prediction-sequence-spoof", "prediction-sequence", true, h -> scenarioPredictionSequenceSpoof(h)));
         // Statistical S checks (ALERT only)
         scenarioResults.add(measure("constant-interval-autoclicker", "click-pattern", true, h -> scenarioAutoClicker(h)));
         scenarioResults.add(measure("oscillating-timer-balance", "timer-balance", true, h -> scenarioTimerBalance(h)));
         scenarioResults.add(measure("ping-spoof-backtrack-rtt", "ping-spoof", true, h -> scenarioPingSpoof(h)));
         scenarioResults.add(measure("combat-rtt-drop-backtrack", "ping-spoof", true, h -> scenarioCombatRttDrop(h)));
         scenarioResults.add(measure("symmetric-backtrack-rtt-drop", "ping-spoof", true, h -> scenarioSymmetricCombatRttDrop(h)));
+        scenarioResults.add(measure("blink-burst-freeze-flood", "blink-burst", true, h -> scenarioBlinkBurst(h)));
+        scenarioResults.add(measure("reach-distribution-3.00b-cluster", "reach-distribution", true, h -> scenarioReachDistribution(h)));
+        scenarioResults.add(measure("scaffold-eagle-sneak-macro", "scaffold-pattern", true, h -> scenarioScaffoldEagleMacro(h)));
+        scenarioResults.add(measure("scaffold-bridge-pitch-lock", "scaffold-pattern", true, h -> scenarioScaffoldBridgePitchLock(h)));
+        scenarioResults.add(measure("aim-linear-combat-tracking", "aim-pattern", true, h -> scenarioAimLinearTracking(h)));
 
         int passed = 0;
         for (ScenarioResult r : scenarioResults) {
@@ -366,6 +383,19 @@ public final class BenchmarkRunner {
                     scenarioGoldenAppleNoSlowSprint(h);
                     h.now += 2_000_000_000L;
                     scenarioSymmetricCombatRttDrop(h);
+                }),
+                new CorpusEntry("cheat-blink-burst.wnrec", BenchmarkRunner::scenarioBlinkBurst),
+                new CorpusEntry("cheat-reach-distribution.wnrec", BenchmarkRunner::scenarioReachDistribution),
+                new CorpusEntry("cheat-scaffold-v2.wnrec", h -> {
+                    scenarioScaffoldBridgePitchLock(h);
+                    h.now += 2_000_000_000L;
+                    scenarioScaffoldEagleMacro(h);
+                }),
+                new CorpusEntry("cheat-aim-linear-tracking.wnrec", BenchmarkRunner::scenarioAimLinearTracking),
+                new CorpusEntry("cheat-delayed-kb-steak-noslow.wnrec", h -> {
+                    scenarioDelayedHorizontalAntiKb(h);
+                    h.now += 2_000_000_000L;
+                    scenarioSteakNoSlowSprint(h);
                 }));
         for (CorpusEntry entry : entries) {
             Path file = outputDir.resolve(entry.fileName());
@@ -968,6 +998,368 @@ public final class BenchmarkRunner {
             h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.KeepAlive(dropKaId)));
             h.deliver(new TimelineEvent.Inbound(h.seq++, dropAckTime, 0, new ServerboundPacket.Pong(dropPid)));
             h.deliver(new TimelineEvent.Acknowledged(h.seq++, dropAckTime, dropPid, dropSent, 0));
+        }
+    }
+
+    // --- Phase 26 expanded honest & adversarial scenarios (36..52) ---
+
+    private static void scenarioHonestConnectedFenceStairPlace(Harness h) {
+        // Settle residual velocity so eye is stationary on the placement tick (identical to scenarioHonestDoubleSlabMerge)
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:oak_fence", 16, List.of(), List.of(), null, false));
+        inv.set(37, new Stack("minecraft:oak_stairs", 16, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 9, inv, Stack.EMPTY));
+        h.syncPing();
+        int bx = (int) Math.floor(h.player.x()) + 2;
+        int bz = (int) Math.floor(h.player.z());
+        double eyeX = h.player.x();
+        double eyeY = h.player.y() + 1.62;
+        double eyeZ = h.player.z();
+        double dx = (bx + 0.5) - eyeX;
+        double dy = 64.0 - eyeY;
+        double dz = (bz + 0.5) - eyeZ;
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(Math.atan2(-dy, Math.hypot(dx, dz)));
+        h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        eyeX = h.player.x();
+        eyeY = h.player.y() + 1.62;
+        eyeZ = h.player.z();
+        Vec3d look = Vec3d.viewVector(pitch, yaw);
+        double tHit = (64.0 - eyeY) / look.y();
+        Vec3d hit = new Vec3d(eyeX + look.x() * tHit, 64.0, eyeZ + look.z() * tHit);
+        h.in(new ServerboundPacket.UseItemOn(
+                Hand.MAIN_HAND, new BlockPosition(bx, 63, bz), BlockFace.UP, hit, false, false, 1));
+        h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+        h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+        h.out(new ClientboundPacket.BlockUpdate(
+                new BlockPosition(bx, 64, bz), BlockStates.vanilla().firstStateOf("minecraft:oak_fence")));
+        h.out(new ClientboundPacket.BlockChangedAck(1));
+        h.syncPing();
+        h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+    }
+
+    private static void scenarioHonestWindChargeChainedBounce(Harness h) {
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        // Chained pre-ack WindCharge explosions: vanilla adds knockback onto existing deltaMovement!
+        h.out(new ClientboundPacket.Explosion(new Vec3d(h.player.x(), 63.8, h.player.z()), 1.2f, new Vec3d(0.0, 0.55, 0.0)));
+        h.out(new ClientboundPacket.Explosion(new Vec3d(h.player.x(), 63.8, h.player.z()), 1.2f, new Vec3d(0.0, 0.45, 0.0)));
+        h.syncPing();
+        Vec3d boosted = h.player.deltaMovement().add(0.0, 1.0, 0.0);
+        h.player = new PlayerState(
+                h.player.x(), h.player.y(), h.player.z(), boosted, h.player.yRot(), h.player.xRot(),
+                h.player.onGround(), h.player.horizontalCollision(), h.player.minorHorizontalCollision(),
+                h.player.verticalCollision(), h.player.verticalCollisionBelow(), h.player.fallDistance(),
+                h.player.sprinting(), h.player.sprintModifier(), h.player.crouching(), h.player.pose(),
+                h.player.keys(), h.player.noJumpDelay(), h.player.sprintTriggerTime(), h.player.autoJumpTime(),
+                h.player.support(), h.player.onGroundNoBlocks(), h.player.stuckSpeedMultiplier(),
+                h.player.swimming(), h.player.eyeInWater());
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+    }
+
+    private static void scenarioHonestGodBridgeConstantPitch(Harness h) {
+        // Hands-off straight GodBridge: zero yaw turns, constant 60.0 pitch, varied human intervals, exact vanilla ray hit -> 0 FP
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 60.0f);
+        }
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:stone", 64, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 10, inv, Stack.EMPTY));
+        h.syncPing();
+        double eyeX = h.player.x();
+        double eyeY = h.player.y() + 1.62;
+        double eyeZ = h.player.z();
+        Vec3d look = Vec3d.viewVector(60.0f, 0.0f);
+        double tHit = (64.0 - eyeY) / look.y();
+        Vec3d hit = new Vec3d(eyeX + look.x() * tHit, 64.0, eyeZ + look.z() * tHit);
+        int bx = (int) Math.floor(hit.x());
+        int bz = (int) Math.floor(hit.z());
+        int[] gaps = {5, 7, 6, 8, 5, 6, 7, 5, 8, 6, 5, 7, 6, 5, 7, 6};
+        for (int i = 0; i < gaps.length; i++) {
+            h.in(new ServerboundPacket.UseItemOn(
+                    Hand.MAIN_HAND, new BlockPosition(bx, 63, bz), BlockFace.UP, hit, false, false, i + 1));
+            h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 60.0f);
+            h.out(new ClientboundPacket.BlockUpdate(new BlockPosition(bx, 64, bz), AIR));
+            h.out(new ClientboundPacket.BlockChangedAck(i + 1));
+            h.syncPing();
+            for (int t = 1; t < gaps[i]; t++) {
+                h.stepVanilla(Harness.KEYS_NONE, 0.0f, 60.0f);
+            }
+        }
+    }
+
+    private static void scenarioHonestSteakEatingSlowdown(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:cooked_beef", 16, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 11, inv, Stack.EMPTY));
+        h.out(new ClientboundPacket.SetHealth(20.0f, 14, 2.0f));
+        h.syncPing();
+        h.in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0f, 0.0f));
+        for (int t = 0; t < 10; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        h.in(new ServerboundPacket.PlayerAction(
+                ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, new BlockPosition(0, 0, 0), BlockFace.DOWN, 0));
+        h.tick();
+    }
+
+    private static void scenarioHonestPvpVariableReachHits(Harness h) {
+        // 45 survival hits with realistic spread [1.95..2.85] and varied human attack cadence -> 0 FP across ALL 23 checks!
+        for (int t = 0; t < 4; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        double[] dists = {2.05, 2.42, 2.74, 2.18, 2.86, 1.95, 2.58, 2.31, 2.79};
+        int[] intervals = {5, 8, 6, 9, 4, 7, 10, 5, 6};
+        h.spawnZombie(20, h.player.x(), h.player.y(), h.player.z() + 2.5);
+        for (int i = 0; i < 45; i++) {
+            double d = dists[i % dists.length];
+            double ez = h.player.z() + d + 0.3;
+            h.out(new ClientboundPacket.TeleportEntity(20, new Vec3d(h.player.x(), h.player.y(), ez), Vec3d.ZERO, 0.0f, 0.0f, Set.of(), false));
+            h.syncPing();
+            float yaw = (i % 5 - 2) * 1.1f; // stays well inside zombie hitbox width (+/- 6 deg)
+            float pitch = 1.5f + (i % 4) * 0.9f;
+            h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+            h.in(new ServerboundPacket.InteractEntity(20, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+            h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+            int gap = intervals[i % intervals.length];
+            for (int t = 0; t < gap; t++) {
+                h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+            }
+        }
+    }
+
+    private static void scenarioHonestSmoothManualAim(Harness h) {
+        // Human mouse sweeps with variable acceleration aimed within zombie box + varied cadence -> 0 FP across ALL 23 checks!
+        for (int t = 0; t < 4; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        h.spawnZombie(21, h.player.x(), h.player.y(), h.player.z() + 2.2);
+        float[] yaws = {0.0f, 1.2f, 3.1f, 4.0f, 2.4f, -0.5f, -3.2f, -4.1f, -1.8f, 0.6f, 2.8f, 3.6f, 1.1f, -1.9f, -3.7f, -2.2f};
+        int[] attackAt = {3, 10, 16, 25, 31};
+        int atkIdx = 0;
+        for (int i = 0; i < 34; i++) {
+            float yaw = yaws[i % yaws.length];
+            float pitch = 2.0f + ((i * 7) % 11) * 0.45f;
+            h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+            if (atkIdx < attackAt.length && i == attackAt[atkIdx]) {
+                atkIdx++;
+                h.in(new ServerboundPacket.InteractEntity(21, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+                h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+                h.stepVanilla(Harness.KEYS_NONE, yaw, pitch);
+            }
+        }
+    }
+
+    private static void scenarioChainedWindChargeAntiKb(Harness h) {
+        for (int t = 0; t < 4; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        h.markCheatStart();
+        h.out(new ClientboundPacket.Explosion(new Vec3d(h.player.x(), 63.8, h.player.z()), 1.2f, new Vec3d(0.0, 0.45, 0.0)));
+        h.out(new ClientboundPacket.Explosion(new Vec3d(h.player.x(), 63.8, h.player.z()), 1.2f, new Vec3d(0.0, 0.40, 0.0)));
+        h.syncPing();
+        // Cheater completely ignores both chained WindCharge launches
+        h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y(), h.player.z(), 0.0f, 0.0f, true, false, true, false));
+        h.tick();
+        h.tick();
+    }
+
+    private static void scenarioDelayedHorizontalAntiKb(Harness h) {
+        for (int t = 0; t < 6; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        h.markCheatStart();
+        h.out(ClientboundPacket.SetEntityMotion.sent(1, new Vec3d(0.55, 0.36, 0.0)));
+        h.syncPing();
+        // Tick 1 accepts full horizontal KB (+0.55), then Tick 2 abruptly halts (< 15% of tick 1) with zero input!
+        double x1 = h.player.x() + 0.55;
+        double y1 = h.player.y() + 0.36;
+        h.in(new ServerboundPacket.MovePlayer(x1, y1, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+        h.in(new ServerboundPacket.MovePlayer(x1 + 0.01, y1 + 0.25, h.player.z(), 0.0f, 0.0f, true, false, false, false));
+        h.tick();
+    }
+
+    private static void scenarioSteakNoSlowSprint(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:cooked_beef", 16, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 12, inv, Stack.EMPTY));
+        h.out(new ClientboundPacket.SetHealth(20.0f, 14, 2.0f));
+        h.syncPing();
+        h.in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0f, 0.0f));
+        h.tick();
+        h.tick();
+        h.markCheatStart();
+        h.in(new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0));
+        h.tick();
+    }
+
+    private static void scenarioGoldenCarrotNoSlowSprint(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:golden_carrot", 16, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 13, inv, Stack.EMPTY));
+        h.out(new ClientboundPacket.SetHealth(20.0f, 16, 4.0f));
+        h.syncPing();
+        h.in(new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0f, 0.0f));
+        h.tick();
+        h.tick();
+        h.markCheatStart();
+        h.in(new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0));
+        h.tick();
+    }
+
+    private static void scenarioActionGrammarNoSwing(Harness h) {
+        h.spawnZombie(22, 2.5, 64.0, 4.5);
+        h.markCheatStart();
+        h.in(new ServerboundPacket.InteractEntity(22, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+        h.tick(); // missing Swing in vanilla attack tick
+    }
+
+    private static void scenarioPredictionSequenceSpoof(Harness h) {
+        h.markCheatStart();
+        h.in(new ServerboundPacket.PlayerAction(
+                ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM, new BlockPosition(0, 0, 0), BlockFace.DOWN, 42));
+        h.tick();
+    }
+
+    private static void scenarioBlinkBurst(Harness h) {
+        h.spawnZombie(24, h.player.x() + 2.0, h.player.y(), h.player.z());
+        for (int i = 0; i < 6; i++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        h.markCheatStart();
+        double x = h.player.x();
+        // 3 repeated combat blink cycles: 450 ms wall silence followed by 10 ticks + attack flushed in 10 ms
+        for (int burst = 0; burst < 3; burst++) {
+            h.now += 450_000_000L;
+            for (int k = 0; k < 10; k++) {
+                h.now += 1_000_000L;
+                x += 0.15;
+                h.in(new ServerboundPacket.MovePlayer(x, h.player.y(), h.player.z(), 0.0f, 0.0f, true, false, true, false));
+                if (k == 9) {
+                    h.in(new ServerboundPacket.InteractEntity(24, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+                    h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+                }
+                h.in(new ServerboundPacket.ClientTickEnd());
+                h.noteTick();
+            }
+            for (int r = 0; r < 6; r++) {
+                h.now += 50_000_000L;
+                x += 0.05;
+                h.in(new ServerboundPacket.MovePlayer(x, h.player.y(), h.player.z(), 0.0f, 0.0f, true, false, true, false));
+                h.in(new ServerboundPacket.ClientTickEnd());
+                h.noteTick();
+            }
+        }
+    }
+
+    private static void scenarioReachDistribution(Harness h) {
+        for (int t = 0; t < 4; t++) {
+            h.stepVanilla(Harness.KEYS_NONE, 0.0f, 0.0f);
+        }
+        double px = h.player.x();
+        double py = h.player.y();
+        double pz = h.player.z();
+        // Zombie width=0.6 (half=0.3): center at pz + 0.3 + 2.97 -> exact box distance = 2.970b!
+        h.spawnZombie(25, px, py, pz + 3.27);
+        h.markCheatStart();
+        for (int i = 0; i < 44; i++) {
+            double jitter = ((i % 3) - 1) * 0.008; // [2.962 .. 2.978], median 2.97, stdDev < 0.01
+            h.out(new ClientboundPacket.TeleportEntity(25, new Vec3d(px, py, pz + 3.27 + jitter), Vec3d.ZERO, 0.0f, 0.0f, Set.of(), false));
+            h.syncPing();
+            h.in(new ServerboundPacket.MovePlayer(px, py, pz, 0.0f, 0.0f, true, false, true, false));
+            h.in(new ServerboundPacket.InteractEntity(25, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+            h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+            h.tick();
+            h.tick();
+        }
+    }
+
+    private static void scenarioScaffoldEagleMacro(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:stone", 64, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 14, inv, Stack.EMPTY));
+        h.syncPing();
+        h.markCheatStart();
+        // 15 robotic Eagle / SafeWalk sneak cycles: exact 1-tick sneak lead & 2-tick sneak duration
+        for (int i = 0; i < 15; i++) {
+            float pitch = 78.0f + (i % 3) * 0.2f;
+            h.in(new ServerboundPacket.PlayerInput(false, true, false, false, false, true, false));
+            h.in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 180.0f, pitch, false, true, true, false));
+            h.tick();
+            h.in(new ServerboundPacket.UseItemOn(
+                    Hand.MAIN_HAND, new BlockPosition(30 + i, 63, 30), BlockFace.EAST,
+                    new Vec3d(30.5 + i, 63.5, 30.5), false, false, i + 1));
+            h.in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 180.0f, pitch, false, true, true, false));
+            h.tick();
+            h.in(new ServerboundPacket.PlayerInput(false, true, false, false, false, false, false));
+            for (int t = 0; t < (i % 3) + 4; t++) {
+                h.in(new ServerboundPacket.MovePlayer(Double.NaN, Double.NaN, Double.NaN, 180.0f, pitch, false, true, true, false));
+                h.tick();
+            }
+        }
+    }
+
+    private static void scenarioScaffoldBridgePitchLock(Harness h) {
+        List<Stack> inv = new ArrayList<>(46);
+        for (int i = 0; i < 46; i++) {
+            inv.add(Stack.EMPTY);
+        }
+        inv.set(36, new Stack("minecraft:stone", 64, List.of(), List.of(), null, false));
+        h.out(new ClientboundPacket.ContainerSetContent(0, 15, inv, Stack.EMPTY));
+        h.syncPing();
+        h.markCheatStart();
+        // 14 bridge placements with active yaw turning (diagonal scaffold) and locked pitch 78.2500
+        for (int i = 0; i < 14; i++) {
+            float yaw = 135.0f + (i % 2 == 0 ? 4.5f : -4.5f) + i * 1.2f;
+            h.in(new ServerboundPacket.MovePlayer(2.5 + i * 0.2, 64.0, 2.5 + i * 0.2, yaw, 78.25f, true, true, true, false));
+            h.in(new ServerboundPacket.UseItemOn(
+                    Hand.MAIN_HAND, new BlockPosition(2 + i, 63, 2 + i), BlockFace.EAST,
+                    new Vec3d(3.0 + i, 63.5, 2.5 + i), false, false, i + 1));
+            h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+            h.tick();
+            h.tick();
+        }
+    }
+
+    private static void scenarioAimLinearTracking(Harness h) {
+        h.spawnZombie(26, 2.5, 64.0, 4.5);
+        h.markCheatStart();
+        float yaw = 0.0f;
+        // 28 consecutive combat rotation ticks with exact linear yaw step 2.25 deg/tick (|ddYaw| == 0.0)
+        for (int i = 0; i < 28; i++) {
+            yaw += 2.25f;
+            h.in(new ServerboundPacket.MovePlayer(h.player.x(), h.player.y(), h.player.z(), yaw, 6.0f, false, true, true, false));
+            if (i % 5 == 0) {
+                h.in(new ServerboundPacket.InteractEntity(26, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false));
+                h.in(new ServerboundPacket.Swing(Hand.MAIN_HAND));
+            }
+            h.tick();
         }
     }
 
