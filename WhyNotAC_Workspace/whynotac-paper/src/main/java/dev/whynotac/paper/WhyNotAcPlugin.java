@@ -96,6 +96,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private Alerts alerts;
     private final AtomicLong listenerErrors = new AtomicLong();
     private final TickCost transactionLoop = new TickCost();
+    private final java.util.concurrent.ConcurrentLinkedDeque<MetricsExporter.CaseSummary> recentDashboardCases = new java.util.concurrent.ConcurrentLinkedDeque<>();
     private Diagnostics diagnostics;
 
     @Override
@@ -167,6 +168,20 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         verdict.addCaseListener(aiAdvisor);
         verdict.addCaseListener(cases);
         verdict.addCaseListener(alerts);
+        verdict.addCaseListener(verdictCase -> {
+            PlayerSession.Identity id = verdictCase.session() != null ? verdictCase.session().identity() : null;
+            recentDashboardCases.addFirst(new MetricsExporter.CaseSummary(
+                    verdictCase.id(),
+                    verdictCase.createdEpochMillis(),
+                    id == null || id.name() == null ? "unknown" : id.name(),
+                    verdictCase.evidence().check(),
+                    verdictCase.evidence().evidenceClass().code(),
+                    verdictCase.lifecycle().name(),
+                    verdictCase.evidence().summary()));
+            while (recentDashboardCases.size() > 25) {
+                recentDashboardCases.pollLast();
+            }
+        });
         verdictBridge = new PaperVerdictBridge(this, verdictConfig);
         verdict.addEnforcementListener(verdictBridge);
         try {
@@ -261,10 +276,17 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }
         int metricsPort = getConfig().getInt("observability.metrics-http-port", 0);
         String metricsAuthToken = getConfig().getString("observability.metrics-auth-token", "");
+        boolean dashboardEnabled = getConfig().getBoolean("observability.dashboard-enabled", false);
         if (metricsPort > 0) {
             try {
-                metricsExporter = MetricsExporter.startLocalHttp("127.0.0.1", metricsPort, metricsAuthToken, this::metricsSnapshot);
-                getLogger().info("WhyNotAC OpenMetrics endpoint listening on http://127.0.0.1:" + metricsExporter.boundPort() + "/metrics");
+                if (dashboardEnabled && (metricsAuthToken == null || metricsAuthToken.isBlank())) {
+                    getLogger().warning("WhyNotAC observability.dashboard-enabled=true ignored until a non-empty observability.metrics-auth-token is configured");
+                }
+                metricsExporter = MetricsExporter.startLocalHttp(
+                        "127.0.0.1", metricsPort, metricsAuthToken, dashboardEnabled,
+                        this::metricsSnapshot, this::dashboardStatus);
+                getLogger().info("WhyNotAC OpenMetrics endpoint listening on http://127.0.0.1:" + metricsExporter.boundPort() + "/metrics"
+                        + (metricsExporter.isDashboardActive() ? " (dashboard enabled at /dashboard)" : ""));
             } catch (IOException e) {
                 getLogger().log(Level.WARNING, "WhyNotAC failed to bind metrics HTTP port " + metricsPort, e);
             }
@@ -472,8 +494,10 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             verdict.addCaseListener(alertStreamExporter);
         }
         String newBearerToken = getConfig().getString("observability.metrics-auth-token", "");
+        boolean newDashboardEnabled = getConfig().getBoolean("observability.dashboard-enabled", false);
         if (metricsExporter != null) {
             metricsExporter.updateBearerToken(newBearerToken);
+            metricsExporter.setDashboardEnabled(newDashboardEnabled);
         }
         boolean probesEnabled = getConfig().getBoolean("ai.active-probes.enabled", false);
         long probeTtl = Math.max(4L, getConfig().getLong("ai.active-probes.ttl-ticks", 10L));
@@ -612,7 +636,30 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                 verdict.margins(),
                 health(),
                 liveBudgetYields,
-                aiAdvisor == null ? 0L : aiAdvisor.sessionGapBursts());
+                aiAdvisor == null ? 0L : aiAdvisor.sessionGapBursts(),
+                cases == null ? 0L : cases.batchesCommitted(),
+                cases == null ? 0L : cases.casesBatched(),
+                redisClusterBus == null ? 0L : redisClusterBus.publishedCount(),
+                redisClusterBus == null ? 0L : redisClusterBus.receivedCount());
+    }
+
+    private MetricsExporter.DashboardStatus dashboardStatus() {
+        long nowMs = System.currentTimeMillis();
+        var cb = verdict.circuitBreaker().status(nowMs);
+        var fb = verdict.falseBanBudget().snapshot(nowMs);
+        return new MetricsExporter.DashboardStatus(
+                metricsSnapshot(),
+                cb.tripped(),
+                cb.killSwitchActive(),
+                cb.reason(),
+                fb.recentIncidents(),
+                fb.budgetLimit(),
+                fb.locked(),
+                cases == null ? 0L : cases.batchesCommitted(),
+                cases == null ? 0L : cases.casesBatched(),
+                redisClusterBus == null ? 0L : redisClusterBus.publishedCount(),
+                redisClusterBus == null ? 0L : redisClusterBus.receivedCount(),
+                List.copyOf(recentDashboardCases));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

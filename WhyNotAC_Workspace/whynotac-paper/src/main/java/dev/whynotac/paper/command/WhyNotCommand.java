@@ -4,6 +4,8 @@ import dev.whynotac.ai.AccountBaselineModel;
 import dev.whynotac.ai.AiAdvisor;
 import dev.whynotac.ai.BehavioralFeatureExtractor;
 import dev.whynotac.ai.EValueProcess;
+import dev.whynotac.analysis.cli.HtmlReportRenderer;
+import dev.whynotac.analysis.cli.Tool;
 import dev.whynotac.paper.cases.CaseStore;
 import dev.whynotac.paper.diagnostics.Diagnostics;
 import dev.whynotac.paper.diagnostics.HealthModel;
@@ -347,6 +349,111 @@ public final class WhyNotCommand implements BasicCommand {
                     sender.sendMessage(Component.text("Review rejected: " + e.getMessage(), NamedTextColor.RED));
                 }
             }));
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("report")) {
+            cases.find(args[1], found -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (found.isEmpty()) {
+                    sender.sendMessage(Component.text("No single case starts with " + args[1], NamedTextColor.RED));
+                    return;
+                }
+                CaseStore.StoredCase c = found.get();
+                java.nio.file.Path dossierPath = java.nio.file.Path.of(c.dossier());
+                java.nio.file.Path outHtml = dossierPath.resolveSibling(c.id() + ".html");
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    try {
+                        HtmlReportRenderer.renderPath(dossierPath, outHtml);
+                        Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(Component.text(
+                                "WhyNotAC HTML5 forensic report written: " + outHtml, NamedTextColor.GREEN)));
+                    } catch (java.io.IOException | IllegalArgumentException ex) {
+                        Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(Component.text(
+                                "WhyNotAC report failed: " + ex.getMessage(), NamedTextColor.RED)));
+                    }
+                });
+            }));
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("replay")) {
+            cases.find(args[1], found -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (found.isEmpty()) {
+                    sender.sendMessage(Component.text("No single case starts with " + args[1], NamedTextColor.RED));
+                    return;
+                }
+                CaseStore.StoredCase c = found.get();
+                java.nio.file.Path dossierPath = java.nio.file.Path.of(c.dossier());
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    java.io.ByteArrayOutputStream outBuf = new java.io.ByteArrayOutputStream();
+                    java.io.ByteArrayOutputStream errBuf = new java.io.ByteArrayOutputStream();
+                    int code = Tool.verify(dossierPath,
+                            new java.io.PrintStream(outBuf, true, java.nio.charset.StandardCharsets.UTF_8),
+                            new java.io.PrintStream(errBuf, true, java.nio.charset.StandardCharsets.UTF_8));
+                    String stdout = outBuf.toString(java.nio.charset.StandardCharsets.UTF_8).trim();
+                    String stderr = errBuf.toString(java.nio.charset.StandardCharsets.UTF_8).trim();
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (code == 0) {
+                            sender.sendMessage(Component.text("WhyNotAC replay VERIFIED " + c.id().substring(0, 8) + ": " + stdout,
+                                    NamedTextColor.GREEN));
+                        } else {
+                            sender.sendMessage(Component.text("WhyNotAC replay FAILED (exit=" + code + ") " + c.id().substring(0, 8) + ": "
+                                    + (stderr.isEmpty() ? stdout : stderr), NamedTextColor.RED));
+                        }
+                    });
+                });
+            }));
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("profiles")) {
+            if (storage == null) {
+                sender.sendMessage(Component.text("WhyNotAC storage profiles unavailable", NamedTextColor.RED));
+                return;
+            }
+            UUID targetUuid = resolvePlayerUuid(args[1]);
+            if (targetUuid == null) {
+                sender.sendMessage(Component.text("Unknown player or UUID: " + args[1], NamedTextColor.RED));
+                return;
+            }
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                try {
+                    var foundProfile = storage.profiles().find(targetUuid);
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (foundProfile.isEmpty()) {
+                            sender.sendMessage(Component.text("No persisted WhyNotAC profile for " + args[1] + " (" + targetUuid + ")",
+                                    NamedTextColor.YELLOW));
+                            return;
+                        }
+                        var p = foundProfile.get();
+                        var cov = p.combatCovariance();
+                        sender.sendMessage(Component.text("WhyNotAC profile " + args[1] + " (" + targetUuid + "):", NamedTextColor.GOLD));
+                        sender.sendMessage(Component.text("  cases=" + p.totalCases() + " autoBans=" + p.autoBansIssued()
+                                + " overturned=" + p.overturnedCount()
+                                + " falseBanIncidents=" + p.falseBanIncidentTimestamps().size()
+                                + " baselineFeatures=" + p.baselineFeatures().size()
+                                + " covariance=" + (cov == null ? "none" : cov.dim() + "x" + cov.dim() + " (n=" + cov.count() + ")"),
+                                NamedTextColor.GRAY));
+                        p.baselineFeatures().forEach((name, fs) -> sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                                "  feature %s: n=%d mean=%.4f var=%.4f", name, fs.count(), fs.mean(), fs.sampleVariance()),
+                                NamedTextColor.GRAY)));
+                    });
+                } catch (java.io.IOException ex) {
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(Component.text(
+                            "WhyNotAC profile read failed: " + ex.getMessage(), NamedTextColor.RED)));
+                }
+            });
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("ledger") && args[1].equalsIgnoreCase("rotate")) {
+            if (storage == null) {
+                sender.sendMessage(Component.text("WhyNotAC storage ledger unavailable", NamedTextColor.RED));
+                return;
+            }
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                try {
+                    Optional<java.nio.file.Path> archived = storage.ledger().rotateIfExceeds(1L, System.currentTimeMillis());
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (archived.isPresent()) {
+                            sender.sendMessage(Component.text("WhyNotAC audit ledger rotated -> " + archived.get().getFileName()
+                                    + " (signed #checkpoint written)", NamedTextColor.GREEN));
+                        } else {
+                            sender.sendMessage(Component.text("WhyNotAC audit ledger has no entries to rotate", NamedTextColor.YELLOW));
+                        }
+                    });
+                } catch (java.io.IOException ex) {
+                    Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(Component.text(
+                            "WhyNotAC ledger rotation failed: " + ex.getMessage(), NamedTextColor.RED)));
+                }
+            });
         } else if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
             String summary = reloader.apply(sender.getName());
             sender.sendMessage(Component.text("WhyNotAC configuration reloaded: " + summary, NamedTextColor.GREEN));
@@ -358,8 +465,21 @@ public final class WhyNotCommand implements BasicCommand {
             }
             inspectAi(sender, target);
         } else {
-            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac metrics | /whynotac network | /whynotac cases | /whynotac case <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac verdict | /whynotac reload | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
+            sender.sendMessage(Component.text("/whynotac inspect <player> | /whynotac ai <player> | /whynotac profiles <player|uuid> | /whynotac pipeline <player> | /whynotac world <player> | /whynotac entities <player> | /whynotac inventory <player> | /whynotac self <player> | /whynotac sessions | /whynotac stats | /whynotac health | /whynotac metrics | /whynotac network | /whynotac cases | /whynotac case <id> | /whynotac report <id> | /whynotac replay <id> | /whynotac review <id> [pass1|confirm|appeal|uphold|overturn] | /whynotac audit | /whynotac ledger rotate | /whynotac verdict | /whynotac reload | /whynotac killswitch [on|off] | /whynotac circuit [status|reset] | /whynotac privacy find|forget <uuid> [--yes]",
                     NamedTextColor.YELLOW));
+        }
+    }
+
+    private static UUID resolvePlayerUuid(String arg) {
+        Player online = Bukkit.getPlayerExact(arg);
+        if (online != null) {
+            return online.getUniqueId();
+        }
+        try {
+            return UUID.fromString(arg);
+        } catch (IllegalArgumentException ignored) {
+            var cached = Bukkit.getOfflinePlayerIfCached(arg);
+            return cached != null ? cached.getUniqueId() : null;
         }
     }
 
@@ -446,16 +566,24 @@ public final class WhyNotCommand implements BasicCommand {
     @Override
     public Collection<String> suggest(CommandSourceStack source, String[] args) {
         if (args.length <= 1) {
-            return List.of("inspect", "ai", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "health",
-                    "metrics", "network", "cases", "case", "review", "audit", "verdict", "reload", "killswitch", "circuit");
+            return List.of("inspect", "ai", "profiles", "pipeline", "world", "entities", "inventory", "self", "sessions", "stats", "health",
+                    "metrics", "network", "cases", "case", "report", "replay", "review", "audit", "ledger", "verdict", "reload",
+                    "killswitch", "circuit", "privacy");
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("review")) {
             return List.of("status", "pass1", "confirm", "appeal", "uphold", "overturn");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("ai")
-                || args[0].equalsIgnoreCase("pipeline") || args[0].equalsIgnoreCase("world")
-                || args[0].equalsIgnoreCase("entities") || args[0].equalsIgnoreCase("inventory") || args[0].equalsIgnoreCase("self"))) {
+                || args[0].equalsIgnoreCase("profiles") || args[0].equalsIgnoreCase("pipeline")
+                || args[0].equalsIgnoreCase("world") || args[0].equalsIgnoreCase("entities")
+                || args[0].equalsIgnoreCase("inventory") || args[0].equalsIgnoreCase("self"))) {
             return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("ledger")) {
+            return List.of("rotate");
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("privacy")) {
+            return List.of("find", "forget");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("killswitch")) {
             return List.of("on", "off", "status");

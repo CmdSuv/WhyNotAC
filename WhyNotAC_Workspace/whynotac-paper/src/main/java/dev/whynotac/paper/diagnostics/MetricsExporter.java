@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -44,7 +45,11 @@ public final class MetricsExporter implements AutoCloseable {
             Map<String, Margins.Margin> margins,
             HealthModel.Evaluation health,
             long sessionBudgetYields,
-            long sessionGapBursts) {
+            long sessionGapBursts,
+            long casesBatchesCommitted,
+            long casesBatched,
+            long redisPublished,
+            long redisReceived) {
 
         public Snapshot(
                 int sessionsLive,
@@ -69,7 +74,36 @@ public final class MetricsExporter implements AutoCloseable {
             this(sessionsLive, sessionsTotal, queuedEvents, inboundTotal, outboundTotal, lostEvents,
                     inboundDivergences, outboundDivergences, listenerErrors, casesOpened, casesStored,
                     casesDropped, recordingFailed, recordingRejectedBlocks, banWavePending,
-                    transactionMeanWallMicros, transactionMaxWallMicros, margins, health, 0L, 0L);
+                    transactionMeanWallMicros, transactionMaxWallMicros, margins, health, 0L, 0L, 0L, 0L, 0L, 0L);
+        }
+
+        public Snapshot(
+                int sessionsLive,
+                long sessionsTotal,
+                long queuedEvents,
+                long inboundTotal,
+                long outboundTotal,
+                long lostEvents,
+                long inboundDivergences,
+                long outboundDivergences,
+                long listenerErrors,
+                long casesOpened,
+                long casesStored,
+                long casesDropped,
+                long recordingFailed,
+                long recordingRejectedBlocks,
+                int banWavePending,
+                double transactionMeanWallMicros,
+                double transactionMaxWallMicros,
+                Map<String, Margins.Margin> margins,
+                HealthModel.Evaluation health,
+                long sessionBudgetYields,
+                long sessionGapBursts) {
+            this(sessionsLive, sessionsTotal, queuedEvents, inboundTotal, outboundTotal, lostEvents,
+                    inboundDivergences, outboundDivergences, listenerErrors, casesOpened, casesStored,
+                    casesDropped, recordingFailed, recordingRejectedBlocks, banWavePending,
+                    transactionMeanWallMicros, transactionMaxWallMicros, margins, health,
+                    sessionBudgetYields, sessionGapBursts, 0L, 0L, 0L, 0L);
         }
     }
 
@@ -91,14 +125,41 @@ public final class MetricsExporter implements AutoCloseable {
         }
     }
 
+    /** One recent case summary rendered by the live operator web dashboard. */
+    public record CaseSummary(
+            String id,
+            long createdEpochMillis,
+            String playerName,
+            String check,
+            String evidenceClass,
+            String lifecycle,
+            String summary) {}
+
+    /** Aggregated operational payload for {@code /api/status} on the opt-in operator dashboard. */
+    public record DashboardStatus(
+            Snapshot metrics,
+            boolean circuitBreakerTripped,
+            boolean killSwitchActive,
+            String circuitBreakerReason,
+            long falseBanIncidents,
+            int falseBanLimit,
+            boolean falseBanLocked,
+            long batchesCommitted,
+            long casesBatched,
+            long redisPublished,
+            long redisReceived,
+            List<CaseSummary> recentCases) {}
+
     private final HttpServer server;
     private final ExecutorService httpExecutor;
     private volatile String expectedAuth;
+    private volatile boolean dashboardEnabled;
 
-    private MetricsExporter(HttpServer server, ExecutorService httpExecutor, String bearerToken) {
+    private MetricsExporter(HttpServer server, ExecutorService httpExecutor, String bearerToken, boolean dashboardEnabled) {
         this.server = server;
         this.httpExecutor = httpExecutor;
         this.expectedAuth = normalizeBearer(bearerToken);
+        this.dashboardEnabled = dashboardEnabled;
     }
 
     private static String normalizeBearer(String bearerToken) {
@@ -110,15 +171,35 @@ public final class MetricsExporter implements AutoCloseable {
         this.expectedAuth = normalizeBearer(newBearerToken);
     }
 
+    /** Hot-reloads whether the opt-in operator web dashboard is enabled. */
+    public void setDashboardEnabled(boolean enabled) {
+        this.dashboardEnabled = enabled;
+    }
+
     public boolean hasBearerToken() {
         return expectedAuth != null;
     }
 
+    public boolean isDashboardActive() {
+        return dashboardEnabled && expectedAuth != null;
+    }
+
     public static MetricsExporter startLocalHttp(String host, int port, Supplier<Snapshot> snapshotSupplier) throws IOException {
-        return startLocalHttp(host, port, "", snapshotSupplier);
+        return startLocalHttp(host, port, "", false, snapshotSupplier, null);
     }
 
     public static MetricsExporter startLocalHttp(String host, int port, String bearerToken, Supplier<Snapshot> snapshotSupplier)
+            throws IOException {
+        return startLocalHttp(host, port, bearerToken, false, snapshotSupplier, null);
+    }
+
+    public static MetricsExporter startLocalHttp(
+            String host,
+            int port,
+            String bearerToken,
+            boolean dashboardEnabled,
+            Supplier<Snapshot> snapshotSupplier,
+            Supplier<DashboardStatus> dashboardSupplier)
             throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
         ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
@@ -127,20 +208,29 @@ public final class MetricsExporter implements AutoCloseable {
             return t;
         });
         server.setExecutor(exec);
-        MetricsExporter exporter = new MetricsExporter(server, exec, bearerToken);
+        MetricsExporter exporter = new MetricsExporter(server, exec, bearerToken, dashboardEnabled);
         server.createContext("/metrics", exchange -> {
+            if (!exactSafePath(exchange, "/metrics")) {
+                sendJsonError(exchange, 404, "not found");
+                return;
+            }
             if (!isAuthorized(exchange, exporter.expectedAuth)) {
                 rejectUnauthorized(exchange);
                 return;
             }
             byte[] body = formatOpenMetrics(snapshotSupplier.get()).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(body);
             }
         });
         server.createContext("/health", exchange -> {
+            if (!exactSafePath(exchange, "/health")) {
+                sendJsonError(exchange, 404, "not found");
+                return;
+            }
             if (!isAuthorized(exchange, exporter.expectedAuth)) {
                 rejectUnauthorized(exchange);
                 return;
@@ -149,13 +239,96 @@ public final class MetricsExporter implements AutoCloseable {
             int code = eval.status() == HealthModel.Status.CRITICAL ? 503 : 200;
             byte[] body = (eval.toJson() + "\n").getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
             exchange.sendResponseHeaders(code, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        server.createContext("/dashboard", exchange -> {
+            if (!exactSafePath(exchange, "/dashboard")) {
+                sendJsonError(exchange, 400, "invalid path");
+                return;
+            }
+            if (!exporter.dashboardEnabled) {
+                sendJsonError(exchange, 404, "dashboard disabled");
+                return;
+            }
+            // Security invariant: never expose /dashboard without a configured Bearer token.
+            if (exporter.expectedAuth == null) {
+                sendJsonError(exchange, 403, "dashboard requires non-empty observability.metrics-auth-token");
+                return;
+            }
+            if (!isAuthorized(exchange, exporter.expectedAuth)) {
+                rejectUnauthorized(exchange);
+                return;
+            }
+            byte[] body = OperatorDashboardHtml.renderPage().getBytes(StandardCharsets.UTF_8);
+            applyDashboardSecurityHeaders(exchange);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        server.createContext("/api/status", exchange -> {
+            if (!exactSafePath(exchange, "/api/status")) {
+                sendJsonError(exchange, 400, "invalid path");
+                return;
+            }
+            if (!exporter.dashboardEnabled) {
+                sendJsonError(exchange, 404, "dashboard disabled");
+                return;
+            }
+            if (exporter.expectedAuth == null) {
+                sendJsonError(exchange, 403, "dashboard requires non-empty observability.metrics-auth-token");
+                return;
+            }
+            if (!isAuthorized(exchange, exporter.expectedAuth)) {
+                rejectUnauthorized(exchange);
+                return;
+            }
+            DashboardStatus status = dashboardSupplier != null
+                    ? dashboardSupplier.get()
+                    : new DashboardStatus(snapshotSupplier.get(), false, false, "", 0L, 0, false, 0L, 0L, 0L, 0L, List.of());
+            byte[] body = OperatorDashboardHtml.formatStatusJson(status).getBytes(StandardCharsets.UTF_8);
+            applyDashboardSecurityHeaders(exchange);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+            exchange.sendResponseHeaders(200, body.length);
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(body);
             }
         });
         server.start();
         return exporter;
+    }
+
+    private static boolean exactSafePath(HttpExchange exchange, String expectedPath) {
+        String raw = exchange.getRequestURI().getRawPath();
+        if (raw == null || !raw.equals(expectedPath)) {
+            return false;
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        return !lower.contains("..") && !lower.contains("%2e") && !lower.contains("%2f") && !lower.contains("\\");
+    }
+
+    private static void applyDashboardSecurityHeaders(HttpExchange exchange) {
+        var h = exchange.getResponseHeaders();
+        h.set("Content-Security-Policy", OperatorDashboardHtml.CSP_HEADER);
+        h.set("X-Content-Type-Options", "nosniff");
+        h.set("X-Frame-Options", "DENY");
+        h.set("Referrer-Policy", "no-referrer");
+        h.set("Cache-Control", "no-store");
+    }
+
+    private static void sendJsonError(HttpExchange exchange, int status, String message) throws IOException {
+        byte[] body = ("{\"error\":\"" + message + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.sendResponseHeaders(status, body.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+        }
     }
 
     private static boolean isAuthorized(HttpExchange exchange, String expectedAuthHeader) {
@@ -218,6 +391,10 @@ public final class MetricsExporter implements AutoCloseable {
         gauge(out, "whynotac_transaction_loop_max_wall_micros", "Max main-thread tick transaction wall time (us)", s.transactionMaxWallMicros());
         counter(out, "whynotac_session_budget_yields_total", "Per-session analysis slice budget yields (fairness protection)", s.sessionBudgetYields());
         counter(out, "whynotac_session_gap_bursts_total", "Per-session repeated Gap blinding bursts (>=3 gaps in 60s)", s.sessionGapBursts());
+        counter(out, "whynotac_cases_batches_committed_total", "Batched SQLite/JDBC case transactions committed", s.casesBatchesCommitted());
+        counter(out, "whynotac_cases_batched_total", "Total case rows committed via batch transactions", s.casesBatched());
+        counter(out, "whynotac_redis_published_total", "Signed cluster envelopes published to Redis Pub/Sub", s.redisPublished());
+        counter(out, "whynotac_redis_received_total", "Signed cluster envelopes received from Redis Pub/Sub", s.redisReceived());
 
         if (s.margins() != null && !s.margins().isEmpty()) {
             out.append("# HELP whynotac_check_min_margin Smallest honest safety margin observed per check.\n");

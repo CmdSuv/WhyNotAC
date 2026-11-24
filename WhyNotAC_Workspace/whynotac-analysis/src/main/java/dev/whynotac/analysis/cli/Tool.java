@@ -37,6 +37,9 @@ public final class Tool {
         if (args.length == 2 && args[0].equals("audit")) {
             System.exit(audit(Path.of(args[1]), System.out, System.err));
         }
+        if (args.length == 3 && args[0].equals("report")) {
+            System.exit(HtmlReportRenderer.runCli(Path.of(args[1]), Path.of(args[2]), System.out, System.err));
+        }
         if (args.length >= 1 && args[0].equals("benchmark")) {
             try {
                 BenchmarkRunner.runCli(args, System.out, System.err);
@@ -131,7 +134,7 @@ public final class Tool {
         }
     }
 
-    static int verify(Path dossier, PrintStream out, PrintStream err) {
+    public static int verify(Path dossier, PrintStream out, PrintStream err) {
         String json;
         try {
             json = Files.readString(dossier, StandardCharsets.UTF_8);
