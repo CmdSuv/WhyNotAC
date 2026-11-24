@@ -69,21 +69,28 @@ Offline-mode sunucularda [`identity.trust-auth-plugins: true`](../deploy/configs
 | `/whynotac world|entities|inventory|self <oyuncu>` | Replikaların Paper sunucu durumuyla canlı karşılaştırması |
 | `/whynotac ai <oyuncu>` | Cezasız davranışsal sapma özellikleri, AI öncelik puanı ve e-süreci özeti |
 | `/whynotac cases` / `/whynotac case <önek>` | Son açılan vakalar ve dosya bilgisi |
+| `/whynotac report <önek>` / `/whynotac replay <önek>` | Tek-dosya çevrimdışı HTML5 adli rapor üretir (`cases/<id>.html`) / kayıttan canlı deterministik yeniden doğrulama çalıştırır |
+| `/whynotac profiles <oyuncu\|uuid>` | Kalıcı AI davranışsal taban profili ve 4x4 Mahalanobis kovaryans örnek sayısını gösterir |
 | `/whynotac review <önek> <pass1|confirm|appeal|uphold|overturn>` | İki farklı yetkili gerektiren inceleme/itiraz süreci |
 | `/whynotac metrics` / `/whynotac health` / `/whynotac stats` | Sağlık (`GREEN`/`DEGRADED`/`CRITICAL`), OpenMetrics ve JSON telemetri |
-| `/whynotac verdict` / `/whynotac reload` / `/whynotac killswitch [on|off]` / `/whynotac circuit [reset]` | Karar politikası, canlı `config.yml` sıcak yenileme (`CONFIG_RELOAD` audit), devre kesici |
-| `/whynotac audit` / `/whynotac network` / `/whynotac sessions` | İmzalı hash zinciri doğrulama, proxy köprü sayaçları, aktif oturumlar |
+| `/whynotac verdict` / `/whynotac reload` / `/whynotac killswitch [on|off]` / `/whynotac circuit [reset]` | Karar politikası, tam canlı `config.yml` sıcak yenileme (`verdict.*`, webhook, metrics Bearer token, aktif sondalar, kayıt, `wire.ignored-reconcile-packets`), devre kesici |
+| `/whynotac audit` / `/whynotac ledger rotate` / `/whynotac network` / `/whynotac sessions` | İmzalı hash zinciri doğrulama, elle `#checkpoint` segment döndürme, proxy/Redis köprü sayaçları, aktif oturumlar |
 | `/whynotac privacy <find|forget> <uuid>` | GDPR/KVKK veri bulma ve kalıcı silme talebi |
 
 ### Çevrimdışı JAR CLI (`java -jar WhyNotAC.jar ...`)
+- `doctor <data-dir>` — `config.yml` güvenlik çelişkileri, `*.key` (`0600` & `>= 32B`), tüm `audit-ledger*.jsonl` segmentleri, SQLite `cases.db` (`PRAGMA integrity_check`) ve ban-wave günlüğünü denetler (`DOCTOR_JSON`).
+- `report <dossier.json|cases-dir> <out.html>` — Sıfır dış bağımlılıklı, XSS korumalı, dark/light temalı, inline SVG zaman çizelgeli, arama/filtreleme ve JSON/CSV dışa aktarmalı tek-dosya HTML5 adli rapor üretir.
 - `verify <dossier.json>` — Kayıtlı `.wnrec` üzerinden bağımsız replikada bulguyu tekrar üretir ve parmak izini doğrular.
 - `explain <dossier.json>` — İnsan tarafından okunabilir inceleme, karar ve AI triage (`aiPriorityScore`, `aiDominantSignal`, `aiProbeWealth`) özetini basar.
-- `benchmark [regression-dir] [cheat-corpus-dir]` (`--write-corpus <dir>`) — Tüm dürüst `.wnrec` kayıtlarını (`0` yanlış pozitif), **10** kalıcı `.wnrec` hile korpusunu (`0` FN) ve **32** senaryolu kıyaslama matrisini çalıştırıp `BENCHMARK_JSON` üretir.
-- `audit <storage-dir>` — `plugins/WhyNotAC/storage` dizinindeki HMAC/hash zincirli denetim defterinin bütünlüğünü doğrular.
+- `benchmark [regression-dir] [cheat-corpus-dir]` (`--write-corpus <dir>`) — Tüm dürüst `.wnrec` kayıtlarını (`0` yanlış pozitif), **16** kalıcı `.wnrec` hile korpusunu (`0` FN) ve **52** senaryolu kıyaslama matrisini çalıştırıp `BENCHMARK_JSON` üretir.
+- `audit <storage-dir>` — `plugins/WhyNotAC/storage` dizinindeki tüm HMAC/hash zincirli aktif ve döndürülmüş `#checkpoint` denetim defteri segmentlerini doğrular.
 - `inspect <file.wnrec>` / `dump <file.wnrec>` / `find ...` / `forget ...` — Ham kayıt ve mahremiyet araçları ([`docs/privacy`](privacy/README.md)).
 
 ---
 
-## 6. Prometheus, Alert Stream & Grafana Kurulumu
+## 6. Canlı Web Panosu, Redis Küme Otobüsü, Haricî JDBC & Docker Compose Pilotu
 
-[`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml), [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) ve [`deploy/monitoring/grafana-dashboard.json`](../deploy/monitoring/grafana-dashboard.json) dosyaları, `observability.metrics-http-port: 9108` üzerinden `MetricsExporter` metriklerini izler; `observability.alert-stream-file: "alerts-stream.jsonl"` ise açılan her vakayı gerçek zamanlı tek-satır JSON akışına yazar (`observability.webhook-url` yapılandırılmışsa asenkron HTTP POST ile haricî SIEM/Discord webhook'larına da iletilir).
+- **Canlı Operatör Web Panosu (`/dashboard`, `/api/status`):** `observability.metrics-http-port` ve `observability.metrics-auth-token` tanımlandıktan sonra `observability.dashboard-enabled: true` ile etkinleşir. Token boşsa uçlar güvenle `403 Forbidden` döndürür; tüm yanıtlar sıkı `Content-Security-Policy`, `X-Content-Type-Options: nosniff` ve `X-Frame-Options: DENY` başlıklarıyla sunulur.
+- **Redis Pub/Sub Küme Kontrol Otobüsü (`network-bridge.redis-uri`):** Sıfır haricî bağımlılıklı saf-Java RESP2 istemcisi, oyuncu sayısı `0` olan arka uç sunuculara dahi HMAC-SHA256 imzalı `GDPR_FORGET`, itiraz iptali ve davranış profili çerçevelerini `whynotac:cluster` kanalı üzerinden ulaştırır.
+- **Toplu İşlemli SQLite WAL & Haricî PostgreSQL/JDBC (`storage.jdbc-url`):** `CaseStore` yazımları `<= 64` vaka/işlem olarak toplu WAL işlemiyle işler; opsiyonel `storage.jdbc-url` / `jdbc-user` / `jdbc-password` ile haricî PostgreSQL/JDBC veritabanına geçilebilir.
+- **Docker Compose Pilot Yığını:** [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), [`deploy/README.md`](../deploy/README.md), [`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml), [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) ve [`deploy/monitoring/grafana-dashboard.json`](../deploy/monitoring/grafana-dashboard.json) tek komutla Paper + Velocity + Redis + Prometheus + Grafana yığınını ayağa kaldırır.

@@ -40,6 +40,9 @@ public final class Tool {
         if (args.length == 3 && args[0].equals("report")) {
             System.exit(HtmlReportRenderer.runCli(Path.of(args[1]), Path.of(args[2]), System.out, System.err));
         }
+        if (args.length == 2 && args[0].equals("doctor")) {
+            System.exit(DoctorCommand.runCli(Path.of(args[1]), System.out, System.err));
+        }
         if (args.length >= 1 && args[0].equals("benchmark")) {
             try {
                 BenchmarkRunner.runCli(args, System.out, System.err);
