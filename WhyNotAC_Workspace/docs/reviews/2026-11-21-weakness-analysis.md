@@ -297,7 +297,7 @@ Gerçek 1.21.11 istemciyle sınanmamış meşru davranışlar açıkça kayıt a
 - Gerçek `240+ FPS` ve `VSync` altında tek tikte biriken çoklu fare kareleri (şu an yalnızca sentetik birim testi var; Xvfb yazılım Mesa düşük FPS verir).
 - `rawMouseInput` (Xvfb altında etkinliği doğrulanmadı) ve ayrık fare tekeri kaydırması.
 - Gerçek **Windows** ve **macOS (Apple Silicon)** JVM/donanım koşuları (`PlatformCos.X86_64`/`AARCH64` QEMU Linux altında doğrulandı, gerçek masaüstü OS koşusu yapılmadı).
-- `> 600 ms` RTT, `10+ s` zaman aşımına yakın donmalar ve **koşarak (eğilmeden, zıplayarak) köprü kurma**.
+- `10+ s` zaman aşımına yakın donmalar ve **koşarak (eğilmeden, zıplayarak) köprü kurma**. (`> 600 ms` RTT 2026-11-24'te `REALCLIENT_LATENCY="320 40"` ile iki koşuda sınandı: 0 vaka, 0 açıklanamayan tik; `docs/LEGITIMATE-BEHAVIOUR.md`.)
 
 **Önerilen çözüm (P2):**
 - `tools/realclient` sürücüsüne `toggleSprint`/`toggleCrouch` uyumlu tam tur profili, `>600 ms` `tc netem` gecikme profili ve GitHub Actions `macos-latest` / `windows-latest` isteğe bağlı doğrulama işi eklemek.
