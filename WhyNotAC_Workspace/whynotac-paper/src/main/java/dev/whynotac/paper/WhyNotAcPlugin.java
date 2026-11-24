@@ -18,6 +18,7 @@ import dev.whynotac.paper.identity.AuthPluginHook;
 import dev.whynotac.paper.identity.ClientFacts;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.paper.network.PaperNetworkBridge;
+import dev.whynotac.paper.network.RedisClusterBus;
 import dev.whynotac.paper.privacy.SubjectRequests;
 import dev.whynotac.paper.verdict.PaperVerdictBridge;
 import dev.whynotac.paper.world.EntityVerifier;
@@ -66,6 +67,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 
 /** Entry point: packet interception, per-player timelines, transaction latency tracking and (optional) session recording. */
 public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
@@ -73,6 +75,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private ExecutorService analysisExecutor;
     private SessionRegistry registry;
     private PacketInterceptor interceptor;
+    private RecordingSetup.Recording recordingSetup;
     private RecordingStore recordings;
     private VerdictEngine verdict;
     private PaperVerdictBridge verdictBridge;
@@ -82,6 +85,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
     private MetricsExporter metricsExporter;
     private AlertStreamExporter alertStreamExporter;
     private PaperNetworkBridge networkBridge;
+    private RedisClusterBus redisClusterBus;
+    private BukkitTask probeDriverTask;
     private CaseStore cases;
     private ClientWorldTracker worldTracker;
     private ClientEntitiesTracker entitiesTracker;
@@ -116,11 +121,14 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         } catch (IOException e) {
             getLogger().log(Level.SEVERE, "Session recording could not start; continuing without it", e);
         }
+        recordingSetup = recording;
         recordings = recording == null ? null : recording.store();
         // Checks run after the recorder, so a case can name the recording that holds its window.
-        RecordingSetup.Recording recorder = recording;
+        String jdbcUrl = getConfig().getString("storage.jdbc-url", "");
+        String jdbcUser = getConfig().getString("storage.jdbc-user", "");
+        String jdbcPassword = getConfig().getString("storage.jdbc-password", "");
         cases = new CaseStore(getDataPath().resolve("cases.db"), getDataPath().resolve("cases"),
-                session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session),
+                session -> recordingSetup == null ? java.util.Optional.empty() : recordingSetup.listener().recordingFile(session),
                 verdictCase -> {
                     if (aiAdvisor == null || verdictCase.session() == null) {
                         return java.util.Optional.empty();
@@ -141,7 +149,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                             shift.topFeature(),
                             ep != null ? ep.wealth() : 1.0));
                 },
-                getPluginMeta().getVersion(), getLogger());
+                getPluginMeta().getVersion(), getLogger(), jdbcUrl, jdbcUser, jdbcPassword);
         int caseRetentionDays = Math.max(1, getConfig().getInt("cases.retention-days", 90));
         cases.retain(caseRetentionDays);
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> cases.retain(caseRetentionDays), 20L * 3600, 20L * 3600);
@@ -150,7 +158,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         alerts = new Alerts(this);
         VerdictConfig verdictConfig = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
         verdict = new VerdictEngine(verdictConfig, SecondVerifier.ReplaySource.fromRecordingPaths(
-                session -> recorder == null ? java.util.Optional.empty() : recorder.listener().recordingFile(session)));
+                session -> recordingSetup == null ? java.util.Optional.empty() : recordingSetup.listener().recordingFile(session)));
         long probeMinCooldown = Math.max(1L, getConfig().getLong("ai.active-probes.min-cooldown-ticks", 200L));
         long probeMaxJitter = Math.max(0L, getConfig().getLong("ai.active-probes.max-jitter-ticks", 400L));
         aiAdvisor = new AiAdvisor(verdict, new dev.whynotac.ai.ProbeScheduler(probeMinCooldown, probeMaxJitter, 0.001, 0x5A17_C0DEL));
@@ -165,7 +173,15 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             String buildTag = getPluginMeta().getVersion() + "-p" + SharedConstants.getProtocolVersion();
             storage = new StorageManager(getDataPath().resolve("storage"), buildTag, getLogger());
             storage.restoreFalseBanBudget(verdict.falseBanBudget(), verdictConfig.falseBanBudgetWindowMillis(), System.currentTimeMillis());
-            verdict.banWaveQueue().attachJournal(getDataPath().resolve("storage").resolve("ban-wave-queue.jsonl"));
+            Path banWaveJournal = getDataPath().resolve("storage").resolve("ban-wave-queue.jsonl");
+            verdict.banWaveQueue().attachJournal(banWaveJournal);
+            int recoveredWaves = verdict.banWaveQueue().recoverFromJournal(
+                    banWaveJournal,
+                    System.currentTimeMillis(),
+                    entry -> verdictBridge.executeRecoveredBan(entry, verdict.config().tempBanDurationMillis()));
+            if (recoveredWaves > 0) {
+                getLogger().info("WhyNotAC recovered " + recoveredWaves + " unexpired ban-wave entry(ies) from journal");
+            }
             verdict.addCaseListener(storage);
             verdict.addEnforcementListener(storage);
         } catch (IOException e) {
@@ -262,14 +278,16 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
             alertStreamExporter = new AlertStreamExporter(alertStreamPath, aiAdvisor, getLogger(), webhookUrl);
             verdict.addCaseListener(alertStreamExporter);
         }
-        if (getConfig().getBoolean("network-bridge.enabled", false)) {
+        boolean velocityBridgeEnabled = getConfig().getBoolean("network-bridge.enabled", false);
+        String redisUri = getConfig().getString("network-bridge.redis-uri", "");
+        boolean redisBusEnabled = redisUri != null && !redisUri.isBlank();
+        if (velocityBridgeEnabled || redisBusEnabled) {
             String secretName = getConfig().getString("network-bridge.secret-file", "network-secret.key");
             long maxSkewMs = Math.max(1L, getConfig().getLong("network-bridge.max-clock-skew-seconds", 60L)) * 1000L;
             try {
                 byte[] secret = NetworkSecret.loadOrCreate(getDataPath().resolve(secretName));
-                networkBridge = new PaperNetworkBridge(
-                        secret, maxSkewMs, registry::byPlayer, aiAdvisor.baselineModel(), verdict.banWaveQueue(),
-                        frame -> {
+                PaperNetworkBridge.FrameSender velocitySender = velocityBridgeEnabled
+                        ? frame -> {
                             if (!isEnabled()) {
                                 return;
                             }
@@ -282,8 +300,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                                     }
                                 });
                             }
-                        },
-                        System::currentTimeMillis, getLogger());
+                        }
+                        : frame -> { };
+                networkBridge = new PaperNetworkBridge(
+                        secret, maxSkewMs, registry::byPlayer, aiAdvisor.baselineModel(), verdict.banWaveQueue(),
+                        velocitySender, System::currentTimeMillis, getLogger());
                 networkBridge.setRemoteErasureHandler(subject -> {
                     aiAdvisor.forget(subject);
                     verdict.forgetSubject(subject, System.currentTimeMillis());
@@ -300,8 +321,20 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
                         });
                     }
                 });
-                PaperNetworkBridge.registerBukkitChannels(this, networkBridge);
-                getLogger().info("WhyNotAC Velocity companion network bridge enabled (" + NetworkEnvelope.CHANNEL + ")");
+                if (velocityBridgeEnabled) {
+                    PaperNetworkBridge.registerBukkitChannels(this, networkBridge);
+                    getLogger().info("WhyNotAC Velocity companion network bridge enabled (" + NetworkEnvelope.CHANNEL + ")");
+                }
+                if (redisBusEnabled) {
+                    String serverId = getConfig().getString("network-bridge.server-id", "");
+                    try {
+                        redisClusterBus = new RedisClusterBus(redisUri, serverId, networkBridge::handleInboundFrame, getLogger());
+                        networkBridge.attachClusterBus(redisClusterBus);
+                        getLogger().info("WhyNotAC Redis Pub/Sub cluster control bus enabled (serverId=" + redisClusterBus.serverId() + ")");
+                    } catch (IllegalArgumentException ex) {
+                        getLogger().log(Level.WARNING, "WhyNotAC ignoring invalid network-bridge.redis-uri", ex);
+                    }
+                }
             } catch (IOException e) {
                 getLogger().log(Level.WARNING, "WhyNotAC failed to initialize network bridge secret", e);
             }
@@ -333,7 +366,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
         if (getConfig().getBoolean("ai.active-probes.enabled", false)) {
             long probeTtl = Math.max(4L, getConfig().getLong("ai.active-probes.ttl-ticks", 10L));
-            Bukkit.getScheduler().runTaskTimer(this, new LiveProbeDriver(this, interceptor, aiAdvisor, probeTtl), 5L, 5L);
+            probeDriverTask = Bukkit.getScheduler().runTaskTimer(this, new LiveProbeDriver(this, interceptor, aiAdvisor, probeTtl), 5L, 5L);
             getLogger().info("WhyNotAC active behind-FOV design probes enabled (ttl=" + probeTtl + " ticks, DESIGN_STATISTIC)");
         }
 
@@ -401,6 +434,14 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (cases != null) {
             cases.close();
         }
+        if (probeDriverTask != null) {
+            probeDriverTask.cancel();
+            probeDriverTask = null;
+        }
+        if (redisClusterBus != null) {
+            redisClusterBus.close();
+            redisClusterBus = null;
+        }
         if (metricsExporter != null) {
             metricsExporter.close();
         }
@@ -409,7 +450,11 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }
     }
 
-    /** Hot-reloads {@code config.yml} verdict settings without dropping active sessions. */
+    /**
+     * Atomically hot-reloads {@code config.yml} runtime settings without dropping active sessions:
+     * {@code verdict.*}, {@code observability.webhook-url}, {@code observability.metrics-auth-token},
+     * {@code ai.active-probes.*}, and {@code recording.enabled}.
+     */
     public String reloadConfiguration(String operator) {
         reloadConfig();
         VerdictConfig updated = PaperVerdictBridge.loadConfig(getConfig().getConfigurationSection("verdict"), getLogger());
@@ -419,14 +464,55 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         if (verdictBridge != null) {
             verdictBridge.updateConfig(updated);
         }
+        String newWebhookUrl = getConfig().getString("observability.webhook-url", "");
+        if (alertStreamExporter != null) {
+            alertStreamExporter.updateWebhookUrl(newWebhookUrl);
+        } else if (newWebhookUrl != null && !newWebhookUrl.isBlank() && verdict != null) {
+            alertStreamExporter = new AlertStreamExporter(null, aiAdvisor, getLogger(), newWebhookUrl);
+            verdict.addCaseListener(alertStreamExporter);
+        }
+        String newBearerToken = getConfig().getString("observability.metrics-auth-token", "");
+        if (metricsExporter != null) {
+            metricsExporter.updateBearerToken(newBearerToken);
+        }
+        boolean probesEnabled = getConfig().getBoolean("ai.active-probes.enabled", false);
+        long probeTtl = Math.max(4L, getConfig().getLong("ai.active-probes.ttl-ticks", 10L));
+        if (probeDriverTask != null) {
+            probeDriverTask.cancel();
+            probeDriverTask = null;
+        }
+        if (probesEnabled && interceptor != null && aiAdvisor != null && isEnabled()) {
+            probeDriverTask = Bukkit.getScheduler().runTaskTimer(
+                    this, new LiveProbeDriver(this, interceptor, aiAdvisor, probeTtl), 5L, 5L);
+        }
+        boolean recordingEnabled = getConfig().getBoolean("recording.enabled", false);
+        if (recordingSetup != null) {
+            recordingSetup.listener().setEnabled(recordingEnabled);
+        } else if (recordingEnabled && registry != null) {
+            try {
+                recordingSetup = RecordingSetup.install(getConfig().getConfigurationSection("recording"), getDataPath(), registry,
+                        getPluginMeta().getVersion(), getLogger()).orElse(null);
+                if (recordingSetup != null) {
+                    recordings = recordingSetup.store();
+                }
+            } catch (IOException ex) {
+                getLogger().log(Level.WARNING, "WhyNotAC failed to enable session recording on reload", ex);
+            }
+        }
+        boolean webhookActive = alertStreamExporter != null && !alertStreamExporter.webhookUrl().isEmpty();
+        boolean bearerActive = metricsExporter != null && metricsExporter.hasBearerToken();
         String summary = String.format(Locale.ROOT,
-                "armed=%d (%s) mitigations=%b hideInfo=%b autoKick=%b autoBan=%b",
+                "armed=%d (%s) mitigations=%b hideInfo=%b autoKick=%b autoBan=%b webhook=%b metricsAuth=%b probes=%b recording=%b",
                 updated.armedChecks().size(),
                 String.join(",", updated.armedChecks()),
                 updated.mitigationsEnabled(),
                 updated.hidesInformationEnabled(),
                 updated.autoKickEnabled(),
-                updated.autoBanEnabled());
+                updated.autoBanEnabled(),
+                webhookActive,
+                bearerActive,
+                probesEnabled,
+                recordingEnabled);
         if (storage != null) {
             storage.recordConfigReloadAsync(operator, summary, System.currentTimeMillis());
         }

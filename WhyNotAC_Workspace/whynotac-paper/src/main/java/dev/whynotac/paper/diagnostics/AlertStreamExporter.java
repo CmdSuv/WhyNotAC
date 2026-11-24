@@ -37,9 +37,9 @@ public final class AlertStreamExporter implements CaseListener, AutoCloseable {
     private final Path outputFile;
     private final AiAdvisor aiAdvisor;
     private final Logger logger;
-    private final URI webhookUri;
-    private final ExecutorService webhookExecutor;
-    private final HttpClient httpClient;
+    private URI webhookUri;
+    private ExecutorService webhookExecutor;
+    private HttpClient httpClient;
     private final AtomicLong droppedWebhooks = new AtomicLong();
     private BufferedWriter writer;
 
@@ -51,7 +51,31 @@ public final class AlertStreamExporter implements CaseListener, AutoCloseable {
         this.outputFile = outputFile;
         this.aiAdvisor = aiAdvisor;
         this.logger = logger;
-        URI parsed = parseWebhookUri(webhookUrl, logger);
+        configureWebhook(parseWebhookUri(webhookUrl, logger));
+    }
+
+    /** Hot-reloads the webhook destination without restarting the server or leaking executors. */
+    public synchronized void updateWebhookUrl(String newWebhookUrl) {
+        URI parsed = parseWebhookUri(newWebhookUrl, logger);
+        if (java.util.Objects.equals(parsed, this.webhookUri)) {
+            return;
+        }
+        ExecutorService oldExecutor = this.webhookExecutor;
+        this.webhookUri = null;
+        this.webhookExecutor = null;
+        this.httpClient = null;
+        if (oldExecutor != null) {
+            oldExecutor.shutdown();
+        }
+        configureWebhook(parsed);
+    }
+
+    /** Returns the currently active webhook URL, or empty string if disabled. */
+    public synchronized String webhookUrl() {
+        return webhookUri == null ? "" : webhookUri.toString();
+    }
+
+    private void configureWebhook(URI parsed) {
         this.webhookUri = parsed;
         if (parsed != null) {
             this.webhookExecutor = new ThreadPoolExecutor(
@@ -155,23 +179,27 @@ public final class AlertStreamExporter implements CaseListener, AutoCloseable {
             }
         }
         if (httpClient != null && webhookUri != null) {
-            dispatchWebhookWithRetry(c.id(), jsonLine, 0);
+            dispatchWebhookWithRetry(c.id(), jsonLine, 0, webhookUri, httpClient, webhookExecutor);
         }
     }
 
-    private void dispatchWebhookWithRetry(String caseId, String jsonLine, int attempt) {
-        HttpRequest request = HttpRequest.newBuilder(webhookUri)
+    private void dispatchWebhookWithRetry(
+            String caseId, String jsonLine, int attempt, URI targetUri, HttpClient client, ExecutorService executor) {
+        if (targetUri == null || client == null || executor == null || executor.isShutdown()) {
+            return;
+        }
+        HttpRequest request = HttpRequest.newBuilder(targetUri)
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json; charset=utf-8")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonLine, StandardCharsets.UTF_8))
                 .build();
         try {
-            CompletableFuture<HttpResponse<Void>> fut = httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding());
+            CompletableFuture<HttpResponse<Void>> fut = client.sendAsync(request, HttpResponse.BodyHandlers.discarding());
             fut.whenComplete((resp, err) -> {
                 boolean retryable = err != null || (resp != null && (resp.statusCode() == 429 || resp.statusCode() >= 500));
-                if (retryable && attempt == 0 && webhookExecutor != null && !webhookExecutor.isShutdown()) {
-                    CompletableFuture.delayedExecutor(250L, TimeUnit.MILLISECONDS, webhookExecutor)
-                            .execute(() -> dispatchWebhookWithRetry(caseId, jsonLine, 1));
+                if (retryable && attempt == 0 && !executor.isShutdown()) {
+                    CompletableFuture.delayedExecutor(250L, TimeUnit.MILLISECONDS, executor)
+                            .execute(() -> dispatchWebhookWithRetry(caseId, jsonLine, 1, targetUri, client, executor));
                     return;
                 }
                 if (logger == null) {

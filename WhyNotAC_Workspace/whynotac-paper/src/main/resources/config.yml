@@ -34,6 +34,13 @@ cases:
   # personal data, kept for this many days.
   retention-days: 90
 
+storage:
+  # Optional external JDBC database URL (e.g. PostgreSQL: jdbc:postgresql://host:5432/whynotac).
+  # Leave blank to use the embedded WAL-mode batched SQLite database (plugins/WhyNotAC/cases.db).
+  jdbc-url: ""
+  jdbc-user: ""
+  jdbc-password: ""
+
 verdict:
   # Checks listed here move from SHADOW to ARMED. Leave empty ([]) for observation/alerts/dossiers only.
   armed-checks: []
@@ -73,6 +80,10 @@ observability:
   health-watchdog: true
   # Optional loopback HTTP exporter (/metrics OpenMetrics + /health JSON). 0 disables the HTTP listener.
   metrics-http-port: 0
+  # Optional Bearer token required on HTTP requests to /metrics, /health, /dashboard, and /api/status.
+  metrics-auth-token: ""
+  # Opt-in live HTML5 operator dashboard (/dashboard + /api/status); requires a non-empty metrics-auth-token.
+  dashboard-enabled: false
   # Real-time structured JSONL alert & case stream (plugins/WhyNotAC/<file>). Blank disables export.
   alert-stream-file: "alerts-stream.jsonl"
   # Optional async HTTP/HTTPS POST webhook URL for case/alert JSON payloads. Blank disables webhook delivery.
@@ -83,6 +94,11 @@ network-bridge:
   enabled: false
   secret-file: "network-secret.key"
   max-clock-skew-seconds: 60
+  # Optional Redis Pub/Sub control bus URI (e.g. redis://:password@127.0.0.1:6379) for multi-server sync
+  # (GDPR erasures, overturns, profiles) even across backends with zero online players. Blank disables it.
+  redis-uri: ""
+  # Optional unique identifier for this backend node (used for self-echo filtering on Redis Pub/Sub).
+  server-id: ""
 
 ai:
   active-probes:

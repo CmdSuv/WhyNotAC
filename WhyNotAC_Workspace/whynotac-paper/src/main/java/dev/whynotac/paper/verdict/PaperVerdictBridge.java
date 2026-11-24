@@ -1,6 +1,7 @@
 package dev.whynotac.paper.verdict;
 
 import dev.whynotac.analysis.checks.Checks;
+import dev.whynotac.verdict.BanWaveQueue;
 import dev.whynotac.verdict.CircuitBreaker;
 import dev.whynotac.verdict.MitigationKind;
 import dev.whynotac.verdict.VerdictConfig;
@@ -372,6 +373,28 @@ public final class PaperVerdictBridge implements VerdictEngine.EnforcementListen
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player online = Bukkit.getPlayer(uuid);
             var profile = online != null ? online.getPlayerProfile() : Bukkit.createProfile(uuid, name);
+            Bukkit.getBanList(BanListType.PROFILE).addBan(profile, reason, Date.from(expires), "WhyNotAC");
+            if (online != null && online.isOnline()) {
+                online.kick(Component.text(reason, NamedTextColor.RED));
+            }
+        });
+    }
+
+    /** Executes an unexpired ban-wave entry recovered from {@code ban-wave-queue.jsonl} after restart. */
+    public void executeRecoveredBan(BanWaveQueue.RecoveredEntry entry, long tempBanDurationMillis) {
+        if (!plugin.isEnabled() || entry == null || entry.playerId() == null) {
+            return;
+        }
+        UUID uuid = entry.playerId();
+        String digest = entry.certificateSha256();
+        String digestShort = digest == null ? "?" : digest.substring(0, Math.min(12, digest.length()));
+        String reason = "WhyNotAC automated check (" + entry.check() + ", recovered cert " + digestShort + ")";
+        Instant expires = Instant.now().plusMillis(Math.max(TimeUnit.HOURS.toMillis(1), tempBanDurationMillis));
+        logger.warning("WhyNotAC issuing recovered ban-wave temp-ban for " + uuid + " (case " + entry.caseId()
+                + ", check=" + entry.check() + ", digest=" + digestShort + ")");
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player online = Bukkit.getPlayer(uuid);
+            var profile = online != null ? online.getPlayerProfile() : Bukkit.createProfile(uuid, null);
             Bukkit.getBanList(BanListType.PROFILE).addBan(profile, reason, Date.from(expires), "WhyNotAC");
             if (online != null && online.isOnline()) {
                 online.kick(Component.text(reason, NamedTextColor.RED));

@@ -36,6 +36,17 @@ import java.util.function.Consumer;
 public final class BanWaveQueue implements AutoCloseable {
 
     private static final int MAX_CANCELLED_SUBJECTS = 10_000;
+    public static final long MAX_RECOVERY_AGE_MILLIS = 86_400_000L; // 24 hours
+
+    /** One unexpired, uncancelled ban-wave entry recovered from {@code ban-wave-queue.jsonl} after restart. */
+    public record RecoveredEntry(
+            String caseId,
+            UUID playerId,
+            String check,
+            String certificateSha256,
+            long queuedAtMillis,
+            long delayMillis,
+            long remainingDelayMillis) {}
 
     private volatile VerdictConfig config;
     private final CircuitBreaker circuitBreaker;
@@ -118,6 +129,192 @@ public final class BanWaveQueue implements AutoCloseable {
             } else {
                 cancelledBeforeMillis.merge(playerId, cancelledAtMillis, Math::max);
             }
+            appendCancelJournalEntry(playerId, cancelledAtMillis);
+        }
+    }
+
+    /**
+     * Scans a persisted {@code ban-wave-queue.jsonl} journal on startup and reschedules every unexpired
+     * (within 24h), uncancelled, unexecuted {@code QUEUED} entry with full execution-time invariant checks
+     * ({@code autoBanEnabled}, {@code armedChecks}, {@link CircuitBreaker}, {@link FalseBanBudget},
+     * cancellation cutoff, and 64-hex {@code certificateSha256}). Returns the number of recovered entries.
+     */
+    public int recoverFromJournal(Path journalPath, long nowMillis, Consumer<RecoveredEntry> executor) throws IOException {
+        Objects.requireNonNull(journalPath, "journalPath");
+        Objects.requireNonNull(executor, "executor");
+        if (!Files.isRegularFile(journalPath)) {
+            return 0;
+        }
+        Map<String, RecoveredEntry> pendingByCase = new java.util.LinkedHashMap<>();
+        java.util.Set<String> completedCases = new java.util.HashSet<>();
+        Map<UUID, Long> journalCancellations = new java.util.HashMap<>();
+        for (String line : Files.readAllLines(journalPath, StandardCharsets.UTF_8)) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String state = readJsonString(line, "state");
+            if (state == null) {
+                continue;
+            }
+            long ts = readJsonLong(line, "timestampMs", 0L);
+            String caseId = readJsonString(line, "caseId");
+            String playerStr = readJsonString(line, "playerId");
+            UUID playerId = null;
+            if (playerStr != null && !playerStr.isEmpty()) {
+                try {
+                    playerId = UUID.fromString(playerStr);
+                } catch (IllegalArgumentException ignored) { }
+            }
+            switch (state) {
+                case "QUEUED" -> {
+                    String check = readJsonString(line, "check");
+                    String cert = readJsonString(line, "certificateSha256");
+                    long delayMs = Math.max(0L, readJsonLong(line, "delayMs", 0L));
+                    if (caseId != null && !caseId.isEmpty() && playerId != null
+                            && check != null && !check.isEmpty()
+                            && cert != null && cert.length() == 64) {
+                        long remaining = Math.max(50L, (ts + delayMs) - nowMillis);
+                        pendingByCase.put(caseId, new RecoveredEntry(caseId, playerId, check, cert, ts, delayMs, remaining));
+                    }
+                }
+                case "EXECUTED" -> {
+                    if (caseId != null) {
+                        completedCases.add(caseId);
+                    }
+                }
+                case "CANCELLED" -> {
+                    if (playerId != null) {
+                        journalCancellations.merge(playerId, ts, Math::max);
+                    }
+                }
+                default -> { }
+            }
+        }
+        for (Map.Entry<UUID, Long> cancel : journalCancellations.entrySet()) {
+            cancelledBeforeMillis.merge(cancel.getKey(), cancel.getValue(), Math::max);
+        }
+        int recovered = 0;
+        for (RecoveredEntry entry : pendingByCase.values()) {
+            if (completedCases.contains(entry.caseId())) {
+                continue;
+            }
+            if (nowMillis - entry.queuedAtMillis() > MAX_RECOVERY_AGE_MILLIS) {
+                continue;
+            }
+            Long cutoff = cancelledBeforeMillis.get(entry.playerId());
+            if (cutoff != null && entry.queuedAtMillis() <= cutoff) {
+                continue;
+            }
+            pendingCount.incrementAndGet();
+            recovered++;
+            ScheduledFuture<?>[] holder = new ScheduledFuture<?>[1];
+            ScheduledFuture<?> future = scheduler.schedule(() -> {
+                try {
+                    executeRecoveredIfSafe(entry, executor);
+                } finally {
+                    pendingCount.decrementAndGet();
+                    if (holder[0] != null) {
+                        pendingFutures.remove(holder[0]);
+                    }
+                }
+            }, entry.remainingDelayMillis(), TimeUnit.MILLISECONDS);
+            holder[0] = future;
+            pendingFutures.add(future);
+        }
+        return recovered;
+    }
+
+    private void executeRecoveredIfSafe(RecoveredEntry entry, Consumer<RecoveredEntry> executor) {
+        VerdictConfig active = this.config;
+        if (!active.autoBanEnabled() || !isHex64(entry.certificateSha256())) {
+            return;
+        }
+        if (circuitBreaker.isSuppressed() || falseBanBudget.isLocked()) {
+            return;
+        }
+        Long cutoff = cancelledBeforeMillis.get(entry.playerId());
+        if (cutoff != null && entry.queuedAtMillis() <= cutoff) {
+            return;
+        }
+        if (!active.armedChecks().contains(entry.check())) {
+            return;
+        }
+        falseBanBudget.recordAutoBanIssued();
+        appendRawJournalLine("{\"timestampMs\":" + System.currentTimeMillis()
+                + ",\"state\":\"EXECUTED\",\"caseId\":\"" + escapeJson(entry.caseId())
+                + "\",\"playerId\":\"" + entry.playerId()
+                + "\",\"check\":\"" + escapeJson(entry.check())
+                + "\",\"delayMs\":0,\"certificateSha256\":\"" + escapeJson(entry.certificateSha256()) + "\"}\n");
+        executor.accept(entry);
+    }
+
+    private static boolean isHex64(String s) {
+        if (s == null || s.length() != 64) {
+            return false;
+        }
+        for (int i = 0; i < 64; i++) {
+            char c = s.charAt(i);
+            boolean ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void appendCancelJournalEntry(UUID playerId, long cancelledAtMillis) {
+        appendRawJournalLine("{\"timestampMs\":" + cancelledAtMillis
+                + ",\"state\":\"CANCELLED\",\"caseId\":\"\",\"playerId\":\"" + playerId
+                + "\",\"check\":\"\",\"delayMs\":0,\"certificateSha256\":\"\"}\n");
+    }
+
+    private static String escapeJson(String s) {
+        return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static String readJsonString(String json, String key) {
+        String token = "\"" + key + "\":\"";
+        int idx = json.indexOf(token);
+        if (idx < 0) {
+            return null;
+        }
+        int i = idx + token.length();
+        StringBuilder sb = new StringBuilder();
+        while (i < json.length()) {
+            char c = json.charAt(i++);
+            if (c == '"') {
+                return sb.toString();
+            }
+            if (c == '\\' && i < json.length()) {
+                sb.append(json.charAt(i++));
+            } else {
+                sb.append(c);
+            }
+        }
+        return null;
+    }
+
+    private static long readJsonLong(String json, String key, long def) {
+        String token = "\"" + key + "\":";
+        int idx = json.indexOf(token);
+        if (idx < 0) {
+            return def;
+        }
+        int i = idx + token.length();
+        int start = i;
+        if (i < json.length() && json.charAt(i) == '-') {
+            i++;
+        }
+        while (i < json.length() && json.charAt(i) >= '0' && json.charAt(i) <= '9') {
+            i++;
+        }
+        if (i == start) {
+            return def;
+        }
+        try {
+            return Long.parseLong(json.substring(start, i));
+        } catch (NumberFormatException e) {
+            return def;
         }
     }
 
@@ -171,11 +368,19 @@ public final class BanWaveQueue implements AutoCloseable {
                 : null;
         String line = "{\"timestampMs\":" + System.currentTimeMillis()
                 + ",\"state\":\"" + state
-                + "\",\"caseId\":\"" + decision.verdictCase().id()
+                + "\",\"caseId\":\"" + escapeJson(decision.verdictCase().id())
                 + "\",\"playerId\":\"" + (subjectId == null ? "" : subjectId)
-                + "\",\"check\":\"" + decision.evidence().check()
+                + "\",\"check\":\"" + escapeJson(decision.evidence().check())
                 + "\",\"delayMs\":" + delayMillis
-                + ",\"certificateSha256\":\"" + decision.certificate().sha256Digest() + "\"}\n";
+                + ",\"certificateSha256\":\"" + escapeJson(decision.certificate().sha256Digest()) + "\"}\n";
+        appendRawJournalLine(line);
+    }
+
+    private void appendRawJournalLine(String line) {
+        Path file = this.journalFile;
+        if (file == null) {
+            return;
+        }
         synchronized (journalLock) {
             try {
                 Path parent = file.getParent();

@@ -43,6 +43,7 @@ public final class PaperNetworkBridge implements PluginMessageListener {
     private final LongSupplier wallClockMillis;
     private final Logger logger;
     private volatile Consumer<UUID> remoteErasureHandler;
+    private volatile RedisClusterBus clusterBus;
 
     private final AtomicLong receivedValid = new AtomicLong();
     private final AtomicLong rejectedInvalid = new AtomicLong();
@@ -75,6 +76,20 @@ public final class PaperNetworkBridge implements PluginMessageListener {
     /** Optional hook run when a signed remote {@code GDPR_FORGET} notice arrives from another backend via proxy. */
     public void setRemoteErasureHandler(Consumer<UUID> handler) {
         this.remoteErasureHandler = handler;
+    }
+
+    /** Attaches an optional Redis Pub/Sub cluster bus so broadcasts also reach empty backends. */
+    public void attachClusterBus(RedisClusterBus bus) {
+        this.clusterBus = bus;
+    }
+
+    private void broadcastFrame(byte[] frame) {
+        frameSender.send(frame);
+        RedisClusterBus bus = this.clusterBus;
+        if (bus != null) {
+            bus.publish(frame);
+        }
+        sentFrames.incrementAndGet();
     }
 
     @Override
@@ -155,8 +170,7 @@ public final class PaperNetworkBridge implements PluginMessageListener {
         byte[] frame = NetworkEnvelope.encode(new NetworkEnvelope.ProfileSummarySync(
                 wallClockMillis.getAsLong(), playerId, identity, featureName,
                 moments.count(), moments.mean(), moments.sampleVariance(), falseBanIncidents), secret);
-        frameSender.send(frame);
-        sentFrames.incrementAndGet();
+        broadcastFrame(frame);
     }
 
     /** Signs and transmits an authenticated multivariate combat covariance summary to the proxy for cross-server sync. */
@@ -166,16 +180,14 @@ public final class PaperNetworkBridge implements PluginMessageListener {
         }
         byte[] frame = NetworkEnvelope.encode(new NetworkEnvelope.CovarianceSummarySync(
                 wallClockMillis.getAsLong(), playerId, identity, cov.dim(), cov.count(), cov.mean(), cov.flatCoMoments()), secret);
-        frameSender.send(frame);
-        sentFrames.incrementAndGet();
+        broadcastFrame(frame);
     }
 
     /** Signs and transmits an enforcement/appeal/erasure broadcast across the proxy network. */
     public void sendEnforcementNotice(UUID playerId, String kind, String caseId, String digest, long durationMs, String reason) {
         byte[] frame = NetworkEnvelope.encode(new NetworkEnvelope.EnforcementNotice(
                 wallClockMillis.getAsLong(), playerId, kind, caseId, digest, durationMs, reason), secret);
-        frameSender.send(frame);
-        sentFrames.incrementAndGet();
+        broadcastFrame(frame);
     }
 
     public long receivedValid() {

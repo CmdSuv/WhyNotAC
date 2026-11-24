@@ -127,4 +127,69 @@ final class AlertStreamExporterTest {
             server.stop(0);
         }
     }
+
+    @Test
+    void hotReloadsWebhookUrlWithoutRestartOrLeak(@TempDir Path dir) throws Exception {
+        CopyOnWriteArrayList<String> bodiesA = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<String> bodiesB = new CopyOnWriteArrayList<>();
+        CountDownLatch latchA = new CountDownLatch(1);
+        CountDownLatch latchB = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/hookA", ex -> {
+            bodiesA.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            ex.sendResponseHeaders(200, 0);
+            ex.close();
+            latchA.countDown();
+        });
+        server.createContext("/hookB", ex -> {
+            bodiesB.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            ex.sendResponseHeaders(200, 0);
+            ex.close();
+            latchB.countDown();
+        });
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            String urlA = "http://127.0.0.1:" + port + "/hookA";
+            String urlB = "http://127.0.0.1:" + port + "/hookB";
+            SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, err) -> { throw new AssertionError(err); });
+            PlayerSession session = registry.open("hotreload-test");
+            session.bind(new UUID(4, 5), "HotReload", 1, 100L);
+            Evidence ev = new Evidence(
+                    "attack-reach", 1, EvidenceClass.ADVANTAGE_PROOF,
+                    1L, 2L, 1_000L, 2_000L, "reach", Map.of(),
+                    new Admissibility(true, List.of(), Admissibility.IdentityTier.AUTHENTICATED));
+            EvidenceCertificate cert = EvidenceCertificate.issue(
+                    "cert-hr", 1000L, session.connectionId(),
+                    ev.check(), ev.checkVersion(), ev.evidenceClass(),
+                    ActionPolicy.Lifecycle.ARMED, Admissibility.IdentityTier.AUTHENTICATED,
+                    ev.fingerprint(), List.of(), List.of(DependencyGroup.ATTACK_REACH.id()),
+                    EvidenceCertificate.VerificationStatus.NOT_NEEDED, "",
+                    ActionPolicy.Action.ALERT, MitigationKind.NONE);
+            VerdictCase vCase = new VerdictCase(
+                    "case-hr-1", 1000L, session, ev,
+                    ActionPolicy.Lifecycle.ARMED, DependencyGroup.ATTACK_REACH,
+                    EnumSet.of(ActionPolicy.Action.ALERT),
+                    ActionPolicy.Action.ALERT, MitigationKind.NONE,
+                    1.0, 0.9, 1, false, cert);
+            try (AlertStreamExporter exporter = new AlertStreamExporter(
+                    dir.resolve("alerts-hr.jsonl"), new AiAdvisor(), Logger.getLogger("hr"), urlA)) {
+                assertEquals(urlA, exporter.webhookUrl());
+                exporter.opened(vCase);
+                assertTrue(latchA.await(5, TimeUnit.SECONDS));
+
+                exporter.updateWebhookUrl(urlB);
+                assertEquals(urlB, exporter.webhookUrl());
+                exporter.opened(vCase);
+                assertTrue(latchB.await(5, TimeUnit.SECONDS));
+
+                exporter.updateWebhookUrl("");
+                assertEquals("", exporter.webhookUrl());
+            }
+            assertEquals(1, bodiesA.size());
+            assertEquals(1, bodiesB.size());
+        } finally {
+            server.stop(0);
+        }
+    }
 }

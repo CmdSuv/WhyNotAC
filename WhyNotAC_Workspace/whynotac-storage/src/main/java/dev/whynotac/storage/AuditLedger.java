@@ -14,11 +14,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -247,11 +246,12 @@ public final class AuditLedger implements AutoCloseable {
 
     private String verifyCheckpointHeader(String line) {
         try {
-            long startSeq = extractLongField(line, "startSeq");
-            String prev = extractStringField(line, "prevHash");
-            String tag = extractStringField(line, "buildTag");
-            String hmac = extractStringField(line, "hmacTag");
-            if (startSeq <= 0 || prev == null || prev.length() != 64 || tag == null || hmac == null) {
+            Map<String, Object> cp = MinimalJson.parseObject(line.substring(CHECKPOINT_PREFIX.length()));
+            long startSeq = MinimalJson.requireLong(cp, "startSeq");
+            String prev = MinimalJson.requireString(cp, "prevHash");
+            String tag = MinimalJson.requireString(cp, "buildTag");
+            String hmac = MinimalJson.requireString(cp, "hmacTag");
+            if (startSeq <= 0 || prev.length() != 64) {
                 return "malformed checkpoint header";
             }
             String expectedHmac = hmacHex(secretKey, "checkpoint:startSeq=" + startSeq + "|prevHash=" + prev + "|buildTag=" + tag);
@@ -266,11 +266,13 @@ public final class AuditLedger implements AutoCloseable {
     }
 
     private static long extractLongField(String line, String key) {
-        return Long.parseLong(requireNumber(line, key));
+        Map<String, Object> cp = MinimalJson.parseObject(line.substring(CHECKPOINT_PREFIX.length()));
+        return MinimalJson.requireLong(cp, key);
     }
 
     private static String extractStringField(String line, String key) {
-        return requireString(line, key);
+        Map<String, Object> cp = MinimalJson.parseObject(line.substring(CHECKPOINT_PREFIX.length()));
+        return MinimalJson.requireString(cp, key);
     }
 
     public String pseudonymFor(UUID playerUuid) {
@@ -366,73 +368,22 @@ public final class AuditLedger implements AutoCloseable {
     }
 
     private static LedgerEntry parseJsonLine(String line) {
-        long seq = Long.parseLong(requireNumber(line, "seq"));
-        long ts = Long.parseLong(requireNumber(line, "ts"));
-        EntryKind kind = EntryKind.valueOf(requireString(line, "kind"));
-        String caseId = requireString(line, "caseId");
-        String cert = requireString(line, "cert");
-        String build = requireString(line, "build");
-        String subject = requireString(line, "subject");
-        String summary = requireString(line, "summary");
-        String prev = requireString(line, "prev");
-        String hash = requireString(line, "hash");
-        String hmac = requireString(line, "hmac");
+        Map<String, Object> obj = MinimalJson.parseObject(line);
+        long seq = MinimalJson.requireLong(obj, "seq");
+        long ts = MinimalJson.requireLong(obj, "ts");
+        EntryKind kind = EntryKind.valueOf(MinimalJson.requireString(obj, "kind"));
+        String caseId = MinimalJson.requireString(obj, "caseId");
+        String cert = MinimalJson.requireString(obj, "cert");
+        String build = MinimalJson.requireString(obj, "build");
+        String subject = MinimalJson.requireString(obj, "subject");
+        String summary = MinimalJson.requireString(obj, "summary");
+        String prev = MinimalJson.requireString(obj, "prev");
+        String hash = MinimalJson.requireString(obj, "hash");
+        String hmac = MinimalJson.requireString(obj, "hmac");
         return new LedgerEntry(seq, ts, kind, caseId, cert, build, subject, summary, prev, hash, hmac);
     }
 
-    private static String requireNumber(String json, String key) {
-        Matcher m = Pattern.compile("\"" + Pattern.quote(key) + "\":(-?\\d+)").matcher(json);
-        if (!m.find()) {
-            throw new IllegalArgumentException("missing numeric field " + key);
-        }
-        return m.group(1);
-    }
-
-    private static String requireString(String json, String key) {
-        Matcher m = Pattern.compile("\"" + Pattern.quote(key) + "\":\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(json);
-        if (!m.find()) {
-            throw new IllegalArgumentException("missing string field " + key);
-        }
-        return unescape(m.group(1));
-    }
-
     private static String escape(String s) {
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            switch (ch) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                default -> sb.append(ch < 0x20 ? String.format("\\u%04x", (int) ch) : ch);
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String unescape(String s) {
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            if (ch == '\\' && i + 1 < s.length()) {
-                char next = s.charAt(++i);
-                switch (next) {
-                    case '"', '\\' -> sb.append(next);
-                    case 'n' -> sb.append('\n');
-                    case 'r' -> sb.append('\r');
-                    case 'u' -> {
-                        if (i + 4 < s.length()) {
-                            sb.append((char) Integer.parseInt(s.substring(i + 1, i + 5), 16));
-                            i += 4;
-                        }
-                    }
-                    default -> sb.append(next);
-                }
-            } else {
-                sb.append(ch);
-            }
-        }
-        return sb.toString();
+        return MinimalJson.escape(s);
     }
 }

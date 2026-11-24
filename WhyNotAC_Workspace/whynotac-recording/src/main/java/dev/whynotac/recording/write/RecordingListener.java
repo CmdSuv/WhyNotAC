@@ -39,6 +39,7 @@ public final class RecordingListener implements TimelineListener {
     private final int protocolVersion;
     private final String gameVersion;
     private final String whynotacVersion;
+    private volatile boolean enabled = true;
 
     public RecordingListener(RecordingStore store, Pseudonymizer pseudonymizer, int protocolVersion, String gameVersion, String whynotacVersion) {
         this.store = store;
@@ -46,6 +47,15 @@ public final class RecordingListener implements TimelineListener {
         this.protocolVersion = protocolVersion;
         this.gameVersion = gameVersion;
         this.whynotacVersion = whynotacVersion;
+    }
+
+    /** Enables or disables starting new session recordings during hot config reload; open recordings finish cleanly. */
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
     }
 
     private static final class State {
@@ -95,6 +105,13 @@ public final class RecordingListener implements TimelineListener {
             return;
         }
         if (state.writer == null) {
+            if (!enabled) {
+                if (event instanceof TimelineEvent.Bound || event instanceof TimelineEvent.Disconnected) {
+                    state.finished = true;
+                    state.pending.clear();
+                }
+                return;
+            }
             if (event instanceof TimelineEvent.Bound bound) {
                 start(state, bound);
             } else if (event instanceof TimelineEvent.Disconnected) {

@@ -93,10 +93,25 @@ public final class MetricsExporter implements AutoCloseable {
 
     private final HttpServer server;
     private final ExecutorService httpExecutor;
+    private volatile String expectedAuth;
 
-    private MetricsExporter(HttpServer server, ExecutorService httpExecutor) {
+    private MetricsExporter(HttpServer server, ExecutorService httpExecutor, String bearerToken) {
         this.server = server;
         this.httpExecutor = httpExecutor;
+        this.expectedAuth = normalizeBearer(bearerToken);
+    }
+
+    private static String normalizeBearer(String bearerToken) {
+        return (bearerToken == null || bearerToken.isBlank()) ? null : "Bearer " + bearerToken.trim();
+    }
+
+    /** Hot-reloads the HTTP Bearer token without restarting the metrics listener. */
+    public void updateBearerToken(String newBearerToken) {
+        this.expectedAuth = normalizeBearer(newBearerToken);
+    }
+
+    public boolean hasBearerToken() {
+        return expectedAuth != null;
     }
 
     public static MetricsExporter startLocalHttp(String host, int port, Supplier<Snapshot> snapshotSupplier) throws IOException {
@@ -106,15 +121,15 @@ public final class MetricsExporter implements AutoCloseable {
     public static MetricsExporter startLocalHttp(String host, int port, String bearerToken, Supplier<Snapshot> snapshotSupplier)
             throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
-        String expectedAuth = (bearerToken == null || bearerToken.isBlank()) ? null : "Bearer " + bearerToken.trim();
         ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "WhyNotAC MetricsHTTP");
             t.setDaemon(true);
             return t;
         });
         server.setExecutor(exec);
+        MetricsExporter exporter = new MetricsExporter(server, exec, bearerToken);
         server.createContext("/metrics", exchange -> {
-            if (!isAuthorized(exchange, expectedAuth)) {
+            if (!isAuthorized(exchange, exporter.expectedAuth)) {
                 rejectUnauthorized(exchange);
                 return;
             }
@@ -126,7 +141,7 @@ public final class MetricsExporter implements AutoCloseable {
             }
         });
         server.createContext("/health", exchange -> {
-            if (!isAuthorized(exchange, expectedAuth)) {
+            if (!isAuthorized(exchange, exporter.expectedAuth)) {
                 rejectUnauthorized(exchange);
                 return;
             }
@@ -140,7 +155,7 @@ public final class MetricsExporter implements AutoCloseable {
             }
         });
         server.start();
-        return new MetricsExporter(server, exec);
+        return exporter;
     }
 
     private static boolean isAuthorized(HttpExchange exchange, String expectedAuthHeader) {

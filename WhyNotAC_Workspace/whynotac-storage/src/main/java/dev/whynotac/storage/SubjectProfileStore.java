@@ -15,8 +15,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Atomic, restart-safe persistent profile store indexed by player UUID (STO-03), supporting GDPR access and
@@ -304,52 +302,52 @@ public final class SubjectProfileStore {
     }
 
     private static SubjectProfile fromJson(UUID expectedId, String json) {
-        long lastSeen = parseLong(json, "lastSeenEpochMillis");
-        long totalCases = parseLong(json, "totalCases");
-        long autoBans = parseLong(json, "autoBansIssued");
-        long overturned = parseLong(json, "overturnedCount");
+        Map<String, Object> root = MinimalJson.parseObject(json);
+        long lastSeen = MinimalJson.getLong(root, "lastSeenEpochMillis", 0L);
+        long totalCases = MinimalJson.getLong(root, "totalCases", 0L);
+        long autoBans = MinimalJson.getLong(root, "autoBansIssued", 0L);
+        long overturned = MinimalJson.getLong(root, "overturnedCount", 0L);
         Map<String, Long> byCheck = new LinkedHashMap<>();
-        Matcher checksBlock = Pattern.compile("\"casesByCheck\"\\s*:\\s*\\{([^}]*)}").matcher(json);
-        if (checksBlock.find()) {
-            Matcher entry = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"\\s*:\\s*(\\d+)").matcher(checksBlock.group(1));
-            while (entry.find()) {
-                byCheck.put(entry.group(1), Long.parseLong(entry.group(2)));
+        Map<String, Object> checksObj = MinimalJson.getObject(root, "casesByCheck");
+        if (checksObj != null) {
+            for (Map.Entry<String, Object> e : checksObj.entrySet()) {
+                if (e.getValue() instanceof Number n) {
+                    byCheck.put(e.getKey(), n.longValue());
+                }
             }
         }
         List<Long> incidents = new ArrayList<>();
-        Matcher incBlock = Pattern.compile("\"falseBanIncidents\"\\s*:\\s*\\[([^\\]]*)]").matcher(json);
-        if (incBlock.find()) {
-            Matcher num = Pattern.compile("\\d+").matcher(incBlock.group(1));
-            while (num.find()) {
-                incidents.add(Long.parseLong(num.group()));
+        List<Object> incArr = MinimalJson.getArray(root, "falseBanIncidents");
+        if (incArr != null) {
+            for (Object item : incArr) {
+                if (item instanceof Number n) {
+                    incidents.add(n.longValue());
+                }
             }
         }
         Map<String, FeatureSummary> baseline = new TreeMap<>();
-        int bfStart = json.indexOf("\"baselineFeatures\"");
-        int covStart = json.indexOf("\"combatCovariance\"");
-        if (bfStart >= 0) {
-            String bfSlice = covStart > bfStart ? json.substring(bfStart, covStart) : json.substring(bfStart);
-            Matcher feat = Pattern.compile(
-                    "\"((?:[^\"\\\\]|\\\\.)*)\"\\s*:\\s*\\{\\s*\"count\"\\s*:\\s*(\\d+)\\s*,\\s*\"mean\"\\s*:\\s*([^,\\s}]+)\\s*,\\s*\"var\"\\s*:\\s*([^}\\s]+)\\s*}")
-                    .matcher(bfSlice);
-            while (feat.find()) {
-                try {
-                    long count = Long.parseLong(feat.group(2));
-                    double mean = Double.parseDouble(feat.group(3));
-                    double var = Double.parseDouble(feat.group(4));
+        Map<String, Object> bfObj = MinimalJson.getObject(root, "baselineFeatures");
+        if (bfObj != null) {
+            for (Map.Entry<String, Object> e : bfObj.entrySet()) {
+                if (e.getValue() instanceof Map<?, ?> raw) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> fMap = (Map<String, Object>) raw;
+                    long count = MinimalJson.getLong(fMap, "count", 0L);
+                    double mean = MinimalJson.getDouble(fMap, "mean", Double.NaN);
+                    double var = MinimalJson.getDouble(fMap, "var", Double.NaN);
                     if (count > 0 && Double.isFinite(mean) && Double.isFinite(var) && var >= 0.0) {
-                        baseline.put(feat.group(1), new FeatureSummary(count, mean, var));
+                        baseline.put(e.getKey(), new FeatureSummary(count, mean, var));
                     }
-                } catch (NumberFormatException ignored) { }
+                }
             }
         }
         CovarianceSummary covSummary = null;
-        if (covStart >= 0) {
-            String covSlice = json.substring(covStart);
-            int dim = (int) parseLong(covSlice, "dim");
-            long count = parseLong(covSlice, "count");
-            double[] mean = parseDoubleArray(covSlice, "mean");
-            double[] cm = parseDoubleArray(covSlice, "coMoments");
+        Map<String, Object> covObj = MinimalJson.getObject(root, "combatCovariance");
+        if (covObj != null) {
+            int dim = (int) MinimalJson.getLong(covObj, "dim", 0L);
+            long count = MinimalJson.getLong(covObj, "count", 0L);
+            double[] mean = toDoubleArray(MinimalJson.getArray(covObj, "mean"));
+            double[] cm = toDoubleArray(MinimalJson.getArray(covObj, "coMoments"));
             if (dim > 0 && count > 0 && mean.length == dim && cm.length == dim * dim) {
                 covSummary = new CovarianceSummary(dim, count, mean, cm);
             }
@@ -357,37 +355,25 @@ public final class SubjectProfileStore {
         return new SubjectProfile(expectedId, lastSeen, totalCases, autoBans, overturned, byCheck, incidents, baseline, covSummary);
     }
 
-    private static double[] parseDoubleArray(String json, String field) {
-        Matcher m = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\\[([^\\]]*)]").matcher(json);
-        if (!m.find()) {
+    private static double[] toDoubleArray(List<Object> arr) {
+        if (arr == null || arr.isEmpty()) {
             return new double[0];
         }
-        String body = m.group(1).trim();
-        if (body.isEmpty()) {
-            return new double[0];
-        }
-        String[] parts = body.split(",");
-        double[] out = new double[parts.length];
-        for (int i = 0; i < parts.length; i++) {
-            try {
-                double v = Double.parseDouble(parts[i].trim());
-                if (!Double.isFinite(v)) {
-                    return new double[0];
-                }
-                out[i] = v;
-            } catch (NumberFormatException ignored) {
+        double[] out = new double[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            if (!(arr.get(i) instanceof Number n)) {
                 return new double[0];
             }
+            double v = n.doubleValue();
+            if (!Double.isFinite(v)) {
+                return new double[0];
+            }
+            out[i] = v;
         }
         return out;
     }
 
-    private static long parseLong(String json, String field) {
-        Matcher m = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*(-?\\d+)").matcher(json);
-        return m.find() ? Long.parseLong(m.group(1)) : 0L;
-    }
-
     private static String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        return MinimalJson.escape(s);
     }
 }

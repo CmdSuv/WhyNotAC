@@ -21,9 +21,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -54,6 +56,9 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
     public record Subject(List<String> cases, List<String> dossiers, long deletedRows, long deletedDossiers, List<String> failures) {}
 
     static final int MAX_QUEUED = 10_000;
+    static final int WRITE_BATCH_SIZE = 64;
+
+    private record PendingWrite(StoredCase row, String dossier, boolean countedInQueue) {}
 
     /** Optional AI case triage context written into each case dossier JSON. */
     public record AiTelemetry(
@@ -65,6 +70,10 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
             double probeWealth) {}
 
     private final Path database;
+    private final String jdbcUrl;
+    private final String jdbcUser;
+    private final String jdbcPassword;
+    private final boolean sqlite;
     private final Path dossiers;
     private final Function<PlayerSession, Optional<Path>> recordingOf;
     private final Function<VerdictCase, Optional<AiTelemetry>> aiTelemetryOf;
@@ -75,15 +84,19 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
         thread.setDaemon(true);
         return thread;
     });
+    private final ConcurrentLinkedQueue<PendingWrite> pendingWrites = new ConcurrentLinkedQueue<>();
+    private final AtomicBoolean flushScheduled = new AtomicBoolean();
     private final AtomicInteger queued = new AtomicInteger();
     int retentionBatch = 10_000; // rows per retention round; tests use a small one
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong stored = new AtomicLong();
+    private final AtomicLong batchesCommitted = new AtomicLong();
+    private final AtomicLong casesBatched = new AtomicLong();
     private Connection connection; // writer thread only
     private boolean databaseFailed; // writer thread only
 
     public CaseStore(Path database, Path dossiers, Function<PlayerSession, Optional<Path>> recordingOf, String whynotacVersion, Logger logger) {
-        this(database, dossiers, recordingOf, c -> Optional.empty(), whynotacVersion, logger);
+        this(database, dossiers, recordingOf, c -> Optional.empty(), whynotacVersion, logger, null, "", "");
     }
 
     public CaseStore(
@@ -93,7 +106,27 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
             Function<VerdictCase, Optional<AiTelemetry>> aiTelemetryOf,
             String whynotacVersion,
             Logger logger) {
+        this(database, dossiers, recordingOf, aiTelemetryOf, whynotacVersion, logger, null, "", "");
+    }
+
+    public CaseStore(
+            Path database,
+            Path dossiers,
+            Function<PlayerSession, Optional<Path>> recordingOf,
+            Function<VerdictCase, Optional<AiTelemetry>> aiTelemetryOf,
+            String whynotacVersion,
+            Logger logger,
+            String jdbcUrl,
+            String jdbcUser,
+            String jdbcPassword) {
         this.database = database;
+        String effectiveUrl = (jdbcUrl != null && !jdbcUrl.isBlank())
+                ? jdbcUrl.trim()
+                : "jdbc:sqlite:" + database;
+        this.jdbcUrl = effectiveUrl;
+        this.jdbcUser = jdbcUser == null ? "" : jdbcUser;
+        this.jdbcPassword = jdbcPassword == null ? "" : jdbcPassword;
+        this.sqlite = effectiveUrl.startsWith("jdbc:sqlite:");
         this.dossiers = dossiers;
         this.recordingOf = recordingOf;
         this.aiTelemetryOf = aiTelemetryOf == null ? c -> Optional.empty() : aiTelemetryOf;
@@ -120,64 +153,148 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
             }
             return;
         }
-        writer.execute(() -> {
-            try {
-                write(row, dossier);
-            } finally {
-                queued.decrementAndGet();
-            }
-        });
+        enqueueWrite(new PendingWrite(row, dossier, true));
     }
 
     /** Stores a case row and its dossier as {@link #opened} does (tests). */
     void add(StoredCase row, String dossier) {
-        writer.execute(() -> write(row, dossier));
+        enqueueWrite(new PendingWrite(row, dossier, false));
     }
 
-    private void write(StoredCase row, String dossier) {
+    private void enqueueWrite(PendingWrite item) {
+        pendingWrites.add(item);
+        if (flushScheduled.compareAndSet(false, true)) {
+            writer.execute(this::drainLoop);
+        }
+    }
+
+    private void drainLoop() {
         try {
-            Files.createDirectories(dossiers);
-            Files.writeString(Path.of(row.dossier()), dossier, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "WhyNotAC could not write the dossier of case " + row.id(), e);
+            flushAllPending();
+        } finally {
+            flushScheduled.set(false);
+            if (!pendingWrites.isEmpty() && flushScheduled.compareAndSet(false, true)) {
+                writer.execute(this::drainLoop);
+            }
         }
-        Connection db = connection();
-        if (db == null) {
-            return;
+    }
+
+    /** Drains all currently queued writes in bounded transactional batches (writer thread only). */
+    private void flushAllPending() {
+        while (!pendingWrites.isEmpty()) {
+            List<PendingWrite> batch = new ArrayList<>(WRITE_BATCH_SIZE);
+            for (int i = 0; i < WRITE_BATCH_SIZE; i++) {
+                PendingWrite next = pendingWrites.poll();
+                if (next == null) {
+                    break;
+                }
+                batch.add(next);
+            }
+            if (batch.isEmpty()) {
+                break;
+            }
+            writeBatch(batch);
         }
-        try (PreparedStatement insert = db.prepareStatement("INSERT INTO cases (id, created_at, check_id, check_version, evidence_class, "
-                + "lifecycle, player_name, player_id, identity, from_seq, to_seq, summary, fingerprint, recording, dossier) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
-            insert.setString(1, row.id());
-            insert.setLong(2, row.createdEpochMillis());
-            insert.setString(3, row.check());
-            insert.setInt(4, row.checkVersion());
-            insert.setString(5, row.evidenceClass());
-            insert.setString(6, row.lifecycle());
-            insert.setString(7, row.playerName());
-            insert.setString(8, row.playerId());
-            insert.setString(9, row.identity());
-            insert.setLong(10, row.fromSequence());
-            insert.setLong(11, row.toSequence());
-            insert.setString(12, row.summary());
-            insert.setString(13, row.fingerprint());
-            insert.setString(14, row.recording());
-            insert.setString(15, row.dossier());
-            insert.executeUpdate();
-            stored.incrementAndGet();
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "WhyNotAC could not store case " + row.id() + " (the dossier file was written)", e);
+    }
+
+    private void writeBatch(List<PendingWrite> batch) {
+        try {
+            try {
+                Files.createDirectories(dossiers);
+            } catch (IOException e) {
+                logger.log(Level.WARNING, "WhyNotAC could not create dossier directory " + dossiers, e);
+            }
+            for (PendingWrite item : batch) {
+                try {
+                    Files.writeString(Path.of(item.row().dossier()), item.dossier(), StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    logger.log(Level.WARNING, "WhyNotAC could not write the dossier of case " + item.row().id(), e);
+                }
+            }
+            Connection db = connection();
+            if (db == null) {
+                return;
+            }
+            String insertSql = "INSERT INTO cases (id, created_at, check_id, check_version, evidence_class, "
+                    + "lifecycle, player_name, player_id, identity, from_seq, to_seq, summary, fingerprint, recording, dossier) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            boolean previousAutoCommit = true;
+            try {
+                previousAutoCommit = db.getAutoCommit();
+                db.setAutoCommit(false);
+                try (PreparedStatement insert = db.prepareStatement(insertSql)) {
+                    for (PendingWrite item : batch) {
+                        bindInsert(insert, item.row());
+                        insert.addBatch();
+                    }
+                    insert.executeBatch();
+                }
+                db.commit();
+                stored.addAndGet(batch.size());
+                batchesCommitted.incrementAndGet();
+                casesBatched.addAndGet(batch.size());
+            } catch (SQLException batchFailure) {
+                try {
+                    db.rollback();
+                } catch (SQLException ignored) { }
+                try {
+                    db.setAutoCommit(true);
+                } catch (SQLException ignored) { }
+                // Fallback row-by-row so one bad/duplicate row never drops the rest of the batch.
+                for (PendingWrite item : batch) {
+                    try (PreparedStatement insert = db.prepareStatement(insertSql)) {
+                        bindInsert(insert, item.row());
+                        insert.executeUpdate();
+                        stored.incrementAndGet();
+                    } catch (SQLException rowFailure) {
+                        logger.log(Level.WARNING, "WhyNotAC could not store case " + item.row().id()
+                                + " (the dossier file was written)", rowFailure);
+                    }
+                }
+            } finally {
+                try {
+                    db.setAutoCommit(previousAutoCommit);
+                } catch (SQLException ignored) { }
+            }
+        } finally {
+            for (PendingWrite item : batch) {
+                if (item.countedInQueue()) {
+                    queued.decrementAndGet();
+                }
+            }
         }
+    }
+
+    private static void bindInsert(PreparedStatement insert, StoredCase row) throws SQLException {
+        insert.setString(1, row.id());
+        insert.setLong(2, row.createdEpochMillis());
+        insert.setString(3, row.check());
+        insert.setInt(4, row.checkVersion());
+        insert.setString(5, row.evidenceClass());
+        insert.setString(6, row.lifecycle());
+        insert.setString(7, row.playerName());
+        insert.setString(8, row.playerId());
+        insert.setString(9, row.identity());
+        insert.setLong(10, row.fromSequence());
+        insert.setLong(11, row.toSequence());
+        insert.setString(12, row.summary());
+        insert.setString(13, row.fingerprint());
+        insert.setString(14, row.recording());
+        insert.setString(15, row.dossier());
     }
 
     /** The most recent cases, newest first; {@code callback} runs on the writer thread. */
     public void recent(int limit, Consumer<List<StoredCase>> callback) {
-        writer.execute(() -> callback.accept(query("SELECT * FROM cases ORDER BY created_at DESC LIMIT ?", limit, null)));
+        writer.execute(() -> {
+            flushAllPending();
+            callback.accept(query("SELECT * FROM cases ORDER BY created_at DESC LIMIT ?", limit, null));
+        });
     }
 
     /** The case whose id starts with {@code prefix} (at least 4 characters), if exactly one does. */
     public void find(String prefix, Consumer<Optional<StoredCase>> callback) {
         writer.execute(() -> {
+            flushAllPending();
             List<StoredCase> found = prefix.length() < 4 ? List.of() : query("SELECT * FROM cases WHERE id LIKE ? LIMIT 2", 2, prefix + "%");
             callback.accept(found.size() == 1 ? Optional.of(found.getFirst()) : Optional.empty());
         });
@@ -190,6 +307,7 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
      */
     public void retain(int days) {
         writer.execute(() -> {
+            flushAllPending();
             long cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days);
             Connection db = connection();
             if (db != null) {
@@ -220,6 +338,7 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
      */
     public void subject(UUID playerId, boolean delete, Consumer<Subject> callback) {
         writer.execute(() -> {
+            flushAllPending();
             String id = playerId.toString();
             java.util.Set<String> ids = new java.util.TreeSet<>();
             java.util.Set<Path> files = new java.util.TreeSet<>();
@@ -319,6 +438,22 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
         return dropped.get();
     }
 
+    public long batchesCommitted() {
+        return batchesCommitted.get();
+    }
+
+    public long casesBatched() {
+        return casesBatched.get();
+    }
+
+    public boolean isSqlite() {
+        return sqlite;
+    }
+
+    public String jdbcUrl() {
+        return jdbcUrl;
+    }
+
     private List<StoredCase> query(String sql, int limit, String parameter) {
         Connection db = connection();
         List<StoredCase> out = new ArrayList<>();
@@ -353,21 +488,33 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
             return connection;
         }
         try {
-            Class.forName("org.sqlite.JDBC"); // bundled with Paper
-            Files.createDirectories(database.getParent());
-            connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+            if (sqlite) {
+                Class.forName("org.sqlite.JDBC"); // bundled with Paper
+                if (database != null && database.getParent() != null) {
+                    Files.createDirectories(database.getParent());
+                }
+                connection = DriverManager.getConnection(jdbcUrl);
+            } else if (!jdbcUser.isEmpty()) {
+                connection = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword);
+            } else {
+                connection = DriverManager.getConnection(jdbcUrl);
+            }
             try (Statement s = connection.createStatement()) {
-                s.execute("PRAGMA journal_mode=WAL");
-                s.execute("PRAGMA synchronous=NORMAL");
-                s.executeUpdate("CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, check_id TEXT NOT NULL, "
-                        + "check_version INTEGER NOT NULL, evidence_class TEXT NOT NULL, lifecycle TEXT NOT NULL, player_name TEXT, player_id TEXT, "
-                        + "identity TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER NOT NULL, summary TEXT NOT NULL, "
-                        + "fingerprint TEXT NOT NULL, recording TEXT, dossier TEXT NOT NULL)");
+                if (sqlite) {
+                    s.execute("PRAGMA journal_mode=WAL");
+                    s.execute("PRAGMA synchronous=NORMAL");
+                }
+                s.executeUpdate("CREATE TABLE IF NOT EXISTS cases (id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL, "
+                        + "check_id VARCHAR(128) NOT NULL, check_version INTEGER NOT NULL, evidence_class VARCHAR(32) NOT NULL, "
+                        + "lifecycle VARCHAR(32) NOT NULL, player_name VARCHAR(64), player_id VARCHAR(64), "
+                        + "identity VARCHAR(64) NOT NULL, from_seq BIGINT NOT NULL, to_seq BIGINT NOT NULL, summary TEXT NOT NULL, "
+                        + "fingerprint VARCHAR(128) NOT NULL, recording TEXT, dossier TEXT NOT NULL)");
                 s.executeUpdate("CREATE INDEX IF NOT EXISTS cases_created ON cases (created_at)");
+                s.executeUpdate("CREATE INDEX IF NOT EXISTS cases_player ON cases (player_id)");
             }
         } catch (ClassNotFoundException | SQLException | IOException e) {
             databaseFailed = true;
-            logger.log(Level.WARNING, "WhyNotAC case database unavailable (" + database + "); cases are kept as dossier files only", e);
+            logger.log(Level.WARNING, "WhyNotAC case database unavailable (" + jdbcUrl + "); cases are kept as dossier files only", e);
         }
         return connection;
     }
@@ -439,6 +586,11 @@ public final class CaseStore implements VerdictEngine.CaseListener, AutoCloseabl
 
     @Override
     public void close() {
+        if (!writer.isShutdown()) {
+            try {
+                writer.execute(this::flushAllPending);
+            } catch (RuntimeException ignored) { }
+        }
         writer.shutdown();
         try {
             if (!writer.awaitTermination(5, TimeUnit.SECONDS)) {

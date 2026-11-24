@@ -17,8 +17,6 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Four-eyes review, appeal resolution, and plain-language explanation workflow (ADM-02, VER-15).
@@ -225,8 +223,14 @@ public final class ReviewWorkflow {
     }
 
     private static ReviewRecord parseJsonLine(String line) {
-        String caseId = extractString(line, "caseId");
-        String statusStr = extractString(line, "status");
+        Map<String, Object> obj;
+        try {
+            obj = MinimalJson.parseObject(line);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        String caseId = MinimalJson.getString(obj, "caseId");
+        String statusStr = MinimalJson.getString(obj, "status");
         if (caseId == null || statusStr == null) {
             return null;
         }
@@ -236,72 +240,15 @@ public final class ReviewWorkflow {
         } catch (IllegalArgumentException ignored) {
             return null;
         }
-        String primary = extractNullableString(line, "primary");
-        String secondary = extractNullableString(line, "secondary");
-        String notes = extractString(line, "notes");
-        long updated = extractLong(line, "updated");
+        String primary = MinimalJson.getString(obj, "primary");
+        String secondary = MinimalJson.getString(obj, "secondary");
+        String notes = MinimalJson.getString(obj, "notes");
+        long updated = MinimalJson.getLong(obj, "updated", 0L);
         return new ReviewRecord(caseId, status, primary, secondary, notes == null ? "" : notes, updated);
     }
 
-    private static String extractString(String json, String field) {
-        Matcher m = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(json);
-        return m.find() ? unescape(m.group(1)) : null;
-    }
-
-    private static String extractNullableString(String json, String field) {
-        Matcher mNull = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*null").matcher(json);
-        if (mNull.find()) {
-            return null;
-        }
-        return extractString(json, field);
-    }
-
-    private static long extractLong(String json, String field) {
-        Matcher m = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*(-?\\d+)").matcher(json);
-        return m.find() ? Long.parseLong(m.group(1)) : 0L;
-    }
-
     private static String escape(String s) {
-        StringBuilder out = new StringBuilder(s.length() + 8);
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"' -> out.append("\\\"");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                }
-            }
-        }
-        return out.toString();
-    }
-
-    private static String unescape(String s) {
-        StringBuilder out = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '\\' && i + 1 < s.length()) {
-                char next = s.charAt(++i);
-                switch (next) {
-                    case '\\' -> out.append('\\');
-                    case '"' -> out.append('"');
-                    case 'n' -> out.append('\n');
-                    case 'r' -> out.append('\r');
-                    case 't' -> out.append('\t');
-                    default -> out.append(next);
-                }
-            } else {
-                out.append(c);
-            }
-        }
-        return out.toString();
+        return MinimalJson.escape(s);
     }
 
     /** Generates a clear, non-technical plain-language explanation suitable for staff and player appeal views (VER-15). */
