@@ -97,6 +97,11 @@ public final class UseSlowdownCheck implements TimelineListener {
         boolean confirmedHungry;
         long pendingHungrySeq = Long.MIN_VALUE;
 
+        // Pending outbound self SetEntityData (index 0, FLAG_SPRINTING bit 3 = 0x08) echo tracking:
+        // suppressed until a subsequent ping is acknowledged plus one additional client tick.
+        long pendingSprintEchoSeq = Long.MIN_VALUE;
+        int sprintEchoGraceTicks;
+
         boolean releasedInCurrentTick;
         long releaseSeq = -1L;
         long releaseNano;
@@ -132,6 +137,15 @@ public final class UseSlowdownCheck implements TimelineListener {
             pendingHungrySeq = Long.MIN_VALUE;
         }
 
+        void resetSprintEcho() {
+            pendingSprintEchoSeq = Long.MIN_VALUE;
+            sprintEchoGraceTicks = 0;
+        }
+
+        boolean isSprintEchoSuppressed() {
+            return pendingSprintEchoSeq != Long.MIN_VALUE || sprintEchoGraceTicks > 0;
+        }
+
         void resetTick() {
             releasedInCurrentTick = false;
             releaseSeq = -1L;
@@ -164,6 +178,7 @@ public final class UseSlowdownCheck implements TimelineListener {
                 state.resetTick();
                 state.clearHold();
                 state.resetHunger();
+                state.resetSprintEcho();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
@@ -175,6 +190,10 @@ public final class UseSlowdownCheck implements TimelineListener {
                 if (pingSeq != Long.MIN_VALUE && state.pendingHungrySeq != Long.MIN_VALUE && pingSeq > state.pendingHungrySeq) {
                     state.confirmedHungry = true;
                     state.pendingHungrySeq = Long.MIN_VALUE;
+                }
+                if (pingSeq != Long.MIN_VALUE && state.pendingSprintEchoSeq != Long.MIN_VALUE && pingSeq > state.pendingSprintEchoSeq) {
+                    state.pendingSprintEchoSeq = Long.MIN_VALUE;
+                    state.sprintEchoGraceTicks = 2;
                 }
             }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
@@ -190,6 +209,7 @@ public final class UseSlowdownCheck implements TimelineListener {
                 state.resetTick();
                 state.clearHold();
                 state.resetHunger();
+                state.resetSprintEcho();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
@@ -198,6 +218,7 @@ public final class UseSlowdownCheck implements TimelineListener {
                 state.resetTick();
                 state.clearHold();
                 state.resetHunger();
+                state.resetSprintEcho();
                 state.shieldCooldownTicks = 0;
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
@@ -241,6 +262,13 @@ public final class UseSlowdownCheck implements TimelineListener {
                     if (e.index() == 8 && (e.value() & 1L) == 0L || e.index() == 6) {
                         state.clearHold();
                     }
+                    // Entity.DATA_SHARED_FLAGS_ID (index 0) bit 3 (Entity.FLAG_SPRINTING = 0x08):
+                    // a stale server sprint echo overwrites client isSprinting() even while holding a shield
+                    // (LocalPlayer.shouldStopRunSprinting does not check isUsingItem), causing
+                    // LocalPlayer.sendIsSprintingIfNeeded() to emit START_SPRINTING on vanilla clients.
+                    if (e.index() == 0 && (e.value() & 8L) != 0L) {
+                        state.pendingSprintEchoSeq = out.sequence();
+                    }
                 }
             }
             default -> { }
@@ -267,6 +295,9 @@ public final class UseSlowdownCheck implements TimelineListener {
                     if (state.holdTicksRemaining <= 0) {
                         state.clearHold();
                     }
+                }
+                if (state.sprintEchoGraceTicks > 0) {
+                    state.sprintEchoGraceTicks--;
                 }
             }
             case ServerboundPacket.SetCarriedItem ignored -> state.clearHold();
@@ -380,16 +411,20 @@ public final class UseSlowdownCheck implements TimelineListener {
             case ServerboundPacket.PlayerCommand cmd -> {
                 if (cmd.action() == ServerboundPacket.PlayerCommand.Action.START_SPRINTING) {
                     if (state.activeHoldUse) {
-                        long startSeq = state.holdStartSeq;
-                        long startNano = state.holdStartNano;
-                        String item = state.holdItem;
-                        state.clearHold();
-                        Map<String, String> details = new TreeMap<>();
-                        details.put("reason", "sprint-while-using");
-                        details.put("item", item);
-                        report(session, state, startSeq, startNano, in,
-                                "sent START_SPRINTING while continuously using " + item + " (NoSlow)",
-                                details);
+                        if (state.isSprintEchoSuppressed()) {
+                            state.clearHold();
+                        } else {
+                            long startSeq = state.holdStartSeq;
+                            long startNano = state.holdStartNano;
+                            String item = state.holdItem;
+                            state.clearHold();
+                            Map<String, String> details = new TreeMap<>();
+                            details.put("reason", "sprint-while-using");
+                            details.put("item", item);
+                            report(session, state, startSeq, startNano, in,
+                                    "sent START_SPRINTING while continuously using " + item + " (NoSlow)",
+                                    details);
+                        }
                     }
                     state.sprintCommandInCurrentTick = true;
                     state.sprintCmdSeq = in.sequence();

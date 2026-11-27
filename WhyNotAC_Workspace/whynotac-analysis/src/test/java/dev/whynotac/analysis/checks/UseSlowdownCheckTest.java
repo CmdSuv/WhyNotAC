@@ -266,4 +266,52 @@ final class UseSlowdownCheckTest {
         assertEquals("sprint-while-using", evidence.get(0).details().get("reason"));
         assertEquals("minecraft:cooked_beef", evidence.get(0).details().get("item"));
     }
+
+    @Test
+    void selfSprintFlagEchoSuppressesSprintWhileUsingUntilAckPlusOneTick() {
+        giveOffhandShield();
+
+        // 1. Stale server sprint echo (index 0, FLAG_SPRINTING bit 3 = 0x08) arrives while shield is raised;
+        // START_SPRINTING before ping ack must produce 0 evidence.
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.UseItem(Hand.OFF_HAND, 1, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetEntityData(
+                1, List.of(new ClientboundPacket.SetEntityData.DataEntry(0, ClientboundPacket.SetEntityData.Kind.BYTE, 0x08L)), 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "Sprint echo before ack must not flag: " + evidence);
+
+        // 2. Subsequent ping is acknowledged; START_SPRINTING on the tick after ack (+1 tick grace) must still produce 0 evidence.
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(201)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.Pong(201)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 201, now, 0));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2,
+                new ServerboundPacket.UseItem(Hand.OFF_HAND, 2, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.ClientTickEnd()));
+
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "Sprint echo within ack + 1 tick grace must not flag: " + evidence);
+
+        // 3. After the grace tick expires with no new sprint echo, START_SPRINTING while holding shield must flag.
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 4,
+                new ServerboundPacket.UseItem(Hand.OFF_HAND, 3, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 4, new ServerboundPacket.ClientTickEnd()));
+
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 5,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 5, new ServerboundPacket.ClientTickEnd()));
+        assertEquals(1, evidence.size());
+        assertEquals("sprint-while-using", evidence.get(0).details().get("reason"));
+        assertEquals("minecraft:shield", evidence.get(0).details().get("item"));
+    }
 }
