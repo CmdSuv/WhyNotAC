@@ -4042,4 +4042,59 @@ class MovementCheckTest {
                 "Expected fast post-action anchor within 2 stationary ticks: " + recovery);
         assertEquals(List.of(), evidence);
     }
+
+    @Test
+    void fastPostActionAnchorPreservesDoubleTapSprintTriggerWindowAfterWallTap() throws Exception {
+        // Place a stone wall directly ahead (+Z) at (4, 64..65, 5) so tapping W at z=4.7 keeps position unchanged.
+        place(4, 64, 5, STONE);
+        place(4, 65, 5, STONE);
+        // Put brush in slot 0 (triggers short-action loss) and stone in slot 1 (quiet client-side slot switch).
+        List<Stack> slots = new ArrayList<>();
+        for (int i = 0; i < 46; i++) {
+            slots.add(Stack.EMPTY);
+        }
+        slots.set(36, new Stack("minecraft:brush", 1, List.of(), List.of(), null, false));
+        slots.set(37, new Stack("minecraft:stone", 1, List.of(), List.of(), null, false));
+        out(new ClientboundPacket.ContainerSetContent(0, 1, slots, Stack.EMPTY));
+        sync();
+
+        teleport(4.5, 64.0, 4.4, 0.0F, 0.0F);
+        // Establish ground state
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        // Trigger short-action loss using brush on slot 0, then switch cleanly to stone (slot 1)
+        keybinds.add(new ServerboundPacket.UseItem(Hand.MAIN_HAND, ++blockSequence, 0.0F, 0.0F));
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        keybinds.add(new ServerboundPacket.SetCarriedItem(1));
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+
+        // Walk up flush against the wall at z=4.7 while untracked so post-loss quietSincePosition becomes true
+        ticks(6, FORWARD, 0.0F, 0.0F);
+        // Wait briefly so horizontal velocity settles at z=4.7 and sends final settled position packet
+        ticks(3, NONE, 0.0F, 0.0F);
+        // Wait until reminder is 4 ticks away from the automatic 20-tick position reminder
+        while (reminder < 16) {
+            tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        }
+        // Tap W into the wall: position stays exact at z=4.7, but vanilla sets sprintTriggerTime = 7!
+        tick(FORWARD, 0.0F, 0.0F, Vec3d.ZERO);
+        // Release W until the 20-tick reminder sends the exact repeated position -> fastPostActionAnchor fires!
+        int anchorStart = ticks.size();
+        while (reminder > 0) {
+            tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        }
+        // Confirm fastPostActionAnchor fired while player still has sprintTriggerTime > 0
+        assertTrue(player.sprintTriggerTime() > 0, "Expected vanilla sprintTriggerTime > 0, was " + player.sprintTriggerTime());
+        assertTrue(ticks.subList(anchorStart, ticks.size()).stream()
+                        .anyMatch(t -> "anchored: post-action recovery".equals(t.reason())),
+                "Expected fastPostActionAnchor to fire on reminder packet: " + ticks.subList(anchorStart, ticks.size()));
+
+        // Turn away from the wall and press W within the remaining sprintTriggerTime window -> vanilla double-tap sprints!
+        int sprintStart = ticks.size();
+        ticks(4, FORWARD, 180.0F, 0.0F);
+        assertTrue(player.sprinting(), "Vanilla client should have double-tap sprinted");
+        List<MovementTracker.Tick> afterAnchor = ticks.subList(sprintStart, ticks.size());
+        assertTrue(afterAnchor.stream().noneMatch(t -> t.outcome() == MovementTracker.Outcome.UNEXPLAINED),
+                "Honest double-tap sprint after fastPostActionAnchor must never be UNEXPLAINED: " + afterAnchor);
+        assertEquals(List.of(), evidence, "Honest double-tap sprint after fastPostActionAnchor must produce 0 evidence");
+    }
 }

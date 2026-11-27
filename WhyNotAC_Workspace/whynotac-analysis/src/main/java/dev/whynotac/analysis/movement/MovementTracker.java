@@ -131,6 +131,8 @@ public final class MovementTracker {
     static final int MAX_PENDING = 4096;
     static final int SETTLE_KEYLESS_TICKS = 12;
     static final int SETTLE_MIN_TICKS = 3;
+    /** Maximum value of vanilla 1.21.11 {@code Options.sprintWindow} ({@code OptionInstance.IntRange(0, 10)}). */
+    static final int MAX_SPRINT_WINDOW = 10;
     /** The run anchor tries once this many steady ticks are on record, and again every this many ticks while they last. */
     static final int RUN_MIN_TICKS = 20;
     static final int RUN_MAX_TICKS = 80;
@@ -2793,13 +2795,20 @@ public final class MovementTracker {
             fastPostAction = settled != null;
         }
         List<Hypothesis> uses = settled == null ? null : usesAtAnchor(settled);
+        int maxSprintTrigger = fastPostAction ? Math.max(0, MAX_SPRINT_WINDOW - keylessTicks) : 0;
+        if (uses != null && fastPostAction && (long) uses.size() * 2L * (maxSprintTrigger + 1L) > MAX_HYPOTHESES) {
+            uses = null; // wait until keylessTicks shrinks the remaining sprintTriggerTime fan-out within MAX_HYPOTHESES
+        }
         if (uses != null) {
             boolean present = settled.self().speed().holdsSprinting();
             SpeedAttribute other = settled.self().speed().setSprinting(!present);
             List<Hypothesis> anchored = new ArrayList<>();
             for (Hypothesis u : uses) {
-                anchored.add(u);
-                anchored.add(u.withPlayer(withSprintModifier(u.player(), !present)).withSelf(u.self().withSpeed(other)));
+                for (int trigger = 0; trigger <= maxSprintTrigger; trigger++) {
+                    PlayerState p = trigger == 0 ? u.player() : withSprintTrigger(u.player(), trigger);
+                    anchored.add(u.withPlayer(p));
+                    anchored.add(u.withPlayer(withSprintModifier(p, !present)).withSelf(u.self().withSpeed(other)));
+                }
             }
             hypotheses = List.copyOf(borderTicked(anchored, entities.lastTickRanNormally())); // the anchor is the state after this tick
             lostFromShortAction = false;
@@ -3174,9 +3183,13 @@ public final class MovementTracker {
      * Fast post-action anchor recovery ({@code PH21-04}): after a short bounded loss (Riptide trident, self-ending
      * brush/bundle, or unresolved item use), re-anchors in 1-2 stationary on-ground ticks once the client sends an
      * exact repeated position packet ({@code move.x == lastX && move.y == lastY && move.z == lastZ}) with no keys
-     * held. Because vanilla {@code LivingEntity.aiStep} zeroes any horizontal velocity below {@code 0.003} and any
-     * velocity {@code >= 0.003} strictly moves the position away from {@code lastX/lastZ}, an exact repeated ground
-     * position proves {@code deltaMovement == (0.0, settledY, 0.0)} bit-for-bit without waiting 12 keyless ticks.
+     * held. Because vanilla {@code LivingEntity.aiStep} zeroes any horizontal velocity below {@code 0.003} (and clears
+     * {@code noJumpDelay} to {@code 0} whenever jump is not pressed) while any velocity {@code >= 0.003} strictly moves
+     * the position away from {@code lastX/lastZ}, an exact repeated ground position proves
+     * {@code deltaMovement == (0.0, settledY, 0.0)} bit-for-bit. Because {@code LocalPlayer.sprintTriggerTime} can
+     * still be non-zero for up to {@link #MAX_SPRINT_WINDOW} ({@code Options.sprintWindow} range {@code 0..10}) ticks
+     * after a forward tap (for example against a wall), callers fan out hypotheses across
+     * {@code 0..max(0, MAX_SPRINT_WINDOW - keylessTicks)}.
      */
     private Hypothesis fastPostActionAnchor(long number, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
         ServerboundPacket.MovePlayer move = in.move;
