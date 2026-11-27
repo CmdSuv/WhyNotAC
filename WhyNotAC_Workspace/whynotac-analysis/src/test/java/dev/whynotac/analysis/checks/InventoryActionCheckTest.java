@@ -121,6 +121,46 @@ final class InventoryActionCheckTest {
     }
 
     @Test
+    void inFlightServerCloseRespawnAndSprintEchoProduceZeroEvidence() {
+        // 1. Server sends ClientboundContainerClose(5) -> before ack, client's in-flight ContainerClick(5) arrives,
+        // then client processes server close (no ServerboundContainerClose sent) and walks in the same tick.
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.OpenScreen(5, "minecraft:generic_9x3")));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerClose(5)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ContainerClick(5, 1, 2, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(true, false, false, false, false, false, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "In-flight server ContainerClose before ack must not flag: " + evidence);
+
+        // 2. Server opens container 6, then sends Respawn -> client's in-flight ContainerClick(6) before Respawn ack must not flag.
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.OpenScreen(6, "minecraft:generic_9x3")));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Respawn(new ClientboundPacket.Dimension("minecraft:overworld", -64, 384), 0, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.ContainerClick(6, 1, 2, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "In-flight ContainerClick before Respawn ack must not flag: " + evidence);
+
+        // Acknowledge respawn via ping so container 6 is now truly closed
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(55)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.Pong(55)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 55, now, 0));
+
+        // 3. Self SetEntityData sprint echo during inventory click suppresses START_SPRINTING in the same tick
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.SetEntityData(
+                1, List.of(new ClientboundPacket.SetEntityData.DataEntry(0, ClientboundPacket.SetEntityData.Kind.BYTE, 0x08L)), 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2,
+                new ServerboundPacket.ContainerClick(0, 1, 9, 0, "PICKUP", List.of(), Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "Self sprint flag echo during ContainerClick must not flag: " + evidence);
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(InventoryActionCheck.VERSION, Checks.version(InventoryActionCheck.ID));
         assertNotNull(Checks.create(InventoryActionCheck.ID, (s, e) -> { }));

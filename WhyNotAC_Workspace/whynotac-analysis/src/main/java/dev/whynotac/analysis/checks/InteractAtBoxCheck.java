@@ -84,31 +84,33 @@ public final class InteractAtBoxCheck implements TimelineListener {
         if (states.isEmpty()) {
             return;
         }
-        double maxHalfX = 0.0;
-        double maxHalfZ = 0.0;
-        double minY = 0.0;
-        double maxY = 0.0;
+        double minX = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        double minZ = Double.POSITIVE_INFINITY;
+        double maxZ = Double.NEGATIVE_INFINITY;
         for (ClientEntities.PossibleState s : states) {
-            if (!s.present() || !s.known() || s.bounds() == null) {
+            if (!s.present() || !s.known() || !s.positionKnown() || s.bounds() == null) {
                 return;
             }
             EntitySizes.Box b = s.bounds();
-            double halfX = (b.maxX() - b.minX()) * 0.5 + s.pickRadius() + BOX_TOLERANCE;
-            double halfZ = (b.maxZ() - b.minZ()) * 0.5 + s.pickRadius() + BOX_TOLERANCE;
-            double lowY = -s.pickRadius() - BOX_TOLERANCE;
-            double highY = (b.maxY() - b.minY()) + s.pickRadius() + BOX_TOLERANCE;
-            maxHalfX = Math.max(maxHalfX, halfX);
-            maxHalfZ = Math.max(maxHalfZ, halfZ);
-            minY = Math.min(minY, lowY);
-            maxY = Math.max(maxY, highY);
+            double pad = s.pickRadius() + BOX_TOLERANCE;
+            minX = Math.min(minX, (b.minX() - s.x()) - pad);
+            maxX = Math.max(maxX, (b.maxX() - s.x()) + pad);
+            minY = Math.min(minY, (b.minY() - s.y()) - pad);
+            maxY = Math.max(maxY, (b.maxY() - s.y()) + pad);
+            minZ = Math.min(minZ, (b.minZ() - s.z()) - pad);
+            maxZ = Math.max(maxZ, (b.maxZ() - s.z()) + pad);
         }
-        if (Math.abs(loc.x()) > maxHalfX || Math.abs(loc.z()) > maxHalfZ || loc.y() < minY || loc.y() > maxY) {
+        if (loc.x() < minX || loc.x() > maxX || loc.y() < minY || loc.y() > maxY || loc.z() < minZ || loc.z() > maxZ) {
             Map<String, String> details = new TreeMap<>();
             details.put("reason", "out-of-bounds-interact-at");
             details.put("target", Integer.toString(interact.entityId()));
             details.put("location", String.format(Locale.ROOT, "%.4f,%.4f,%.4f", loc.x(), loc.y(), loc.z()));
-            details.put("allowedHalfXZ", String.format(Locale.ROOT, "%.4f,%.4f", maxHalfX, maxHalfZ));
+            details.put("allowedX", String.format(Locale.ROOT, "%.4f..%.4f", minX, maxX));
             details.put("allowedY", String.format(Locale.ROOT, "%.4f..%.4f", minY, maxY));
+            details.put("allowedZ", String.format(Locale.ROOT, "%.4f..%.4f", minZ, maxZ));
             report(session, state, in.sequence(), in.nanoTime(), in,
                     String.format(Locale.ROOT, "INTERACT_AT offset (%.3f, %.3f, %.3f) outside entity %d hitbox bounds",
                             loc.x(), loc.y(), loc.z(), interact.entityId()),

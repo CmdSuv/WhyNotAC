@@ -314,4 +314,38 @@ final class UseSlowdownCheckTest {
         assertEquals("sprint-while-using", evidence.get(0).details().get("reason"));
         assertEquals("minecraft:shield", evidence.get(0).details().get("item"));
     }
+
+    @Test
+    void useEffectsComponentAndInFlightServerStopUseProduceZeroEvidence() {
+        // 1. 1.21.11 minecraft:use_effects (can_sprint=true) allows sprinting while using on vanilla clients
+        List<Stack> items = new ArrayList<>();
+        Stack customShield = new Stack("minecraft:shield", 1, List.of("minecraft:use_effects"), List.of(), null, false);
+        for (int i = 0; i < 46; i++) {
+            items.add(i == 45 ? customShield : Stack.EMPTY);
+        }
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(301)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.Pong(301)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 301, now, 0));
+
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.UseItem(Hand.OFF_HAND, 1, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.PlayerCommand(1, ServerboundPacket.PlayerCommand.Action.START_SPRINTING, 0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "minecraft:use_effects patched shield must not flag: " + evidence);
+
+        // 2. In-flight server OpenScreen sent BEFORE client's UseItem arrives stops use without RELEASE_USE_ITEM
+        giveOffhandShield();
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.OpenScreen(9, "minecraft:generic_9x3")));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.UseItem(Hand.OFF_HAND, 2, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3,
+                new ServerboundPacket.InteractEntity(4, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "In-flight OpenScreen before UseItem ack must not flag: " + evidence);
+    }
 }

@@ -135,7 +135,8 @@ public final class BreakTimeCheck implements TimelineListener {
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Outbound out when out.packet() instanceof ClientboundPacket.Login
-                    || out.packet() instanceof ClientboundPacket.Respawn -> state.dig = null; // a new player, a new MultiPlayerGameMode at login
+                    || out.packet() instanceof ClientboundPacket.Respawn
+                    || (out.packet() instanceof ClientboundPacket.Unmodeled u && "minecraft:start_configuration".equals(u.type())) -> state.dig = null;
             case TimelineEvent.Gap ignored -> state.dig = null;
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             default -> { }

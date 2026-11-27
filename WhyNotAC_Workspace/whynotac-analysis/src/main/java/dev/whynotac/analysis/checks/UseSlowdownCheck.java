@@ -76,6 +76,8 @@ public final class UseSlowdownCheck implements TimelineListener {
     private static final String CONSUMABLE = "minecraft:consumable";
     private static final String FOOD = "minecraft:food";
     private static final String USE_COOLDOWN = "minecraft:use_cooldown";
+    private static final String USE_EFFECTS = "minecraft:use_effects";
+    private static final String BLOCKS_ATTACKS = "minecraft:blocks_attacks";
 
     private static final PlayerSession.AttachmentKey STATE = new PlayerSession.AttachmentKey();
 
@@ -101,6 +103,10 @@ public final class UseSlowdownCheck implements TimelineListener {
         // suppressed until a subsequent ping is acknowledged plus one additional client tick.
         long pendingSprintEchoSeq = Long.MIN_VALUE;
         int sprintEchoGraceTicks;
+        // Pending outbound server packet that stops client item use without RELEASE_USE_ITEM (OpenScreen,
+        // PlayerPosition, SetEntityData index 8=0 / index 6, Cooldown, EntityEvent, GameEvent): do not arm
+        // cross-tick hold claims until a subsequent ping confirms the client processed it.
+        long pendingStopUseSeq = Long.MIN_VALUE;
 
         boolean releasedInCurrentTick;
         long releaseSeq = -1L;
@@ -140,6 +146,7 @@ public final class UseSlowdownCheck implements TimelineListener {
         void resetSprintEcho() {
             pendingSprintEchoSeq = Long.MIN_VALUE;
             sprintEchoGraceTicks = 0;
+            pendingStopUseSeq = Long.MIN_VALUE;
         }
 
         boolean isSprintEchoSuppressed() {
@@ -195,6 +202,9 @@ public final class UseSlowdownCheck implements TimelineListener {
                     state.pendingSprintEchoSeq = Long.MIN_VALUE;
                     state.sprintEchoGraceTicks = 2;
                 }
+                if (pingSeq != Long.MIN_VALUE && state.pendingStopUseSeq != Long.MIN_VALUE && pingSeq > state.pendingStopUseSeq) {
+                    state.pendingStopUseSeq = Long.MIN_VALUE;
+                }
             }
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             default -> { }
@@ -223,6 +233,15 @@ public final class UseSlowdownCheck implements TimelineListener {
                 state.spyglassCooldownTicks = 0;
                 state.anyCooldownTicks = 0;
             }
+            case ClientboundPacket.Unmodeled u when "minecraft:start_configuration".equals(u.type()) -> {
+                state.resetTick();
+                state.clearHold();
+                state.resetHunger();
+                state.resetSprintEcho();
+                state.shieldCooldownTicks = 0;
+                state.spyglassCooldownTicks = 0;
+                state.anyCooldownTicks = 0;
+            }
             case ClientboundPacket.Ping ping -> {
                 if (!state.sharedLedger) {
                     state.ledger.onPing(ping.id(), out.sequence());
@@ -230,6 +249,7 @@ public final class UseSlowdownCheck implements TimelineListener {
             }
             case ClientboundPacket.Cooldown cd -> {
                 state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
                 if (cd.duration() > 0) {
                     state.anyCooldownTicks = Math.max(state.anyCooldownTicks, cd.duration());
                     if (cd.group().endsWith(":shield") || cd.group().equals("shield")) {
@@ -239,28 +259,50 @@ public final class UseSlowdownCheck implements TimelineListener {
                     }
                 }
             }
-            case ClientboundPacket.PlayerPosition ignored -> state.clearHold();
-            case ClientboundPacket.OpenScreen ignored -> state.clearHold();
-            case ClientboundPacket.MountScreenOpen ignored -> state.clearHold();
-            case ClientboundPacket.ContainerClose ignored -> state.clearHold();
+            case ClientboundPacket.PlayerPosition ignored -> {
+                state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
+            }
+            case ClientboundPacket.OpenScreen ignored -> {
+                state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
+            }
+            case ClientboundPacket.MountScreenOpen ignored -> {
+                state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
+            }
+            case ClientboundPacket.ContainerClose ignored -> {
+                state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
+            }
             case ClientboundPacket.ContainerSetContent ignored -> state.clearHold();
             case ClientboundPacket.ContainerSetSlot ignored -> state.clearHold();
             case ClientboundPacket.SetPlayerInventory ignored -> state.clearHold();
             case ClientboundPacket.SetCursorItem ignored -> state.clearHold();
             case ClientboundPacket.SetHealth h -> {
                 state.clearHold();
+                if (!(h.health() > 0.0F)) {
+                    state.pendingStopUseSeq = out.sequence();
+                }
                 if (h.food() >= 20 || !(h.health() > 0.0F)) {
                     state.resetHunger();
                 } else if (h.food() >= 0 && !state.confirmedHungry) {
                     state.pendingHungrySeq = out.sequence();
                 }
             }
-            case ClientboundPacket.GameEvent ignored -> state.clearHold();
-            case ClientboundPacket.EntityEvent ev when state.selfId >= 0 && ev.entityId() == state.selfId -> state.clearHold();
+            case ClientboundPacket.GameEvent ignored -> {
+                state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
+            }
+            case ClientboundPacket.EntityEvent ev when state.selfId >= 0 && ev.entityId() == state.selfId -> {
+                state.clearHold();
+                state.pendingStopUseSeq = out.sequence();
+            }
             case ClientboundPacket.SetEntityData data when state.selfId >= 0 && data.entityId() == state.selfId -> {
                 for (ClientboundPacket.SetEntityData.DataEntry e : data.entries()) {
                     if (e.index() == 8 && (e.value() & 1L) == 0L || e.index() == 6) {
                         state.clearHold();
+                        state.pendingStopUseSeq = out.sequence();
                     }
                     // Entity.DATA_SHARED_FLAGS_ID (index 0) bit 3 (Entity.FLAG_SPRINTING = 0x08):
                     // a stale server sprint echo overwrites client isSprinting() even while holding a shield
@@ -442,7 +484,7 @@ public final class UseSlowdownCheck implements TimelineListener {
     }
 
     private void armContinuousHold(PlayerSession session, State state, TimelineEvent.Inbound in, Hand hand) {
-        if (state.sawUseOnThisTick || state.sawInteractEntityThisTick) {
+        if (state.sawUseOnThisTick || state.sawInteractEntityThisTick || state.pendingStopUseSeq != Long.MIN_VALUE) {
             return;
         }
         ClientSelf self = replicas.self().self(session);
@@ -474,7 +516,9 @@ public final class UseSlowdownCheck implements TimelineListener {
             if ((!isContinuous && !isAlwaysConsumable && !isHungryFood)
                     || stack.added().contains(CONSUMABLE) || stack.removed().contains(CONSUMABLE)
                     || stack.added().contains(FOOD) || stack.removed().contains(FOOD)
-                    || stack.added().contains(USE_COOLDOWN)) {
+                    || stack.added().contains(USE_COOLDOWN)
+                    || stack.added().contains(USE_EFFECTS) || stack.removed().contains(USE_EFFECTS)
+                    || stack.added().contains(BLOCKS_ATTACKS) || stack.removed().contains(BLOCKS_ATTACKS)) {
                 return;
             }
             if (agreed == null) {

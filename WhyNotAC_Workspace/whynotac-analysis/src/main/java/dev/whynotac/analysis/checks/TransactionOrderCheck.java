@@ -118,6 +118,7 @@ public final class TransactionOrderCheck implements TimelineListener {
         switch (out.packet()) {
             case ClientboundPacket.Login ignored -> reset(state);
             case ClientboundPacket.Respawn ignored -> reset(state);
+            case ClientboundPacket.Unmodeled u when "minecraft:start_configuration".equals(u.type()) -> reset(state);
             case ClientboundPacket.Ping ping -> state.pendingPings.put(ping.id(), new TrackedPing(out.sequence(), out.nanoTime()));
             case ClientboundPacket.PlayerPosition pos -> state.pendingTeleports.put(pos.teleportId(), out.sequence());
             case ClientboundPacket.KeepAlive ka -> state.pendingKeepAlives.put(ka.id(), out.sequence());

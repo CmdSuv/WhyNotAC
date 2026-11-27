@@ -101,6 +101,7 @@ public final class PacketBoundsCheck implements TimelineListener {
         switch (out.packet()) {
             case ClientboundPacket.Login ignored -> state.resetSession();
             case ClientboundPacket.Respawn ignored -> state.resetSession();
+            case ClientboundPacket.Unmodeled u when "minecraft:start_configuration".equals(u.type()) -> state.resetSession();
             case ClientboundPacket.Untranslatable ignored -> state.lastSentHotbarSlot = -1;
             case ClientboundPacket.PlayerPosition pos -> {
                 if (pos.relatives().contains(RelativeFlag.X_ROT) || pos.relatives().contains(RelativeFlag.UNKNOWN)

@@ -5,6 +5,7 @@ import dev.whynotac.analysis.evidence.AdmissibilityTracker;
 import dev.whynotac.analysis.evidence.Evidence;
 import dev.whynotac.analysis.evidence.EvidenceClass;
 import dev.whynotac.analysis.evidence.EvidenceSink;
+import dev.whynotac.protocol.packet.ClientboundPacket;
 import dev.whynotac.protocol.packet.ServerboundPacket;
 import dev.whynotac.protocol.session.PingLedger;
 import dev.whynotac.protocol.session.PlayerSession;
@@ -95,7 +96,17 @@ public final class TickFramingCheck implements TimelineListener {
         state.admissibility.onEvent(event);
         switch (event) {
             case TimelineEvent.Bound bound -> state.replies.onBound(bound.entityId());
-            case TimelineEvent.Outbound out -> state.replies.onOutbound(out);
+            case TimelineEvent.Outbound out -> {
+                if (out.packet() instanceof ClientboundPacket.Unmodeled u && "minecraft:start_configuration".equals(u.type())) {
+                    state.intervalStart = Long.MIN_VALUE;
+                    state.moves.clear();
+                    state.rotationShaped = 0;
+                    state.posRotShaped = 0;
+                    state.teleportReplies = 0;
+                    state.judged = false;
+                }
+                state.replies.onOutbound(out);
+            }
             case TimelineEvent.Acknowledged ack -> state.replies.onAcknowledged(ack);
             case TimelineEvent.Inbound in -> onInbound(session, state, in);
             default -> { }
