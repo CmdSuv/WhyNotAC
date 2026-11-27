@@ -403,6 +403,51 @@ final class VelocityCheckTest {
         assertEquals("delayed-horizontal-knockback", evidence.get(0).details().get("reason"));
     }
 
+    @Test
+    void sneakingAtEdgeWithZeroVerticalPushProducesZeroEvidence() {
+        // Carve a drop-off at x=3, y=63 so x=2.75 is perched at a block edge
+        for (int z = 1; z <= 4; z++) {
+            session.deliver(new TimelineEvent.Outbound(seq++, now,
+                    new ClientboundPacket.BlockUpdate(new dev.whynotac.protocol.packet.BlockPosition(3, 63, z), AIR)));
+        }
+        syncPing();
+        // Establish ground position at edge while holding Shift (sneaking)
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(false, false, false, false, false, true, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+
+        // Plugin horizontal push with vy=0.0: vanilla Player.maybeBackOffFromEdge blocks stepping off the edge
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.0, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        assertTrue(evidence.isEmpty(), () -> "Sneaking at edge with vy=0 horizontal push must not flag: " + evidence);
+
+        // Even without a prior PlayerInput packet, vy=0.0 horizontal-only push must not claim P-A
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(false, false, false, false, false, false, false)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.0, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        assertTrue(evidence.isEmpty(), () -> "vy=0 horizontal-only push must not flag: " + evidence);
+    }
+
     private static byte[] flatChunk() {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         varInt(body, 0);

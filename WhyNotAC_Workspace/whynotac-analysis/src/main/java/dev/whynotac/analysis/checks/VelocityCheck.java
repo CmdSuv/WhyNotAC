@@ -92,6 +92,7 @@ public final class VelocityCheck implements TimelineListener {
         boolean hasVerticalEffect;
         boolean currentHorizInput;
         boolean currentJumpInput;
+        boolean currentShiftInput;
         int groundPosCount;
         double lastX = Double.NaN;
         double lastY = Double.NaN;
@@ -104,6 +105,7 @@ public final class VelocityCheck implements TimelineListener {
         boolean horizCollisionSinceKb;
         boolean hadHorizInputSinceKb;
         boolean hadJumpInputSinceKb;
+        boolean hadShiftInputSinceKb;
         double maxHorizProj;
         double prevTickHorizProj;
         double tick1HorizStepProj;
@@ -136,6 +138,7 @@ public final class VelocityCheck implements TimelineListener {
             horizCollisionSinceKb = false;
             hadHorizInputSinceKb = false;
             hadJumpInputSinceKb = false;
+            hadShiftInputSinceKb = false;
             maxHorizProj = 0.0;
             prevTickHorizProj = 0.0;
             tick1HorizStepProj = 0.0;
@@ -158,6 +161,7 @@ public final class VelocityCheck implements TimelineListener {
             hasVerticalEffect = false;
             currentHorizInput = false;
             currentJumpInput = false;
+            currentShiftInput = false;
             reset();
         }
 
@@ -302,7 +306,7 @@ public final class VelocityCheck implements TimelineListener {
                         } else {
                             boolean vert = effVy >= MIN_VERTICAL_KB && hasOpenAirAbove(world, prev.baseX(), prev.baseY(), prev.baseZ());
                             boolean sameDirHoriz = (prev.vx() * pk.x() + prev.vz() * pk.z()) >= -1.0e-6;
-                            boolean horiz = prev.horizontalCandidate() && sameDirHoriz && horizMag >= MIN_HORIZONTAL_KB && effVy >= 0.0
+                            boolean horiz = prev.horizontalCandidate() && sameDirHoriz && horizMag >= MIN_HORIZONTAL_KB && effVy > 0.0
                                     && hasOpenAirBox(world, prev.baseX(), prev.baseY(), prev.baseZ())
                                     && noPusherNear(replicas.entities().entities(session), self.selfId(), prev.baseX(), prev.baseY(), prev.baseZ());
                             if (vert || horiz) {
@@ -355,7 +359,9 @@ public final class VelocityCheck implements TimelineListener {
         boolean vert = effVy >= MIN_VERTICAL_KB && hasOpenAirAbove(world, state.lastX, state.lastY, state.lastZ);
         double horizMag = Math.hypot(v.x(), v.z());
         boolean horizEligible = !additive || state.lastHorizStep <= 1.0e-3;
-        boolean horiz = horizEligible && horizMag >= MIN_HORIZONTAL_KB && effVy >= 0.0
+        // Vanilla Player.maybeBackOffFromEdge runs whenever movement.y <= 0 and the player is sneaking
+        // (isStayingOnGroundSurface), clamping horizontal motion to 0 at block edges; require strict effVy > 0.
+        boolean horiz = horizEligible && horizMag >= MIN_HORIZONTAL_KB && effVy > 0.0
                 && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
         if (vert || horiz) {
@@ -367,6 +373,7 @@ public final class VelocityCheck implements TimelineListener {
             state.horizCollisionSinceKb = false;
             state.hadHorizInputSinceKb = state.currentHorizInput || state.lastHorizStep > 1.0e-3;
             state.hadJumpInputSinceKb = state.currentJumpInput;
+            state.hadShiftInputSinceKb = state.currentShiftInput;
             state.maxHorizProj = 0.0;
             state.prevTickHorizProj = 0.0;
             state.tick1HorizStepProj = 0.0;
@@ -406,14 +413,19 @@ public final class VelocityCheck implements TimelineListener {
             case ServerboundPacket.PlayerInput input -> {
                 boolean horizInput = input.forward() || input.backward() || input.left() || input.right();
                 boolean jumpInput = input.jump();
+                boolean shiftInput = input.shift();
                 state.currentHorizInput = horizInput;
                 state.currentJumpInput = jumpInput;
+                state.currentShiftInput = shiftInput;
                 if (state.pending != null || state.activeAcked != null) {
                     if (horizInput) {
                         state.hadHorizInputSinceKb = true;
                     }
                     if (jumpInput) {
                         state.hadJumpInputSinceKb = true;
+                    }
+                    if (shiftInput) {
+                        state.hadShiftInputSinceKb = true;
                     }
                 }
             }
@@ -504,8 +516,9 @@ public final class VelocityCheck implements TimelineListener {
                 && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
         boolean delayedBrakeEligible = active.horizontalCandidate()
-                && !state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb
+                && !state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb && !state.hadShiftInputSinceKb
                 && !state.horizCollisionSinceKb
+                && hasStandardGroundFriction(world, active.baseX(), active.baseY(), active.baseZ())
                 && state.sawTick1Step && state.tick1HorizStepProj >= MIN_DELAYED_TICK1_PROJ
                 && hasOpenAirBox(world, state.lastX, state.lastY, state.lastZ)
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
@@ -588,6 +601,9 @@ public final class VelocityCheck implements TimelineListener {
     }
 
     private static double expectedHorizontalMinimum(State state, PendingKb kb, ClientWorld world) {
+        if (state.hadShiftInputSinceKb) {
+            return Double.NaN;
+        }
         if (!state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb) {
             return Math.max(MIN_HORIZONTAL_DISPLACEMENT, kb.horizMag() * STATIONARY_HORIZ_FACTOR);
         }
@@ -623,7 +639,8 @@ public final class VelocityCheck implements TimelineListener {
                     return false;
                 }
                 int s = world.settledBlockState(bx, by, bz);
-                if (!states.isValid(s) || states.friction(s) != 0.6F || states.speedFactor(s) != 1.0F
+                if (!states.isValid(s) || !states.has(s, BlockStates.FULL_BLOCK)
+                        || states.friction(s) != 0.6F || states.speedFactor(s) != 1.0F
                         || "minecraft:soul_soil".equals(states.block(s))) {
                     return false;
                 }
