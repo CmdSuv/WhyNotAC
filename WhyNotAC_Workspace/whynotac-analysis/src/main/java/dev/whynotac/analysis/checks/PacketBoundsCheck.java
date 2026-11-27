@@ -42,8 +42,10 @@ import java.util.TreeMap;
  *   <li>{@code command-entity-mismatch} and {@code invalid-command-data}: {@code PlayerCommand} targeting an entity
  *       id other than {@code selfId}, or carrying out-of-bounds {@code data} ({@code START_RIDING_JUMP} outside
  *       {@code 0..100}, or non-zero {@code data} on any other known action);</li>
- *   <li>{@code invalid-chunk-batch-rate}: {@code ChunkBatchReceived} with non-finite or out-of-bounds
- *       {@code desiredChunksPerTick} ({@code <= 0.0F || > 64.0F}).</li>
+ *   <li>{@code invalid-chunk-batch-rate}: {@code ChunkBatchReceived} with non-finite or non-positive
+ *       {@code desiredChunksPerTick} ({@code !Float.isFinite(rate) || rate <= 0.0F}); vanilla
+ *       {@code ChunkBatchSizeCalculator.getDesiredChunksPerTick()} has no client-side upper bound
+ *       ({@code PlayerChunkSender.onChunkBatchReceivedByClient} clamps to {@code [0.01, 64]} on the server).</li>
  * </ul>
  */
 public final class PacketBoundsCheck implements TimelineListener {
@@ -241,11 +243,14 @@ public final class PacketBoundsCheck implements TimelineListener {
             }
             case ServerboundPacket.ChunkBatchReceived batch -> {
                 float rate = batch.desiredChunksPerTick();
-                if (!Float.isFinite(rate) || rate <= 0.0F || rate > 64.0F) {
+                // Vanilla ChunkBatchSizeCalculator.getDesiredChunksPerTick() returns (float)(7000000.0 / aggregatedNanosPerChunk)
+                // with no absolute lower bound on aggregatedNanosPerChunk, so rates > 64 are valid on fast clients;
+                // only PlayerChunkSender.onChunkBatchReceivedByClient clamps to [0.01, 64] server-side.
+                if (!Float.isFinite(rate) || rate <= 0.0F) {
                     Map<String, String> details = new TreeMap<>();
                     details.put("reason", "invalid-chunk-batch-rate");
                     details.put("desiredChunksPerTick", Float.toString(rate));
-                    report(session, state, in, "ChunkBatchReceived desiredChunksPerTick " + rate + " outside vanilla (0, 64] bounds", details, false);
+                    report(session, state, in, "ChunkBatchReceived desiredChunksPerTick " + rate + " is non-finite or <= 0", details, false);
                 }
             }
             case ServerboundPacket.Untranslatable ignored -> state.lastSentHotbarSlot = -1;

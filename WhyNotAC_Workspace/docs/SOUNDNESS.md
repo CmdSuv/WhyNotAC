@@ -110,7 +110,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
   4. `self-interaction`: `InteractEntity` paketinin oyuncunun kendi `selfId` varlık kimliğini hedeflemesi.
   5. `invalid-block-cursor`: `UseItemOn` vuruş noktasının sonlu olmaması veya blok imleç ofsetinin `[-1.0001, 2.0001]` zarfı dışına çıkması.
   6. `invalid-container-slot`, `invalid-container-swap`, `invalid-container-button`: `ContainerClick` yuva indeksinin `< -1 && != -999` olması veya `SWAP` (`0..8`, `40`), `THROW` (`0..1`), `PICKUP_ALL` (`0`), `QUICK_CRAFT` (`0..2`, `4..6`, `8..10`) tuş sınırlarının aşılması.
-  7. `command-entity-mismatch`, `invalid-command-data`, `invalid-chunk-batch-rate`: `PlayerCommand` kimlik/veri sınırı (`START_RIDING_JUMP` `0..100`, diğerleri `0`) ve `ChunkBatchReceived` hız sınırı `(0, 64]`.
+  7. `command-entity-mismatch`, `invalid-command-data`, `invalid-chunk-batch-rate`: `PlayerCommand` kimlik/veri sınırı (`START_RIDING_JUMP` `0..100`, diğerleri `0`) ve `ChunkBatchReceived` hız sınırı (sonlu ve `> 0`; `ChunkBatchSizeCalculator.getDesiredChunksPerTick()` istemci tarafında üst sınır koymadığından `> 64` serbesttir, `[0.01, 64]` kırpması sunucudaki `PlayerChunkSender.onChunkBatchReceivedByClient` tarafından yapılır).
 - **Dışlanan Durumlar:** `Login` öncesi (`selfId < 0`), sunucunun aralık-dışı veya göreli `PlayerPosition`/`PlayerRotation`/`TeleportEntity` gönderdiği pencereler (`invalid-pitch` için), `Login`/`Respawn`/`Gap` sıfırlamaları (`duplicate-hotbar-slot` için) ve kabul edilemez pencereler.
 
 ### 2.9c `velocity-response` (`P-A`, v5)

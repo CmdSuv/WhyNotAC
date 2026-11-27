@@ -245,6 +245,38 @@ final class PacketBoundsCheckTest {
     }
 
     @Test
+    void chunkBatchRateAllowsValuesAbove64AndRejectsNonFiniteOrNonPositive() {
+        // Vanilla ChunkBatchSizeCalculator has no absolute lower bound on aggregatedNanosPerChunk,
+        // so desiredChunksPerTick = (float)(7000000.0 / aggregatedNanosPerChunk) can legitimately exceed 64.
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ChunkBatchReceived(100.0F)));
+        assertTrue(evidence.isEmpty(), "rate > 64 must not flag because vanilla has no client upper clamp");
+
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ChunkBatchReceived(Float.NaN)));
+        assertEquals(1, evidence.size());
+        assertEquals("invalid-chunk-batch-rate", evidence.get(0).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ChunkBatchReceived(Float.POSITIVE_INFINITY)));
+        assertEquals(2, evidence.size());
+        assertEquals("invalid-chunk-batch-rate", evidence.get(1).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ChunkBatchReceived(0.0F)));
+        assertEquals(3, evidence.size());
+        assertEquals("invalid-chunk-batch-rate", evidence.get(2).details().get("reason"));
+
+        now += 2_000_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.ChunkBatchReceived(-1.0F)));
+        assertEquals(4, evidence.size());
+        assertEquals("invalid-chunk-batch-rate", evidence.get(3).details().get("reason"));
+    }
+
+    @Test
     void registeredInChecksAllAndCreate() {
         assertEquals(PacketBoundsCheck.VERSION, Checks.version(PacketBoundsCheck.ID));
         assertNotNull(Checks.create(PacketBoundsCheck.ID, (s, e) -> { }));
