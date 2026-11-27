@@ -448,6 +448,91 @@ final class VelocityCheckTest {
         assertTrue(evidence.isEmpty(), () -> "vy=0 horizontal-only push must not flag: " + evidence);
     }
 
+    @Test
+    void pvpAttackTradeSlowdownAndHighPingPreAckWalkAndOverlappingKbProduceZeroEvidence() {
+        // 1. PvP hit trade: holding W + attacking opponent triggers vanilla Player.causeExtraKnockback (0.6x horiz)
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(true, false, false, false, false, false, true)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.38, 0.36, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.InteractEntity(99, ServerboundPacket.InteractEntity.Kind.ATTACK, null, null, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.60, 64.36, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.62, 64.60, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertTrue(evidence.isEmpty(), () -> "PvP attack 0.6x horizontal slowdown must not false-flag P-A: " + evidence);
+
+        // 2. High-ping walking toward attacker before ack: x moves 2.5 -> 2.0 before ack, then +0.45 KB to 2.45 (< 2.50!)
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.PlayerInput(false, false, false, false, false, false, false)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.36, 0.0))));
+        // Before client receives SetEntityMotion, client walks -0.50 west to x=2.0
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.25, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.00, 64.0, 2.5, 90.0F, 0.0F, true, false, true, false)));
+        tick();
+        syncPing();
+        // Client now takes FULL +0.45 KB from x=2.00 -> x=2.45 (still west of send-time baseX=2.50!)
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.45, 64.36, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.75, 64.62, 2.5, 90.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertTrue(evidence.isEmpty(), () -> "High-ping pre-ack movement toward attacker must not false-flag P-A: " + evidence);
+
+        // 3. Overlapping opposite SetEntityMotion before ack clears stale horizontal baseline
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(-0.45, 0.36, 0.0))));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.36, 0.0))));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.36, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.60, 2.5, 0.0F, 0.0F, true, false, false, false)));
+        tick();
+        assertTrue(evidence.isEmpty(), () -> "Overlapping opposite SetEntityMotion must not false-flag P-A: " + evidence);
+
+        // 4. Start configuration (Velocity server switch) resets pending KB cleanly
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                ClientboundPacket.SetEntityMotion.sent(SELF, new Vec3d(0.45, 0.40, 0.0))));
+        session.deliver(new TimelineEvent.Outbound(seq++, now,
+                new ClientboundPacket.Unmodeled("minecraft:start_configuration")));
+        syncPing();
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0,
+                new ServerboundPacket.MovePlayer(2.5, 64.0, 2.5, 0.0F, 0.0F, true, false, true, false)));
+        tick();
+        tick();
+        assertTrue(evidence.isEmpty(), () -> "start_configuration must reset VelocityCheck state: " + evidence);
+    }
+
     private static byte[] flatChunk() {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         varInt(body, 0);

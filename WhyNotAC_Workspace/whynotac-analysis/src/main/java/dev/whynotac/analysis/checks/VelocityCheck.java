@@ -106,6 +106,8 @@ public final class VelocityCheck implements TimelineListener {
         boolean hadHorizInputSinceKb;
         boolean hadJumpInputSinceKb;
         boolean hadShiftInputSinceKb;
+        boolean hadAttackSinceKb;
+        double minPreAckHorizProj;
         double maxHorizProj;
         double prevTickHorizProj;
         double tick1HorizStepProj;
@@ -139,6 +141,8 @@ public final class VelocityCheck implements TimelineListener {
             hadHorizInputSinceKb = false;
             hadJumpInputSinceKb = false;
             hadShiftInputSinceKb = false;
+            hadAttackSinceKb = false;
+            minPreAckHorizProj = 0.0;
             maxHorizProj = 0.0;
             prevTickHorizProj = 0.0;
             tick1HorizStepProj = 0.0;
@@ -202,6 +206,7 @@ public final class VelocityCheck implements TimelineListener {
         switch (out.packet()) {
             case ClientboundPacket.Login ignored -> state.resetSession();
             case ClientboundPacket.Respawn ignored -> state.resetSession();
+            case ClientboundPacket.Unmodeled u when "minecraft:start_configuration".equals(u.type()) -> state.resetSession();
             case ClientboundPacket.PlayerPosition ignored -> state.reset();
             case ClientboundPacket.PlayerAbilities a -> {
                 state.flying = a.flying();
@@ -285,7 +290,12 @@ public final class VelocityCheck implements TimelineListener {
             case ClientboundPacket.SetEntityMotion motion -> {
                 ClientSelf self = replicas.self().self(session);
                 if (self.selfId() >= 0 && motion.entityId() == self.selfId()) {
-                    armKnockback(session, state, out, "motion", motion.clientMotion(), false);
+                    if (state.pending != null || state.activeAcked != null) {
+                        // Overlapping SetEntityMotion before previous KB settled invalidates send-time baseX/Y/Z
+                        state.clearKb();
+                    } else {
+                        armKnockback(session, state, out, "motion", motion.clientMotion(), false);
+                    }
                 }
             }
             case ClientboundPacket.Explosion explosion -> {
@@ -374,6 +384,8 @@ public final class VelocityCheck implements TimelineListener {
             state.hadHorizInputSinceKb = state.currentHorizInput || state.lastHorizStep > 1.0e-3;
             state.hadJumpInputSinceKb = state.currentJumpInput;
             state.hadShiftInputSinceKb = state.currentShiftInput;
+            state.hadAttackSinceKb = false;
+            state.minPreAckHorizProj = 0.0;
             state.maxHorizProj = 0.0;
             state.prevTickHorizProj = 0.0;
             state.tick1HorizStepProj = 0.0;
@@ -410,6 +422,16 @@ public final class VelocityCheck implements TimelineListener {
             }
             case ServerboundPacket.PlayerCommand cmd
                     when cmd.action() == ServerboundPacket.PlayerCommand.Action.START_FALL_FLYING -> state.clearKb();
+            case ServerboundPacket.PlayerAction action
+                    when action.action() == ServerboundPacket.PlayerAction.Action.STAB
+                            || action.action() == ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM -> state.clearKb();
+            case ServerboundPacket.InteractEntity interact
+                    when interact.kind() == ServerboundPacket.InteractEntity.Kind.ATTACK -> {
+                if (state.pending != null || state.activeAcked != null) {
+                    // Vanilla Player.attack -> causeExtraKnockback multiplies client horizontal deltaMovement by 0.6x
+                    state.hadAttackSinceKb = true;
+                }
+            }
             case ServerboundPacket.PlayerInput input -> {
                 boolean horizInput = input.forward() || input.backward() || input.left() || input.right();
                 boolean jumpInput = input.jump();
@@ -450,7 +472,13 @@ public final class VelocityCheck implements TimelineListener {
                         }
                         if (kb.horizontalCandidate() && kb.horizMag() > 0.0) {
                             double proj = ((move.x() - kb.baseX()) * kb.vx() + (move.z() - kb.baseZ()) * kb.vz()) / kb.horizMag();
-                            state.maxHorizProj = Math.max(state.maxHorizProj, proj);
+                            if (state.activeAcked == null) {
+                                // Track furthest pre-ack position opposite the KB vector so high-ping players walking
+                                // toward an attacker before ack are measured from their actual pre-KB position.
+                                state.minPreAckHorizProj = Math.min(state.minPreAckHorizProj, proj);
+                            }
+                            double netProj = proj - state.minPreAckHorizProj;
+                            state.maxHorizProj = Math.max(state.maxHorizProj, netProj);
                             if (state.activeAcked != null) {
                                 double stepProj = proj - state.prevTickHorizProj;
                                 if (!state.sawTick1Step) {
@@ -506,6 +534,13 @@ public final class VelocityCheck implements TimelineListener {
             return;
         }
         PendingKb active = state.activeAcked;
+        int bx = (int) Math.floor(state.lastX);
+        int by = (int) Math.floor(state.lastY);
+        int bz = (int) Math.floor(state.lastZ);
+        if (world.mayMoveEntitiesIn(bx - 2, by - 2, bz - 2, bx + 2, by + 3, bz + 2, active.sentSeq())) {
+            state.clearKb();
+            return;
+        }
         boolean vertReady = active.verticalCandidate() && !state.movedUpSinceKb
                 && hasOpenAirAbove(world, active.baseX(), active.baseY(), active.baseZ())
                 && hasOpenAirAbove(world, state.lastX, state.lastY, state.lastZ);
@@ -517,6 +552,7 @@ public final class VelocityCheck implements TimelineListener {
                 && noPusherNear(replicas.entities().entities(session), self.selfId(), state.lastX, state.lastY, state.lastZ);
         boolean delayedBrakeEligible = active.horizontalCandidate()
                 && !state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb && !state.hadShiftInputSinceKb
+                && !state.hadAttackSinceKb
                 && !state.horizCollisionSinceKb
                 && hasStandardGroundFriction(world, active.baseX(), active.baseY(), active.baseZ())
                 && state.sawTick1Step && state.tick1HorizStepProj >= MIN_DELAYED_TICK1_PROJ
@@ -601,7 +637,10 @@ public final class VelocityCheck implements TimelineListener {
     }
 
     private static double expectedHorizontalMinimum(State state, PendingKb kb, ClientWorld world) {
-        if (state.hadShiftInputSinceKb) {
+        if (state.hadShiftInputSinceKb || state.hadAttackSinceKb) {
+            return Double.NaN;
+        }
+        if ("explosion".equals(kb.source()) && state.hadHorizInputSinceKb) {
             return Double.NaN;
         }
         if (!state.hadHorizInputSinceKb && !state.hadJumpInputSinceKb) {
