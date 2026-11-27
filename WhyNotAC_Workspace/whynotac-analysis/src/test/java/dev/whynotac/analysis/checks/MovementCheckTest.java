@@ -4097,4 +4097,151 @@ class MovementCheckTest {
                 "Honest double-tap sprint after fastPostActionAnchor must never be UNEXPLAINED: " + afterAnchor);
         assertEquals(List.of(), evidence, "Honest double-tap sprint after fastPostActionAnchor must produce 0 evidence");
     }
+
+    @Test
+    void absoluteTeleportReanchorsInTwoTicksAndCatchesImmediateCheat() throws Exception {
+        ticks(4, NONE, 30.0F, 0.0F);
+        // Lose tracking via camera switch away and back (non-dismount, non-short-action loss).
+        out(new ClientboundPacket.SetCamera(999));
+        sync();
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.SetCamera(SELF));
+        sync();
+        tick(NONE, 30.0F, 0.0F, Vec3d.ZERO);
+        assertEquals(MovementTracker.Outcome.UNTRACKED, ticks.getLast().outcome());
+
+        // Absolute zero-delta teleport to clean flat ground re-anchors on Tick 2 ("anchored: teleported").
+        teleport(12.5, 64.0, 12.5, 0.0F, 0.0F);
+        int tpStart = ticks.size();
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO); // Tick 1: POS_ROT, onGround=false
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO); // Tick 2: STATUS_ONLY, onGround=true -> anchored!
+        assertEquals("anchored: teleported", ticks.getLast().reason(), String.valueOf(ticks.subList(tpStart, ticks.size())));
+
+        // Honest walking/jumping right after re-anchoring stays EXPLAINED with zero evidence.
+        int walkStart = ticks.size();
+        ticks(5, FORWARD, 0.0F, 0.0F);
+        assertTrue(ticks.subList(walkStart, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(walkStart, ticks.size())));
+        assertEquals(List.of(), evidence);
+
+        // An immediate cheat right after teleportAnchor is caught.
+        tick(FORWARD, 0.0F, 0.0F, new Vec3d(0.0, 0.25, 0.0));
+        assertTrue(count(MovementTracker.Outcome.UNEXPLAINED) >= 1, String.valueOf(ticks.subList(tpStart, ticks.size())));
+    }
+
+    @Test
+    void absoluteTeleportAfterCobwebIceAndSprintWindowNeverFalseFlags() throws Exception {
+        // Put the player on ice + inside a cobweb, with an active sprintTriggerTime window and non-zero fallDistance.
+        int ice = STATES.stateOf("minecraft:ice", "");
+        int cobweb = STATES.stateOf("minecraft:cobweb", "");
+        place(4, 63, 4, ice);
+        place(4, 64, 4, cobweb);
+        place(4, 64, 5, STONE);
+        place(4, 65, 5, STONE);
+        sync();
+
+        teleport(4.5, 64.0, 4.5, 0.0F, 0.0F);
+        ticks(3, NONE, 0.0F, 0.0F);
+        // Tap forward inside cobweb against the wall: sets stuckSpeedMultiplier != ZERO, support=ice, sprintTriggerTime=7!
+        tick(FORWARD, 0.0F, 0.0F, Vec3d.ZERO);
+        assertTrue(player.sprintTriggerTime() > 0, "Expected sprintTriggerTime > 0 before teleport");
+        assertTrue(player.stuckSpeedMultiplier().lengthSqr() > 0.0, "Expected cobweb stuckSpeedMultiplier before teleport");
+        // Lose tracking via camera toggle while retaining all adversarial hidden client state.
+        out(new ClientboundPacket.SetCamera(999));
+        sync();
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.SetCamera(SELF));
+        sync();
+        // Also simulate a non-zero fallDistance and swimming pose carried into the teleport.
+        player = new PlayerState(player.x(), player.y(), player.z(), player.deltaMovement(), player.yRot(), player.xRot(),
+                player.onGround(), player.horizontalCollision(), player.minorHorizontalCollision(), player.verticalCollision(),
+                player.verticalCollisionBelow(), 3.25, player.sprinting(), player.sprintModifier(), player.crouching(),
+                PlayerState.Pose.SWIMMING, player.keys(), 6, player.sprintTriggerTime(), 0, player.support(),
+                player.onGroundNoBlocks(), player.stuckSpeedMultiplier(), true, true, false, true, true, 0);
+
+        teleport(14.5, 64.0, 14.5, 90.0F, 0.0F);
+        int tpStart = ticks.size();
+        tick(NONE, 90.0F, 0.0F, Vec3d.ZERO);
+        tick(NONE, 90.0F, 0.0F, Vec3d.ZERO);
+        assertEquals("anchored: teleported", ticks.getLast().reason(), String.valueOf(ticks.subList(tpStart, ticks.size())));
+        assertTrue(player.sprintTriggerTime() > 0, "Expected sprintTriggerTime > 0 still active after 2-tick TP anchor");
+
+        // Immediately press forward within the remaining double-tap window -> vanilla double-tap sprints!
+        int postStart = ticks.size();
+        ticks(5, FORWARD, 90.0F, 0.0F);
+        assertTrue(player.sprinting(), "Vanilla client should have double-tap sprinted after teleportAnchor");
+        List<MovementTracker.Tick> post = ticks.subList(postStart, ticks.size());
+        assertTrue(post.stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED), String.valueOf(post));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(post));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void absoluteTeleportOntoSlimeOrMidAirDoesNotFalseAnchor() throws Exception {
+        int slime = STATES.stateOf("minecraft:slime_block", "");
+        place(16, 63, 16, slime);
+        sync();
+        ticks(3, NONE, 0.0F, 0.0F);
+
+        // Lose tracking and teleport onto slime block: Stage 2 rejects because loaded vs unloaded vy bounce differently.
+        out(new ClientboundPacket.SetCamera(999));
+        sync();
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.SetCamera(SELF));
+        sync();
+        teleport(16.5, 64.0, 16.5, 0.0F, 0.0F);
+        int slimeStart = ticks.size();
+        ticks(3, NONE, 0.0F, 0.0F);
+        assertTrue(ticks.subList(slimeStart, ticks.size()).stream().noneMatch(t -> "anchored: teleported".equals(t.reason())),
+                "Teleport onto slime must not anchor via teleportAnchor: " + ticks.subList(slimeStart, ticks.size()));
+
+        // Teleport mid-air (y = 68.0 above stone at y = 64.0): Stage 2 rejects because player is falling, not grounded.
+        teleport(12.5, 68.0, 12.5, 0.0F, 0.0F);
+        int airStart = ticks.size();
+        ticks(3, NONE, 0.0F, 0.0F);
+        assertTrue(ticks.subList(airStart, ticks.size()).stream().noneMatch(t -> "anchored: teleported".equals(t.reason())),
+                "Mid-air teleport must not anchor via teleportAnchor: " + ticks.subList(airStart, ticks.size()));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(List.of(), evidence);
+    }
+
+    @Test
+    void absoluteTeleportIntoUnloadedChunkThenChunkLoadReanchorsCleanly() throws Exception {
+        ticks(3, NONE, 0.0F, 0.0F);
+        // Lose tracking.
+        out(new ClientboundPacket.SetCamera(999));
+        sync();
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO);
+        out(new ClientboundPacket.SetCamera(SELF));
+        sync();
+
+        // Unload chunk (2, 0) (x = 32..47, z = 0..15) so the client certainly does not hold it on Tick 1.
+        out(new ClientboundPacket.ForgetLevelChunk(2, 0));
+        sync();
+
+        // Server teleports player to (36.5, 64.0, 4.5); on Tick 1 the client runs in VOID_AIR and sets vy = -0.1 * 0.98F.
+        teleport(36.5, 64.0, 4.5, 0.0F, 0.0F);
+        int tpStart = ticks.size();
+        player = new PlayerState(36.5, 64.0, 4.5, new Vec3d(0.0, -0.1 * 0.98F, 0.0), 0.0F, 0.0F, false, false, false, false, false,
+                player.fallDistance(), false, player.sprintModifier(), false, PlayerState.Pose.STANDING, NONE, 0,
+                Math.max(player.sprintTriggerTime() - 1, 0), 0, null, false, Vec3d.ZERO, false, false, false, false, false, 0);
+        in(new ServerboundPacket.MovePlayer(36.5, 64.0, 4.5, 0.0F, 0.0F, true, true, false, false));
+        sentX = 36.5; sentY = 64.0; sentZ = 4.5; sentYRot = 0.0F; sentXRot = 0.0F;
+        sentOnGround = false; sentCollision = false; reminder = 0;
+        in(new ServerboundPacket.ClientTickEnd());
+
+        // Before Tick 2, the server sends LevelChunk(2, 0) so solid stone ground is now present at y = 63!
+        out(new ClientboundPacket.LevelChunk(2, 0, chunk(OVERWORLD.sections())));
+        sync();
+        tick(NONE, 0.0F, 0.0F, Vec3d.ZERO); // Tick 2 lands on ground from vy = -0.1 * 0.98F!
+        assertEquals("anchored: teleported", ticks.getLast().reason(), String.valueOf(ticks.subList(tpStart, ticks.size())));
+
+        // Walking immediately after re-anchoring is EXPLAINED with zero evidence.
+        int walkStart = ticks.size();
+        ticks(4, FORWARD, 0.0F, 0.0F);
+        assertTrue(ticks.subList(walkStart, ticks.size()).stream().allMatch(t -> t.outcome() == MovementTracker.Outcome.EXPLAINED),
+                String.valueOf(ticks.subList(walkStart, ticks.size())));
+        assertEquals(0, count(MovementTracker.Outcome.UNEXPLAINED), String.valueOf(ticks));
+        assertEquals(List.of(), evidence);
+    }
 }

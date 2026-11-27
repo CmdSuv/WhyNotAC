@@ -318,6 +318,24 @@ public final class MovementTracker {
     private boolean dismountTeleportFallClean;
     private int dismountWaitTicks;
     /**
+     * Two-tick verified ground-settled teleport anchor (P4): an absolute-position, zero-delta {@code PlayerPosition}
+     * accepted on foot in clean standing space (Stage 1: clears old pose/fluids/stuck/support/onGround) followed on the
+     * very next tick by a stationary ground landing (Stage 2: resets {@code fallDistance = 0}, proves independence of
+     * whether the pre-teleport supporting chunk was loaded, clears {@code noJumpDelay = 0}, and branches
+     * {@code sprintModifier}, {@code sprintTriggerTime} and held-item {@code using}).
+     */
+    private record TpStage1(long tick, long tpSequence, double tx, double ty, double tz, boolean previousShift, Hypothesis.Sent sentAfterTick1) {}
+
+    private ClientboundPacket.PlayerPosition pendingTeleport;
+    private long pendingTeleportSeq = Long.MIN_VALUE;
+    private boolean pendingTeleportAccepted;
+    private TpStage1 tpStage1;
+    private boolean tickCertainlyOnFoot;
+    private boolean tickCertainlyRiding;
+    private float baseOnFootYRot;
+    private float baseOnFootXRot;
+    private boolean baseOnFootRotKnown = true;
+    /**
      * The run anchor's record ({@link #runAnchor}): the positions the client sent at the ends of its last steady ticks
      * (oldest first, at most {@link #RUN_MAX_TICKS} + 1), and the keys, rotation and sprinting they all had.
      */
@@ -481,6 +499,8 @@ public final class MovementTracker {
                 dismountFallClean = false;
                 dismountTeleportFallClean = false;
                 dismountWaitTicks = 0;
+                clearTeleportAnchor();
+                baseOnFootRotKnown = false;
                 teamChange(gap.sequence(), ClientTeams.LOST); // until a login
                 baseReliable = false; // until a new player, what the server knows for certain may be wrong
                 if (!sharedLedger) {
@@ -561,6 +581,8 @@ public final class MovementTracker {
             // the client stopped answering: forget the oldest (they are applied to nothing any more)
             lose("too many packets waiting for the client");
             baseReliable = false;
+            clearTeleportAnchor();
+            baseOnFootRotKnown = false;
             pending.remove(0);
             queueBase++;
             baseApplied = Math.max(baseApplied, queueBase);
@@ -684,6 +706,8 @@ public final class MovementTracker {
             horseRide.unclaim(reason);
         }
         sentUnsure = true;
+        clearTeleportAnchor();
+        baseOnFootRotKnown = false;
     }
 
     // --- teams ------------------------------------------------------------------------------------------------------
@@ -962,8 +986,18 @@ public final class MovementTracker {
         boolean sprintBefore = sentBefore.sprinting(); // and its sprint (sendIsSprintingIfNeeded: what it is after each tick on foot)
         observeBase(in); // the anchor below starts from what the client sent in this very tick
         Tick riding = rideTick(number, end, in, w, world, entities, keysBefore, sprintBefore);
+        if (tickCertainlyOnFoot) {
+            if (base.ticking() && !sentUnsure && in.move != null && in.move.hasRotation()) {
+                baseOnFootYRot = in.move.yaw();
+                baseOnFootXRot = in.move.pitch();
+                baseOnFootRotKnown = true;
+            }
+        } else if (!tickCertainlyRiding && in.move != null && in.move.hasRotation()) {
+            baseOnFootRotKnown = false;
+        }
         Tick result;
         if (hypotheses != null) {
+            clearTeleportAnchor();
             result = tracked(number, end, in, w, world, entities, riding == null);
         } else {
             result = untracked(number, end, in, w, world, entities, baseBefore, sentBefore);
@@ -1005,6 +1039,8 @@ public final class MovementTracker {
             rideApply(p, number, view, world, entities, keysBefore);
         }
         boolean ambiguous = false;
+        boolean ambiguousMayMount = false;
+        boolean ambiguousMayDismount = false;
         for (RidePacket p : ridePending) {
             if (p.sequence >= windowEnd) {
                 break;
@@ -1012,10 +1048,18 @@ public final class MovementTracker {
             p.ambiguous = true; // the client may or may not have processed it before this tick
             ambiguous = true;
             mayHaveRidden |= p.mayMount;
+            ambiguousMayMount |= p.mayMount;
+            if (p.packet instanceof ClientboundPacket.SetPassengers || p.packet instanceof ClientboundPacket.RemoveEntities
+                    || p.packet instanceof ClientboundPacket.Login || p.packet instanceof ClientboundPacket.Respawn
+                    || p.packet instanceof ClientboundPacket.Untranslatable) {
+                ambiguousMayDismount = true;
+            }
             if (mayBeOn != null && p.mayMount && p.packet instanceof ClientboundPacket.SetPassengers set) {
                 mayBeOn.add(set.vehicleId());
             }
         }
+        tickCertainlyOnFoot = clientVehicles != null && clientVehicles.isEmpty() && !ambiguousMayMount;
+        tickCertainlyRiding = clientVehicles != null && !clientVehicles.isEmpty() && !ambiguousMayDismount;
         mayHaveRidden |= clientVehicles == null || !clientVehicles.isEmpty();
         if (!mayHaveRidden) {
             ridingNothing++;
@@ -2767,6 +2811,7 @@ public final class MovementTracker {
                 dismountTeleport = null;
                 dismountAccepted = false;
                 dismountTeleportFallClean = false;
+                clearTeleportAnchor();
                 hypotheses = List.copyOf(borderTicked(dismounted, entities.lastTickRanNormally()));
                 lastHands = hands();
                 since = end.sequence();
@@ -2786,6 +2831,36 @@ public final class MovementTracker {
             if (++dismountWaitTicks > 4) {
                 dismountedPendingTeleport = false;
                 dismountWaitTicks = 0;
+            }
+        }
+        if (pendingTeleport != null && !in.acceptedTeleports.isEmpty()
+                && in.acceptedTeleports.getLast() == pendingTeleport.teleportId()) {
+            pendingTeleportAccepted = true;
+        }
+        if (tpStage1 != null) {
+            TpStage1 st1 = tpStage1;
+            tpStage1 = null;
+            List<Hypothesis> teleported = baseReliable && number == st1.tick() + 1
+                    ? tryTeleportStage2(st1, in, w, world, entities) : null;
+            if (teleported != null) {
+                clearTeleportAnchor();
+                hypotheses = List.copyOf(borderTicked(teleported, entities.lastTickRanNormally()));
+                lostFromShortAction = false;
+                lastHands = hands();
+                since = end.sequence();
+                return new Tick(number, end.sequence(), end.nanoTime(), Outcome.UNTRACKED, "anchored: teleported", hypotheses.size(), since, null,
+                        null);
+            }
+        }
+        if (pendingTeleport != null && base.ticking()) {
+            ClientboundPacket.PlayerPosition tp = pendingTeleport;
+            long tpSeq = pendingTeleportSeq;
+            boolean accepted = pendingTeleportAccepted;
+            pendingTeleport = null;
+            pendingTeleportSeq = Long.MIN_VALUE;
+            pendingTeleportAccepted = false;
+            if (accepted && baseReliable) {
+                tpStage1 = tryTeleportStage1(number, tp, tpSeq, in, w, world, entities, sentBefore);
             }
         }
         Hypothesis settled = baseReliable ? settleAnchor(number, in, w, world, entities) : null;
@@ -2811,6 +2886,7 @@ public final class MovementTracker {
                 }
             }
             hypotheses = List.copyOf(borderTicked(anchored, entities.lastTickRanNormally())); // the anchor is the state after this tick
+            clearTeleportAnchor();
             lostFromShortAction = false;
             lastHands = hands();
             since = end.sequence();
@@ -2820,6 +2896,7 @@ public final class MovementTracker {
         List<Hypothesis> running = baseReliable ? runAnchor(number, in, w, world, entities) : null;
         if (running != null) {
             hypotheses = List.copyOf(borderTicked(running, entities.lastTickRanNormally())); // the state after this tick
+            clearTeleportAnchor();
             lostFromShortAction = false;
             lastHands = hands();
             since = end.sequence();
@@ -2906,6 +2983,23 @@ public final class MovementTracker {
             }
             boolean newPlayer = packet instanceof ClientboundPacket.Login
                     || packet instanceof ClientboundPacket.Respawn r && r.dataToKeep() >= 0 && (r.dataToKeep() & ClientboundPacket.Respawn.KEEP_ENTITY_DATA) == 0;
+            if (packet instanceof ClientboundPacket.Login || packet instanceof ClientboundPacket.Respawn) {
+                baseOnFootYRot = 0.0F;
+                baseOnFootXRot = 0.0F;
+                baseOnFootRotKnown = true;
+                clearTeleportAnchor();
+            } else if (packet instanceof ClientboundPacket.PlayerPosition teleport) {
+                if (b.self().vehicle() == -1 && isAbsoluteZeroDeltaTeleport(teleport)) {
+                    pendingTeleport = teleport;
+                    pendingTeleportSeq = pendingEvent.sequence();
+                    pendingTeleportAccepted = false;
+                    tpStage1 = null;
+                } else {
+                    clearTeleportAnchor();
+                }
+            } else if (clearsTeleportAnchor(packet, b.self().vehicle())) {
+                clearTeleportAnchor();
+            }
             if (newPlayer) {
                 fresh = b; // as it was right after its packet: the tick applies the rest to it
                 baseReliable = true;
@@ -2936,6 +3030,214 @@ public final class MovementTracker {
         baseSent = b.sent();
         baseApplied = Math.max(baseApplied, must);
         return fresh;
+    }
+
+    private void clearTeleportAnchor() {
+        pendingTeleport = null;
+        pendingTeleportSeq = Long.MIN_VALUE;
+        pendingTeleportAccepted = false;
+        tpStage1 = null;
+    }
+
+    private static boolean isAbsoluteZeroDeltaTeleport(ClientboundPacket.PlayerPosition teleport) {
+        return isAbsoluteDismountTeleport(teleport)
+                && teleport.deltaMovement().x() == 0.0
+                && teleport.deltaMovement().y() == 0.0
+                && teleport.deltaMovement().z() == 0.0;
+    }
+
+    private boolean clearsTeleportAnchor(ClientboundPacket packet, int baseVehicle) {
+        if (baseVehicle != -1) {
+            return true;
+        }
+        return switch (packet) {
+            case ClientboundPacket.Login ignored -> true;
+            case ClientboundPacket.Respawn ignored -> true;
+            case ClientboundPacket.Untranslatable ignored -> true;
+            case ClientboundPacket.PlayerRotation ignored -> true;
+            case ClientboundPacket.SetCamera ignored -> true;
+            case ClientboundPacket.SetEntityMotion m -> m.entityId() == selfId;
+            case ClientboundPacket.Explosion e -> e.playerKnockback() != null;
+            case ClientboundPacket.TeleportEntity t -> t.entityId() == selfId;
+            case ClientboundPacket.EntityPositionSync s -> s.entityId() == selfId;
+            case ClientboundPacket.MoveEntity mv -> mv.entityId() == selfId;
+            case ClientboundPacket.MobEffect e -> e.entityId() == selfId;
+            case ClientboundPacket.RemoveMobEffect e -> e.entityId() == selfId;
+            case ClientboundPacket.EntityEvent e -> e.entityId() == selfId && !NEUTRAL_ENTITY_EVENTS.contains(e.event());
+            case ClientboundPacket.GameEvent g -> g.type() == ClientboundPacket.GameEvent.CHANGE_GAME_MODE;
+            case ClientboundPacket.SetEntityData d when d.entityId() == selfId -> {
+                for (ClientboundPacket.SetEntityData.DataEntry e : d.entries()) {
+                    if (e.index() == 0 || e.index() == 5 || e.index() == 6 || e.index() == 8) {
+                        yield true;
+                    }
+                }
+                yield false;
+            }
+            default -> false;
+        };
+    }
+
+    /**
+     * Stage 1 of the two-tick ground-settled teleport anchor (P4): verifies that the first ticking tick after an
+     * absolute-position, zero-delta {@code PlayerPosition} ran keyless on foot in clean standing space with no nearby
+     * pushers/colliders/pistons and sent an exact non-grounded position packet at {@code tp.position()}. Because
+     * {@code deltaMovement == ZERO} and {@code Keys.NONE} perform a zero displacement in clean dry space, every
+     * pre-teleport {@code pose}, {@code eyeInWater}, {@code swimming}, {@code inPowderSnow}, {@code stuckSpeedMultiplier},
+     * {@code support}, {@code onGroundNoBlocks}, {@code onGround}, {@code horizontalCollision} and {@code sprinting}
+     * value converges to the exact same post-tick-1 state (up to whether the old supporting block's chunk was still
+     * loaded, which Stage 2 proves irrelevant on ground landing).
+     */
+    private TpStage1 tryTeleportStage1(long number, ClientboundPacket.PlayerPosition tp, long tpSeq, TickInput in, long[] w, ClientWorld world,
+            ClientEntities entities, Hypothesis.Sent sentBefore) {
+        ServerboundPacket.MovePlayer move = in.move;
+        if (move == null || !move.hasPosition() || !tickCertainlyOnFoot || !base.ticking() || w[0] != w[1]
+                || base.outOfScope() != null || base.spinAttack() || in.unmodelled != null || !in.blockUses.isEmpty()
+                || !in.itemActions.isEmpty() || in.abilities > 0 || in.attacks > 0 || in.stabs > 0 || in.interactions > 0
+                || in.moves != 1 || in.inputs > 1 || in.sprints > 1 || in.glideStarts > 0
+                || baseMayGlide || lastGlideStart != Long.MIN_VALUE && lastBaseFlags < lastGlideStart
+                || spinMayRun > 0 || sentUnsure || !base.speed().sprintLayoutCanonical() || baseSent.sprinting()) {
+            return null;
+        }
+        PlayerState.Keys now = in.input != null ? keys(in.input) : currentKeys;
+        if (!now.equals(PlayerState.Keys.NONE) || Double.isNaN(settledYMotion(base.effects()))) {
+            return null;
+        }
+        double tx = tp.position().x();
+        double ty = tp.position().y();
+        double tz = tp.position().z();
+        if (move.x() != tx || move.y() != ty || move.z() != tz || move.onGround() || move.horizontalCollision()) {
+            return null;
+        }
+        if (!move.hasRotation() && !baseOnFootRotKnown) {
+            return null;
+        }
+        float yRot = move.hasRotation() ? move.yaw() : baseOnFootYRot;
+        float xRot = move.hasRotation() ? move.pitch() : baseOnFootXRot;
+        if (!Float.isFinite(yRot) || !Float.isFinite(xRot)) {
+            return null;
+        }
+        Box box = PlayerState.Pose.STANDING.box(tx, ty, tz);
+        if (!base.border().known() && !base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
+            return null;
+        }
+        if (world.hasUnlocatedPrediction()
+                || world.mayMoveEntitiesIn((int) Math.floor(tx) - MOVER_MARGIN, (int) Math.floor(ty) - MOVER_MARGIN, (int) Math.floor(tz) - MOVER_MARGIN,
+                (int) Math.floor(tx) + MOVER_MARGIN, (int) Math.floor(ty + 1.8) + MOVER_MARGIN, (int) Math.floor(tz) + MOVER_MARGIN, tpSeq)) {
+            return null;
+        }
+        View view = new View(world, entities, selfId);
+        int cx = (int) Math.floor(tx) >> 4;
+        int cz = (int) Math.floor(tz) >> 4;
+        if (!view.isLoaded(cx, cz) && (world.dimension() == null || !(ty > world.minY()))) {
+            return null; // in an unloaded chunk at or below minY, travelInAir sets vy = 0 instead of -0.1
+        }
+        try {
+            view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
+            if (!OnFoot.cleanTeleportSpace(tx, ty, tz, view, base.border().collision(), leatherBoots)) {
+                return null;
+            }
+        } catch (Colliders.Unknown | Lose e) {
+            return null;
+        }
+        Hypothesis.Sent sentAfterTick1 = new Hypothesis.Sent(tx, ty, tz, yRot, xRot, false, false, 0, false, PlayerState.Keys.NONE);
+        return new TpStage1(number, tpSeq, tx, ty, tz, sentBefore.input().shift(), sentAfterTick1);
+    }
+
+    /**
+     * Stage 2 of the two-tick ground-settled teleport anchor (P4): runs on the immediate next tick after Stage 1,
+     * verifies stationary landing on solid ground identically from both {@code settledY} (loaded pre-TP support chunk)
+     * and {@code -0.1 * 0.98F} (unloaded pre-TP support chunk), resets {@code fallDistance = 0.0} and
+     * {@code noJumpDelay = 0}, matches {@link #observe} bit-for-bit, and branches {@code sprintModifier},
+     * {@code sprintTriggerTime} and held-item {@code using}.
+     */
+    private List<Hypothesis> tryTeleportStage2(TpStage1 st1, TickInput in, long[] w, ClientWorld world, ClientEntities entities) {
+        if (!tickCertainlyOnFoot || !base.ticking() || w[0] != w[1] || base.outOfScope() != null || base.spinAttack()
+                || in.unmodelled != null || !in.blockUses.isEmpty() || !in.itemActions.isEmpty() || in.abilities > 0
+                || in.attacks > 0 || in.stabs > 0 || in.interactions > 0 || in.moves > 1 || in.inputs > 1 || in.sprints > 1
+                || in.glideStarts > 0 || !in.acceptedTeleports.isEmpty() || in.loaded
+                || baseMayGlide || lastGlideStart != Long.MIN_VALUE && lastBaseFlags < lastGlideStart
+                || spinMayRun > 0 || sentUnsure || !base.speed().sprintLayoutCanonical() || baseSent.sprinting()) {
+            return null;
+        }
+        PlayerState.Keys now = in.input != null ? keys(in.input) : currentKeys;
+        if (!now.equals(PlayerState.Keys.NONE)) {
+            return null;
+        }
+        double settled = settledYMotion(base.effects());
+        if (Double.isNaN(settled)) {
+            return null;
+        }
+        Hypothesis.Sent st1Sent = st1.sentAfterTick1();
+        float yRot = st1Sent.yRot();
+        float xRot = st1Sent.xRot();
+        if (in.move != null && in.move.hasRotation()) {
+            yRot = in.move.yaw();
+            xRot = in.move.pitch();
+            if (!Float.isFinite(yRot) || !Float.isFinite(xRot) || yRot == st1Sent.yRot() && xRot == st1Sent.xRot()) {
+                return null;
+            }
+        }
+        double tx = st1.tx();
+        double ty = st1.ty();
+        double tz = st1.tz();
+        Box box = PlayerState.Pose.STANDING.box(tx, ty, tz);
+        if (!base.border().known() && !base.border().farFrom(box.minX(), box.minZ(), box.maxX(), box.maxZ(), BORDER_MARGIN)) {
+            return null;
+        }
+        if (world.hasUnlocatedPrediction()
+                || world.mayMoveEntitiesIn((int) Math.floor(tx) - MOVER_MARGIN, (int) Math.floor(ty) - MOVER_MARGIN, (int) Math.floor(tz) - MOVER_MARGIN,
+                (int) Math.floor(tx) + MOVER_MARGIN, (int) Math.floor(ty + 1.8) + MOVER_MARGIN, (int) Math.floor(tz) + MOVER_MARGIN, st1.tpSequence())) {
+            return null;
+        }
+        View view = new View(world, entities, selfId);
+        boolean present = base.speed().holdsSprinting();
+        PlayerState preNormal = new PlayerState(tx, ty, tz, new Vec3d(0.0, settled, 0.0), yRot, xRot, false, false, false, false, false, Double.NaN,
+                false, present, st1.previousShift(), PlayerState.Pose.STANDING, PlayerState.Keys.NONE, 0, 0, 0, null, false, Vec3d.ZERO, false, false,
+                false, false, false, 0);
+        PlayerState preUnloaded = withDelta(preNormal, new Vec3d(0.0, -0.1 * 0.98F, 0.0));
+        PlayerState landed;
+        try {
+            view.check(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ(), true);
+            OnFoot.Conditions conditions = new OnFoot.Conditions(base.foodAllowsSprint(), OnFoot.DEFAULT_SPRINT_WINDOW, false, base.speed(),
+                    base.effects(), null, false, PlatformCos.X86_64, base.border().collision(), leatherBoots).withSpinAttack(base.spinAttack());
+            landed = OnFoot.tick(preNormal, PlayerState.Keys.NONE, view, conditions);
+            PlayerState landedFromUnloaded = OnFoot.tick(preUnloaded, PlayerState.Keys.NONE, view, conditions);
+            PlayerState again = OnFoot.tick(landed, PlayerState.Keys.NONE, view, conditions);
+            if (!landed.equals(landedFromUnloaded) || !landed.equals(again)
+                    || landed.x() != tx || landed.y() != ty || landed.z() != tz
+                    || !landed.onGround() || landed.horizontalCollision() || landed.fallDistance() != 0.0
+                    || landed.deltaMovement().x() != 0.0 || landed.deltaMovement().z() != 0.0 || landed.deltaMovement().y() != settled
+                    || landed.sprinting()) {
+                return null;
+            }
+        } catch (Colliders.Unknown | Lose e) {
+            return null;
+        }
+        Hypothesis.Sent sentAfter = observe(landed, st1Sent, PlayerState.Keys.NONE, in);
+        if (sentAfter == null) {
+            return null;
+        }
+        Hypothesis baseHyp = new Hypothesis(landed, base, sentAfter, Hypothesis.ALL_WINDOWS,
+                base.firstTick() ? Hypothesis.AUTO_JUMP_ON : Hypothesis.AUTO_JUMP_ANY, lockedCosineMask, baseApplied);
+        List<Hypothesis> uses = usesAtAnchor(baseHyp);
+        if (uses == null) {
+            return null;
+        }
+        int keylessAfterTick2 = keylessTicks + 1;
+        int maxSprintTrigger = st1.previousShift() ? 0 : Math.max(0, MAX_SPRINT_WINDOW - keylessAfterTick2);
+        if ((long) uses.size() * 2L * (maxSprintTrigger + 1L) > MAX_HYPOTHESES) {
+            return null;
+        }
+        SpeedAttribute other = base.speed().setSprinting(!present);
+        List<Hypothesis> anchored = new ArrayList<>();
+        for (Hypothesis u : uses) {
+            for (int trigger = 0; trigger <= maxSprintTrigger; trigger++) {
+                PlayerState p = trigger == 0 ? u.player() : withSprintTrigger(u.player(), trigger);
+                anchored.add(u.withPlayer(p));
+                anchored.add(u.withPlayer(withSprintModifier(p, !present)).withSelf(u.self().withSpeed(other)));
+            }
+        }
+        return anchored;
     }
 
     private static boolean isAbsoluteDismountTeleport(ClientboundPacket.PlayerPosition teleport) {

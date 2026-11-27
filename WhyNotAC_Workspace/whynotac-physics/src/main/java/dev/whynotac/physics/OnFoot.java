@@ -321,6 +321,60 @@ public final class OnFoot {
     }
 
     /**
+     * Whether {@code (x, y, z)} has clean standing space (no block collision for either shift state, no suffocating
+     * corner columns, no fluid, no climbable or trapdoor, and no inside-moving block such as cobweb, sweet berry bush,
+     * powder snow, honey block or bubble column). Both settled loaded chunks and certainly-unloaded chunks (which
+     * vanilla {@code EmptyLevelChunk} serves as {@code VOID_AIR} with empty fluid and collision shapes) pass when
+     * settled; any unsettled chunk load/unload or block change throws {@link Colliders.Unknown}. Because every shorter
+     * pose's box is a subset of the standing box, a zero-velocity keyless tick at such a position clears every
+     * pre-teleport pose, fluid, powder-snow, stuck-speed and supporting-block field identically regardless of what the
+     * player stood in before the teleport.
+     */
+    public static boolean cleanTeleportSpace(double x, double y, double z, Colliders.World world, Border border, Boolean leatherBoots)
+            throws Colliders.Unknown {
+        Box standing = PlayerState.Pose.STANDING.box(x, y, z);
+        Box deflated = standing.inflate(-1.0E-7, -1.0E-7, -1.0E-7);
+        Colliders.Context ctx = new Colliders.Context(y, false, x, z, border, Double.NaN, leatherBoots);
+        Colliders.Context ctxShift = new Colliders.Context(y, true, x, z, border, Double.NaN, leatherBoots);
+        if (!Colliders.noCollision(world, ctx, deflated) || !Colliders.noCollision(world, ctxShift, deflated)) {
+            return false;
+        }
+        double w = PlayerState.Pose.STANDING.width * 0.35;
+        double[][] corners = {{x - w, z + w}, {x - w, z - w}, {x + w, z - w}, {x + w, z + w}};
+        for (double[] c : corners) {
+            BlockPos pos = BlockPos.containing(c[0], y, c[1]);
+            Box column = Box.of(pos.x(), standing.minY(), pos.z(), pos.x() + 1.0, standing.maxY(), pos.z() + 1.0)
+                    .inflate(-1.0E-7, -1.0E-7, -1.0E-7);
+            if (Colliders.collidesWithSuffocatingBlock(world, column)) {
+                return false;
+            }
+        }
+        BlockStates states = world.states();
+        Box margin = standing.inflate(0.01, 0.01, 0.01);
+        int x0 = Colliders.floor(margin.minX());
+        int x1 = Colliders.floor(margin.maxX());
+        int y0 = Colliders.floor(margin.minY());
+        int y1 = Colliders.floor(margin.maxY());
+        int z0 = Colliders.floor(margin.minZ());
+        int z1 = Colliders.floor(margin.maxZ());
+        for (int bx = x0; bx <= x1; bx++) {
+            for (int by = y0; by <= y1; by++) {
+                for (int bz = z0; bz <= z1; bz++) {
+                    int s = Terrain.state(world, new BlockPos(bx, by, bz));
+                    if (states.fluidKind(s) != BlockStates.FLUID_NONE) {
+                        return false;
+                    }
+                    String block = states.block(s);
+                    if (MOVING_INSIDE.contains(block) || CLIMBABLE.contains(block) || block.endsWith("_trapdoor")) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
      * Whether the step reads every one of these block states alike wherever it meets them: the same collision geometry,
      * flags and friction, speed and jump factors, none holding a fluid; a block the step or {@link Colliders} tells
      * apart by its name ({@link #namedInMovement}) only as the very same state. A block that may hold any of them then
