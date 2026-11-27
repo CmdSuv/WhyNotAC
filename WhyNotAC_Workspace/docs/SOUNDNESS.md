@@ -174,7 +174,7 @@ Bu belge, `whynotac-analysis` (ve `whynotac-ai` tasarım deneyleri) içindeki he
 - **Dışlanan Durumlar:** Üst yüze kule çıkma (`BlockFace.UP`), aynı bloğa tekrarlı tıklama (`pos.equals(lastBridgePos)`), binek/teleport/creative/spectator durumları. `ActionPolicy` gereği asla ceza veya etkisizleştirme tetiklemez.
 
 ### 2.14 `design-probe` (`D` — Asla Cezalandırmaz)
-- **Dayanak:** Rastgele zamanlanan yem sonda (`ProbeScheduler` + `EValueProcess`, `DesignProbeEngine.java`). Ville eşitsizliği altında her yem deneyi sıfır-hipotez çarpışma oranı $p_0$ ile test martingali $M_t = \prod \frac{\text{outcome}}{p_0}$ veya bahis e-süreci biriktirir; yalnızca $M_t \ge 1 / \alpha$ geçtiğinde ve pencere kabul edilebilir olduğunda `DESIGN_STATISTIC` üretir.
+- **Dayanak:** Rastgele zamanlanan yem sonda (`ProbeScheduler` + `EValueProcess`, `DesignProbeEngine.java`). Ville eşitsizliği altında her yem deneyi sıfır-hipotez çarpışma oranı $p_0$ ile test martingali $M_t = \prod \frac{\text{outcome}}{p_0}$ veya bahis e-süreci biriktirir; yalnızca $M_t \ge 1 / \alpha$ geçtiğinde ve pencere kabul edilebilir olduğunda `DESIGN_STATISTIC` üretir. `LiveProbeDriver` tarafından üretilen yem kimlikleri yalnızca paylaşılan oturum kayıt defteri (`ClientEntitiesTracker.registerDecoy`) üzerinden dövüş/sunucu-sırası görünümünden gizlenir; istemcinin fiziksel olarak çarpışabildiği itici/katı varlık sorgularında (`ClientEntities.mayHavePusherNear`, `pushers`) görünmeye devam eder ve üçüncü taraf eklentilerin yüksek kimlikli (`>= 1.9e9`) varlıkları hiçbir zaman düşürülmez.
 - **İzinli Eylemler (`ActionPolicy`):** Yalnızca `ALERT`, `REVIEW` ve (yalnızca `ARMED` modda) `HIDE_INFORMATION`. `NEUTRALIZE`, `KICK` ve `BAN` sınıfsal olarak **yasaktır**.
 
 ---

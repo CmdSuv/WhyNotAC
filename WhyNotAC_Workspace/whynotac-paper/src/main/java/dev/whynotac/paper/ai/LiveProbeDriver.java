@@ -6,6 +6,7 @@ import dev.whynotac.ai.ProbeScheduler;
 import dev.whynotac.paper.network.PacketInterceptor;
 import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.world.ClientEntities;
+import dev.whynotac.world.ClientEntitiesTracker;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,12 +46,23 @@ public final class LiveProbeDriver implements Runnable {
     private final Plugin plugin;
     private final PacketInterceptor interceptor;
     private final AiAdvisor aiAdvisor;
+    private final ClientEntitiesTracker entitiesTracker;
     private final long ttlTicks;
 
     public LiveProbeDriver(Plugin plugin, PacketInterceptor interceptor, AiAdvisor aiAdvisor, long ttlTicks) {
+        this(plugin, interceptor, aiAdvisor, null, ttlTicks);
+    }
+
+    public LiveProbeDriver(
+            Plugin plugin,
+            PacketInterceptor interceptor,
+            AiAdvisor aiAdvisor,
+            ClientEntitiesTracker entitiesTracker,
+            long ttlTicks) {
         this.plugin = plugin;
         this.interceptor = interceptor;
         this.aiAdvisor = aiAdvisor;
+        this.entitiesTracker = entitiesTracker;
         this.ttlTicks = Math.max(4L, ttlTicks);
     }
 
@@ -114,6 +126,9 @@ public final class LiveProbeDriver implements Runnable {
         phantom.setSmall(plan.type() == ProbeScheduler.ProbeType.RANDOMIZED_HITBOX_OFFSET);
         phantom.setNoGravity(true);
 
+        if (entitiesTracker != null) {
+            entitiesTracker.registerDecoy(session, virtualId);
+        }
         nmsPlayer.connection.send(new ClientboundAddEntityPacket(
                 virtualId, UUID.randomUUID(), x, y, z, 0.0f, lookBackYaw, chosenType, 0, Vec3.ZERO, lookBackYaw));
         List<SynchedEntityData.DataValue<?>> meta = phantom.getEntityData().getNonDefaultValues();
@@ -127,6 +142,9 @@ public final class LiveProbeDriver implements Runnable {
                 if (current.connection != null) {
                     current.connection.send(new ClientboundRemoveEntitiesPacket(virtualId));
                 }
+            }
+            if (entitiesTracker != null) {
+                Bukkit.getScheduler().runTaskLater(plugin, () -> entitiesTracker.unregisterDecoy(session, virtualId), 40L);
             }
         }, effectiveTtl);
     }

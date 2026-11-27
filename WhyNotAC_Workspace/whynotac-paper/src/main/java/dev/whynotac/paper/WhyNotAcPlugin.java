@@ -389,7 +389,8 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
 
         if (getConfig().getBoolean("ai.active-probes.enabled", false)) {
             long probeTtl = Math.max(4L, getConfig().getLong("ai.active-probes.ttl-ticks", 10L));
-            probeDriverTask = Bukkit.getScheduler().runTaskTimer(this, new LiveProbeDriver(this, interceptor, aiAdvisor, probeTtl), 5L, 5L);
+            probeDriverTask = Bukkit.getScheduler().runTaskTimer(
+                    this, new LiveProbeDriver(this, interceptor, aiAdvisor, entitiesTracker, probeTtl), 5L, 5L);
             getLogger().info("WhyNotAC active behind-FOV design probes enabled (ttl=" + probeTtl + " ticks, DESIGN_STATISTIC)");
         }
 
@@ -511,7 +512,7 @@ public final class WhyNotAcPlugin extends JavaPlugin implements Listener {
         }
         if (probesEnabled && interceptor != null && aiAdvisor != null && isEnabled()) {
             probeDriverTask = Bukkit.getScheduler().runTaskTimer(
-                    this, new LiveProbeDriver(this, interceptor, aiAdvisor, probeTtl), 5L, 5L);
+                    this, new LiveProbeDriver(this, interceptor, aiAdvisor, entitiesTracker, probeTtl), 5L, 5L);
         }
         boolean recordingEnabled = getConfig().getBoolean("recording.enabled", false);
         if (recordingSetup != null) {

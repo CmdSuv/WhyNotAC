@@ -959,4 +959,46 @@ class ClientEntitiesTest {
         assertTrue(possible.stream().allMatch(ClientEntities.PossibleState::known));
         assertTrue(possible.stream().anyMatch(s -> s.positionRadius() > 0.0));
     }
+
+    @Test
+    void thirdPartyHighIdEntitiesAreTrackedInReplica() {
+        int pluginShulkerId = ClientEntities.VIRTUAL_DECOY_MIN_ID + 123;
+        int pluginNpcId = ClientEntities.VIRTUAL_DECOY_MIN_ID + 124;
+        out(add(pluginShulkerId, "minecraft:shulker", 0.5, 64.0, 0.5));
+        out(add(pluginNpcId, "minecraft:husk", 10.5, 64.0, 10.5));
+        sync();
+        assertEquals(ClientEntities.Existence.PRESENT, entities.existence(pluginShulkerId),
+                "Unregistered high-ID shulker from another plugin must be tracked in the replica");
+        assertEquals(ClientEntities.Existence.PRESENT, entities.existence(pluginNpcId),
+                "Unregistered high-ID NPC from another plugin must be tracked in the replica");
+        assertTrue(entities.serverOrderEntities().contains(pluginShulkerId));
+        assertTrue(entities.serverOrderEntities().contains(pluginNpcId));
+        assertTrue(entities.mayHaveColliderNear(1, 0.0, 63.5, 0.0, 1.0, 66.0, 1.0, 64.0));
+        assertTrue(entities.mayHavePusherNear(1, 10.0, 63.5, 10.0, 11.0, 66.0, 11.0, 64.0));
+    }
+
+    @Test
+    void registeredProbeDecoyHiddenFromCombatReplicaButStillCountsAsPusher() {
+        assertTrue(!entities.mayHavePusherNear(1, 4.5, 63.5, 4.5, 5.5, 66.0, 5.5, 64.0));
+
+        // Registered LiveProbeDriver decoy: hidden from combat P-A/P-M existence/pickable & serverOrder,
+        // but still tracked physically so mayHavePusherNear returns true near the decoy.
+        int decoyHuskId = ClientEntities.VIRTUAL_DECOY_MIN_ID + 456;
+        entities.registerDecoy(decoyHuskId);
+        out(add(decoyHuskId, "minecraft:husk", 5.0, 64.0, 5.0));
+        sync();
+        tick();
+        assertEquals(ClientEntities.Existence.ABSENT, entities.existence(decoyHuskId),
+                "Registered decoy must not expose combat P-A/P-M target existence");
+        assertEquals(0, entities.pickable(decoyHuskId));
+        assertTrue(!entities.serverOrderEntities().contains(decoyHuskId));
+        assertTrue(entities.mayHavePusherNear(1, 4.5, 63.5, 4.5, 5.5, 66.0, 5.5, 64.0),
+                "Client still physically collides with invisible decoy husk, so mayHavePusherNear must be true");
+
+        out(new ClientboundPacket.RemoveEntities(new int[] {decoyHuskId}));
+        sync();
+        tick();
+        entities.unregisterDecoy(decoyHuskId);
+        assertTrue(!entities.mayHavePusherNear(1, 4.5, 63.5, 4.5, 5.5, 66.0, 5.5, 64.0));
+    }
 }

@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -154,7 +155,7 @@ public final class ClientEntities {
     private static final int UNSET = Integer.MIN_VALUE;
     /** A rocket's target set while the candidate was lost: not known. */
     private static final int ATTACHED_UNKNOWN = Integer.MIN_VALUE + 1;
-    /** Virtual entity IDs >= this bound are synthetic clientbound-only behind-FOV probes, not server world entities. */
+    /** Lower bound for synthetic virtual entity IDs allocated by {@code LiveProbeDriver}. */
     public static final int VIRTUAL_DECOY_MIN_ID = 1_900_000_000;
 
     /** Whether the client has an entity with a given id. */
@@ -162,6 +163,14 @@ public final class ClientEntities {
 
     private final EntityTypes types;
     private final EntitySizes sizes = EntitySizes.vanilla();
+    /**
+     * Thread-safe set of entity IDs explicitly spawned as clientbound-only design-probe decoys by
+     * {@code LiveProbeDriver}. Decoys remain tracked in {@link #tracks} so physical pusher/collider queries
+     * ({@link #mayHavePusherNear}, {@link #pushers}) reflect what the client actually collides with, while
+     * {@link #forEachPossibleState} and {@link #serverOrder} hide them from combat P-A/P-M checks and
+     * server-world verifiers. Unregistered high-ID entities from third-party plugins are tracked normally.
+     */
+    private final Set<Integer> decoyIds;
 
     // --- server order: what the client will hold once it has processed everything sent so far ---------
     private boolean level;
@@ -295,24 +304,44 @@ public final class ClientEntities {
 
     /** {@code totals}: where this replica's counters are summed with every other's (null: nowhere). */
     public ClientEntities(EntityTypes types, Totals totals) {
-        this(types, totals, true, null);
+        this(types, totals, true, null, null);
     }
 
     ClientEntities(EntityTypes types, Totals totals, PingLedger sharedLedger) {
-        this(types, totals, true, sharedLedger);
+        this(types, totals, true, sharedLedger, null);
     }
 
-    private ClientEntities(EntityTypes types, Totals totals, boolean restingAllowed, PingLedger sharedLedger) {
+    ClientEntities(EntityTypes types, Totals totals, PingLedger sharedLedger, Set<Integer> decoyIds) {
+        this(types, totals, true, sharedLedger, decoyIds);
+    }
+
+    private ClientEntities(EntityTypes types, Totals totals, boolean restingAllowed, PingLedger sharedLedger, Set<Integer> decoyIds) {
         this.types = types;
         this.totals = totals;
         this.restingAllowed = restingAllowed;
         this.sharedLedger = sharedLedger != null;
         this.ledger = sharedLedger != null ? sharedLedger : new PingLedger();
+        this.decoyIds = decoyIds != null ? decoyIds : ConcurrentHashMap.newKeySet();
+    }
+
+    /** Marks {@code entityId} as a synthetic clientbound-only design-probe decoy (thread-safe). */
+    public void registerDecoy(int entityId) {
+        decoyIds.add(entityId);
+    }
+
+    /** Removes {@code entityId} from the synthetic design-probe decoy set (thread-safe). */
+    public void unregisterDecoy(int entityId) {
+        decoyIds.remove(entityId);
+    }
+
+    /** Whether {@code entityId} is registered as a synthetic design-probe decoy. */
+    public boolean isDecoy(int entityId) {
+        return decoyIds.contains(entityId);
     }
 
     /** A replica whose every track steps at every tick, as before resting tracks (for tests: the two must agree). */
     static ClientEntities steppingEveryTrack(EntityTypes types) {
-        return new ClientEntities(types, null, false, null);
+        return new ClientEntities(types, null, false, null, null);
     }
 
     /** How many tracks rest now (for tests). */
@@ -546,8 +575,8 @@ public final class ClientEntities {
 
     private void addEntity(long seq, ClientboundPacket.AddEntity add) {
         int id = add.entityId();
-        if (!level || id == selfId || id >= VIRTUAL_DECOY_MIN_ID) {
-            return; // no level: dropped; the player's own id or a synthetic probe decoy: not another world entity
+        if (!level || id == selfId) {
+            return; // no level: dropped; the player's own id: not another entity
         }
         boolean player = EntityTypes.PLAYER.equals(add.type());
         boolean maybe = false;
@@ -2286,6 +2315,12 @@ public final class ClientEntities {
      * of the window the client may have processed since its last tick. Empty when the id is unknown.
      */
     public void forEachPossibleState(int entityId, Consumer<PossibleState> action) {
+        if (decoyIds.contains(entityId)) {
+            if (complete) {
+                action.accept(new PossibleState(false, true, false, null, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NONE, null, null, 0, 0.0F));
+            }
+            return;
+        }
         Track track = tracks.get(entityId);
         if (track == null) {
             if (complete) {
@@ -2811,9 +2846,18 @@ public final class ClientEntities {
         return head == null || !head.baseKnown ? null : new Vec3d(head.bx, head.by, head.bz);
     }
 
-    /** Entity ids the server has added to this client's level and not removed (server order). */
+    /** Entity ids the server has added to this client's level and not removed (server order), excluding registered probe decoys. */
     public Set<Integer> serverOrderEntities() {
-        return Set.copyOf(heads.keySet());
+        if (decoyIds.isEmpty()) {
+            return Set.copyOf(heads.keySet());
+        }
+        Set<Integer> out = new java.util.HashSet<>(heads.size());
+        for (Integer id : heads.keySet()) {
+            if (!decoyIds.contains(id)) {
+                out.add(id);
+            }
+        }
+        return Set.copyOf(out);
     }
 
     /** The vehicle of {@code entityId} once the client processed everything sent so far, or -1. */
@@ -2865,6 +2909,9 @@ public final class ClientEntities {
     public ServerOrder serverOrder() {
         Map<Integer, ServerOrder.Entity> entities = new HashMap<>();
         for (Head head : heads.values()) {
+            if (decoyIds.contains(head.id)) {
+                continue;
+            }
             entities.put(head.id, new ServerOrder.Entity(head.type, head.baseKnown ? new Vec3d(head.bx, head.by, head.bz) : null, head.vehicle,
                     knowledge(tracks.get(head.id)), size(head.id), pickable(head.id)));
         }

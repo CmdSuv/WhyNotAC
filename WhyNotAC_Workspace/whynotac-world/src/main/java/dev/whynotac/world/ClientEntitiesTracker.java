@@ -4,6 +4,7 @@ import dev.whynotac.protocol.session.PlayerSession;
 import dev.whynotac.protocol.session.TimelineEvent;
 import dev.whynotac.protocol.session.TimelineListener;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -18,13 +19,32 @@ import java.util.function.Supplier;
 public final class ClientEntitiesTracker implements TimelineListener {
 
     private static final PlayerSession.AttachmentKey KEY = new PlayerSession.AttachmentKey();
+    private static final PlayerSession.AttachmentKey DECOYS = new PlayerSession.AttachmentKey();
 
     private final Function<PlayerSession, ClientEntities> factory;
     private final Map<PlayerSession, Query<?>> queries = new ConcurrentHashMap<>();
     private final ClientEntities.Totals totals = new ClientEntities.Totals();
 
     public ClientEntitiesTracker(EntityTypes types) {
-        this.factory = s -> new ClientEntities(types, totals, s.pingLedger());
+        this.factory = s -> new ClientEntities(types, totals, s.pingLedger(), decoys(s));
+    }
+
+    private static Set<Integer> decoys(PlayerSession session) {
+        return session.attachment(DECOYS, () -> ConcurrentHashMap.<Integer>newKeySet());
+    }
+
+    /** Registers a synthetic design-probe decoy ID for {@code session} (safe from any thread). */
+    public void registerDecoy(PlayerSession session, int entityId) {
+        if (session != null) {
+            decoys(session).add(entityId);
+        }
+    }
+
+    /** Unregisters a synthetic design-probe decoy ID for {@code session} (safe from any thread). */
+    public void unregisterDecoy(PlayerSession session, int entityId) {
+        if (session != null) {
+            decoys(session).remove(entityId);
+        }
     }
 
     /** Counters summed over every session. Any thread. */
