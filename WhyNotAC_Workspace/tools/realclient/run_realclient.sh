@@ -15,7 +15,9 @@ PORT=25598
 DISPLAY_NUM=:${REALCLIENT_DISPLAY:-97}
 NAME=RealProbe
 
-python3 -I "$HERE/fetch_client.py" "$WORK_DIR/client-cache" > /dev/null
+if [ "${REALCLIENT_PREBUILT_JARS:-false}" != "true" ] || [ ! -f "$WORK_DIR/client-cache/launch.json" ]; then
+  python3 -I "$HERE/fetch_client.py" "$WORK_DIR/client-cache" > /dev/null
+fi
 if [ ! -f "$WORK_DIR/$PAPER_JAR" ]; then
   curl -fsS --retry 3 --retry-delay 5 --max-time 300 -o "$WORK_DIR/$PAPER_JAR" "https://fill-data.papermc.io/v1/objects/$PAPER_SHA256/$PAPER_JAR"
 fi
@@ -33,13 +35,16 @@ simulation-distance=3
 difficulty=peaceful
 spawn-monsters=false
 max-players=5
+allow-flight=${REALCLIENT_ALLOW_FLIGHT:-false}
 motd=WhyNotAC real client
 PROPS
-for i in 1 2 3 4; do
-  if (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar); then break; fi
-  [ "$i" -eq 4 ] && exit 1
-  sleep $((10 * i))
-done
+if [ "${REALCLIENT_PREBUILT_JARS:-false}" != "true" ]; then
+  for i in 1 2 3 4; do
+    if (cd "$ROOT" && ./gradlew -q :whynotac-paper:jar); then break; fi
+    [ "$i" -eq 4 ] && exit 1
+    sleep $((10 * i))
+  done
+fi
 mkdir -p "$WORK_DIR/plugins/WhyNotAC" "$WORK_DIR/game"
 rm -rf "$WORK_DIR/plugins/WhyNotAC/recordings" "$WORK_DIR/plugins/WhyNotAC/cases" "$WORK_DIR/plugins/WhyNotAC/cases.db"
 printf 'recording:\n  enabled: true\n  max-age-days: 14\n  max-total-megabytes: 2048\n  max-queued-megabytes: 64\n' > "$WORK_DIR/plugins/WhyNotAC/config.yml"
@@ -51,6 +56,10 @@ find "$WORK_DIR/plugins" -maxdepth 1 -name '*.jar' ! -name 'WhyNotAC.jar' -delet
 # lines of its own (other legitimate settings, e.g. "toggleSprint:true").
 MAX_FPS=${REALCLIENT_MAX_FPS:-60}
 EXTRA_OPTIONS=${REALCLIENT_OPTIONS:-}
+COURSE_ARGS=()
+if [[ "$EXTRA_OPTIONS" == *"toggleSprint:true"* ]]; then COURSE_ARGS+=(--toggle-sprint); fi
+if [[ "$EXTRA_OPTIONS" == *"toggleCrouch:true"* ]]; then COURSE_ARGS+=(--toggle-crouch); fi
+run_course() { python3 -I "$HERE/course.py" "${COURSE_ARGS[@]}" "$DISPLAY_NUM" "$@"; }
 # The mouse (VAL-13): REALCLIENT_SENSITIVITY is the options' slider value (0.0..1.0; 0.83 by default),
 # REALCLIENT_INVERT_Y=true inverts the vertical axis. The rotation check infers the commanded motions with them.
 SENSITIVITY=${REALCLIENT_SENSITIVITY:-0.83}
@@ -148,7 +157,9 @@ sleep 2
 # The ground-truth agent: records the client's exact physics state every tick (see agent/).
 AGENT_OUT="$WORK_DIR/agent-build"
 rm -rf "$AGENT_OUT" && mkdir -p "$AGENT_OUT/classes"
-(cd "$ROOT" && ./gradlew -q :whynotac-world:jar :whynotac-physics:jar :whynotac-recording:jar)
+if [ "${REALCLIENT_PREBUILT_JARS:-false}" != "true" ]; then
+  (cd "$ROOT" && ./gradlew -q :whynotac-world:jar :whynotac-physics:jar :whynotac-recording:jar)
+fi
 WORLD_JAR=$(find "$ROOT/whynotac-world/build/libs" -name 'whynotac-world-*.jar' ! -name '*-sources.jar' | head -1)
 PROTOCOL_JAR=$(find "$ROOT/whynotac-protocol/build/libs" -name 'whynotac-protocol-*.jar' ! -name '*-sources.jar' | head -1)
 PHYSICS_JAR=$(find "$ROOT/whynotac-physics/build/libs" -name 'whynotac-physics-*.jar' ! -name '*-sources.jar' | head -1)
@@ -227,7 +238,7 @@ echo "give $NAME minecraft:diamond_sword" > "$FIFO"
 echo "give $NAME minecraft:stick[minecraft:attack_range={max_reach:4.5f,hitbox_margin:0.25f}]" > "$FIFO"
 echo "item replace entity $NAME weapon.offhand with minecraft:shield" > "$FIFO"
 sleep 1
-(cd "$HERE" && python3 -I drive.py "$DISPLAY_NUM") > "$WORK_DIR/drive.json"
+(cd "$HERE" && python3 -I drive.py "${COURSE_ARGS[@]}" "$DISPLAY_NUM") > "$WORK_DIR/drive.json"
 # The world WhyNotAC rebuilt from the client's packets, compared with the server's (verify_realclient.py reads the line).
 echo "whynotac world $NAME" > "$FIFO"
 echo "whynotac entities $NAME" > "$FIFO"
@@ -251,7 +262,7 @@ reach 7.15
 # sliding on ice; soul sand; a wall approached at an angle; sneaking to a platform's edge, then releasing shift there and
 # walking off; jumping under a low ceiling; a double-tapped sprint jumping; shift pressed inside the double-tap window;
 # stairs; one-block steps met head on and at an angle (auto-jump).
-leg() { echo "tp $NAME $1 $2 0.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+leg() { echo "tp $NAME $1 $2 0.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; run_course "$@"; sleep 0.5; }
 leg 41.5 -60 -90 w/3.0
 leg 50.5 -60 -90 w/1.0 w,Control_L/1.0 -/1.5
 leg 68.5 -60 -90 w/2.5
@@ -296,7 +307,7 @@ effect clear $NAME minecraft:fire_resistance
 # Climbing, at z = -9.5: a ladder on a wall walked into, held with shift, jumped on and slid down; vines likewise; an
 # open trapdoor over a ladder facing its way (a ladder too). Ladders and trapdoors do not suffocate: walking against
 # them is no push.
-climb() { echo "tp $NAME $1 -60 -9.5 -90 0" > "$FIFO"; sleep 1.5; shift; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+climb() { echo "tp $NAME $1 -60 -9.5 -90 0" > "$FIFO"; sleep 1.5; shift; run_course "$@"; sleep 0.5; }
 climb 59.5 w/2.0 Shift_L,w/0.6 Shift_L/1.0 -/1.5 w/0.3 space/1.0 -/1.0
 climb 64.5 w/2.0 Shift_L/0.8 -/1.5
 climb 69.5 w/1.5 -/1.0
@@ -306,7 +317,7 @@ climb 71.85 -/1.0 w/1.0
 # walked across sneaking,
 # jumped across, dropped onto from five blocks (it bounces back, again and again) and dropped onto holding shift (no
 # bounce); a bed (x 90..91) jumped onto, dropped onto (0.66 of the fall back) and dropped onto holding shift.
-bounce() { echo "tp $NAME $1 $2 -14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+bounce() { echo "tp $NAME $1 $2 -14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; run_course "$@"; sleep 0.5; }
 bounce 77.5 -60 w/2.0 -/0.5
 bounce 79.5 -60 Shift_L,w/2.0 -/0.3
 bounce 78.5 -60 w/1.8/space -/1.5
@@ -318,7 +329,7 @@ bounce 91.5 -55 Shift_L/2.0 -/0.5
 # Fences, walls and fence gates, 1.5 high, at x 100..106: a fence line (z 5), a lone post (x 109), a wall line (z 8) and
 # closed gates (z 11) walked along on top, sneaking to their edge and jumped along until the player drops off; the fence
 # walked into from the ground and jumped against (too high to climb, to auto-jump or to step up).
-fences() { echo "tp $NAME $1 $2 $3 -90 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+fences() { echo "tp $NAME $1 $2 $3 -90 0" > "$FIFO"; sleep 1.5; shift 3; run_course "$@"; sleep 0.5; }
 fences 100.5 -58.5 5.5 w/1.0 -/0.3 Shift_L,w/1.5 -/0.3 w/1.5/space -/1.0
 fences 109.5 -58.5 5.5 -/0.5 Shift_L,w/0.8 -/0.5
 fences 100.5 -58.5 8.5 w/1.0 -/0.3 Shift_L,w/1.5 -/0.3 w/1.5/space -/1.0
@@ -328,7 +339,7 @@ fences 97.5 -60 5.5 w/1.0 w/1.0/space -/0.5
 # sprinting under water (level, looking down, looking up, with dolphin's grace) and climbed out of at its far wall; a
 # channel one block wide (x 134..141) its source floods eastward, walked against the current, stood in and sprinted
 # through (too shallow to sprint in); a waterfall against a stone wall (x 160) stood in and jumped in.
-water() { echo "tp $NAME $1 $2 -9.5 $3 $4" > "$FIFO"; sleep 1.5; shift 4; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+water() { echo "tp $NAME $1 $2 -9.5 $3 $4" > "$FIFO"; sleep 1.5; shift 4; run_course "$@"; sleep 0.5; }
 water 119.5 -60 -90 0 w/1.5 -/1.0 w/1.0/space -/0.5 Shift_L/1.0 -/0.5 w/2.0/space -/1.0
 water 121.5 -62.5 -90 0 w,Control_L/1.5 -/1.0
 water 121.5 -61.5 -90 30 w,Control_L/1.5 -/0.5
@@ -350,7 +361,7 @@ water 176.5 -60 -90 0 -/0.5 w/0.8 w/0.6/space w/1.2 -/0.5
 # (x 150, with fire resistance from here on: its floor, lava and the fire it sets do not hurt); a pool four deep (x 160..170) over two rows of columns rising
 # from soul sand (x 163..164) and two dragging down over magma (x 167..168), swum and sprint-swum across: the box meets
 # several columns at once, each once a tick.
-inside() { echo "tp $NAME $1 $2 14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+inside() { echo "tp $NAME $1 $2 14.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; run_course "$@"; sleep 0.5; }
 inside 111.5 -60 w/2.5 -/0.5 w/1.0/space -/0.5
 inside 111.5 -60 w,Control_L/2.0 -/0.5
 inside 115.5 -55 -/2.5
@@ -372,7 +383,7 @@ inside 160.5 -60 w,Control_L/4.0 -/0.5
 # left at its far wall, placed in and jumped in (jumpInLiquid), sprinted in; a channel in the ground (x 113..118) its
 # source floods three blocks east (the overworld's slow lava), walked into from the east against the current, stood
 # in and jumped in.
-lava() { echo "tp $NAME $1 $2 26.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+lava() { echo "tp $NAME $1 $2 26.5 $3 0" > "$FIFO"; sleep 1.5; shift 3; run_course "$@"; sleep 0.5; }
 lava 98.5 -60 -90 w/2.0 -/1.0 w/1.5/space -/0.5 Shift_L/1.0 -/0.5
 lava 104.5 -62 -90 space/2.0 -/1.0 w,Control_L/1.5 -/1.0
 lava 119.5 -60 90 w/3.0 -/1.5 space/1.0 -/0.5
@@ -380,7 +391,7 @@ lava 119.5 -60 90 w/3.0 -/1.5 space/1.0 -/0.5
 # bridge of three hanging off its top eastward (unsupported: each the slab of its floor below whoever is inside it);
 # the bridge walked along on top, sunk into holding shift (no stable top while descending: onto the floor's slab), stood
 # in, and the tower sunk through holding shift.
-scaff() { echo "tp $NAME $1 $2 26.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+scaff() { echo "tp $NAME $1 $2 26.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; run_course "$@"; sleep 0.5; }
 scaff 130.5 -60 w/0.6 space/3.0 -/1.0 w/0.5 -/1.0
 scaff 133.5 -55 Shift_L/1.5 -/1.0 w/0.5 -/1.0
 scaff 134.5 -55.5 -/1.0 Shift_L/1.0 d/0.4 -/1.0
@@ -389,7 +400,7 @@ scaff 132.5 -55 Shift_L/3.0 -/1.0
 # use ends on the server after 32 ticks), the off hand's shield raised behind a sword that has no use (walking, the
 # sprint key and a double tap while blocking, sneaking; a tap of W, a short block, W again inside the double-tap
 # window), a spear charged while a sprint starts (its use_effects let it), and a bow drawn while walking and released.
-lane() { echo "tp $NAME $1 -60 10.5 -90 0" > "$FIFO"; sleep 1.5; shift; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+lane() { echo "tp $NAME $1 -60 10.5 -90 0" > "$FIFO"; sleep 1.5; shift; run_course "$@"; sleep 0.5; }
 echo "item replace entity $NAME weapon.mainhand with minecraft:golden_apple 8" > "$FIFO"; sleep 0.5
 lane 40.5 w,Control_L/0.8 w,Control_L,Button3/1.2 w,Button3/1.2 w/1.0
 echo "item replace entity $NAME weapon.mainhand with minecraft:diamond_sword" > "$FIFO"; sleep 0.5
@@ -410,7 +421,7 @@ for v in "44.5 -60 20.5" "50.5 -60 20.2" "50.5 -60 20.9" "56.5 -60 20.5"; do
   echo "summon minecraft:villager $v {NoAI:1b,PersistenceRequired:1b,Silent:1b}" > "$FIFO"
 done
 sleep 1
-pushes() { echo "tp $NAME $1 -60 $2 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+pushes() { echo "tp $NAME $1 -60 $2 -90 0" > "$FIFO"; sleep 1.5; shift 2; run_course "$@"; sleep 0.5; }
 pushes 41.5 20.5 w/1.0 -/1.5
 pushes 44.6 20.7 -/1.5
 pushes 47.5 20.5 w/1.0 -/1.5 d/0.5 -/1.0
@@ -423,17 +434,17 @@ for c in "team leave $NAME" "team remove wnc"; do echo "$c" > "$FIFO"; done
 # escape (ContainerClose), and A, which walks again.
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 echo "tp $NAME 66.5 -60 20.5 0 30" > "$FIFO"; sleep 1.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button3/0.2 -/1.0 w/1.5 -/0.5 Escape/0.2 -/0.5 a/0.5 -/1.0; sleep 0.5
+run_course Button3/0.2 -/1.0 w/1.5 -/0.5 Escape/0.2 -/0.5 a/0.5 -/1.0; sleep 0.5
 # Digging with the empty hand, the left button held: a dirt block at eye height ahead (x 76, z 22: its north face), then
 # the ground 45 degrees down (its top). START_DESTROY_BLOCK and STOP_DESTROY_BLOCK carry the pick's block and face.
 echo "tp $NAME 76.5 -60 20.5 0 0" > "$FIFO"; sleep 1.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1/1.6 -/0.5; sleep 0.5
+run_course Button1/1.6 -/0.5; sleep 0.5
 echo "tp $NAME 76.5 -60 20.5 0 45" > "$FIFO"; sleep 1.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1/1.6 -/0.5; sleep 0.5
+run_course Button1/1.6 -/0.5; sleep 0.5
 # Digging while jumping, straight down (x 86, z 20): the grass and the dirt under it, each mostly off the ground, where
 # Player.getDestroySpeed divides by 5 (break-time counts a fifth where the client's own flag says so; BreakAudit.java).
 echo "tp $NAME 86.5 -60 20.5 0 90" > "$FIFO"; sleep 1.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1,space/10.0 -/0.5; sleep 0.5
+run_course Button1,space/10.0 -/0.5; sleep 0.5
 # Allowed repetition (VAL-13): the use button held while looking straight down and jumping (x 46, z 32): the client
 # places stone under its feet at each jump (Minecraft.startUseItem again every four ticks while held), predicts the
 # block before the server confirms it and lands on it, a tower. Then shift-clicks in the inventory screen (quick move):
@@ -442,7 +453,7 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button1,space/10.0 -/0.5; sleep 0.5
 # with the cursor at the centre (427, 240).
 echo "item replace entity $NAME weapon.mainhand with minecraft:stone 64" > "$FIFO"; sleep 0.5
 echo "tp $NAME 46.5 -60 32.5 0 90" > "$FIFO"; sleep 1.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" space,Button3/3.0 -/1.5; sleep 0.5
+run_course space,Button3/3.0 -/1.5; sleep 0.5
 for c in "item replace entity $NAME hotbar.6 with minecraft:cobblestone 32" "item replace entity $NAME hotbar.7 with minecraft:oak_planks 16" \
   "item replace entity $NAME inventory.0 with minecraft:torch 8"; do echo "$c" > "$FIFO"; done
 echo "tp $NAME 52.5 -60 32.5 0 0" > "$FIFO"; sleep 1.5
@@ -456,7 +467,7 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" e/0.05 -/0.8 move:71:134/0.3 Shift_L
 # jumps included), never waiting for it to stand still.
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; echo "item replace entity $NAME weapon.offhand with minecraft:air" > "$FIFO"
 sleep 0.5; echo "tp $NAME 40.5 -60 88.5 -80 50" > "$FIFO"; sleep 2.0
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/1.0 w,Button3/0.1 w/4.0 -/1.0 w,Control_L/1.0 w,Control_L,Button3/0.1 w,Control_L/4.0 -/1.0 \
+run_course w/1.0 w,Button3/0.1 w/4.0 -/1.0 w,Control_L/1.0 w,Control_L,Button3/0.1 w,Control_L/4.0 -/1.0 \
   w,Control_L,space/1.0 w,Control_L,space,Button3/0.1 w,Control_L,space/6.0 -/1.0; sleep 0.5
 # Sneak bridging (VAL-13, #95): on a stone platform four blocks up (x 50..52, z 38..40), facing south and looking 78
 # degrees down, S, shift and the use button held: the client walks back north, its sneak stops it at the edge (no walking
@@ -465,7 +476,29 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/1.0 w,Button3/0.1 w/4.0 -/1.0 w,Co
 # the top of the block below, where the player stands in the way: those uses place nothing.
 echo "item replace entity $NAME weapon.mainhand with minecraft:stone 64" > "$FIFO"; sleep 0.5
 echo "tp $NAME 51.5 -56 39.5 0 78" > "$FIFO"; sleep 1.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" s,Shift_L,Button3/5.0 -/1.0; sleep 0.5
+run_course s,Shift_L,Button3/5.0 -/1.0; sleep 0.5
+if [ "${REALCLIENT_EXTRA_LEG:-}" = "sprint_bridge" ]; then
+  # P3 optional leg: unsneaked sprint-jump bridging + empty-hand/interactive-block uses (door, trapdoor, lever, button, fence gate).
+  echo "fill 50 -57 28 52 -57 30 minecraft:stone" > "$FIFO"
+  echo "setblock 56 -60 32 minecraft:oak_door[facing=west,half=lower,open=false]" > "$FIFO"
+  echo "setblock 56 -59 32 minecraft:oak_door[facing=west,half=upper,open=false]" > "$FIFO"
+  echo "setblock 56 -60 34 minecraft:oak_trapdoor[facing=west,half=bottom,open=false]" > "$FIFO"
+  echo "setblock 56 -60 36 minecraft:oak_fence_gate[facing=west,open=false]" > "$FIFO"
+  echo "setblock 57 -60 38 minecraft:stone" > "$FIFO"
+  echo "setblock 56 -60 38 minecraft:lever[face=wall,facing=west,powered=false]" > "$FIFO"
+  echo "setblock 57 -60 40 minecraft:stone" > "$FIFO"
+  echo "setblock 56 -60 40 minecraft:stone_button[face=wall,facing=west,powered=false]" > "$FIFO"
+  echo "item replace entity $NAME weapon.mainhand with minecraft:stone 64" > "$FIFO"; sleep 0.5
+  echo "tp $NAME 51.5 -56 29.5 0 -12" > "$FIFO"; sleep 1.5
+  python3 -I "$HERE/course.py" "${COURSE_ARGS[@]}" --profile sprint_bridge "$DISPLAY_NUM"; sleep 0.5
+  echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
+  for iz in 32 34 36 38 40; do
+    echo "tp $NAME 54.5 -60 ${iz}.5 -90 25" > "$FIFO"; sleep 1.5
+    run_course Button3/0.15 -/0.4 Button3/0.15 -/0.6; sleep 0.3
+  done
+  echo "effect give $NAME minecraft:instant_health 1 10 true" > "$FIFO"
+  echo "item replace entity $NAME weapon.mainhand with minecraft:stone 64" > "$FIFO"; sleep 0.5
+fi
 # Gliding with an elytra in the chest slot, east along z = 45.5 (clear of the course; the ground first, so its chunks
 # arrive): placed 30 blocks up looking 20 degrees down, the player falls, a press of the jump key in the air starts the
 # glide (LocalPlayer.aiStep, tryToStartFallFlying: the client sends START_FALL_FLYING), and it glides down to the
@@ -476,7 +509,7 @@ python3 -I "$HERE/course.py" "$DISPLAY_NUM" s,Shift_L,Button3/5.0 -/1.0; sleep 0
 # while gliding (the right button): the server attaches it to the player, and its tick on the client boosts the glide
 # (FireworkRocketEntity.tick) until the server removes it.
 glide() { echo "tp $NAME $1 -60 45.5 -90 0" > "$FIFO"; sleep 1.5; echo "tp $NAME $1 $2 45.5 -90 $3" > "$FIFO"; sleep 0.3; shift 3
-  python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+  run_course "$@"; sleep 0.5; }
 echo "item replace entity $NAME armor.chest with minecraft:elytra" > "$FIFO"; sleep 0.5
 glide 40.5 -30 20 -/0.4 space/0.2 -/8.0
 glide 40.5 -60 0 space/0.1 -/0.2 space/0.2 -/2.0
@@ -493,7 +526,7 @@ echo "item replace entity $NAME armor.chest with minecraft:air" > "$FIFO"; sleep
 # (fallen more than 2.5) and sinks after. In leather boots it walks across the strip on top (the full block), sprints
 # across, sinks with shift (descending), climbs out at its east wall (wasInPowderSnow: 0.2 a tick against it), and
 # climbs out of the pit, two blocks up. Random ticks are off: the snow stays.
-snow() { echo "tp $NAME $1 $2 30.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+snow() { echo "tp $NAME $1 $2 30.5 -90 0" > "$FIFO"; sleep 1.5; shift 2; run_course "$@"; sleep 0.5; }
 snow 58.5 -60 w/4.0 w,space/2.0 -/0.5
 snow 62.5 -55 -/2.5
 echo "item replace entity $NAME armor.feet with minecraft:leather_boots" > "$FIFO"; sleep 0.5
@@ -517,7 +550,7 @@ boat() { echo "kill @e[tag=wnb]" > "$FIFO"; echo "tp $NAME $1 -60 $2 -90 0" > "$
 # The boat goes first: the player put down on its box would stand on a solid entity, which the on-foot engine does not model.
 unboat() { echo "kill @e[tag=wnb]" > "$FIFO"; sleep 1.0; }
 fall() { echo "data merge entity @e[tag=wnb,limit=1] {NoGravity:0b}" > "$FIFO"; }
-paddle() { python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; }
+paddle() { run_course "$@"; }
 echo "gamerule entity_drops false" > "$FIFO"
 boat 44.5 -26.5 45.5 -60.5 -34.5 -90 ""; paddle w/2.0 w,a/1.0 d/1.0 s/1.0 -/1.0 w,d/0.6 w/3.0 -/0.5; unboat
 boat 63.5 -26.5 63.5 -63 -34.5 -90 ""; paddle w/0.8 a/0.4 -/0.4; unboat
@@ -592,7 +625,7 @@ camel 90; paddle space/0.4 -/3.2 w/0.3 w,space/0.4 w/0.6 -/0.8; uncamel
 # Each leg first puts the player on the grass beside the pool: its chunks arrive and the player, standing still, is anchored
 # there (in water it could not be); then into the pool, followed.
 riptide() { echo "tp $NAME 396.5 -60 0.5 -90 0" > "$FIFO"; sleep 4.5; echo "tp $NAME 400.5 -62 0.5 -90 $1" > "$FIFO"; sleep 1.0; shift
-  python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+  run_course "$@"; sleep 0.5; }
 echo "item replace entity $NAME weapon.mainhand with minecraft:trident[enchantments={riptide:3}]" > "$FIFO"; sleep 0.5
 riptide 0 -/1.0 Button3/0.8 -/2.5
 riptide -30 -/1.0 Button3/0.8 -/3.0
@@ -604,14 +637,14 @@ riptide 0 -/1.0 Button3/0.3 -/1.0
 echo "effect give $NAME minecraft:saturation 1 10 true" > "$FIFO"
 echo "item replace entity $NAME weapon.mainhand with minecraft:iron_spear[enchantments={lunge:3}]" > "$FIFO"; sleep 0.5
 echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 4.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" -/0.5 Button1/0.1 -/2.0 w/0.5 w,Button1/0.1 w/1.0 -/1.0; sleep 0.5
+run_course -/0.5 Button1/0.1 -/2.0 w/0.5 w,Button1/0.1 w/1.0 -/1.0; sleep 0.5
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"; sleep 0.5
 # Rotations the server sets while the player walks on the same grass (/rotate: ServerPlayer.forceSetRotation sends
 # ClientboundPlayerRotationPacket): an absolute one with its pitch past 90 (the client clamps it before % 360), then a
 # relative one (from the console's rotation: -150 on the yaw). The client answers each at once with
 # Rot(yRot, xRot, false, false), outside its tick; its next tick sends the rotation.
 echo "tp $NAME 396.5 -60 -10.5 0 0" > "$FIFO"; sleep 2.0
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/2.6 & ROTATING=$!
+run_course w/2.6 & ROTATING=$!
 sleep 0.8; echo "rotate $NAME 90 400" > "$FIFO"; sleep 0.8; echo "rotate $NAME ~-60 ~-120" > "$FIFO"; wait $ROTATING; sleep 0.5
 # Pigs, in the horses' arena (centre -79, -90) and on the grass lane: a saddled pig the player steers with a carrot on a
 # stick (a fresh one each leg in the main hand, the shield off the off hand meanwhile), ahead wherever the rider looks
@@ -680,27 +713,27 @@ echo "gamerule entity_drops true" > "$FIFO"
 # shrinking back to 20 over 60 ticks as it walks away backwards. The default border after. The player is put inside
 # first: far outside a border it takes damage by the block beyond (it would die where the rocket left it). The centres
 # are written with a fraction, which the command takes as it is (a whole number is a block's centre).
-border() { echo "tp $NAME $1 -60 $2 $3 0" > "$FIFO"; sleep 1.5; shift 3; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+border() { echo "tp $NAME $1 -60 $2 $3 0" > "$FIFO"; sleep 1.5; shift 3; run_course "$@"; sleep 0.5; }
 echo "tp $NAME 55.5 -60 65.5 -90 0" > "$FIFO"; sleep 1.5
 echo "worldborder center 50.0 65.5" > "$FIFO"; echo "worldborder set 20" > "$FIFO"; sleep 1.0
 border 55.5 65.5 -90 w/2.5 w,space/1.0 w,a/1.5 -/0.5
 border 55.5 70.5 -60 w/1.5 w,Control_L/1.5 -/0.5
 border 56.5 65.5 -90 w/1.0
 echo "worldborder set 30 80" > "$FIFO"
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" w/5.0 -/0.5
+run_course w/5.0 -/0.5
 echo "worldborder set 20 60" > "$FIFO"
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" s/3.5 -/0.5
+run_course s/3.5 -/0.5
 echo "worldborder set 59999968" > "$FIFO"; echo "worldborder center 0.0 0.0" > "$FIFO"; sleep 1.0
 # Fast lava in the nether (gameplay/fast_lava: its current pushes 0.007 rather than 0.0023): in a glass shell (x -1..21,
 # y 99..108, z -1..21), a pool three deep (x 5..12, z 5..8) walked into and jumped in, and a channel (z 10) its source at
 # x 13 floods eight blocks east, walked into from the east against the current, stood in and jumped in. The session ends
 # there.
-nether() { echo "execute in minecraft:the_nether run tp $NAME $1 $2 $3 $4 0" > "$FIFO"; sleep 2.5; shift 4; python3 -I "$HERE/course.py" "$DISPLAY_NUM" "$@"; sleep 0.5; }
+nether() { echo "execute in minecraft:the_nether run tp $NAME $1 $2 $3 $4 0" > "$FIFO"; sleep 2.5; shift 4; run_course "$@"; sleep 0.5; }
 # In the nether a new ClientLevel numbers its block predictions from 1 again (prediction-sequence): a right click on the
 # glass floor with the empty main hand (the shield in the off hand: useItemOn for each hand, then the shield's use).
 echo "item replace entity $NAME weapon.mainhand with minecraft:air" > "$FIFO"
 echo "execute in minecraft:the_nether run tp $NAME 2.5 103 2.5 -90 60" > "$FIFO"; sleep 2.5
-python3 -I "$HERE/course.py" "$DISPLAY_NUM" Button3/0.3 -/0.5; sleep 0.5
+run_course Button3/0.3 -/0.5; sleep 0.5
 nether 2.5 103 6.5 -90 -/1.5 w/2.5 -/1.0 space/1.5 -/0.5
 nether 20.5 103 10.5 90 -/0.5 w/3.0 -/2.0 space/1.0 -/0.5
 sleep 0.5

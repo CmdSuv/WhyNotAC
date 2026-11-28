@@ -121,6 +121,7 @@ public final class UseSlowdownCheck implements TimelineListener {
         boolean sawInteractEntityThisTick;
 
         boolean activeHoldUse;
+        boolean holdStartedInCurrentTick;
         String holdItem;
         long holdStartSeq = -1L;
         long holdStartNano;
@@ -161,10 +162,12 @@ public final class UseSlowdownCheck implements TimelineListener {
             sprintCmdName = null;
             sawUseOnThisTick = false;
             sawInteractEntityThisTick = false;
+            holdStartedInCurrentTick = false;
         }
 
         void clearHold() {
             activeHoldUse = false;
+            holdStartedInCurrentTick = false;
             holdItem = null;
             holdStartSeq = -1L;
             holdTicksRemaining = 0;
@@ -444,7 +447,9 @@ public final class UseSlowdownCheck implements TimelineListener {
                 if (onUsePacket(session, state, in, "UseItem")) {
                     return;
                 }
-                armContinuousHold(session, state, in, use.hand());
+                if (!state.activeHoldUse) {
+                    armContinuousHold(session, state, in, use.hand());
+                }
             }
             case ServerboundPacket.UseItemOn ignored -> {
                 state.sawUseOnThisTick = true;
@@ -534,6 +539,7 @@ public final class UseSlowdownCheck implements TimelineListener {
             return;
         }
         state.activeHoldUse = true;
+        state.holdStartedInCurrentTick = true;
         state.holdItem = agreed;
         state.holdStartSeq = in.sequence();
         state.holdStartNano = in.nanoTime();
@@ -567,7 +573,13 @@ public final class UseSlowdownCheck implements TimelineListener {
                     "sent " + packetName + " after " + cmdName + " in the same tick (NoSlow packet hook)",
                     details);
             return true;
-        } else if (state.activeHoldUse) {
+        } else if (state.activeHoldUse && !state.holdStartedInCurrentTick) {
+            // Bytecode proof (1.21.11 Minecraft.handleKeybinds gfj.by pc 699..739, startUseItem gfj.bv pc 0..26,
+            // LocalPlayer.startUsingItem hnh.c pc 13..20): when player.isUsingItem() is false at tick start and
+            // keyUse has >= 2 queued clicks (e.g. fast double-click or post-freeze input drain), the
+            // while (keyUse.consumeClick()) startUseItem() loop legally emits multiple UseItem/UseItemOn packets
+            // in the hold-start tick (startUsingItem is a no-op once isUsingItem() is true). On subsequent ticks
+            // handleKeybinds enters the isUsingItem() branch and drains consumeClick() without calling startUseItem().
             long startSeq = state.holdStartSeq;
             long startNano = state.holdStartNano;
             String item = state.holdItem;

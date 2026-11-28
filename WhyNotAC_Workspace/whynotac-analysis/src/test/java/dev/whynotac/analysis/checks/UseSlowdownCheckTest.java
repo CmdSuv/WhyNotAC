@@ -348,4 +348,43 @@ final class UseSlowdownCheckTest {
         session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.ClientTickEnd()));
         assertTrue(evidence.isEmpty(), () -> "In-flight OpenScreen before UseItem ack must not flag: " + evidence);
     }
+
+    @Test
+    void multipleQueuedRightClicksInHoldStartTickProduceZeroFpWhileNextTickUseFlags() {
+        List<Stack> items = new ArrayList<>();
+        Stack gapple = new Stack("minecraft:golden_apple", 4, List.of(), List.of(), null, false);
+        for (int i = 0; i < 46; i++) {
+            items.add(i == 36 ? gapple : Stack.EMPTY);
+        }
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.ContainerSetContent(0, 1, items, Stack.EMPTY)));
+        session.deliver(new TimelineEvent.Outbound(seq++, now, new ClientboundPacket.Ping(401)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.Pong(401)));
+        session.deliver(new TimelineEvent.Acknowledged(seq++, now, 401, now, 0));
+
+        // 1. Two UseItem packets in the hold-start tick (vanilla while (keyUse.consumeClick()) startUseItem()
+        // after a freeze or rapid double-click) followed by RELEASE_USE_ITEM on next tick -> 0 FP!
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.UseItem(Hand.MAIN_HAND, 1, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.UseItem(Hand.MAIN_HAND, 2, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 0, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1,
+                new ServerboundPacket.PlayerAction(
+                        ServerboundPacket.PlayerAction.Action.RELEASE_USE_ITEM,
+                        new BlockPosition(0, 0, 0),
+                        BlockFace.DOWN,
+                        0)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 1, new ServerboundPacket.ClientTickEnd()));
+        assertTrue(evidence.isEmpty(), () -> "Same-tick queued UseItem clicks must produce 0 FP: " + evidence);
+
+        // 2. UseItem on a SUBSEQUENT tick while continuously using without RELEASE_USE_ITEM -> still caught as P-M!
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.UseItem(Hand.MAIN_HAND, 3, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 2, new ServerboundPacket.ClientTickEnd()));
+        now += 50_000_000L;
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.UseItem(Hand.MAIN_HAND, 4, 0.0F, 0.0F)));
+        session.deliver(new TimelineEvent.Inbound(seq++, now, 3, new ServerboundPacket.ClientTickEnd()));
+        assertEquals(1, evidence.size());
+        assertEquals("use-while-using", evidence.get(0).details().get("reason"));
+        assertEquals("minecraft:golden_apple", evidence.get(0).details().get("item"));
+    }
 }

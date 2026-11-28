@@ -17,7 +17,17 @@ TICK = 0.05
 
 
 def main():
-    i = Input(sys.argv[1])
+    toggle_sprint = False
+    toggle_crouch = False
+    positional = []
+    for arg in sys.argv[1:]:
+        if arg == "--toggle-sprint":
+            toggle_sprint = True
+        elif arg == "--toggle-crouch":
+            toggle_crouch = True
+        else:
+            positional.append(arg)
+    i = Input(positional[0])
     actions = []
 
     def log(what, **details):
@@ -25,6 +35,11 @@ def main():
 
     def hold(key, seconds):
         log("hold", key=key, seconds=seconds)
+        if toggle_crouch and key == "Shift_L":
+            i.tap("Shift_L", 0.05)
+            time.sleep(seconds)
+            i.tap("Shift_L", 0.05)
+            return
         i.key(key, True)
         time.sleep(seconds)
         i.key(key, False)
@@ -58,6 +73,8 @@ def main():
         time.sleep(0.6)
     log("jumps", count=3)
     i.key("w", False)
+    if toggle_sprint:
+        i.tap("Control_L", 0.05)
     time.sleep(0.5)
     hold("a", 0.8)
     hold("d", 0.8)
