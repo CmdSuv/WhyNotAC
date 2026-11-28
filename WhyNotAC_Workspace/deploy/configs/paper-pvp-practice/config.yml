@@ -1,0 +1,67 @@
+# WhyNotAC Server-Type Preset — Competitive PvP & Practice Arenas (1.21.11)
+# Per docs/DECISIONS.md: tailored for high-frequency duel/practice combat with soft deterministic mitigations,
+# anti-ESP occlusion, active behind-FOV decoy probes, and tight 90s correlation decay — auto-kick & auto-ban OFF.
+
+recording:
+  enabled: true
+  max-age-days: 14
+  max-total-megabytes: 8192
+  max-queued-megabytes: 64
+
+observation:
+  edge: true
+  per-tick-transactions: true
+  flush-transactions: true
+
+cases:
+  retention-days: 90
+
+verdict:
+  armed-checks:
+    - "attack-reach"
+    - "attack-aim"
+    - "break-time"
+    - "use-aim"
+    - "movement"
+    - "velocity-response"
+    - "packet-bounds"
+    - "inventory-protocol"
+    - "interact-at-box"
+    - "use-item-state"
+    - "transaction-order"
+    - "design-probe"
+  mitigations: true
+  hide-information: true
+  auto-kick: false
+  auto-ban: false
+  second-verifier: true
+  require-corroboration-for-ban: true
+  temp-ban-hours: 24
+  max-enforced-players-per-minute: 5
+  max-false-ban-budget: 1
+  false-ban-window-days: 7
+  correlation-half-life-seconds: 90
+  min-score-for-mitigation: 1.0
+  min-score-for-kick: 3.0
+  ban-wave-delay-seconds: 120
+
+identity:
+  trust-auth-plugins: true
+
+observability:
+  health-watchdog: true
+  metrics-http-port: 9108
+  alert-stream-file: "alerts-stream.jsonl"
+  webhook-url: ""
+
+network-bridge:
+  enabled: false
+  secret-file: "network-secret.key"
+  max-clock-skew-seconds: 60
+
+ai:
+  active-probes:
+    enabled: true
+    ttl-ticks: 10
+    min-cooldown-ticks: 160
+    max-jitter-ticks: 320

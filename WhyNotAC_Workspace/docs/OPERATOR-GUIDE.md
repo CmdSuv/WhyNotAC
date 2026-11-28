@@ -1,0 +1,96 @@
+# WhyNotAC Operatör ve Canlı Pilot Kılavuzu (`1.21.11`)
+
+Bu kılavuz, WhyNotAC'yi tekli **Paper `1.21.11`** veya **Velocity `3.4.0` + Paper `1.21.11`** ağında güvenli `SHADOW` gözlemi veya korumalı `mitigate-pilot` profiliyle devreye almak için hazırlanmıştır.
+
+---
+
+## 1. Hızlı Kurulum (Tekli Paper `1.21.11`)
+
+1. Eklenti JAR'ını üretin veya `whynotac-paper/build/libs/whynotac-paper-*.jar` dosyasını sunucunun `plugins/WhyNotAC.jar` konumuna kopyalayın.
+2. İlk pilot haftası için [`deploy/configs/paper-shadow/config.yml`](../deploy/configs/paper-shadow/config.yml) şablonunu `plugins/WhyNotAC/config.yml` olarak yerleştirin:
+   - Tüm kontroller `SHADOW` (`armed-checks: []`) kalır; otomatik kick/ban/etkisizleştirme kapalıdır.
+   - `recording.enabled: true` takma-adlı `.wnrec` kayıtları tutar (`max-age-days: 14`, `max-total-megabytes: 4096`).
+   - `observability.metrics-http-port: 9108` yalnızca `127.0.0.1:9108` üzerinde OpenMetrics (`/metrics`) ve JSON sağlık (`/health`) uçlarını açar.
+3. Sunucuyu başlatıp konsoldan doğrulayın:
+   - `/whynotac health` -> `GREEN`
+   - `/whynotac verdict` -> `armedChecks=[]`
+   - `/whynotac stats` -> `listenerErrors=0`, `lostEvents=0`
+
+---
+
+## 2. Çok-Sunuculu Velocity + Paper Kurulumu (`NET-01` / `NET-22`)
+
+1. Velocity proxy'ye `whynotac-velocity/build/libs/whynotac-velocity-*.jar` eklentisini koyun.
+2. Velocity'yi bir kez başlatın; `plugins/whynotac-velocity/network-secret.key` (32 bayt HMAC-SHA256 anahtarı) oluşur.
+3. Aynı `network-secret.key` dosyasını tüm arka uç Paper sunucularında `plugins/WhyNotAC/network-secret.key` yoluna kopyalayın (**dosyayı herkese açık tutmayın**).
+4. Arka uç Paper sunucularında [`deploy/configs/paper-velocity-backend/config.yml`](../deploy/configs/paper-velocity-backend/config.yml) şablonunu (`network-bridge.enabled: true`) kullanın ve Paper `config/paper-global.yml` içinde `proxies.velocity.enabled: true` ayarının açık olduğundan emin olun.
+5. Doğrulama:
+   - Velocity konsolunda: `wnacproxy status` (`sentEdges >= 1`, `rejected=0`)
+   - Paper konsolunda: `whynotac network` (`valid >= 1`, `rejected=0`)
+
+---
+
+## 3. Offline Mod + Giriş Eklentisi Kimlik Katmanı
+
+Offline-mode sunucularda [`identity.trust-auth-plugins: true`](../deploy/configs/paper-shadow/config.yml) ayarı `AuthMe`, `nLogin`, `LibreLogin` ve `OpeNLogin` eklentilerini algılar:
+- Oyuncu şifresini girene dek kimlik `UNAUTHENTICATED` kalır (otomatik kalıcı profil/ban açılmaz).
+- Giriş doğrulandığı andan itibaren oturum `AUTH_PLUGIN_CONFIRMED` katmanına yükselir ([`POLICY.md`](POLICY.md)).
+
+---
+
+## 4. Aşamalı Pilot -> `mitigate-pilot` -> `ARMED` Geçişi
+
+1. **1–2 Hafta `SHADOW` Gözlemi:**
+   - Hiçbir dürüst oyuncuda yanlış pozitif açılmadığını doğrulayın (`/whynotac cases`, `/whynotac stats` -> `rejectedCandidates`).
+   - Herhangi bir şüpheli vaka düşerse çevrimdışı inceleyin:
+     ```bash
+     java -jar WhyNotAC.jar audit plugins/WhyNotAC/storage
+     java -jar WhyNotAC.jar verify plugins/WhyNotAC/cases/<case-id>.json
+     java -jar WhyNotAC.jar explain plugins/WhyNotAC/cases/<case-id>.json
+     ```
+2. **Yumuşak Etkisizleştirme Pilotu ve Sunucu-Türü Hazır Ayarları (`DECISIONS.md`):**
+   - [`deploy/configs/paper-mitigate-pilot/config.yml`](../deploy/configs/paper-mitigate-pilot/config.yml): genel pilot profili (`11` deterministik/sonda kontrolü `ARMED` + `mitigations: true` + `hide-information: true`, `auto-kick: false`, `auto-ban: false`).
+   - [`deploy/configs/paper-pvp-practice/config.yml`](../deploy/configs/paper-pvp-practice/config.yml): rekabetçi **PvP / Practice** sunucuları için sıkı `90 s` korelasyon yarı ömrü, `12` `ARMED` kontrol (`transaction-order` v2 dâhil), anti-ESP oklüzyon ve aktif yem sondaları (`auto-kick: false`, `auto-ban: false`).
+   - [`deploy/configs/paper-smp/config.yml`](../deploy/configs/paper-smp/config.yml): büyük **SMP / Survival** dünyaları için düşük ana-thread maliyetli (`hide-information: false`, aktif sonda kapalı), `180 s` korelasyon yarı ömrü ve `9` `ARMED` deterministik koruma (`auto-kick: false`, `auto-ban: false`).
+   - `click-pattern`, `aim-pattern`, `container-timing`, `scaffold-pattern`, `timer-balance`, `ping-spoof` (`S`) ve `design-probe` (`D`) sınıfsal olarak asla ban, kick veya etkisizleştirme tetiklemez (`ActionPolicy`).
+3. **İki-Gözlü İnceleme & Acil Durdurma:**
+   - İnceleme iş akışı: `/whynotac review <case-prefix> pass1|confirm|appeal|uphold|overturn [not]` (`overturn` yanlış ban bütçesini kaydeder, bekleyen ban dalgasını iptal eder ve proxy üzerinden diğer sunuculara duyurur).
+   - Acil kapatma: `/whynotac killswitch on` (tüm yaptırımı anında `SHADOW`'a çeker).
+
+---
+
+## 5. Komut ve Çevrimdışı Araç Referansı
+
+### Sunucu / Yetkili Komutları (`/whynotac ...`)
+| Komut | İşlev |
+|---|---|
+| `/whynotac inspect <oyuncu>` | Canlı RTT, transaction sayacı, görünüm (`WIRE`/`GAME`), rotasyon ve anomali özeti |
+| `/whynotac pipeline <oyuncu>` | Netty handler sırası (`whynotac_wire_in`, `whynotac_wire_out`, `whynotac_interceptor`) |
+| `/whynotac world|entities|inventory|self <oyuncu>` | Replikaların Paper sunucu durumuyla canlı karşılaştırması |
+| `/whynotac ai <oyuncu>` | Cezasız davranışsal sapma özellikleri, AI öncelik puanı ve e-süreci özeti |
+| `/whynotac cases` / `/whynotac case <önek>` | Son açılan vakalar ve dosya bilgisi |
+| `/whynotac report <önek>` / `/whynotac replay <önek>` | Tek-dosya çevrimdışı HTML5 adli rapor üretir (`cases/<id>.html`) / kayıttan canlı deterministik yeniden doğrulama çalıştırır |
+| `/whynotac profiles <oyuncu\|uuid>` | Kalıcı AI davranışsal taban profili ve 4x4 Mahalanobis kovaryans örnek sayısını gösterir |
+| `/whynotac review <önek> <pass1|confirm|appeal|uphold|overturn>` | İki farklı yetkili gerektiren inceleme/itiraz süreci |
+| `/whynotac metrics` / `/whynotac health` / `/whynotac stats` | Sağlık (`GREEN`/`DEGRADED`/`CRITICAL`), OpenMetrics ve JSON telemetri |
+| `/whynotac verdict` / `/whynotac reload` / `/whynotac killswitch [on|off]` / `/whynotac circuit [reset]` | Karar politikası, tam canlı `config.yml` sıcak yenileme (`verdict.*`, webhook, metrics Bearer token, aktif sondalar, kayıt, `wire.ignored-reconcile-packets`), devre kesici |
+| `/whynotac audit` / `/whynotac ledger rotate` / `/whynotac network` / `/whynotac sessions` | İmzalı hash zinciri doğrulama, elle `#checkpoint` segment döndürme, proxy/Redis köprü sayaçları, aktif oturumlar |
+| `/whynotac privacy <find|forget> <uuid>` | GDPR/KVKK veri bulma ve kalıcı silme talebi |
+
+### Çevrimdışı JAR CLI (`java -jar WhyNotAC.jar ...`)
+- `doctor <data-dir>` — `config.yml` güvenlik çelişkileri, `*.key` (`0600` & `>= 32B`), tüm `audit-ledger*.jsonl` segmentleri, SQLite `cases.db` (`PRAGMA integrity_check`) ve ban-wave günlüğünü denetler (`DOCTOR_JSON`).
+- `report <dossier.json|cases-dir> <out.html>` — Sıfır dış bağımlılıklı, XSS korumalı, dark/light temalı, inline SVG zaman çizelgeli, arama/filtreleme ve JSON/CSV dışa aktarmalı tek-dosya HTML5 adli rapor üretir.
+- `verify <dossier.json>` — Kayıtlı `.wnrec` üzerinden bağımsız replikada bulguyu tekrar üretir ve parmak izini doğrular.
+- `explain <dossier.json>` — İnsan tarafından okunabilir inceleme, karar ve AI triage (`aiPriorityScore`, `aiDominantSignal`, `aiProbeWealth`) özetini basar.
+- `benchmark [regression-dir] [cheat-corpus-dir]` (`--write-corpus <dir>`) — Tüm dürüst `.wnrec` kayıtlarını (`0` yanlış pozitif), **16** kalıcı `.wnrec` hile korpusunu (`0` FN) ve **52** senaryolu kıyaslama matrisini çalıştırıp `BENCHMARK_JSON` üretir.
+- `audit <storage-dir>` — `plugins/WhyNotAC/storage` dizinindeki tüm HMAC/hash zincirli aktif ve döndürülmüş `#checkpoint` denetim defteri segmentlerini doğrular.
+- `inspect <file.wnrec>` / `dump <file.wnrec>` / `find ...` / `forget ...` — Ham kayıt ve mahremiyet araçları ([`docs/privacy`](privacy/README.md)).
+
+---
+
+## 6. Canlı Web Panosu, Redis Küme Otobüsü, Haricî JDBC & Docker Compose Pilotu
+
+- **Canlı Operatör Web Panosu (`/dashboard`, `/api/status`):** `observability.metrics-http-port` ve `observability.metrics-auth-token` tanımlandıktan sonra `observability.dashboard-enabled: true` ile etkinleşir. Token boşsa uçlar güvenle `403 Forbidden` döndürür; tüm yanıtlar sıkı `Content-Security-Policy`, `X-Content-Type-Options: nosniff` ve `X-Frame-Options: DENY` başlıklarıyla sunulur.
+- **Redis Pub/Sub Küme Kontrol Otobüsü (`network-bridge.redis-uri`):** Sıfır haricî bağımlılıklı saf-Java RESP2 istemcisi, oyuncu sayısı `0` olan arka uç sunuculara dahi HMAC-SHA256 imzalı `GDPR_FORGET`, itiraz iptali ve davranış profili çerçevelerini `whynotac:cluster` kanalı üzerinden ulaştırır.
+- **Toplu İşlemli SQLite WAL & Haricî PostgreSQL/JDBC (`storage.jdbc-url`):** `CaseStore` yazımları `<= 64` vaka/işlem olarak toplu WAL işlemiyle işler; opsiyonel `storage.jdbc-url` / `jdbc-user` / `jdbc-password` ile haricî PostgreSQL/JDBC veritabanına geçilebilir.
+- **Docker Compose Pilot Yığını:** [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), [`deploy/README.md`](../deploy/README.md), [`deploy/monitoring/prometheus.yml`](../deploy/monitoring/prometheus.yml), [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml) ve [`deploy/monitoring/grafana-dashboard.json`](../deploy/monitoring/grafana-dashboard.json) tek komutla Paper + Velocity + Redis + Prometheus + Grafana yığınını ayağa kaldırır.

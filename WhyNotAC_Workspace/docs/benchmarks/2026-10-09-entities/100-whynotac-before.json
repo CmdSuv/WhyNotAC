@@ -1,0 +1,387 @@
+{
+ "variant": "whynotac",
+ "layout": "cluster",
+ "bots": 100,
+ "measureSeconds": 63.72,
+ "warmup": {
+  "seconds": 300,
+  "settled": false
+ },
+ "mspt": {
+  "avg": 504.6,
+  "min": 87.1,
+  "max": 11699.6,
+  "window": "1m"
+ },
+ "tps": 2.0,
+ "serverCpuCores": 1.9586,
+ "jfr": {
+  "samples": 2178,
+  "whynotacSamples": 629,
+  "whynotacShare": 0.28879706152433426,
+  "anywhereSamples": 1122,
+  "truncatedStacks": 0,
+  "threads": {
+   "Attach Listener": {
+    "samples": 1,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "Netty Epoll IO ##": {
+    "samples": 1198,
+    "whynotac": 437,
+    "anywhere": 930
+   },
+   "Paper Watchdog Thread": {
+    "samples": 53,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "Server thread": {
+    "samples": 726,
+    "whynotac": 4,
+    "anywhere": 4
+   },
+   "WhyNotAC Analysis ##": {
+    "samples": 191,
+    "whynotac": 187,
+    "anywhere": 187
+   },
+   "WhyNotAC Recording I/O": {
+    "samples": 1,
+    "whynotac": 1,
+    "anywhere": 1
+   },
+   "pool-#-thread-#": {
+    "samples": 2,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "spark-async-sampler-worker-thread": {
+    "samples": 5,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "spark-monitoring-thread": {
+    "samples": 1,
+    "whynotac": 0,
+    "anywhere": 0
+   }
+  },
+  "threadCpuCores": {
+   "Async-profiler Timer": 0.0005,
+   "Attach Listener": 0.0792,
+   "C# CompilerThread#": 0.7372,
+   "Common-Cleaner": 0.0,
+   "Craft Async Scheduler Management Thread": 0.0004,
+   "DestroyJavaVM": 0.0459,
+   "JFR Periodic Tasks": 0.0138,
+   "JFR Recorder Thread": 0.002,
+   "JNA Cleaner": 0.0,
+   "Log#j#-AsyncAppenderEventDispatcher-#-Async": 0.0011,
+   "Monitor Deflation Thread": 0.0003,
+   "Netty Epoll IO ##": 1.6897,
+   "Paper Async Command Builder Thread Pool - #": 0.0008,
+   "Paper Async Task Handler Thread - #": 0.0009,
+   "Paper Common Worker ##": 0.1105,
+   "Paper I/O Worker ##": 0.003,
+   "Paper Watchdog Thread": 0.0666,
+   "PaperFilledProfileCache-cleanup-#": 0.0,
+   "Reference Handler": 0.0001,
+   "Server console handler": 0.0001,
+   "Server thread": 0.6129,
+   "Service Thread": 0.0009,
+   "Signal Dispatcher": 0.0,
+   "WhyNotAC Analysis ##": 0.476,
+   "WhyNotAC Cases": 0.0015,
+   "WhyNotAC Recording I/O": 0.1027,
+   "Worker-Main-#": 0.0667,
+   "Yggdrasil Key Fetcher": 0.0003,
+   "mysql-cj-abandoned-connection-cleanup": 0.0002,
+   "pool-#-thread-#": 0.0005,
+   "spark-async-sampler-worker-thread": 0.0209,
+   "spark-monitoring-thread": 0.0041
+  }
+ },
+ "heapAfterFullGcBytes": 593445928,
+ "whynotacHeapBytes": 2503664,
+ "whynotacTopClasses": [
+  {
+   "class": "dev.whynotac.world.ClientEntities$State",
+   "instances": 2960,
+   "bytes": 663040
+  },
+  {
+   "class": "dev.whynotac.world.Section",
+   "instances": 9404,
+   "bytes": 376160
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Versioned",
+   "instances": 10030,
+   "bytes": 320960
+  },
+  {
+   "class": "dev.whynotac.world.ClientWorld$Column",
+   "instances": 9945,
+   "bytes": 318240
+  },
+  {
+   "class": "dev.whynotac.world.SectionPool$Entry",
+   "instances": 9404,
+   "bytes": 225696
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Head",
+   "instances": 3033,
+   "bytes": 194112
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Track",
+   "instances": 2950,
+   "bytes": 70800
+  },
+  {
+   "class": "dev.whynotac.paper.wire.WireObserver$Outgoing",
+   "instances": 2637,
+   "bytes": 63288
+  },
+  {
+   "class": "dev.whynotac.math.vector.Vec3d",
+   "instances": 729,
+   "bytes": 29160
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Op$Move",
+   "instances": 598,
+   "bytes": 23920
+  },
+  {
+   "class": "dev.whynotac.world.Shape",
+   "instances": 327,
+   "bytes": 13080
+  },
+  {
+   "class": "dev.whynotac.paper.wire.WireObserver",
+   "instances": 85,
+   "bytes": 12240
+  }
+ ],
+ "whynotacStatsDuringLoad": {
+  "sessionsLive": 85,
+  "queuedEvents": 2,
+  "sessions": 100,
+  "ended": 15,
+  "inbound": 3109313,
+  "outbound": 6844980,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 1,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 4107,
+   "meanWallMicros": 1651.168,
+   "meanCpuMicros": 474.684,
+   "maxWallMicros": 89834.135
+  },
+  "cases": {
+   "opened": 0,
+   "stored": 0,
+   "dropped": 0,
+   "rejectedCandidates": 0
+  },
+  "world": {
+   "retainedBytes": 20963200,
+   "sharedSections": 9259,
+   "worlds": 100
+  },
+  "entities": {
+   "ticks": 665099,
+   "branches": 57229,
+   "merges": 57222,
+   "overflows": 0,
+   "losses": 0
+  }
+ },
+ "whynotacStatsAfterAllLeft": {
+  "sessionsLive": 0,
+  "queuedEvents": 0,
+  "sessions": 100,
+  "ended": 100,
+  "inbound": 3138139,
+  "outbound": 6889086,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 0,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 4166,
+   "meanWallMicros": 1642.496,
+   "meanCpuMicros": 471.794,
+   "maxWallMicros": 89834.135
+  },
+  "cases": {
+   "opened": 0,
+   "stored": 0,
+   "dropped": 0,
+   "rejectedCandidates": 0
+  },
+  "world": {
+   "retainedBytes": 0,
+   "sharedSections": 0,
+   "worlds": 100
+  },
+  "entities": {
+   "ticks": 672624,
+   "branches": 57422,
+   "merges": 57415,
+   "overflows": 0,
+   "losses": 0
+  }
+ },
+ "botSide": {
+  "processes": 4,
+  "joined": 100,
+  "still_connected": 85,
+  "pings_seen": 1414554,
+  "pings_answered": 1414554,
+  "errors": [],
+  "disconnects": [
+   {
+    "name": "Bot29",
+    "joined": true,
+    "ticks": 3702,
+    "pings_answered": 6373,
+    "pings_seen": 6373,
+    "teleports": 13,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot41",
+    "joined": true,
+    "ticks": 4105,
+    "pings_answered": 6784,
+    "pings_seen": 6784,
+    "teleports": 21,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot42",
+    "joined": true,
+    "ticks": 1154,
+    "pings_answered": 558,
+    "pings_seen": 558,
+    "teleports": 99,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot45",
+    "joined": true,
+    "ticks": 5307,
+    "pings_answered": 9867,
+    "pings_seen": 9867,
+    "teleports": 7,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot60",
+    "joined": true,
+    "ticks": 1251,
+    "pings_answered": 709,
+    "pings_seen": 709,
+    "teleports": 39,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot61",
+    "joined": true,
+    "ticks": 1248,
+    "pings_answered": 996,
+    "pings_seen": 996,
+    "teleports": 148,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot74",
+    "joined": true,
+    "ticks": 4495,
+    "pings_answered": 5569,
+    "pings_seen": 5569,
+    "teleports": 4,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot76",
+    "joined": true,
+    "ticks": 3918,
+    "pings_answered": 5310,
+    "pings_seen": 5310,
+    "teleports": 6,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot77",
+    "joined": true,
+    "ticks": 1245,
+    "pings_answered": 751,
+    "pings_seen": 751,
+    "teleports": 27,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   },
+   {
+    "name": "Bot87",
+    "joined": true,
+    "ticks": 4034,
+    "pings_answered": 5597,
+    "pings_seen": 5597,
+    "teleports": 2,
+    "still_connected": false,
+    "error": null,
+    "disconnect_reason": "\n\b\u0000\ttranslate\u0000\u001dmultiplayer.disconnect.flying\u0000"
+   }
+  ]
+ },
+ "serverMovementCorrections": 0,
+ "casesOpened": 0,
+ "caseSummaries": []
+}

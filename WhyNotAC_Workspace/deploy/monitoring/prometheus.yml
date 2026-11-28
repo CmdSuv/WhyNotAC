@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: whynotac_paper
+    metrics_path: /metrics
+    # Uncomment if observability.metrics-auth-token is configured in config.yml:
+    # authorization:
+    #   type: Bearer
+    #   credentials_file: /etc/prometheus/whynotac-metrics.token
+    static_configs:
+      - targets: ["paper:9108"]
+        labels:
+          service: whynotac
+          mc_version: "1.21.11"

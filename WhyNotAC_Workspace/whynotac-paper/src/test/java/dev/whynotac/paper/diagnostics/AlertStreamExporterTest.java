@@ -1,0 +1,195 @@
+package dev.whynotac.paper.diagnostics;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import dev.whynotac.ai.AiAdvisor;
+import dev.whynotac.analysis.evidence.Admissibility;
+import dev.whynotac.analysis.evidence.Evidence;
+import dev.whynotac.analysis.evidence.EvidenceClass;
+import dev.whynotac.analysis.policy.ActionPolicy;
+import dev.whynotac.protocol.session.PlayerSession;
+import dev.whynotac.protocol.session.SessionRegistry;
+import dev.whynotac.verdict.DependencyGroup;
+import dev.whynotac.verdict.EvidenceCertificate;
+import dev.whynotac.verdict.MitigationKind;
+import dev.whynotac.verdict.VerdictCase;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+final class AlertStreamExporterTest {
+
+    @Test
+    void appendsSingleLineJsonWithEscapedFields(@TempDir Path dir) throws Exception {
+        Path outFile = dir.resolve("alerts-stream.jsonl");
+        SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, err) -> { throw new AssertionError(err); });
+        PlayerSession session = registry.open("stream-test");
+        UUID playerId = new UUID(1, 2);
+        session.bind(playerId, "Cheater\"One", 1, 100L);
+
+        Evidence ev = new Evidence(
+                "velocity-response", 3, EvidenceClass.ADVANTAGE_PROOF,
+                10L, 12L, 1_000_000L, 2_000_000L,
+                "ignored vertical kb\nline2\tcol\u0007bell", Map.of(),
+                new Admissibility(true, List.of(), Admissibility.IdentityTier.AUTHENTICATED));
+        EvidenceCertificate cert = EvidenceCertificate.issue(
+                "cert-1", 1000L, session.connectionId(),
+                ev.check(), ev.checkVersion(), ev.evidenceClass(),
+                ActionPolicy.Lifecycle.ARMED, Admissibility.IdentityTier.AUTHENTICATED,
+                ev.fingerprint(), List.of(), List.of(DependencyGroup.MOVEMENT_PHYSICS.id()),
+                EvidenceCertificate.VerificationStatus.NOT_NEEDED, "",
+                ActionPolicy.Action.NEUTRALIZE, MitigationKind.SETBACK_POSITION);
+        VerdictCase vCase = new VerdictCase(
+                "case-stream-1", 1000L, session, ev,
+                ActionPolicy.Lifecycle.ARMED, DependencyGroup.MOVEMENT_PHYSICS,
+                EnumSet.of(ActionPolicy.Action.ALERT, ActionPolicy.Action.NEUTRALIZE),
+                ActionPolicy.Action.NEUTRALIZE, MitigationKind.SETBACK_POSITION,
+                1.0, 0.9, 1, false, cert);
+
+        AiAdvisor advisor = new AiAdvisor();
+        advisor.opened(vCase);
+        try (AlertStreamExporter exporter = new AlertStreamExporter(outFile, advisor, Logger.getLogger("test"))) {
+            exporter.opened(vCase);
+        }
+
+        List<String> lines = Files.readAllLines(outFile);
+        assertEquals(1, lines.size());
+        String line = lines.get(0);
+        assertTrue(line.startsWith("{") && line.endsWith("}"));
+        assertTrue(line.contains("\"caseId\":\"case-stream-1\""));
+        assertTrue(line.contains("\"check\":\"velocity-response\""));
+        assertTrue(line.contains("\"playerName\":\"Cheater\\\"One\""));
+        assertTrue(line.contains("\"mitigation\":\"SETBACK_POSITION\""));
+        assertTrue(line.contains("\\tcol\\u0007bell"), "Control characters must be RFC 8259 JSON-escaped: " + line);
+    }
+
+    @Test
+    void postsJsonAlertToLoopbackHttpWebhook(@TempDir Path dir) throws Exception {
+        CopyOnWriteArrayList<String> receivedBodies = new CopyOnWriteArrayList<>();
+        CountDownLatch latch = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/alerts", exchange -> {
+            byte[] body = exchange.getRequestBody().readAllBytes();
+            receivedBodies.add(new String(body, StandardCharsets.UTF_8));
+            exchange.sendResponseHeaders(200, 0);
+            exchange.close();
+            latch.countDown();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/alerts";
+            SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, err) -> { throw new AssertionError(err); });
+            PlayerSession session = registry.open("webhook-test");
+            session.bind(new UUID(2, 3), "WebhookTarget", 1, 100L);
+            Evidence ev = new Evidence(
+                    "velocity-response", 1, EvidenceClass.ADVANTAGE_PROOF,
+                    10L, 12L, 1_000_000L, 2_000_000L,
+                    "ignored kb", Map.of(),
+                    new Admissibility(true, List.of(), Admissibility.IdentityTier.AUTHENTICATED));
+            EvidenceCertificate cert = EvidenceCertificate.issue(
+                    "cert-2", 1000L, session.connectionId(),
+                    ev.check(), ev.checkVersion(), ev.evidenceClass(),
+                    ActionPolicy.Lifecycle.ARMED, Admissibility.IdentityTier.AUTHENTICATED,
+                    ev.fingerprint(), List.of(), List.of(DependencyGroup.MOVEMENT_PHYSICS.id()),
+                    EvidenceCertificate.VerificationStatus.NOT_NEEDED, "",
+                    ActionPolicy.Action.NEUTRALIZE, MitigationKind.SETBACK_POSITION);
+            VerdictCase vCase = new VerdictCase(
+                    "case-webhook-1", 1000L, session, ev,
+                    ActionPolicy.Lifecycle.ARMED, DependencyGroup.MOVEMENT_PHYSICS,
+                    EnumSet.of(ActionPolicy.Action.ALERT, ActionPolicy.Action.NEUTRALIZE),
+                    ActionPolicy.Action.NEUTRALIZE, MitigationKind.SETBACK_POSITION,
+                    1.0, 0.9, 1, false, cert);
+            AiAdvisor advisor = new AiAdvisor();
+            advisor.opened(vCase);
+            try (AlertStreamExporter exporter = new AlertStreamExporter(
+                    dir.resolve("alerts.jsonl"), advisor, Logger.getLogger("webhook-test"), url)) {
+                exporter.opened(vCase);
+                assertTrue(latch.await(5, TimeUnit.SECONDS), "Webhook HTTP POST must arrive within 5s");
+            }
+            assertEquals(1, receivedBodies.size());
+            assertTrue(receivedBodies.get(0).contains("\"caseId\":\"case-webhook-1\""));
+            assertTrue(receivedBodies.get(0).contains("\"check\":\"velocity-response\""));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void hotReloadsWebhookUrlWithoutRestartOrLeak(@TempDir Path dir) throws Exception {
+        CopyOnWriteArrayList<String> bodiesA = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<String> bodiesB = new CopyOnWriteArrayList<>();
+        CountDownLatch latchA = new CountDownLatch(1);
+        CountDownLatch latchB = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/hookA", ex -> {
+            bodiesA.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            ex.sendResponseHeaders(200, 0);
+            ex.close();
+            latchA.countDown();
+        });
+        server.createContext("/hookB", ex -> {
+            bodiesB.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            ex.sendResponseHeaders(200, 0);
+            ex.close();
+            latchB.countDown();
+        });
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            String urlA = "http://127.0.0.1:" + port + "/hookA";
+            String urlB = "http://127.0.0.1:" + port + "/hookB";
+            SessionRegistry registry = new SessionRegistry(Runnable::run, 16, (s, e, err) -> { throw new AssertionError(err); });
+            PlayerSession session = registry.open("hotreload-test");
+            session.bind(new UUID(4, 5), "HotReload", 1, 100L);
+            Evidence ev = new Evidence(
+                    "attack-reach", 1, EvidenceClass.ADVANTAGE_PROOF,
+                    1L, 2L, 1_000L, 2_000L, "reach", Map.of(),
+                    new Admissibility(true, List.of(), Admissibility.IdentityTier.AUTHENTICATED));
+            EvidenceCertificate cert = EvidenceCertificate.issue(
+                    "cert-hr", 1000L, session.connectionId(),
+                    ev.check(), ev.checkVersion(), ev.evidenceClass(),
+                    ActionPolicy.Lifecycle.ARMED, Admissibility.IdentityTier.AUTHENTICATED,
+                    ev.fingerprint(), List.of(), List.of(DependencyGroup.ATTACK_REACH.id()),
+                    EvidenceCertificate.VerificationStatus.NOT_NEEDED, "",
+                    ActionPolicy.Action.ALERT, MitigationKind.NONE);
+            VerdictCase vCase = new VerdictCase(
+                    "case-hr-1", 1000L, session, ev,
+                    ActionPolicy.Lifecycle.ARMED, DependencyGroup.ATTACK_REACH,
+                    EnumSet.of(ActionPolicy.Action.ALERT),
+                    ActionPolicy.Action.ALERT, MitigationKind.NONE,
+                    1.0, 0.9, 1, false, cert);
+            try (AlertStreamExporter exporter = new AlertStreamExporter(
+                    dir.resolve("alerts-hr.jsonl"), new AiAdvisor(), Logger.getLogger("hr"), urlA)) {
+                assertEquals(urlA, exporter.webhookUrl());
+                exporter.opened(vCase);
+                assertTrue(latchA.await(5, TimeUnit.SECONDS));
+
+                exporter.updateWebhookUrl(urlB);
+                assertEquals(urlB, exporter.webhookUrl());
+                exporter.opened(vCase);
+                assertTrue(latchB.await(5, TimeUnit.SECONDS));
+
+                exporter.updateWebhookUrl("");
+                assertEquals("", exporter.webhookUrl());
+            }
+            assertEquals(1, bodiesA.size());
+            assertEquals(1, bodiesB.size());
+        } finally {
+            server.stop(0);
+        }
+    }
+}

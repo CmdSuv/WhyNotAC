@@ -1,0 +1,280 @@
+{
+ "variant": "whynotac",
+ "layout": "cluster",
+ "bots": 60,
+ "measureSeconds": 61.94,
+ "warmup": {
+  "seconds": 40,
+  "settled": true
+ },
+ "mspt": {
+  "avg": 39.7,
+  "min": 10.9,
+  "max": 4753.3,
+  "window": "1m"
+ },
+ "tps": 16.0,
+ "serverCpuCores": 1.3584,
+ "jfr": {
+  "samples": 1950,
+  "whynotacSamples": 247,
+  "whynotacShare": 0.12666666666666668,
+  "anywhereSamples": 399,
+  "truncatedStacks": 0,
+  "threads": {
+   "Attach Listener": {
+    "samples": 1,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "Netty Epoll IO ##": {
+    "samples": 305,
+    "whynotac": 89,
+    "anywhere": 241
+   },
+   "Server thread": {
+    "samples": 1475,
+    "whynotac": 9,
+    "anywhere": 9
+   },
+   "WhyNotAC Analysis ##": {
+    "samples": 156,
+    "whynotac": 147,
+    "anywhere": 147
+   },
+   "WhyNotAC Recording I/O": {
+    "samples": 2,
+    "whynotac": 2,
+    "anywhere": 2
+   },
+   "mysql-cj-abandoned-connection-cleanup": {
+    "samples": 1,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "spark-async-sampler-worker-thread": {
+    "samples": 6,
+    "whynotac": 0,
+    "anywhere": 0
+   },
+   "spark-monitoring-thread": {
+    "samples": 4,
+    "whynotac": 0,
+    "anywhere": 0
+   }
+  },
+  "threadCpuCores": {
+   "Async-profiler Timer": 0.0003,
+   "Attach Listener": 0.0248,
+   "C# CompilerThread#": 0.4755,
+   "Common-Cleaner": 0.0,
+   "Craft Async Scheduler Management Thread": 0.0011,
+   "DestroyJavaVM": 0.0738,
+   "JFR Periodic Tasks": 0.0042,
+   "JFR Recorder Thread": 0.0007,
+   "JNA Cleaner": 0.0001,
+   "Keep-Alive-Timer": 0.0006,
+   "Log#j#-AsyncAppenderEventDispatcher-#-Async": 0.0008,
+   "Monitor Deflation Thread": 0.0001,
+   "Netty Epoll IO ##": 0.3371,
+   "Paper Async Command Builder Thread Pool - #": 0.001,
+   "Paper Async Task Handler Thread - #": 0.0013,
+   "Paper Common Worker ##": 0.0792,
+   "Paper I/O Worker ##": 0.0062,
+   "Paper Watchdog Thread": 0.0001,
+   "PaperFilledProfileCache-cleanup-#": 0.0,
+   "Reference Handler": 0.0001,
+   "Server console handler": 0.0001,
+   "Server thread": 0.3472,
+   "Service Thread": 0.0013,
+   "User Authenticator ##": 0.0004,
+   "WhyNotAC Analysis ##": 0.1475,
+   "WhyNotAC Cases": 0.0032,
+   "WhyNotAC Recording I/O": 0.0136,
+   "Worker-Main-#": 0.0152,
+   "Yggdrasil Key Fetcher": 0.0005,
+   "mysql-cj-abandoned-connection-cleanup": 0.0001,
+   "process reaper": 0.0001,
+   "spark-async-sampler-worker-thread": 0.003,
+   "spark-monitoring-thread": 0.0015
+  }
+ },
+ "heapAfterFullGcBytes": 410931288,
+ "whynotacHeapBytes": 1148328,
+ "whynotacTopClasses": [
+  {
+   "class": "dev.whynotac.world.ClientEntities$State",
+   "instances": 1121,
+   "bytes": 269040
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Versioned",
+   "instances": 7066,
+   "bytes": 226112
+  },
+  {
+   "class": "dev.whynotac.world.ClientWorld$Column",
+   "instances": 7006,
+   "bytes": 224192
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Head",
+   "instances": 1178,
+   "bytes": 75392
+  },
+  {
+   "class": "dev.whynotac.world.ItemPrototypes$Prototype",
+   "instances": 1505,
+   "bytes": 48160
+  },
+  {
+   "class": "dev.whynotac.paper.wire.WireObserver$Outgoing",
+   "instances": 1474,
+   "bytes": 35376
+  },
+  {
+   "class": "dev.whynotac.world.ClientEntities$Track",
+   "instances": 1118,
+   "bytes": 26832
+  },
+  {
+   "class": "dev.whynotac.world.EntitySizes$Entry",
+   "instances": 314,
+   "bytes": 22608
+  },
+  {
+   "class": "dev.whynotac.world.Shape",
+   "instances": 327,
+   "bytes": 13080
+  },
+  {
+   "class": "dev.whynotac.world.EntitySizes$Size",
+   "instances": 378,
+   "bytes": 12096
+  },
+  {
+   "class": "dev.whynotac.analysis.evidence.AdmissibilityTracker",
+   "instances": 180,
+   "bytes": 11520
+  },
+  {
+   "class": "dev.whynotac.protocol.session.TimelineEvent$Outbound",
+   "instances": 297,
+   "bytes": 9504
+  }
+ ],
+ "whynotacStatsDuringLoad": {
+  "sessionsLive": 60,
+  "queuedEvents": 0,
+  "sessions": 60,
+  "ended": 0,
+  "inbound": 628772,
+  "outbound": 1104408,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 1,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 1831,
+   "meanWallMicros": 902.692,
+   "meanCpuMicros": 309.658,
+   "maxWallMicros": 19394.972
+  },
+  "cases": {
+   "opened": 0,
+   "stored": 0,
+   "dropped": 0,
+   "rejectedCandidates": 0
+  },
+  "world": {
+   "retainedBytes": 23728,
+   "sharedSections": 12,
+   "worlds": 60
+  },
+  "entities": {
+   "ticks": 125493,
+   "branches": 1909,
+   "merges": 1908,
+   "overflows": 0,
+   "losses": 0
+  }
+ },
+ "whynotacStatsAfterAllLeft": {
+  "sessionsLive": 0,
+  "queuedEvents": 0,
+  "sessions": 60,
+  "ended": 60,
+  "inbound": 648494,
+  "outbound": 1136034,
+  "lostEvents": 0,
+  "inboundDivergences": 0,
+  "outboundDivergences": 0,
+  "anomalies": {
+   "UNKNOWN_TRANSACTION": 0,
+   "SKIPPED_TRANSACTION": 0,
+   "NON_FINITE_MOVEMENT": 0,
+   "DUPLICATE_TRANSACTION": 0,
+   "TRANSACTIONS_WITHHELD": 0
+  },
+  "pendingTransactionsMax": 0,
+  "withheldNow": 0,
+  "listenerErrors": 0,
+  "recordingRejectedBlocks": 0,
+  "recordingFailed": 0,
+  "transactionLoop": {
+   "runs": 1945,
+   "meanWallMicros": 890.7,
+   "meanCpuMicros": 301.361,
+   "maxWallMicros": 19394.972
+  },
+  "cases": {
+   "opened": 0,
+   "stored": 0,
+   "dropped": 0,
+   "rejectedCandidates": 0
+  },
+  "world": {
+   "retainedBytes": 0,
+   "sharedSections": 0,
+   "worlds": 60
+  },
+  "entities": {
+   "ticks": 129900,
+   "branches": 1960,
+   "merges": 1951,
+   "overflows": 0,
+   "losses": 0
+  }
+ },
+ "botSide": {
+  "processes": 4,
+  "joined": 60,
+  "still_connected": 60,
+  "pings_seen": 367466,
+  "pings_answered": 367466,
+  "errors": [],
+  "disconnects": []
+ },
+ "serverMovementCorrections": 0,
+ "attackReach": {
+  "attacksAssessed": 3417,
+  "outcomes": {
+   "IN_REACH": 3417
+  },
+  "outOfReach": 0,
+  "smallestMarginInReach": 0.953572
+ },
+ "casesOpened": 0,
+ "caseSummaries": []
+}

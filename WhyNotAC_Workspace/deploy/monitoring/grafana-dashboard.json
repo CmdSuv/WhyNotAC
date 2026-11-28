@@ -1,0 +1,118 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "title": "WhyNotAC — Real-Time Physics, Verdict, Storage & Cluster Overview",
+  "uid": "whynotac-ops-v2",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "tags": ["whynotac", "anticheat", "paper", "observability"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "System Health (0=GREEN, 1=DEGRADED, 2=CRITICAL)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "whynotac_health_status", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Live Sessions / Queued Events",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_sessions_live", "legendFormat": "live", "refId": "A" },
+        { "expr": "whynotac_queued_events", "legendFormat": "queued", "refId": "B" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Lost Events, Listener Errors & Gap Bursts",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_lost_events_total", "legendFormat": "lost", "refId": "A" },
+        { "expr": "whynotac_listener_errors_total", "legendFormat": "errors", "refId": "B" },
+        { "expr": "whynotac_session_gap_bursts_total", "legendFormat": "gap_bursts", "refId": "C" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Transaction Loop Overhead (us) & Budget Yields",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_transaction_loop_mean_wall_micros", "legendFormat": "mean_us", "refId": "A" },
+        { "expr": "whynotac_transaction_loop_max_wall_micros", "legendFormat": "max_us", "refId": "B" },
+        { "expr": "whynotac_session_budget_yields_total", "legendFormat": "budget_yields", "refId": "C" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Packet Throughput (Inbound / Outbound per sec)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(whynotac_inbound_packets_total[1m])", "legendFormat": "inbound/s", "refId": "A" },
+        { "expr": "rate(whynotac_outbound_packets_total[1m])", "legendFormat": "outbound/s", "refId": "B" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Cases, WAL Batch Commits & Pending Ban Waves",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(whynotac_cases_opened_total[5m])", "legendFormat": "opened/s", "refId": "A" },
+        { "expr": "rate(whynotac_cases_stored_total[5m])", "legendFormat": "stored/s", "refId": "B" },
+        { "expr": "rate(whynotac_cases_batches_committed_total[5m])", "legendFormat": "wal_batches/s", "refId": "C" },
+        { "expr": "whynotac_ban_wave_pending", "legendFormat": "pending_bans", "refId": "D" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Redis Pub/Sub Cluster Bus (Signed Envelopes/s)",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(whynotac_redis_published_total[1m])", "legendFormat": "published/s", "refId": "A" },
+        { "expr": "rate(whynotac_redis_received_total[1m])", "legendFormat": "received/s", "refId": "B" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Minimum Clean Margins Across All 23 Checks (Near-Zero Indicator)",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "whynotac_check_min_margin", "legendFormat": "{{check}}", "refId": "A" }
+      ]
+    }
+  ]
+}

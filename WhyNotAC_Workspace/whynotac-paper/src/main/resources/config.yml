@@ -1,0 +1,113 @@
+# WhyNotAC configuration
+
+recording:
+  # Records the timeline of every logged-in player to plugins/WhyNotAC/recordings/.
+  # Recordings are pseudonymised: no IP address, no player name, and the UUID is replaced by an
+  # HMAC pseudonym keyed with plugins/WhyNotAC/recording-secret.key (keep that file private;
+  # deleting it unlinks all past recordings from future ones).
+  # Tell your players before enabling this on a public server: a notice template and the
+  # find/forget tool for access and erasure requests are described in docs/privacy/.
+  enabled: false
+  # Recordings older than this are deleted.
+  max-age-days: 14
+  # Oldest recordings are deleted while the directory is larger than this.
+  max-total-megabytes: 2048
+  # Memory budget for blocks waiting to be written; beyond it blocks are dropped (and marked as gaps)
+  # rather than ever slowing the server down.
+  max-queued-megabytes: 64
+
+observation:
+  # Record the timeline from the bytes at the network edge (true) or from the game's own view of the
+  # packets (false). The edge also sees what other plugins add, cancel or rewrite. Leave it on.
+  edge: true
+  # One transaction (ping) per player per server tick: a continuous latency trace. Physics-changing
+  # packets are always bracketed with transactions either way. Leave it on.
+  per-tick-transactions: true
+  # A transaction before and after every flush to the client (at the network edge): the client's answers
+  # then tell, for every packet, which of its ticks came before and after it handled the packet. The
+  # entity replica is exact with them; without, it keeps every possible order. Leave it on.
+  flush-transactions: true
+
+wire:
+  # Inbound packet types recorded by the edge tap but excluded from wire-vs-game reconciliation
+  # (in addition to vanilla minecraft:set_creative_mode_slot) for third-party plugins that rewrite custom packets.
+  ignored-reconcile-packets:
+    - "minecraft:set_creative_mode_slot"
+
+cases:
+  # Every finding opens a case: a row in plugins/WhyNotAC/cases.db and a dossier in plugins/WhyNotAC/cases/
+  # (re-verifiable offline: java -jar WhyNotAC.jar verify <dossier>). Cases name the player: they are
+  # personal data, kept for this many days.
+  retention-days: 90
+
+storage:
+  # Optional external JDBC database URL (e.g. PostgreSQL: jdbc:postgresql://host:5432/whynotac).
+  # Leave blank to use the embedded WAL-mode batched SQLite database (plugins/WhyNotAC/cases.db).
+  jdbc-url: ""
+  jdbc-user: ""
+  jdbc-password: ""
+
+verdict:
+  # Checks listed here move from SHADOW to ARMED. Leave empty ([]) for observation/alerts/dossiers only.
+  armed-checks: []
+  # Soft mitigations (setback / cancelling impossible hits or block actions) when an ARMED deterministic check triggers.
+  mitigations: false
+  # Soft Anti-ESP occlusion hiding distant out-of-sight targets for ARMED P-A / P-M / D checks.
+  hide-information: false
+  # Automatic kicks when correlated score reaches threshold (OPERATOR_OPT_IN for ARMED P-A / P-M).
+  auto-kick: false
+  # Automatic temporary bans (OPERATOR_OPT_IN for ARMED P-A + authenticated identity + corroboration only).
+  auto-ban: false
+  # Independent deterministic re-verification on a background thread before confirming auto-bans.
+  second-verifier: true
+  # Require >= 2 independent P-A groups or successful SecondVerifier confirmation before auto-banning.
+  require-corroboration-for-ban: true
+  # Temporary ban duration in hours (manual permanent bans remain staff-only).
+  temp-ban-hours: 24
+  # Circuit breaker: suppress active enforcement if more than this many unique players are penalized within 60s.
+  max-enforced-players-per-minute: 5
+  # False-ban budget: lock automatic temporary bans if overturned/mismatch incidents within window reach this limit.
+  max-false-ban-budget: 1
+  false-ban-window-days: 7
+  # Exponential decay half-life (seconds) and correlation thresholds.
+  correlation-half-life-seconds: 120
+  min-score-for-mitigation: 1.0
+  min-score-for-kick: 3.0
+  # Optional jittered ban-wave delay (seconds) for automatic TEMP_BAN decisions; 0 dispatches immediately.
+  ban-wave-delay-seconds: 0
+
+identity:
+  # When running in offline mode alongside AuthMe, nLogin, LibreLogin, or OpeNLogin,
+  # upgrade a session's identity to AUTH_PLUGIN_CONFIRMED strictly after login completes.
+  trust-auth-plugins: true
+
+observability:
+  # Log warning/recovery notices when WhyNotAC HealthModel transitions between GREEN, DEGRADED, and CRITICAL.
+  health-watchdog: true
+  # Optional loopback HTTP exporter (/metrics OpenMetrics + /health JSON). 0 disables the HTTP listener.
+  metrics-http-port: 0
+  # Optional Bearer token required on HTTP requests to /metrics, /health, /dashboard, and /api/status.
+  metrics-auth-token: ""
+  # Opt-in live HTML5 operator dashboard (/dashboard + /api/status); requires a non-empty metrics-auth-token.
+  dashboard-enabled: false
+  # Real-time structured JSONL alert & case stream (plugins/WhyNotAC/<file>). Blank disables export.
+  alert-stream-file: "alerts-stream.jsonl"
+  # Optional async HTTP/HTTPS POST webhook URL for case/alert JSON payloads. Blank disables webhook delivery.
+  webhook-url: ""
+
+network-bridge:
+  # Authenticated Velocity companion bridge (whynotac:bridge) for NET-01 / NET-22.
+  enabled: false
+  secret-file: "network-secret.key"
+  max-clock-skew-seconds: 60
+  # Optional Redis Pub/Sub control bus URI (e.g. redis://:password@127.0.0.1:6379) for multi-server sync
+  # (GDPR erasures, overturns, profiles) even across backends with zero online players. Blank disables it.
+  redis-uri: ""
+  # Optional unique identifier for this backend node (used for self-echo filtering on Redis Pub/Sub).
+  server-id: ""
+
+ai:
+  active-probes:
+    # Spawns invisible behind-FOV phantom decoy targets during combat (DESIGN_STATISTIC / D class only).
+    enabled: false
+    ttl-ticks: 10

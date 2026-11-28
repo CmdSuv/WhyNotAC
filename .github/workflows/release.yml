@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        working-directory: WhyNotAC_Workspace
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: Fetch the Gradle distribution
+        run: for i in 1 2 3 4 5; do ./gradlew --version > /dev/null && exit 0; sleep $((15 * i)); done; exit 1
+      - name: Build reproducible plugin JARs and CycloneDX 1.5 SBOM
+        run: ./gradlew :whynotac-paper:build :whynotac-velocity:build --stacktrace
+      - name: Collect release bundle and SHA256SUMS
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          cp whynotac-paper/build/libs/*.jar "$RUNNER_TEMP/release/"
+          cp whynotac-velocity/build/libs/*.jar "$RUNNER_TEMP/release/"
+          cp whynotac-paper/build/reports/whynotac-sbom.cdx.json "$RUNNER_TEMP/release/"
+          (cd "$RUNNER_TEMP/release" && sha256sum * > SHA256SUMS.txt)
+      - name: Attest build provenance (SLSA / REL-03)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release/*.jar
+            ${{ runner.temp }}/release/whynotac-sbom.cdx.json
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: whynotac-release-bundle
+          path: ${{ runner.temp }}/release/
+      - name: Publish GitHub Release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" "$RUNNER_TEMP"/release/* --generate-notes
