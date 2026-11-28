@@ -160,8 +160,10 @@ oyuncu kodu client'ın hareket adımını koşmaz (yalnızca `move` ile çarpı�
 - **Canlı Hile ve Etkisizleştirme E2E + Dağıtım Rehberi** (`DATA-02`, `PROD-14`, tamam): `tools/e2e/run_cheat_e2e.sh`
   gerçek Paper 1.21.11 üzerinde `ARMED` + `mitigations: true` ile `CANCEL_IMPOSSIBLE_HIT` ve `SETBACK_POSITION`
   davranışını canlı doğrular; operatör profilleri (`deploy/`), [OPERATOR-GUIDE.md](OPERATOR-GUIDE.md) ve
-  [UPGRADE-GUIDE-PROD14.md](UPGRADE-GUIDE-PROD14.md) eklendi. Açık kaynak hile istemcileriyle saha kaydı (`DATA-02`)
-  yalnızca sahibin onayıyla izole VM'de yapılır.
+  [UPGRADE-GUIDE-PROD14.md](UPGRADE-GUIDE-PROD14.md) eklendi. Sahip onaylı izole `--network=none` gerçek açık kaynak
+  hile istemcisi ölçümü (`DATA-02`, [`cheat-corpus/real/`](../cheat-corpus/real/README.md)) tamamlandı: `26/27` (`%96,3`
+  TPR, `Wurst v7.57` `13/13`, `Meteor 1.21.11-86` `13/14`, `1` dürüst FN `meteor-killaura.wnrec`, `0` hata;
+  `RealCheatCorpusReplayTest`).
 
 ## Faz 5 — Karar ve uygulama
 
